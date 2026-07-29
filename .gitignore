@@ -23,7 +23,6 @@
 *.dll
 *.so.*
 
-
 # Fortran module files
 *.mod
 *.smod
@@ -43,6 +42,10 @@
 build/
 Build/
 build-*/
+out/
+
+# Visual Studio
+.vs/
 
 # CMake generated files
 CMakeFiles/
@@ -51,6 +54,9 @@ cmake_install.cmake
 Makefile
 install_manifest.txt
 compile_commands.json
+
+# CMake user presets
+CMakeUserPresets.json
 
 # Temporary files
 *.tmp
@@ -61,9 +67,9 @@ compile_commands.json
 # vcpkg
 vcpkg_installed/
 
-# debug information files
+# Debug information files
 *.dwo
 
-# test output & cache
+# Test output & cache
 Testing/
 .cache/

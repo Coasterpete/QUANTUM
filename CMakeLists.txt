@@ -1,20 +1,32 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(
-    QUANTUMSplineWorksEngine
+    QuantumCoasterEngine
     VERSION 0.1.0
     LANGUAGES CXX
 )
 
-add_executable(quantum_splineworks
+add_executable(
+    QUANTUM
     src/main.cpp
+    src/Application.cpp
+    src/Window.cpp
 )
 
-target_compile_features(quantum_splineworks
+target_include_directories(
+    QUANTUM
     PRIVATE
-        cxx_std_20
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-set_target_properties(quantum_splineworks PROPERTIES
-    CXX_EXTENSIONS OFF
+target_compile_features(
+    QUANTUM
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QUANTUM
+    PROPERTIES
+        CXX_EXTENSIONS OFF
 )
