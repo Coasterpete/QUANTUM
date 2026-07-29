@@ -3,30 +3,39 @@ cmake_minimum_required(VERSION 3.25)
 project(
     QuantumCoasterEngine
     VERSION 0.1.0
+    DESCRIPTION "QUANTUM SplineWorks Engine"
     LANGUAGES CXX
 )
 
-add_executable(
-    QUANTUM
-    src/main.cpp
-    src/Application.cpp
-    src/Window.cpp
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# ------------------------------------------------------------
+# Dependencies
+# ------------------------------------------------------------
+
+find_package(
+    Vulkan
+    REQUIRED
+    COMPONENTS
+        glslangValidator
 )
 
-target_include_directories(
-    QUANTUM
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+find_package(glfw3 CONFIG REQUIRED)
 
-target_compile_features(
-    QUANTUM
-    PRIVATE
-        cxx_std_23
-)
+# ------------------------------------------------------------
+# Project targets
+# ------------------------------------------------------------
 
-set_target_properties(
-    QUANTUM
-    PROPERTIES
-        CXX_EXTENSIONS OFF
+add_subdirectory(engine)
+add_subdirectory(editor)
+
+# ------------------------------------------------------------
+# Configuration information
+# ------------------------------------------------------------
+
+message(STATUS "Vulkan version: ${Vulkan_VERSION}")
+message(STATUS "Vulkan include directory: ${Vulkan_INCLUDE_DIRS}")
+message(
+    STATUS
+    "glslangValidator: ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
 )
