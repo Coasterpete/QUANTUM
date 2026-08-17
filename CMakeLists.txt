@@ -1,11 +1,20 @@
 cmake_minimum_required(VERSION 3.25)
 
+cmake_policy(SET CMP0091 NEW)
+
 project(
     QuantumCoasterEngine
     VERSION 0.1.0
     DESCRIPTION "QUANTUM SplineWorks Engine"
     LANGUAGES CXX
 )
+
+if(MSVC)
+    set(
+        CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+endif()
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -20,7 +29,7 @@ find_package(
         glslangValidator
 )
 
-find_package(glfw3 CONFIG REQUIRED)
+find_package(SDL3 CONFIG REQUIRED)
 
 # ------------------------------------------------------------
 # Project targets

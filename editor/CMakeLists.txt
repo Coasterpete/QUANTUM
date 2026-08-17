@@ -7,6 +7,7 @@ target_link_libraries(
     QUANTUM
     PRIVATE
         Quantum::Engine
+        SDL3::SDL3
 )
 
 target_compile_features(

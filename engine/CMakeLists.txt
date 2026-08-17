@@ -6,6 +6,9 @@ target_sources(
     QuantumEngine
     PRIVATE
         src/Application.cpp
+        src/VulkanContext.cpp
+        include/quantum/engine/Application.hpp
+        include/quantum/renderer/VulkanContext.hpp
 )
 
 target_include_directories(
@@ -20,16 +23,10 @@ target_compile_features(
         cxx_std_23
 )
 
-target_compile_definitions(
-    QuantumEngine
-    PRIVATE
-        GLFW_INCLUDE_NONE
-)
-
 target_link_libraries(
     QuantumEngine
     PRIVATE
-        glfw
+        SDL3::SDL3
         Vulkan::Vulkan
 )
 
