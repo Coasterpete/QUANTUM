@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
 
 project(
-    QuantumCoasterEngine
+    QUANTUM
     VERSION 0.1.0
-    DESCRIPTION "QUANTUM SplineWorks Engine"
+    DESCRIPTION "QUANTUM"
     LANGUAGES CXX
 )
 
@@ -17,6 +17,8 @@ if(MSVC)
 endif()
 
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+include(CTest)
 
 # ------------------------------------------------------------
 # Dependencies
@@ -30,13 +32,21 @@ find_package(
 )
 
 find_package(SDL3 CONFIG REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 # ------------------------------------------------------------
 # Project targets
 # ------------------------------------------------------------
 
+add_subdirectory(core)
 add_subdirectory(engine)
 add_subdirectory(editor)
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 # ------------------------------------------------------------
 # Configuration information

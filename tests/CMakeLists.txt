@@ -1,0 +1,618 @@
+add_executable(
+    QuantumCoreTests
+    BSplineCurveTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.BSplineCurve
+    COMMAND QuantumCoreTests
+)
+
+set_tests_properties(
+    QuantumCore.BSplineCurve
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreNurbsTests
+    NurbsCurveTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreNurbsTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreNurbsTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreNurbsTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.NurbsCurve
+    COMMAND QuantumCoreNurbsTests
+)
+
+set_tests_properties(
+    QuantumCore.NurbsCurve
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreCurveGeometryTests
+    CurveGeometryTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCurveGeometryTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCurveGeometryTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCurveGeometryTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CurveGeometry
+    COMMAND QuantumCoreCurveGeometryTests
+)
+
+set_tests_properties(
+    QuantumCore.CurveGeometry
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreArcLengthTests
+    ArcLengthTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreArcLengthTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreArcLengthTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreArcLengthTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.ArcLength
+    COMMAND QuantumCoreArcLengthTests
+)
+
+set_tests_properties(
+    QuantumCore.ArcLength
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreArcLengthLUTTests
+    ArcLengthLUTTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreArcLengthLUTTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreArcLengthLUTTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreArcLengthLUTTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.ArcLengthLUT
+    COMMAND QuantumCoreArcLengthLUTTests
+)
+
+set_tests_properties(
+    QuantumCore.ArcLengthLUT
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreCurveSamplingTests
+    CurveSamplingTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCurveSamplingTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCurveSamplingTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCurveSamplingTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CurveSampling
+    COMMAND QuantumCoreCurveSamplingTests
+)
+
+set_tests_properties(
+    QuantumCore.CurveSampling
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreRotationMinimizingFramesTests
+    RotationMinimizingFramesTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreRotationMinimizingFramesTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreRotationMinimizingFramesTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreRotationMinimizingFramesTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.RotationMinimizingFrames
+    COMMAND QuantumCoreRotationMinimizingFramesTests
+)
+
+set_tests_properties(
+    QuantumCore.RotationMinimizingFrames
+    PROPERTIES
+        LABELS "core;geometry"
+)
+
+add_executable(
+    QuantumCoreTransitionFunctionsTests
+    TransitionFunctionsTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreTransitionFunctionsTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreTransitionFunctionsTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreTransitionFunctionsTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.TransitionFunctions
+    COMMAND QuantumCoreTransitionFunctionsTests
+)
+
+set_tests_properties(
+    QuantumCore.TransitionFunctions
+    PROPERTIES
+        LABELS "core;math"
+)
+
+add_executable(
+    QuantumCoreScalarTransitionTests
+    ScalarTransitionTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreScalarTransitionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreScalarTransitionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreScalarTransitionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.ScalarTransition
+    COMMAND QuantumCoreScalarTransitionTests
+)
+
+set_tests_properties(
+    QuantumCore.ScalarTransition
+    PROPERTIES
+        LABELS "core;math"
+)
+
+add_executable(
+    QuantumCoreAuthoredSectionTests
+    AuthoredSectionTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreAuthoredSectionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreAuthoredSectionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreAuthoredSectionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.AuthoredSections
+    COMMAND QuantumCoreAuthoredSectionTests
+)
+
+set_tests_properties(
+    QuantumCore.AuthoredSections
+    PROPERTIES
+        LABELS "core;coaster"
+)
+
+add_executable(
+    QuantumCoreRiderLocalGeometryTests
+    RiderLocalGeometryTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreRiderLocalGeometryTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreRiderLocalGeometryTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreRiderLocalGeometryTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.RiderLocalGeometry
+    COMMAND QuantumCoreRiderLocalGeometryTests
+)
+
+set_tests_properties(
+    QuantumCore.RiderLocalGeometry
+    PROPERTIES
+        LABELS "core;coaster;geometry"
+)
+
+add_executable(
+    QuantumCoreVariableLocalPitchRateTests
+    VariableLocalPitchRateTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreVariableLocalPitchRateTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreVariableLocalPitchRateTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreVariableLocalPitchRateTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.VariableLocalPitchRate
+    COMMAND QuantumCoreVariableLocalPitchRateTests
+)
+
+set_tests_properties(
+    QuantumCore.VariableLocalPitchRate
+    PROPERTIES
+        LABELS "core;coaster;geometry;math"
+)
+
+add_executable(
+    QuantumCoreLocalYawRateTests
+    LocalYawRateTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreLocalYawRateTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreLocalYawRateTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreLocalYawRateTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.LocalYawRate
+    COMMAND QuantumCoreLocalYawRateTests
+)
+
+set_tests_properties(
+    QuantumCore.LocalYawRate
+    PROPERTIES
+        LABELS "core;coaster;geometry;math"
+)
+
+add_executable(
+    QuantumCoreLocalRollRateTests
+    LocalRollRateTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreLocalRollRateTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreLocalRollRateTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreLocalRollRateTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.LocalRollRate
+    COMMAND QuantumCoreLocalRollRateTests
+)
+
+set_tests_properties(
+    QuantumCore.LocalRollRate
+    PROPERTIES
+        LABELS "core;coaster;geometry;math"
+)
+
+add_executable(
+    QuantumCoreCoupledLocalPitchYawRateTests
+    CoupledLocalPitchYawRateTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCoupledLocalPitchYawRateTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCoupledLocalPitchYawRateTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCoupledLocalPitchYawRateTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CoupledLocalPitchYawRate
+    COMMAND QuantumCoreCoupledLocalPitchYawRateTests
+)
+
+set_tests_properties(
+    QuantumCore.CoupledLocalPitchYawRate
+    PROPERTIES
+        LABELS "core;coaster;geometry;math"
+)
+
+add_executable(
+    QuantumCoreLocalRollPitchYawRateTests
+    LocalRollPitchYawRateTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreLocalRollPitchYawRateTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreLocalRollPitchYawRateTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreLocalRollPitchYawRateTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.LocalRollPitchYawRate
+    COMMAND QuantumCoreLocalRollPitchYawRateTests
+)
+
+set_tests_properties(
+    QuantumCore.LocalRollPitchYawRate
+    PROPERTIES
+        LABELS "core;coaster;geometry;math"
+)
+
+add_executable(
+    QuantumEditorViewportCameraTests
+    ViewportCameraTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+)
+
+target_include_directories(
+    QuantumEditorViewportCameraTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorViewportCameraTests
+    PRIVATE
+        glm::glm
+)
+
+target_compile_features(
+    QuantumEditorViewportCameraTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorViewportCameraTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.ViewportCamera
+    COMMAND QuantumEditorViewportCameraTests
+)
+
+set_tests_properties(
+    QuantumEditor.ViewportCamera
+    PROPERTIES
+        LABELS "editor;camera;math"
+)
+
+add_executable(
+    QuantumCoreAuthoredTrackTests
+    AuthoredTrackTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreAuthoredTrackTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreAuthoredTrackTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreAuthoredTrackTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.AuthoredTrack
+    COMMAND QuantumCoreAuthoredTrackTests
+)
+
+set_tests_properties(
+    QuantumCore.AuthoredTrack
+    PROPERTIES
+        LABELS "core;coaster"
+)

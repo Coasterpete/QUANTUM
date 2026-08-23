@@ -1,37 +1,104 @@
-# QUANTUM
+# QUANTUM CoasterWorks
 
-QUANTUM is an experimental open-source roller coaster design and simulation engine written in modern C++.
+QUANTUM is an in-development native C++ roller-coaster design, simulation,
+and visualization project. It is being built incrementally around a
+renderer-independent, double-precision geometry core and a separate desktop
+Editor based on SDL3, Vulkan, and Dear ImGui.
+
+The project is not yet a complete coaster editor or ride simulator. Most of
+the verified progress is currently in `QuantumCore`; the Editor remains an
+early rendering and docking shell.
 
 ## Current status
 
-The project is in early development. The current focus is:
+### Implemented and verified
 
-- CMake project setup
-- application structure
-- window creation
-- Vulkan initialization
-- renderer debugging with RenderDoc
+`QuantumCore` currently provides:
 
-## Long-term goals
+- double-precision B-spline and NURBS evaluation;
+- analytic first and second derivatives;
+- analytic unit tangents, curvature, and radius of curvature;
+- arc-length evaluation and arc-length parameter inversion;
+- an adaptive `ArcLengthLUT` and canonical distance-based curve sampling;
+- rotation-minimizing frames and rider-local pitch, yaw, and roll frame
+  transforms;
+- `ScalarTransition`, normalized transition functions, analytic transition
+  integrals, and 19 built-in transition presets;
+- experimental rider-local centerline integration for separate constant and
+  transition-profile pitch, yaw, and roll rates; and
+- simultaneous pitch/yaw rate integration over a shared distance domain.
 
-- spline-based coaster design
-- large configurable park environments
-- terrain chunking and streaming
-- adjustable LOD systems
-- Vulkan rendering
-- optional hardware ray tracing
-- editor tools for track, scenery, terrain, and simulation
+The Core mathematical behavior is covered by automated CTest targets intended
+for both Debug and Release configurations.
 
-## Planned libraries and tools
+### Editor today
 
-- C++23
-- CMake
-- GLFW
-- Vulkan
-- Vulkan Memory Allocator
-- Dear ImGui
-- RenderDoc
+The `QUANTUM` Editor executable currently provides:
 
-## Platforms
+- a resizable SDL3 window and application loop;
+- Vulkan device, swapchain, dynamic-rendering, command, and synchronization
+  setup;
+- VMA-backed test geometry rendering;
+- a Dear ImGui dockspace with layout persistence; and
+- three temporary docking-verification panels over the existing cyan Vulkan
+  test triangle and dark background.
 
-Windows is the initial development platform. Linux and macOS support may be added later.
+The panels are placeholders. The Editor does not yet display Core-generated
+coaster centerlines, edit transition profiles, author track sections, generate
+track meshes, or run a ride simulation.
+
+### In progress and planned
+
+The next stages include connecting the mathematical Core to authored coaster
+sections and to Editor visualization. Major areas that are not implemented yet
+include:
+
+- simultaneous rider-local pitch/yaw/roll integration;
+- connecting `GeometricSection` data to geometry solving and section chaining;
+- force-based section solving;
+- velocity, acceleration, and G-force systems;
+- launches, brakes, and lift systems;
+- heartline and track offsets;
+- track visualization and meshing;
+- interactive transition-profile editing;
+- Core-to-Editor centerline visualization; and
+- train and ride simulation.
+
+These are development directions, not finished features or promised release
+dates.
+
+## Architecture
+
+The current targets have deliberately separate responsibilities:
+
+```text
+QuantumCore (GLM)
+    renderer-independent mathematics and geometry
+
+QuantumEngine (SDL3 + Vulkan + VMA)
+    Vulkan renderer resources and frame submission
+        |
+        v
+QUANTUM Editor (SDL3 + Dear ImGui)
+    application lifetime and early docking UI
+```
+
+`QuantumCore` does not depend on Vulkan, SDL3, Dear ImGui, or the Editor. The
+Editor is also not yet linked to `QuantumCore`; that connection belongs to a
+future visualization milestone.
+
+See [Current Architecture and Mathematics](docs/architecture.md) for the
+target boundaries, mathematical conventions, transition families, and current
+rider-local integration scope.
+
+## Current technology
+
+- C++23 and CMake
+- GLM for Core mathematics
+- SDL3 for windowing and platform integration
+- Vulkan for rendering
+- Vulkan Memory Allocator (VMA) for renderer-managed GPU allocations
+- Dear ImGui for the early Editor UI
+
+Windows is the current development platform. Other platform support remains a
+future possibility.
