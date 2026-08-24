@@ -1,5 +1,6 @@
 #pragma once
 
+#include <quantum/coaster/GeometricSection.hpp>
 #include <quantum/geometry/RotationMinimizingFrames.hpp>
 #include <quantum/math/ScalarTransition.hpp>
 
@@ -175,6 +176,31 @@ namespace quantum::coaster
         const math::ScalarTransition& rollRateTransition,
         const math::ScalarTransition& pitchRateTransition,
         const math::ScalarTransition& yawRateTransition,
+        double integrationSpacing
+    );
+
+    // Breakpoint-aware variant of the full roll/pitch/yaw integration: each
+    // channel authors a multi-segment ChannelProfile over the shared
+    // section-local distance domain [0, profileLength]. The channels are
+    // validated against that domain; the union of all segment boundaries
+    // splits the section into spans inside which every channel behaves as a
+    // single constant-type transition. Each span is integrated by the
+    // identical solver used for single-transition sections and spans are
+    // chained through their shared endpoint states, so one-segment channels
+    // reproduce the single-transition entry point's output exactly.
+    //
+    // The returned sample grid restarts at every profile breakpoint;
+    // distances are measured from the starting position along the whole
+    // section. C0 continuity between segments is required by validation, so
+    // frames chain continuously even across curvature-step breakpoints.
+    [[nodiscard]] std::vector<RiderLocalGeometryState>
+    integrateLocalRollPitchYawRateProfiles(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const ChannelProfile& rollRateProfile,
+        const ChannelProfile& pitchRateProfile,
+        const ChannelProfile& yawRateProfile,
+        double profileLength,
         double integrationSpacing
     );
 }

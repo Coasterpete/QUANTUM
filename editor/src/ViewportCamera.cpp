@@ -1,7 +1,6 @@
 #include <quantum/editor/ViewportCamera.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
 #include <glm/mat4x4.hpp>
 
@@ -14,13 +13,17 @@ namespace
 {
     constexpr glm::dvec3 worldUp{0.0, 0.0, 1.0};
     constexpr double pi = 3.14159265358979323846;
+    // Drag-orbit stays shy of the vertical poles so a live drag can never
+    // flip through them; the Top/Bottom presets set the exact poles and
+    // rely on the pole-safe basis below.
     constexpr double maximumPitch = 89.0 * pi / 180.0;
     constexpr double framingMargin = 1.1;
     constexpr double minimumDistanceScale = 1.0e-3;
     constexpr double maximumDistanceScale = 1.0e4;
-    constexpr double zoomExponentPerWheelUnit = 0.18;
     constexpr double boundsClipPadding = 1.25;
     constexpr double minimumNearScale = 1.0e-4;
+    constexpr double minimumFieldOfView = 10.0 * pi / 180.0;
+    constexpr double maximumFieldOfView = 120.0 * pi / 180.0;
 
     [[nodiscard]] bool isFinite(const glm::dvec3& value) noexcept
     {
@@ -110,6 +113,32 @@ namespace quantum::editor
             );
         }
 
+        // Bounds guarantee a finite positive radius, so the failure path
+        // of frameSphere is unreachable here.
+        static_cast<void>(
+            frameSphere(boundsCenter_, boundsRadius_, aspectRatio)
+        );
+    }
+
+    bool ViewportCamera::frameSphere(
+        const glm::dvec3& center,
+        const double radius,
+        const double aspectRatio)
+    {
+        requireValidAspectRatio(aspectRatio);
+
+        if (!hasBounds_)
+        {
+            throw std::logic_error(
+                "ViewportCamera cannot frame before bounds are assigned."
+            );
+        }
+
+        if (!isFinite(center) || !std::isfinite(radius) || radius <= 0.0)
+        {
+            return false;
+        }
+
         const double verticalHalfAngle = 0.5 * verticalFieldOfView_;
         const double horizontalHalfAngle = std::atan(
             std::tan(verticalHalfAngle) * aspectRatio
@@ -118,22 +147,81 @@ namespace quantum::editor
             verticalHalfAngle,
             horizontalHalfAngle
         );
-        const double framedDistance = framingMargin * boundsRadius_
+        const double framedDistance = framingMargin * radius
             / std::sin(limitingHalfAngle);
 
         if (!std::isfinite(framedDistance) || framedDistance <= 0.0)
         {
-            throw std::runtime_error(
-                "ViewportCamera could not compute a finite framing distance."
-            );
+            return false;
         }
 
-        focus_ = boundsCenter_;
+        focus_ = center;
         distance_ = std::clamp(
             framedDistance,
             minimumDistance_,
             maximumDistance_
         );
+        return true;
+    }
+
+    void ViewportCamera::applyPreset(const ViewportCameraPreset preset)
+    {
+        switch (preset)
+        {
+        case ViewportCameraPreset::Perspective:
+            projection_ = ViewportProjection::Perspective;
+            yaw_ = std::atan2(-1.5, 1.2);
+            pitch_ = std::atan2(1.0, std::hypot(1.2, -1.5));
+            break;
+        case ViewportCameraPreset::Isometric:
+            // Classic isometric: orthographic with equal 120-degree axis
+            // separation, i.e. elevation atan(1/sqrt(2)) at azimuth 45.
+            projection_ = ViewportProjection::Orthographic;
+            yaw_ = 0.25 * pi;
+            pitch_ = std::atan(1.0 / std::sqrt(2.0));
+            break;
+        case ViewportCameraPreset::Top:
+            yaw_ = 0.0;
+            pitch_ = 0.5 * pi;
+            break;
+        case ViewportCameraPreset::Bottom:
+            yaw_ = 0.0;
+            pitch_ = -0.5 * pi;
+            break;
+        case ViewportCameraPreset::Left:
+            // Rider-facing convention: travel starts along +X with world up
+            // +Z, so the rider's left side is +Y and the Left view looks
+            // from there toward -Y.
+            yaw_ = 0.5 * pi;
+            pitch_ = 0.0;
+            break;
+        case ViewportCameraPreset::Right:
+            yaw_ = -0.5 * pi;
+            pitch_ = 0.0;
+            break;
+        }
+    }
+
+    void ViewportCamera::setPose(const ViewportCameraPose& pose)
+    {
+        if (!isFinite(pose.focus)
+            || !std::isfinite(pose.yaw)
+            || !std::isfinite(pose.pitch)
+            || !std::isfinite(pose.distance)
+            || pose.distance <= 0.0)
+        {
+            throw std::invalid_argument(
+                "ViewportCamera requires a finite pose with a positive "
+                "distance."
+            );
+        }
+
+        focus_ = pose.focus;
+        yaw_ = std::remainder(pose.yaw, 2.0 * pi);
+        pitch_ = pose.pitch;
+        distance_ = hasBounds_
+            ? std::clamp(pose.distance, minimumDistance_, maximumDistance_)
+            : pose.distance;
     }
 
     void ViewportCamera::orbit(
@@ -190,17 +278,22 @@ namespace quantum::editor
         focus_ += displacement;
     }
 
-    void ViewportCamera::zoom(const double wheelDelta)
+    void ViewportCamera::zoom(
+        const double wheelDelta,
+        const double exponentPerWheelUnit)
     {
-        if (!std::isfinite(wheelDelta))
+        if (!std::isfinite(wheelDelta)
+            || !std::isfinite(exponentPerWheelUnit)
+            || exponentPerWheelUnit <= 0.0)
         {
             throw std::invalid_argument(
-                "ViewportCamera zoom delta must be finite."
+                "ViewportCamera zoom requires a finite delta and a "
+                "positive exponent scale."
             );
         }
 
         const double exponent = std::clamp(
-            -wheelDelta * zoomExponentPerWheelUnit,
+            -wheelDelta * exponentPerWheelUnit,
             -20.0,
             20.0
         );
@@ -208,6 +301,28 @@ namespace quantum::editor
             distance_ * std::exp(exponent),
             minimumDistance_,
             maximumDistance_
+        );
+    }
+
+    void ViewportCamera::setProjection(
+        const ViewportProjection projection)
+    {
+        projection_ = projection;
+    }
+
+    void ViewportCamera::setVerticalFieldOfView(const double radians)
+    {
+        if (!std::isfinite(radians))
+        {
+            throw std::invalid_argument(
+                "ViewportCamera field of view must be finite."
+            );
+        }
+
+        verticalFieldOfView_ = std::clamp(
+            radians,
+            minimumFieldOfView,
+            maximumFieldOfView
         );
     }
 
@@ -239,6 +354,16 @@ namespace quantum::editor
     double ViewportCamera::verticalFieldOfView() const noexcept
     {
         return verticalFieldOfView_;
+    }
+
+    ViewportProjection ViewportCamera::projection() const noexcept
+    {
+        return projection_;
+    }
+
+    bool ViewportCamera::hasBounds() const noexcept
+    {
+        return hasBounds_;
     }
 
     glm::dvec3 ViewportCamera::boundsCenter() const noexcept
@@ -307,19 +432,57 @@ namespace quantum::editor
         requireValidAspectRatio(aspectRatio);
 
         const ViewportCameraClipPlanes clipping = clipPlanes();
-        glm::dmat4 projection = glm::perspectiveRH_ZO(
-            verticalFieldOfView_,
-            aspectRatio,
-            clipping.nearPlane,
-            clipping.farPlane
-        );
+        glm::dmat4 projection{1.0};
+
+        if (projection_ == ViewportProjection::Perspective)
+        {
+            projection = glm::perspectiveRH_ZO(
+                verticalFieldOfView_,
+                aspectRatio,
+                clipping.nearPlane,
+                clipping.farPlane
+            );
+        }
+        else
+        {
+            // Tie the orthographic frustum to the orbit distance and field
+            // of view so perspective/orthographic switches keep apparent
+            // size, pan scale, and dolly steps consistent.
+            const double halfHeightAtFocus = distance_
+                * std::tan(0.5 * verticalFieldOfView_);
+            projection = glm::orthoRH_ZO(
+                -halfHeightAtFocus * aspectRatio,
+                halfHeightAtFocus * aspectRatio,
+                -halfHeightAtFocus,
+                halfHeightAtFocus,
+                clipping.nearPlane,
+                clipping.farPlane
+            );
+        }
         projection[1][1] *= -1.0;
 
-        const glm::dmat4 view = glm::lookAtRH(
-            position(),
-            focus_,
-            worldUp
-        );
+        // Hand-built right-handed look-at instead of glm::lookAtRH: the
+        // basis comes from the same pole-safe helpers as pan/orbit, so the
+        // exact Top/Bottom presets remain well-defined.
+        const glm::dvec3 eye = position();
+        const glm::dvec3 forward = -directionFromFocus();
+        const glm::dvec3 rightVector = right();
+        const glm::dvec3 upVector = up();
+
+        glm::dmat4 view{1.0};
+        view[0][0] = rightVector.x;
+        view[0][1] = upVector.x;
+        view[0][2] = -forward.x;
+        view[1][0] = rightVector.y;
+        view[1][1] = upVector.y;
+        view[1][2] = -forward.y;
+        view[2][0] = rightVector.z;
+        view[2][1] = upVector.z;
+        view[2][2] = -forward.z;
+        view[3][0] = -glm::dot(rightVector, eye);
+        view[3][1] = -glm::dot(upVector, eye);
+        view[3][2] = glm::dot(forward, eye);
+
         const glm::dmat4 viewProjection = projection * view;
         std::array<float, 16> rendererMatrix{};
 
@@ -357,7 +520,18 @@ namespace quantum::editor
 
     glm::dvec3 ViewportCamera::right() const noexcept
     {
-        return glm::normalize(glm::cross(-directionFromFocus(), worldUp));
+        const glm::dvec3 forward = -directionFromFocus();
+
+        // The cross product with worldUp degenerates exactly at the
+        // vertical poles (Top/Bottom presets); its analytic limit there is
+        // the yaw-aligned horizontal vector below, so use it to stay
+        // continuous and NaN-free.
+        if (std::abs(forward.z) < 1.0 - 1.0e-9)
+        {
+            return glm::normalize(glm::cross(forward, worldUp));
+        }
+
+        return {-std::sin(yaw_), std::cos(yaw_), 0.0};
     }
 
     glm::dvec3 ViewportCamera::up() const noexcept

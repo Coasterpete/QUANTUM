@@ -1631,4 +1631,164 @@ namespace quantum::coaster
             integrationSpacing
         );
     }
+
+    namespace
+    {
+        void appendChannelBreakpoints(
+            const ChannelProfile& channel,
+            std::vector<double>& breakpoints
+        )
+        {
+            for (const ProfileSegment& segment : channel.segments)
+            {
+                breakpoints.push_back(segment.transition.domainBegin);
+                breakpoints.push_back(segment.transition.domainEnd);
+            }
+        }
+
+        [[nodiscard]] const math::ScalarTransition& containingSegment(
+            const ChannelProfile& channel,
+            const double spanBegin,
+            const double spanEnd
+        )
+        {
+            for (const ProfileSegment& segment : channel.segments)
+            {
+                if (segment.transition.domainBegin <= spanBegin
+                    && segment.transition.domainEnd >= spanEnd)
+                {
+                    return segment.transition;
+                }
+            }
+
+            // Unreachable for validated channels: consecutive merged
+            // breakpoints always fall inside one segment of every channel.
+            throw std::logic_error(
+                "No channel profile segment covers the requested span."
+            );
+        }
+
+        // Restricts one segment to the requested span. The containing-
+        // segment precondition makes the clip bounds exact, and boundary
+        // evaluation returns valueBegin/valueEnd verbatim because the scalar
+        // evaluator special-cases exact domain boundaries.
+        [[nodiscard]] math::ScalarTransition segmentViewOverSpan(
+            const math::ScalarTransition& segment,
+            const double spanBegin,
+            const double spanEnd
+        )
+        {
+            return {
+                spanBegin,
+                spanEnd,
+                math::evaluateScalarTransition(segment, spanBegin),
+                math::evaluateScalarTransition(segment, spanEnd),
+                segment.transitionType
+            };
+        }
+    }
+
+    std::vector<RiderLocalGeometryState>
+    integrateLocalRollPitchYawRateProfiles(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const ChannelProfile& rollRateProfile,
+        const ChannelProfile& pitchRateProfile,
+        const ChannelProfile& yawRateProfile,
+        const double profileLength,
+        const double integrationSpacing
+    )
+    {
+        if (!isFinitePosition(startingPosition))
+        {
+            throw std::invalid_argument(
+                "The rider-local geometry starting position must be finite."
+            );
+        }
+
+        if (!std::isfinite(integrationSpacing)
+            || integrationSpacing <= 0.0)
+        {
+            throw std::invalid_argument(
+                "Rider-local geometry integration spacing must be positive and finite."
+            );
+        }
+
+        // Invoke the established frame validation without changing any bits.
+        static_cast<void>(geometry::applyLocalPitch(startingFrame, 0.0));
+
+        validateChannelProfile(rollRateProfile, profileLength);
+        validateChannelProfile(pitchRateProfile, profileLength);
+        validateChannelProfile(yawRateProfile, profileLength);
+
+        // Merged breakpoint set: {0, length} plus every segment boundary of
+        // every channel. Exact sorting/deduplication is enough because all
+        // boundaries come from validated, contiguous channels.
+        std::vector<double> breakpoints{0.0, profileLength};
+        appendChannelBreakpoints(rollRateProfile, breakpoints);
+        appendChannelBreakpoints(pitchRateProfile, breakpoints);
+        appendChannelBreakpoints(yawRateProfile, breakpoints);
+
+        std::sort(breakpoints.begin(), breakpoints.end());
+        breakpoints.erase(
+            std::unique(breakpoints.begin(), breakpoints.end()),
+            breakpoints.end()
+        );
+
+        std::vector<RiderLocalGeometryState> states;
+
+        glm::dvec3 position = startingPosition;
+        geometry::CurveFrame frame = startingFrame;
+
+        for (std::size_t span = 1; span < breakpoints.size(); ++span)
+        {
+            const double spanBegin = breakpoints[span - 1];
+            const double spanEnd = breakpoints[span];
+
+            const std::vector<RiderLocalGeometryState> spanStates =
+                integrateLocalRollPitchYawRateProfiles(
+                    position,
+                    frame,
+                    segmentViewOverSpan(
+                        containingSegment(rollRateProfile, spanBegin, spanEnd),
+                        spanBegin,
+                        spanEnd
+                    ),
+                    segmentViewOverSpan(
+                        containingSegment(
+                            pitchRateProfile,
+                            spanBegin,
+                            spanEnd
+                        ),
+                        spanBegin,
+                        spanEnd
+                    ),
+                    segmentViewOverSpan(
+                        containingSegment(yawRateProfile, spanBegin, spanEnd),
+                        spanBegin,
+                        spanEnd
+                    ),
+                    integrationSpacing
+                );
+
+            // Spans chain through their shared endpoint states; the first
+            // state of every span after the first repeats the previous
+            // span's final joint state and is skipped, exactly like section
+            // chaining in AuthoredTrack.
+            const bool isFirstSpan = states.empty();
+            for (std::size_t i = isFirstSpan ? 0u : 1u;
+                i < spanStates.size();
+                ++i)
+            {
+                RiderLocalGeometryState state = spanStates[i];
+                state.distance += spanBegin;
+                states.push_back(std::move(state));
+            }
+
+            position = spanStates.back().position;
+            frame = spanStates.back().frame;
+        }
+
+        return states;
+    }
 }

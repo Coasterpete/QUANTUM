@@ -16,15 +16,22 @@
 
 namespace
 {
-    using quantum::coaster::ForceSection;
+    using quantum::coaster::ChannelProfile;
+    using quantum::coaster::evaluateChannelProfile;
     using quantum::coaster::evaluateGeometricSection;
+    using quantum::coaster::ForceSection;
     using quantum::coaster::GeometricSection;
     using quantum::coaster::GeometricSectionState;
+    using quantum::coaster::ProfileSegment;
     using quantum::coaster::validateForceSection;
     using quantum::coaster::validateGeometricSection;
     using quantum::math::evaluateScalarTransition;
     using quantum::math::ScalarTransition;
     using quantum::math::TransitionType;
+
+    // Canonical section-local distance-domain length of the reference
+    // geometric section below.
+    constexpr double referenceSectionLength = 20.75;
 
     class TestFailure final : public std::runtime_error
     {
@@ -81,6 +88,30 @@ namespace
         };
     }
 
+    // Single-segment channel covering [domainBegin, domainEnd] exactly.
+    [[nodiscard]] ChannelProfile singleSegmentChannel(
+        const double valueBegin,
+        const double valueEnd,
+        const TransitionType type,
+        const double domainBegin = 0.0,
+        const double domainEnd = referenceSectionLength
+    )
+    {
+        ChannelProfile profile;
+        profile.segments.push_back(ProfileSegment{
+            profile.nextSegmentId,
+            ScalarTransition{
+                domainBegin,
+                domainEnd,
+                valueBegin,
+                valueEnd,
+                type
+            }
+        });
+        ++profile.nextSegmentId;
+        return profile;
+    }
+
     [[nodiscard]] constexpr ForceSection validForceSection()
     {
         return {
@@ -90,12 +121,12 @@ namespace
         };
     }
 
-    [[nodiscard]] constexpr GeometricSection validGeometricSection()
+    [[nodiscard]] GeometricSection validGeometricSection()
     {
         return {
-            transition(-0.2, 0.4, TransitionType::Smoothstep),
-            transition(0.3, -0.1, TransitionType::Smootherstep),
-            transition(-0.5, -0.5, TransitionType::Linear)
+            singleSegmentChannel(-0.2, 0.4, TransitionType::Smoothstep),
+            singleSegmentChannel(0.3, -0.1, TransitionType::Smootherstep),
+            singleSegmentChannel(-0.5, -0.5, TransitionType::Linear)
         };
     }
 
@@ -172,24 +203,53 @@ namespace
 
     void testGeometricSectionRepresentation()
     {
-        constexpr GeometricSection section = validGeometricSection();
+        const GeometricSection section = validGeometricSection();
 
-        validateGeometricSection(section);
+        validateGeometricSection(section, referenceSectionLength);
 
         requireTransitionRetained(
-            section.pitch,
-            transition(-0.2, 0.4, TransitionType::Smoothstep),
+            section.pitch.segments.front().transition,
+            transition(
+                -0.2,
+                0.4,
+                TransitionType::Smoothstep,
+                0.0,
+                referenceSectionLength
+            ),
             "pitch"
         );
         requireTransitionRetained(
-            section.yaw,
-            transition(0.3, -0.1, TransitionType::Smootherstep),
+            section.yaw.segments.front().transition,
+            transition(
+                0.3,
+                -0.1,
+                TransitionType::Smootherstep,
+                0.0,
+                referenceSectionLength
+            ),
             "yaw"
         );
         requireTransitionRetained(
-            section.roll,
-            transition(-0.5, -0.5, TransitionType::Linear),
+            section.roll.segments.front().transition,
+            transition(
+                -0.5,
+                -0.5,
+                TransitionType::Linear,
+                0.0,
+                referenceSectionLength
+            ),
             "geometric-section roll"
+        );
+
+        requireThrows<std::invalid_argument>(
+            [&section]
+            {
+                validateGeometricSection(
+                    section,
+                    referenceSectionLength + 1.0
+                );
+            },
+            "section validation rejects a mismatched length"
         );
     }
 
@@ -224,34 +284,35 @@ namespace
         );
     }
 
-    void testGeometricSectionSharedDomain()
+    void testGeometricSectionSharedLength()
     {
-        validateGeometricSection(validGeometricSection());
+        validateGeometricSection(validGeometricSection(), referenceSectionLength);
 
-        GeometricSection mismatchedBeginning = validGeometricSection();
-        mismatchedBeginning.yaw.domainBegin = std::nextafter(
-            mismatchedBeginning.pitch.domainBegin,
-            mismatchedBeginning.pitch.domainEnd
-        );
+        // Every channel must cover [0, length] exactly, so shrinking one
+        // channel's coverage by even one representable step is rejected.
+        GeometricSection shortRoll = validGeometricSection();
+        shortRoll.roll.segments.back().transition.domainEnd =
+            std::nextafter(
+                shortRoll.roll.segments.back().transition.domainEnd,
+                -std::numeric_limits<double>::infinity()
+            );
         requireThrows<std::invalid_argument>(
-            [&mismatchedBeginning]
+            [&shortRoll]
             {
-                validateGeometricSection(mismatchedBeginning);
+                validateGeometricSection(shortRoll, referenceSectionLength);
             },
-            "geometric-section smallest-representable beginning mismatch"
+            "geometric-section smallest-representable coverage shortfall"
         );
 
-        GeometricSection mismatchedEnd = validGeometricSection();
-        mismatchedEnd.roll.domainEnd = std::nextafter(
-            mismatchedEnd.pitch.domainEnd,
-            std::numeric_limits<double>::infinity()
-        );
+        GeometricSection latePitch = validGeometricSection();
+        latePitch.pitch.segments.front().transition.domainBegin =
+            std::nextafter(0.0, std::numeric_limits<double>::infinity());
         requireThrows<std::invalid_argument>(
-            [&mismatchedEnd]
+            [&latePitch]
             {
-                validateGeometricSection(mismatchedEnd);
+                validateGeometricSection(latePitch, referenceSectionLength);
             },
-            "geometric-section smallest-representable end mismatch"
+            "geometric-section channel not starting at zero"
         );
     }
 
@@ -294,34 +355,64 @@ namespace
     void testGeometricSectionInvalidChannels()
     {
         GeometricSection zeroWidth = validGeometricSection();
-        zeroWidth.pitch.domainEnd = zeroWidth.pitch.domainBegin;
+        zeroWidth.pitch.segments.front().transition.domainEnd =
+            zeroWidth.pitch.segments.front().transition.domainBegin;
         requireThrows<std::invalid_argument>(
             [&zeroWidth]
             {
-                validateGeometricSection(zeroWidth);
+                validateGeometricSection(zeroWidth, referenceSectionLength);
             },
             "geometric-section zero-width scalar transition"
         );
 
         GeometricSection reversed = validGeometricSection();
-        reversed.yaw.domainBegin = reversed.yaw.domainEnd + 1.0;
+        reversed.yaw.segments.front().transition.domainBegin =
+            reversed.yaw.segments.front().transition.domainEnd + 1.0;
         requireThrows<std::invalid_argument>(
             [&reversed]
             {
-                validateGeometricSection(reversed);
+                validateGeometricSection(reversed, referenceSectionLength);
             },
             "geometric-section reversed scalar transition"
         );
 
         GeometricSection unsupportedType = validGeometricSection();
-        unsupportedType.roll.transitionType =
+        unsupportedType.roll.segments.front().transition.transitionType =
             static_cast<TransitionType>(999);
         requireThrows<std::invalid_argument>(
             [&unsupportedType]
             {
-                validateGeometricSection(unsupportedType);
+                validateGeometricSection(unsupportedType, referenceSectionLength);
             },
             "geometric-section unsupported scalar transition type"
+        );
+
+        // A C0 discontinuity between adjacent segments of one channel is
+        // rejected at the section level too.
+        GeometricSection discontinuousYaw = validGeometricSection();
+        ChannelProfile& yaw = discontinuousYaw.yaw;
+        yaw.segments.push_back(ProfileSegment{
+            yaw.nextSegmentId,
+            ScalarTransition{
+                referenceSectionLength / 2.0,
+                referenceSectionLength,
+                yaw.segments.back().transition.valueEnd + 0.25,
+                -0.1,
+                TransitionType::Linear
+            }
+        });
+        ++yaw.nextSegmentId;
+        yaw.segments.front().transition.domainEnd =
+            referenceSectionLength / 2.0;
+        requireThrows<std::invalid_argument>(
+            [&discontinuousYaw]
+            {
+                validateGeometricSection(
+                    discontinuousYaw,
+                    referenceSectionLength
+                );
+            },
+            "geometric-section C0 discontinuity between segments"
         );
     }
 
@@ -366,31 +457,31 @@ namespace
             );
 
             GeometricSection geometric = validGeometricSection();
-            geometric.pitch.valueBegin = nonFinite;
+            geometric.pitch.segments.front().transition.valueBegin = nonFinite;
             requireThrows<std::invalid_argument>(
                 [&geometric]
                 {
-                    validateGeometricSection(geometric);
+                    validateGeometricSection(geometric, referenceSectionLength);
                 },
                 "non-finite pitch value"
             );
 
             geometric = validGeometricSection();
-            geometric.yaw.valueEnd = nonFinite;
+            geometric.yaw.segments.front().transition.valueEnd = nonFinite;
             requireThrows<std::invalid_argument>(
                 [&geometric]
                 {
-                    validateGeometricSection(geometric);
+                    validateGeometricSection(geometric, referenceSectionLength);
                 },
                 "non-finite yaw value"
             );
 
             geometric = validGeometricSection();
-            geometric.roll.domainEnd = nonFinite;
+            geometric.roll.segments.front().transition.domainEnd = nonFinite;
             requireThrows<std::invalid_argument>(
                 [&geometric]
                 {
-                    validateGeometricSection(geometric);
+                    validateGeometricSection(geometric, referenceSectionLength);
                 },
                 "non-finite geometric-section roll domain"
             );
@@ -399,83 +490,180 @@ namespace
 
     void testGeometricSectionEvaluationReference()
     {
-        constexpr GeometricSection section{
-            transition(0.0, 1.0, TransitionType::Linear, 0.0, 100.0),
-            transition(-2.0, 2.0, TransitionType::Smoothstep, 0.0, 100.0),
-            transition(1.0, -1.0, TransitionType::Smootherstep, 0.0, 100.0)
+        const GeometricSection section{
+            singleSegmentChannel(0.0, 1.0, TransitionType::Linear, 0.0, 100.0),
+            singleSegmentChannel(
+                -2.0,
+                2.0,
+                TransitionType::Smoothstep,
+                0.0,
+                100.0
+            ),
+            singleSegmentChannel(
+                1.0,
+                -1.0,
+                TransitionType::Smootherstep,
+                0.0,
+                100.0
+            )
         };
 
         requireState(
-            evaluateGeometricSection(section, 0.0),
+            evaluateGeometricSection(section, 100.0, 0.0),
             {0.0, -2.0, 1.0},
             "reference beginning"
         );
         requireState(
-            evaluateGeometricSection(section, 25.0),
+            evaluateGeometricSection(section, 100.0, 25.0),
             {0.25, -1.375, 0.79296875},
             "reference 25 percent"
         );
         requireState(
-            evaluateGeometricSection(section, 50.0),
+            evaluateGeometricSection(section, 100.0, 50.0),
             {0.5, 0.0, 0.0},
             "reference midpoint"
         );
         requireState(
-            evaluateGeometricSection(section, 75.0),
+            evaluateGeometricSection(section, 100.0, 75.0),
             {0.75, 1.375, -0.79296875},
             "reference 75 percent"
         );
         requireState(
-            evaluateGeometricSection(section, 100.0),
+            evaluateGeometricSection(section, 100.0, 100.0),
             {1.0, 2.0, -1.0},
             "reference end"
         );
     }
 
-    void testGeometricSectionTranslatedDomainAndConstantChannel()
+    void testGeometricSectionMultiSegmentEvaluation()
     {
-        constexpr GeometricSection section{
-            transition(-4.0, 4.0, TransitionType::Linear, 100.0, 140.0),
-            transition(0.0, 0.0, TransitionType::Smoothstep, 100.0, 140.0),
-            transition(2.0, -2.0, TransitionType::Smootherstep, 100.0, 140.0)
+        // Pitch stays single-segment; yaw chains two C0-joined segments and
+        // roll is an explicit constant plateau split into two segments.
+        const GeometricSection section{
+            singleSegmentChannel(0.0, 1.0, TransitionType::Linear, 0.0, 100.0),
+            [] {
+                ChannelProfile yaw;
+                yaw.segments.push_back(ProfileSegment{
+                    yaw.nextSegmentId++,
+                    ScalarTransition{
+                        0.0,
+                        40.0,
+                        0.0,
+                        1.0,
+                        TransitionType::Smoothstep}
+                });
+                yaw.segments.push_back(ProfileSegment{
+                    yaw.nextSegmentId++,
+                    ScalarTransition{
+                        40.0,
+                        100.0,
+                        1.0,
+                        0.0,
+                        TransitionType::Smootherstep}
+                });
+                return yaw;
+            }(),
+            [] {
+                ChannelProfile roll;
+                roll.segments.push_back(ProfileSegment{
+                    roll.nextSegmentId++,
+                    ScalarTransition{
+                        0.0,
+                        55.0,
+                        -0.5,
+                        -0.5,
+                        TransitionType::Linear}
+                });
+                roll.segments.push_back(ProfileSegment{
+                    roll.nextSegmentId++,
+                    ScalarTransition{
+                        55.0,
+                        100.0,
+                        -0.5,
+                        -0.5,
+                        TransitionType::Smoothstep}
+                });
+                return roll;
+            }()
         };
 
+        validateGeometricSection(section, 100.0);
+
         requireState(
-            evaluateGeometricSection(section, 110.0),
-            {-2.0, 0.0, 1.5859375},
-            "translated-domain 25 percent"
+            evaluateGeometricSection(section, 100.0, 0.0),
+            {0.0, 0.0, -0.5},
+            "multi-segment beginning"
         );
         requireState(
-            evaluateGeometricSection(section, 120.0),
-            {0.0, 0.0, 0.0},
-            "translated-domain midpoint"
+            evaluateGeometricSection(section, 100.0, 20.0),
+            {0.2, 0.5, -0.5},
+            "multi-segment inside first yaw segment"
+        );
+
+        // The yaw joint at 40 evaluates identically from both sides because
+        // the chain is C0 there.
+        const GeometricSectionState joint = evaluateGeometricSection(
+            section,
+            100.0,
+            40.0
+        );
+        requireState(joint, {0.4, 1.0, -0.5}, "multi-segment yaw joint");
+
+        requireState(
+            evaluateGeometricSection(section, 100.0, 70.0),
+            {0.7, 0.5, -0.5},
+            "multi-segment inside second yaw segment"
         );
         requireState(
-            evaluateGeometricSection(section, 130.0),
-            {2.0, 0.0, -1.5859375},
-            "translated-domain 75 percent"
+            evaluateGeometricSection(section, 100.0, 100.0),
+            {1.0, 0.0, -0.5},
+            "multi-segment end"
         );
+
+        // Channel-level evaluation agrees bit-for-bit with the section-level
+        // evaluation on every queried distance.
+        for (const double distance : {0.0, 13.75, 40.0, 55.0, 82.5, 100.0})
+        {
+            const GeometricSectionState state = evaluateGeometricSection(
+                section,
+                100.0,
+                distance
+            );
+            require(
+                state.pitch ==
+                    evaluateChannelProfile(section.pitch, distance)
+                    && state.yaw ==
+                    evaluateChannelProfile(section.yaw, distance)
+                    && state.roll ==
+                    evaluateChannelProfile(section.roll, distance),
+                "section and channel evaluators agree"
+            );
+        }
     }
 
     void testGeometricSectionEvaluationRejectsInvalidQueries()
     {
-        constexpr GeometricSection section{
-            transition(0.0, 1.0, TransitionType::Linear, 0.0, 100.0),
-            transition(-2.0, 2.0, TransitionType::Smoothstep, 0.0, 100.0),
-            transition(1.0, -1.0, TransitionType::Smootherstep, 0.0, 100.0)
-        };
+        const GeometricSection section = validGeometricSection();
 
         requireThrows<std::out_of_range>(
             [&section]
             {
-                static_cast<void>(evaluateGeometricSection(section, -0.01));
+                static_cast<void>(evaluateGeometricSection(
+                    section,
+                    referenceSectionLength,
+                    -0.01
+                ));
             },
             "geometric-section query below domain"
         );
         requireThrows<std::out_of_range>(
             [&section]
             {
-                static_cast<void>(evaluateGeometricSection(section, 100.01));
+                static_cast<void>(evaluateGeometricSection(
+                    section,
+                    referenceSectionLength,
+                    referenceSectionLength + 0.01
+                ));
             },
             "geometric-section query above domain"
         );
@@ -491,9 +679,11 @@ namespace
             requireThrows<std::invalid_argument>(
                 [&section, nonFinite]
                 {
-                    static_cast<void>(
-                        evaluateGeometricSection(section, nonFinite)
-                    );
+                    static_cast<void>(evaluateGeometricSection(
+                        section,
+                        referenceSectionLength,
+                        nonFinite
+                    ));
                 },
                 "geometric-section non-finite query"
             );
@@ -502,17 +692,19 @@ namespace
 
     void testGeometricSectionEvaluationRejectsInvalidSection()
     {
-        GeometricSection mismatchedDomain = validGeometricSection();
-        mismatchedDomain.roll.domainEnd = 14.0;
+        GeometricSection mismatchedCoverage = validGeometricSection();
+        mismatchedCoverage.roll.segments.back().transition.domainEnd = 14.0;
 
         requireThrows<std::invalid_argument>(
-            [&mismatchedDomain]
+            [&mismatchedCoverage]
             {
-                static_cast<void>(
-                    evaluateGeometricSection(mismatchedDomain, 2.0)
-                );
+                static_cast<void>(evaluateGeometricSection(
+                    mismatchedCoverage,
+                    referenceSectionLength,
+                    2.0
+                ));
             },
-            "geometric-section evaluation with mismatched domain"
+            "geometric-section evaluation with mismatched coverage"
         );
     }
 
@@ -522,6 +714,7 @@ namespace
         constexpr double independentValue = 2.375;
         const GeometricSectionState expected = evaluateGeometricSection(
             section,
+            referenceSectionLength,
             independentValue
         );
         const std::uint64_t expectedPitchBits =
@@ -535,6 +728,7 @@ namespace
         {
             const GeometricSectionState actual = evaluateGeometricSection(
                 section,
+                referenceSectionLength,
                 independentValue
             );
 
@@ -564,13 +758,16 @@ namespace
         );
         const std::uint64_t expectedGeometricBits =
             std::bit_cast<std::uint64_t>(
-                evaluateScalarTransition(geometric.yaw, independentValue)
+                evaluateScalarTransition(
+                    geometric.yaw.segments.front().transition,
+                    independentValue
+                )
             );
 
         for (int repetition = 0; repetition < 100; ++repetition)
         {
             validateForceSection(force);
-            validateGeometricSection(geometric);
+            validateGeometricSection(geometric, referenceSectionLength);
 
             require(
                 std::bit_cast<std::uint64_t>(evaluateScalarTransition(
@@ -581,7 +778,7 @@ namespace
             );
             require(
                 std::bit_cast<std::uint64_t>(evaluateScalarTransition(
-                    geometric.yaw,
+                    geometric.yaw.segments.front().transition,
                     independentValue
                 )) == expectedGeometricBits,
                 "geometric-section scalar evaluation changed bits"
@@ -591,8 +788,10 @@ namespace
         require(
             force.verticalForce.domainBegin == -7.25
                 && force.verticalForce.domainEnd == 13.5
-                && geometric.pitch.domainBegin == -7.25
-                && geometric.pitch.domainEnd == 13.5,
+                && geometric.pitch.segments.front().transition.domainBegin
+                == 0.0
+                && geometric.pitch.segments.front().transition.domainEnd
+                == referenceSectionLength,
             "validation changed exact authored domain endpoints"
         );
     }
@@ -609,10 +808,7 @@ int main()
             testGeometricSectionRepresentation
         },
         {"force-section shared domain", testForceSectionSharedDomain},
-        {
-            "geometric-section shared domain",
-            testGeometricSectionSharedDomain
-        },
+        {"geometric-section shared length", testGeometricSectionSharedLength},
         {"force-section invalid channels", testForceSectionInvalidChannels},
         {
             "geometric-section invalid channels",
@@ -624,8 +820,8 @@ int main()
             testGeometricSectionEvaluationReference
         },
         {
-            "geometric-section translated domain and constant channel",
-            testGeometricSectionTranslatedDomainAndConstantChannel
+            "geometric-section multi-segment evaluation",
+            testGeometricSectionMultiSegmentEvaluation
         },
         {
             "geometric-section evaluation rejects invalid queries",

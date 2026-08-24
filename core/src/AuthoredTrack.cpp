@@ -2,62 +2,145 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace quantum::coaster
 {
     namespace
     {
+        // Single-construction access into GeometryRegion until more
+        // constructions exist; keeps dispatch sites uniform.
+        [[nodiscard]] const PlanarArcRegion& planarArcConstruction(
+            const GeometryRegion& region)
+        {
+            const PlanarArcRegion* construction =
+                std::get_if<PlanarArcRegion>(&region.construction);
+
+            if (construction == nullptr)
+            {
+                throw std::logic_error(
+                    "Unsupported geometry construction kind."
+                );
+            }
+
+            return *construction;
+        }
+
+        [[nodiscard]] PlanarArcRegion& planarArcConstruction(
+            GeometryRegion& region)
+        {
+            return const_cast<PlanarArcRegion&>(
+                planarArcConstruction(
+                    static_cast<const GeometryRegion&>(region)));
+        }
+
         void validateSectionLocalDomain(
             const AuthoredTrackSection& section)
         {
-            // Track sections must author their rate profiles over the
-            // canonical section-local domain [0, length] so that chaining is
-            // unambiguous. The scalar-transition evaluator remains
-            // authoritative for value and transition-type validity.
-            validateGeometricSection(section.rateProfiles);
+            // Track sections must author their content over the canonical
+            // section-local domain [0, section.length] so that chaining and
+            // rescaling stay unambiguous. Per-kind validation remains
+            // authoritative for finer defects.
+            std::visit(
+                [&section](const auto& authored)
+                {
+                    using AuthoredRegion =
+                        std::decay_t<decltype(authored)>;
 
-            const double domainBegin =
-                section.rateProfiles.pitch.domainBegin;
-            const double length = section.rateProfiles.pitch.domainEnd;
+                    if constexpr (std::is_same_v<
+                        AuthoredRegion, RateProfileRegion>)
+                    {
+                        validateGeometricSection(
+                            authored.rateProfiles,
+                            section.length
+                        );
+                    }
+                    else
+                    {
+                        validatePlanarArcRegion(
+                            planarArcConstruction(authored),
+                            section.length
+                        );
+                    }
+                },
+                section.region
+            );
+        }
 
-            if (domainBegin != 0.0
-                || !std::isfinite(length)
-                || length <= 0.0)
-            {
-                throw std::invalid_argument(
-                    "An authored track section must use the canonical "
-                    "section-local domain [0, length] with a positive "
-                    "finite length."
-                );
-            }
+        // Single zero-rate Linear segment covering [0, length].
+        [[nodiscard]] ChannelProfile createZeroRateChannel(
+            const double length)
+        {
+            ChannelProfile channel;
+            channel.segments.push_back(ProfileSegment{
+                channel.nextSegmentId,
+                math::ScalarTransition{
+                    .domainBegin = 0.0,
+                    .domainEnd = length,
+                    .valueBegin = 0.0,
+                    .valueEnd = 0.0,
+                    .transitionType = math::TransitionType::Linear
+                }
+            });
+            ++channel.nextSegmentId;
+            return channel;
         }
 
         [[nodiscard]] AuthoredTrackSection createDefaultSection()
         {
-            constexpr math::TransitionType straightType =
-                math::TransitionType::Linear;
+            return createRateProfileSection(defaultNewSectionLength);
+        }
 
-            const math::ScalarTransition zeroRate{
-                .domainBegin = 0.0,
-                .domainEnd = defaultNewSectionLength,
-                .valueBegin = 0.0,
-                .valueEnd = 0.0,
-                .transitionType = straightType
-            };
-
-            AuthoredTrackSection section;
-            section.rateProfiles.pitch = zeroRate;
-            section.rateProfiles.yaw = zeroRate;
-            section.rateProfiles.roll = zeroRate;
-            return section;
+        // Builds one single-segment channel covering [0, length]. Used for
+        // documents whose channels are authored wholesale.
+        [[nodiscard]] ChannelProfile createSingleSegmentChannel(
+            const double length,
+            const double valueBegin,
+            const double valueEnd,
+            const math::TransitionType transitionType)
+        {
+            ChannelProfile channel;
+            channel.segments.push_back(ProfileSegment{
+                channel.nextSegmentId,
+                math::ScalarTransition{
+                    .domainBegin = 0.0,
+                    .domainEnd = length,
+                    .valueBegin = valueBegin,
+                    .valueEnd = valueEnd,
+                    .transitionType = transitionType
+                }
+            });
+            ++channel.nextSegmentId;
+            return channel;
         }
     }
 
     double sectionLength(const AuthoredTrackSection& section)
     {
-        validateGeometricSection(section.rateProfiles);
-        return section.rateProfiles.pitch.domainEnd;
+        validateSectionLocalDomain(section);
+        return section.length;
+    }
+
+    AuthoredTrackSection createRateProfileSection(const double length)
+    {
+        if (!std::isfinite(length) || length <= 0.0)
+        {
+            throw std::invalid_argument(
+                "An authored track section requires a positive finite "
+                "length."
+            );
+        }
+
+        AuthoredTrackSection section;
+        section.length = length;
+        section.rateProfileRegion().rateProfiles.pitch =
+            createZeroRateChannel(length);
+        section.rateProfileRegion().rateProfiles.yaw =
+            createZeroRateChannel(length);
+        section.rateProfileRegion().rateProfiles.roll =
+            createZeroRateChannel(length);
+        return section;
     }
 
     void setSectionLength(AuthoredTrackSection& section, double newLength)
@@ -70,14 +153,222 @@ namespace quantum::coaster
             );
         }
 
-        for (math::ScalarTransition* channel :
-            {&section.rateProfiles.pitch,
-             &section.rateProfiles.yaw,
-             &section.rateProfiles.roll})
+        // Rescaling requires a well-formed current state so the applied
+        // policy is derived from a real [0, oldLength] coverage.
+        const double oldLength = sectionLength(section);
+
+        if (newLength == oldLength)
         {
-            channel->domainBegin = 0.0;
-            channel->domainEnd = newLength;
+            return;
         }
+
+        const double scale = newLength / oldLength;
+
+        std::visit(
+            [&scale, newLength](auto& authored)
+            {
+                using AuthoredRegion = std::decay_t<decltype(authored)>;
+
+                if constexpr (std::is_same_v<
+                    AuthoredRegion, RateProfileRegion>)
+                {
+                    for (ChannelProfile* channel :
+                        {&authored.rateProfiles.pitch,
+                         &authored.rateProfiles.yaw,
+                         &authored.rateProfiles.roll})
+                    {
+                        // Multiplying identical boundary doubles by one
+                        // scale factor is deterministic, so shared
+                        // boundaries stay contiguous on both sides; the
+                        // outer endpoints are pinned exactly.
+                        for (ProfileSegment& segment : channel->segments)
+                        {
+                            segment.transition.domainBegin *= scale;
+                            segment.transition.domainEnd *= scale;
+                        }
+
+                        channel->segments.front().transition.domainBegin = 0.0;
+                        channel->segments.back().transition.domainEnd = newLength;
+                    }
+                }
+                else
+                {
+                    std::visit(
+                        [&scale, newLength](auto& construction)
+                        {
+                            using Construction =
+                                std::decay_t<decltype(construction)>;
+
+                            if constexpr (std::is_same_v<
+                                Construction, PlanarArcRegion>)
+                            {
+                                // Length edits keep the authored radius and
+                                // sweep sign designer-authoritative; the
+                                // swept angle absorbs the new length.
+                                construction.sweptAngle =
+                                    (construction.sweptAngle < 0.0
+                                        ? -1.0
+                                        : 1.0)
+                                    * newLength
+                                    / construction.radius;
+                            }
+                            else
+                            {
+                                static_assert(
+                                    sizeof(Construction) == 0,
+                                    "Unhandled geometry construction.");
+                            }
+                        },
+                        authored.construction
+                    );
+                }
+            },
+            section.region
+        );
+
+        section.length = newLength;
+    }
+
+    void convertSectionToRateProfiles(AuthoredTrackSection& section)
+    {
+        if (section.kind == RegionKind::RateProfiles)
+        {
+            return;
+        }
+
+        // Conversions preserve the currently authored length so the track
+        // shape at the boundary is unaffected by the kind switch itself.
+        const double length = sectionLength(section);
+        section = createRateProfileSection(length);
+    }
+
+    void convertSectionToPlanarArc(AuthoredTrackSection& section)
+    {
+        if (section.kind == RegionKind::Geometry)
+        {
+            return;
+        }
+
+        const double length = sectionLength(section);
+
+        AuthoredTrackSection converted;
+        converted.kind = RegionKind::Geometry;
+        converted.length = length;
+
+        // The default radius is designer-authoritative for the conversion;
+        // the sweep follows from preserving the current length.
+        PlanarArcRegion arc;
+        arc.sweptAngle = length / arc.radius;
+        converted.region = GeometryRegion{std::move(arc)};
+
+        section = std::move(converted);
+    }
+
+    void setPlanarArcRadius(AuthoredTrackSection& section, const double radius)
+    {
+        if (section.kind != RegionKind::Geometry)
+        {
+            throw std::invalid_argument(
+                "Planar-arc parameter edits require a geometry region."
+            );
+        }
+
+        if (!std::isfinite(radius) || radius <= 0.0)
+        {
+            throw std::invalid_argument(
+                "A planar-arc radius must be positive and finite."
+            );
+        }
+
+        // The stored length stays authoritative; the swept angle absorbs
+        // the radius change while preserving its turn direction.
+        PlanarArcRegion& arc =
+            planarArcConstruction(std::get<GeometryRegion>(section.region));
+        const double length = sectionLength(section);
+
+        arc.radius = radius;
+        arc.sweptAngle =
+            (arc.sweptAngle < 0.0 ? -1.0 : 1.0) * length / radius;
+
+        validatePlanarArcRegion(arc, section.length);
+    }
+
+    void setPlanarArcSweptAngle(
+        AuthoredTrackSection& section,
+        const double sweptAngle)
+    {
+        if (section.kind != RegionKind::Geometry)
+        {
+            throw std::invalid_argument(
+                "Planar-arc parameter edits require a geometry region."
+            );
+        }
+
+        if (!std::isfinite(sweptAngle) || sweptAngle == 0.0)
+        {
+            throw std::invalid_argument(
+                "A planar-arc swept angle must be finite and nonzero."
+            );
+        }
+
+        PlanarArcRegion& arc =
+            planarArcConstruction(std::get<GeometryRegion>(section.region));
+
+        // A designer-authored sweep defines the resulting length.
+        arc.sweptAngle = sweptAngle;
+        section.length = planarArcLength(arc);
+
+        validatePlanarArcRegion(arc, section.length);
+    }
+
+    void setPlanarArcPlaneTilt(
+        AuthoredTrackSection& section,
+        const double planeTilt)
+    {
+        if (section.kind != RegionKind::Geometry)
+        {
+            throw std::invalid_argument(
+                "Planar-arc parameter edits require a geometry region."
+            );
+        }
+
+        if (!std::isfinite(planeTilt))
+        {
+            throw std::invalid_argument(
+                "A planar-arc plane tilt must be finite."
+            );
+        }
+
+        PlanarArcRegion& arc =
+            planarArcConstruction(std::get<GeometryRegion>(section.region));
+        arc.planeTilt = planeTilt;
+
+        validatePlanarArcRegion(arc, section.length);
+    }
+
+    void setPlanarArcBankChange(
+        AuthoredTrackSection& section,
+        const double bankChange)
+    {
+        if (section.kind != RegionKind::Geometry)
+        {
+            throw std::invalid_argument(
+                "Planar-arc parameter edits require a geometry region."
+            );
+        }
+
+        if (!std::isfinite(bankChange))
+        {
+            throw std::invalid_argument(
+                "A planar-arc bank change must be finite."
+            );
+        }
+
+        PlanarArcRegion& arc =
+            planarArcConstruction(std::get<GeometryRegion>(section.region));
+        arc.bankChange = bankChange;
+
+        validatePlanarArcRegion(arc, section.length);
     }
 
     std::size_t AuthoredTrack::sectionCount() const noexcept
@@ -159,33 +450,32 @@ namespace quantum::coaster
         // Reproduces the original demonstration profile behavior: one curved
         // section whose rider-local roll/pitch/yaw rate profiles span
         // [0, 180].
+        constexpr double defaultDemoLength = 180.0;
+
         AuthoredTrack track;
 
         track.appendSection();
-        setSectionLength(track.section(0), 180.0);
+        setSectionLength(track.section(0), defaultDemoLength);
 
         AuthoredTrackSection& section = track.section(0);
-        section.rateProfiles.roll = {
-            .domainBegin = 0.0,
-            .domainEnd = 180.0,
-            .valueBegin = 0.0,
-            .valueEnd = 0.024,
-            .transitionType = math::TransitionType::Smootherstep
-        };
-        section.rateProfiles.pitch = {
-            .domainBegin = 0.0,
-            .domainEnd = 180.0,
-            .valueBegin = 0.018,
-            .valueEnd = -0.010,
-            .transitionType = math::TransitionType::CosineEaseInOut
-        };
-        section.rateProfiles.yaw = {
-            .domainBegin = 0.0,
-            .domainEnd = 180.0,
-            .valueBegin = 0.004,
-            .valueEnd = 0.022,
-            .transitionType = math::TransitionType::Smoothstep
-        };
+        section.rateProfileRegion().rateProfiles.roll = createSingleSegmentChannel(
+            defaultDemoLength,
+            0.0,
+            0.024,
+            math::TransitionType::Smootherstep
+        );
+        section.rateProfileRegion().rateProfiles.pitch = createSingleSegmentChannel(
+            defaultDemoLength,
+            0.018,
+            -0.010,
+            math::TransitionType::CosineEaseInOut
+        );
+        section.rateProfileRegion().rateProfiles.yaw = createSingleSegmentChannel(
+            defaultDemoLength,
+            0.004,
+            0.022,
+            math::TransitionType::Smoothstep
+        );
 
         return track;
     }
@@ -232,13 +522,37 @@ namespace quantum::coaster
             const AuthoredTrackSection& section = track.section(index);
 
             const std::vector<RiderLocalGeometryState> localStates =
-                integrateLocalRollPitchYawRateProfiles(
-                    position,
-                    frame,
-                    section.rateProfiles.roll,
-                    section.rateProfiles.pitch,
-                    section.rateProfiles.yaw,
-                    integrationSpacing
+                std::visit(
+                    [&](const auto& authored)
+                        -> std::vector<RiderLocalGeometryState>
+                    {
+                        using AuthoredRegion =
+                            std::decay_t<decltype(authored)>;
+
+                        if constexpr (std::is_same_v<
+                            AuthoredRegion, RateProfileRegion>)
+                        {
+                            return integrateLocalRollPitchYawRateProfiles(
+                                position,
+                                frame,
+                                authored.rateProfiles.roll,
+                                authored.rateProfiles.pitch,
+                                authored.rateProfiles.yaw,
+                                section.length,
+                                integrationSpacing
+                            );
+                        }
+                        else
+                        {
+                            return integratePlanarArcRegion(
+                                position,
+                                frame,
+                                planarArcConstruction(authored),
+                                integrationSpacing
+                            );
+                        }
+                    },
+                    section.region
                 );
 
             // The first state of every section repeats the previous
@@ -265,4 +579,3 @@ namespace quantum::coaster
         return states;
     }
 }
-

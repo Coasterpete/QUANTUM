@@ -22,6 +22,15 @@ namespace quantum::renderer
         std::array<float, 4> color;
     };
 
+    // The track-curve stream concatenates four equal-length reference-curve
+    // runs in this order; visibility bits address these indices.
+    inline constexpr std::uint32_t viewportLeftRailCurve = 0;
+    inline constexpr std::uint32_t viewportRightRailCurve = 1;
+    inline constexpr std::uint32_t viewportCenterlineCurve = 2;
+    inline constexpr std::uint32_t viewportHeartlineCurve = 3;
+    inline constexpr std::uint32_t viewportCurveCount = 4;
+    inline constexpr std::uint32_t viewportAllCurvesVisibleMask = 0xFu;
+
     class VulkanContext
     {
     public:
@@ -34,9 +43,12 @@ namespace quantum::renderer
         VulkanContext(const VulkanContext&) = delete;
         VulkanContext& operator=(const VulkanContext&) = delete;
 
+        // The track-curve vertices must consist of exactly four runs of
+        // `trackVerticesPerCurve` vertices each.
         void initialize(
             SDL_Window* window,
-            std::span<const LineVertex> trackCurveVertices
+            std::span<const LineVertex> trackCurveVertices,
+            std::uint32_t trackVerticesPerCurve
         );
         void drawFrame(
             FrameRenderCallback renderCallback = nullptr,
@@ -52,7 +64,25 @@ namespace quantum::renderer
             const std::array<float, 16>& viewProjection
         );
         void updateTrackCurveVertices(
-            std::span<const LineVertex> trackCurveVertices
+            std::span<const LineVertex> trackCurveVertices,
+            std::uint32_t trackVerticesPerCurve
+        );
+
+        // Host-side draw skipping for the viewport reference elements.
+        // Idempotent; intended to be pushed every frame from the editor's
+        // authoritative settings like the view-projection matrix.
+        void setViewportElementVisibility(
+            bool gridVisible,
+            std::uint32_t curveVisibilityMask
+        );
+
+        // Recenters and rescales the ground grid toward a reference sphere
+        // (usually the solved-track bounds), snapping to the chosen spacing
+        // so the grid only rewrites its buffer when it actually moves.
+        void updateViewportAidReference(
+            float centerX,
+            float centerY,
+            float referenceRadius
         );
         void shutdown() noexcept;
 
@@ -72,7 +102,8 @@ namespace quantum::renderer
         void createDevice();
         [[nodiscard]] bool createSwapchain();
         void createVertexBuffers(
-            std::span<const LineVertex> trackCurveVertices
+            std::span<const LineVertex> trackCurveVertices,
+            std::uint32_t trackVerticesPerCurve
         );
         void createGraphicsPipeline();
         void createViewportTarget(std::uint32_t width, std::uint32_t height);
@@ -87,6 +118,14 @@ namespace quantum::renderer
         );
         void destroyViewportTarget() noexcept;
         void destroySwapchain() noexcept;
+
+        // Regenerates the grid/axes vertices in place through the retained
+        // persistent mapping of the static viewport-aid buffer.
+        void rewriteViewportAidVertices(
+            float centerX,
+            float centerY,
+            float spacing
+        );
 
         SDL_Window* window_ = nullptr;
         VkInstance instance_ = VK_NULL_HANDLE;
@@ -128,12 +167,23 @@ namespace quantum::renderer
 
         VkBuffer staticVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation staticVertexAllocation_ = VK_NULL_HANDLE;
+        void* staticVertexMappedData_ = nullptr;
+        VkDeviceSize staticVertexCapacity_ = 0;
         std::uint32_t staticVertexCount_ = 0;
+        // Grid placement currently written into the aid buffer, so the
+        // reference update only rewrites when the snapped values change.
+        float viewportAidCenterX_ = 0.0F;
+        float viewportAidCenterY_ = 0.0F;
+        float viewportAidSpacing_ = 0.0F;
+        bool viewportGridVisible_ = true;
+        std::uint32_t viewportCurveVisibilityMask_ =
+            viewportAllCurvesVisibleMask;
         VkBuffer trackCurveVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* trackCurveVertexMappedData_ = nullptr;
         VkDeviceSize trackCurveVertexCapacity_ = 0;
         std::uint32_t trackCurveVertexCount_ = 0;
+        std::uint32_t trackVerticesPerCurve_ = 0;
         VkBuffer spareTrackCurveVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation spareTrackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* spareTrackCurveVertexMappedData_ = nullptr;

@@ -8,14 +8,18 @@ target_sources(
         src/ArcLengthLUT.cpp
         src/AuthoredSections.cpp
         src/AuthoredTrack.cpp
+        src/ChannelProfileEditing.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
+        src/PlanarArcRegion.cpp
         src/RiderLocalGeometry.cpp
         src/ScalarTransition.cpp
         src/TransitionFunctions.cpp
         include/quantum/coaster/ForceSection.hpp
         include/quantum/coaster/AuthoredTrack.hpp
+        include/quantum/coaster/ChannelProfileEditing.hpp
         include/quantum/coaster/GeometricSection.hpp
+        include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
         include/quantum/geometry/ArcLengthLUT.hpp
         include/quantum/geometry/BSplineCurve.hpp

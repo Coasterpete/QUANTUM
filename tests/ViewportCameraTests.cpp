@@ -6,6 +6,7 @@
 #include <cmath>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -265,6 +266,370 @@ namespace
         require(first == second, "matrix generation must be deterministic");
         requireFiniteMatrix(first);
     }
+
+    // Transforms one world point by a column-major float[16] matrix and
+    // returns clip-space (x, y, z, w).
+    [[nodiscard]] std::array<double, 4> transformPoint(
+        const std::array<float, 16>& matrix,
+        const glm::dvec3& point)
+    {
+        std::array<double, 4> result{};
+        const double components[4] = {point.x, point.y, point.z, 1.0};
+        for (std::size_t row = 0; row < 4; ++row)
+        {
+            double sum = 0.0;
+            for (std::size_t column = 0; column < 4; ++column)
+            {
+                sum += static_cast<double>(matrix[column * 4 + row])
+                    * components[column];
+            }
+            result[row] = sum;
+        }
+        return result;
+    }
+
+    void testDeterministicPresets()
+    {
+        using quantum::editor::ViewportCameraPreset;
+        using quantum::editor::ViewportProjection;
+
+        struct PresetExpectation
+        {
+            ViewportCameraPreset preset;
+            const char* name;
+            double yaw;
+            double pitch;
+            ViewportProjection projection;
+        };
+
+        const double isoPitch = std::atan(1.0 / std::sqrt(2.0));
+        const double defaultYaw = std::atan2(-1.5, 1.2);
+        const double defaultPitch = std::atan2(
+            1.0, std::hypot(1.2, -1.5));
+
+        const PresetExpectation expectations[] = {
+            {ViewportCameraPreset::Perspective, "perspective",
+                defaultYaw, defaultPitch, ViewportProjection::Perspective},
+            {ViewportCameraPreset::Isometric, "isometric",
+                0.25 * 3.14159265358979323846, isoPitch,
+                ViewportProjection::Orthographic},
+            {ViewportCameraPreset::Top, "top",
+                0.0, 0.5 * 3.14159265358979323846,
+                ViewportProjection::Orthographic},
+            {ViewportCameraPreset::Bottom, "bottom",
+                0.0, -0.5 * 3.14159265358979323846,
+                ViewportProjection::Orthographic},
+            {ViewportCameraPreset::Left, "left",
+                0.5 * 3.14159265358979323846, 0.0,
+                ViewportProjection::Orthographic},
+            {ViewportCameraPreset::Right, "right",
+                -0.5 * 3.14159265358979323846, 0.0,
+                ViewportProjection::Orthographic},
+        };
+
+        for (const PresetExpectation& expectation : expectations)
+        {
+            ViewportCamera camera = makeFramedCamera();
+            // Start from a different projection and heavily perturbed
+            // orientation to prove the preset fully determines both.
+            camera.setProjection(ViewportProjection::Orthographic);
+            camera.orbit(2.3, 0.9);
+            camera.applyPreset(expectation.preset);
+
+            requireNear(
+                camera.yaw(),
+                expectation.yaw,
+                std::string(expectation.name) + " yaw"
+            );
+            requireNear(
+                camera.pitch(),
+                expectation.pitch,
+                std::string(expectation.name) + " pitch"
+            );
+            if (expectation.preset == ViewportCameraPreset::Perspective
+                || expectation.preset == ViewportCameraPreset::Isometric)
+            {
+                require(
+                    camera.projection() == expectation.projection,
+                    std::string(expectation.name)
+                        + " must switch projection"
+                );
+            }
+            requireFiniteMatrix(camera.viewProjection(wideAspectRatio));
+        }
+
+        // Axis presets keep focus and distance and place the eye on the
+        // correct side of the focus.
+        ViewportCamera top = makeFramedCamera();
+        const glm::dvec3 focusBefore = top.focus();
+        const double distanceBefore = top.distance();
+        top.applyPreset(ViewportCameraPreset::Top);
+        require(top.position().z > top.focus().z + distanceBefore * 0.999,
+            "Top preset must look straight down from above");
+        requireVectorNear(top.focus(), focusBefore, "Top keeps focus");
+
+        ViewportCamera bottom = makeFramedCamera();
+        bottom.applyPreset(ViewportCameraPreset::Bottom);
+        require(bottom.position().z < bottom.focus().z - distanceBefore * 0.999,
+            "Bottom preset must look straight up from below");
+
+        ViewportCamera left = makeFramedCamera();
+        left.applyPreset(ViewportCameraPreset::Left);
+        require(left.position().y > left.focus().y + distanceBefore * 0.999,
+            "Left preset must place the eye on the +Y side");
+
+        ViewportCamera right = makeFramedCamera();
+        right.applyPreset(ViewportCameraPreset::Right);
+        require(right.position().y < right.focus().y - distanceBefore * 0.999,
+            "Right preset must place the eye on the -Y side");
+    }
+
+    void testPoleSafeMatrices()
+    {
+        for (const quantum::editor::ViewportCameraPreset polePreset :
+            {quantum::editor::ViewportCameraPreset::Top,
+                quantum::editor::ViewportCameraPreset::Bottom})
+        {
+            ViewportCamera camera = makeFramedCamera();
+            camera.applyPreset(polePreset);
+
+            const auto clipping = camera.clipPlanes();
+            require(
+                clipping.nearPlane > 0.0
+                    && clipping.farPlane > clipping.nearPlane,
+                "pole view clip planes must stay ordered"
+            );
+            requireFiniteMatrix(camera.viewProjection(wideAspectRatio));
+
+            // Panning and zooming at the exact pole must remain finite.
+            camera.pan(40.0, -30.0, 1280.0, 720.0);
+            camera.zoom(-3.0);
+            require(std::isfinite(camera.distance())
+                    && camera.distance() > 0.0,
+                "pan/zoom at the pole must keep a finite distance");
+            requireFiniteMatrix(camera.viewProjection(wideAspectRatio));
+
+            // Orbiting away from the pole recovers normal behavior.
+            camera.orbit(0.6, -0.2);
+            require(
+                std::abs(camera.pitch()) < 0.5 * 3.14159265358979323846,
+                "orbit must leave the exact pole when dragged"
+            );
+        }
+    }
+
+    void testProjectionSwitching()
+    {
+        using quantum::editor::ViewportProjection;
+
+        ViewportCamera camera = makeFramedCamera();
+        require(
+            camera.projection() == ViewportProjection::Perspective,
+            "cameras start in perspective mode"
+        );
+
+        const glm::dvec3 focusBefore = camera.focus();
+        const double distanceBefore = camera.distance();
+
+        camera.setProjection(ViewportProjection::Orthographic);
+        require(
+            camera.projection() == ViewportProjection::Orthographic,
+            "projection mode must switch"
+        );
+        requireVectorNear(camera.focus(), focusBefore,
+            "ortho switch preserves focus");
+        requireNear(camera.distance(), distanceBefore,
+            "ortho switch preserves distance");
+        requireFiniteMatrix(camera.viewProjection(wideAspectRatio));
+
+        // Perspective divides by view-space depth (w varies), while the
+        // orthographic projection keeps w constant.
+        const auto orthoMatrix = camera.viewProjection(wideAspectRatio);
+        camera.setProjection(ViewportProjection::Perspective);
+        const auto perspectiveMatrix =
+            camera.viewProjection(wideAspectRatio);
+        require(perspectiveMatrix != orthoMatrix,
+            "projection mode must change the matrix");
+
+        // Probe two points at different depths along the view direction:
+        // perspective divides by depth (w varies), orthographic does not
+        // (w stays 1).
+        const glm::dvec3 forwardDirection = glm::normalize(
+            camera.focus() - camera.position()
+        );
+        const glm::dvec3 nearPoint = camera.position()
+            + 0.5 * camera.distance() * forwardDirection;
+        const glm::dvec3 farPoint = camera.position()
+            + 1.5 * camera.distance() * forwardDirection;
+
+        const auto nearClip = transformPoint(perspectiveMatrix, nearPoint);
+        const auto farClip = transformPoint(perspectiveMatrix, farPoint);
+        require(
+            std::abs(nearClip[3] - farClip[3]) > 1.0e-3,
+            "perspective w must vary with depth"
+        );
+        requireNear(transformPoint(orthoMatrix, nearPoint)[3], 1.0,
+            "orthographic w must be constant");
+        requireNear(transformPoint(orthoMatrix, farPoint)[3], 1.0,
+            "orthographic w must stay constant");
+        requireFiniteMatrix(orthoMatrix);
+    }
+
+    void testFocusSphereFraming()
+    {
+        ViewportCamera camera = makeFramedCamera();
+
+        const glm::dvec3 center{12.0, -3.0, 4.0};
+        constexpr double radius = 9.0;
+
+        require(camera.frameSphere(center, radius, wideAspectRatio),
+            "a valid sphere must frame successfully");
+        requireVectorNear(camera.focus(), center, "sphere framing focus");
+
+        const double verticalHalfAngle =
+            0.5 * camera.verticalFieldOfView();
+        const double horizontalHalfAngle = std::atan(
+            std::tan(verticalHalfAngle) * wideAspectRatio
+        );
+        const double limitingHalfAngle = std::min(
+            verticalHalfAngle,
+            horizontalHalfAngle
+        );
+        require(
+            camera.distance() >= 1.09 * radius
+                / std::sin(limitingHalfAngle),
+            "sphere framing distance must cover the sphere with margin"
+        );
+
+        // A tall viewport frames farther than a wide one for the same
+        // sphere (the vertical half-angle limits first).
+        ViewportCamera tall = makeFramedCamera(0.5);
+        tall.frameSphere(center, radius, 0.5);
+        require(
+            tall.distance() > camera.distance(),
+            "tall viewport frames the sphere farther away"
+        );
+
+        // Invalid selections are rejected without moving the camera.
+        const double distanceBefore = camera.distance();
+        const glm::dvec3 focusBefore = camera.focus();
+        require(!camera.frameSphere(center, 0.0, wideAspectRatio),
+            "zero radius must be rejected");
+        require(!camera.frameSphere(center, -2.0, wideAspectRatio),
+            "negative radius must be rejected");
+        require(!camera.frameSphere(
+            glm::dvec3{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0},
+            radius, wideAspectRatio),
+            "non-finite centers must be rejected");
+        requireVectorNear(camera.focus(), focusBefore,
+            "rejected framing keeps focus");
+        requireNear(camera.distance(), distanceBefore,
+            "rejected framing keeps distance");
+    }
+
+    void testPoseApplication()
+    {
+        using quantum::editor::ViewportCameraPose;
+
+        ViewportCamera camera = makeFramedCamera();
+        const ViewportCameraPose pose{
+            glm::dvec3{5.0, 6.0, 7.0},
+            10.0 * 3.14159265358979323846 + 0.25,
+            -0.15,
+            33.0
+        };
+        camera.setPose(pose);
+
+        requireVectorNear(camera.focus(), pose.focus, "pose focus");
+        requireNear(camera.yaw(), 0.25, "pose yaw wraps into range");
+        requireNear(camera.pitch(), pose.pitch, "pose pitch");
+        requireNear(camera.distance(), pose.distance, "pose distance");
+
+        // Out-of-limits distances clamp to the bounds-derived range.
+        ViewportCameraPose extreme = pose;
+        extreme.distance = 1.0e18;
+        camera.setPose(extreme);
+        require(
+            camera.distance() < 1.0e18,
+            "pose distance clamps to the usable maximum"
+        );
+
+        bool threwInvalidDistance = false;
+        try
+        {
+            camera.setPose(ViewportCameraPose{pose.focus, 0.0, 0.0, 0.0});
+        }
+        catch (const std::invalid_argument&)
+        {
+            threwInvalidDistance = true;
+        }
+        require(threwInvalidDistance,
+            "non-positive distances must be rejected");
+
+        bool threwNonFinite = false;
+        try
+        {
+            camera.setPose(ViewportCameraPose{
+                glm::dvec3{std::numeric_limits<double>::infinity(),
+                    0.0, 0.0}, 0.0, 0.0, 1.0});
+        }
+        catch (const std::invalid_argument&)
+        {
+            threwNonFinite = true;
+        }
+        require(threwNonFinite,
+            "non-finite poses must be rejected");
+    }
+
+    void testConfigurableInteractionResponse()
+    {
+        using quantum::editor::defaultViewportZoomExponentPerWheelUnit;
+
+        requireNear(defaultViewportZoomExponentPerWheelUnit, 0.18,
+            "default zoom exponent");
+
+        ViewportCamera slow = makeFramedCamera();
+        ViewportCamera fast = makeFramedCamera();
+        const double initialSlow = slow.distance();
+        const double initialFast = fast.distance();
+
+        slow.zoom(-1.0, 0.05);
+        fast.zoom(-1.0, 0.40);
+
+        requireNear(
+            slow.distance(),
+            initialSlow * std::exp(0.05),
+            "weak exponent dollies out slowly per wheel unit"
+        );
+        requireNear(
+            fast.distance(),
+            initialFast * std::exp(0.40),
+            "strong exponent dollies out faster per wheel unit"
+        );
+
+        // Field-of-view changes affect framing: a wider FOV frames the
+        // same bounds from closer.
+        ViewportCamera narrow = makeFramedCamera();
+        const double narrowDistance = narrow.distance();
+        narrow.setVerticalFieldOfView(100.0 * 3.14159265358979323846 / 180.0);
+        narrow.frame(wideAspectRatio);
+        require(
+            narrow.distance() < narrowDistance,
+            "wider field of view frames closer"
+        );
+
+        bool threwNonFiniteFov = false;
+        try
+        {
+            narrow.setVerticalFieldOfView(
+                std::numeric_limits<double>::quiet_NaN());
+        }
+        catch (const std::invalid_argument&)
+        {
+            threwNonFiniteFov = true;
+        }
+        require(threwNonFiniteFov, "non-finite FOV must be rejected");
+    }
 }
 
 int main()
@@ -278,6 +643,12 @@ int main()
         testFrameRecoversTransformedState();
         testUpdatedBoundsPreserveCameraUntilExplicitFrame();
         testMatrixGenerationIsDeterministic();
+        testDeterministicPresets();
+        testPoleSafeMatrices();
+        testProjectionSwitching();
+        testFocusSphereFraming();
+        testPoseApplication();
+        testConfigurableInteractionResponse();
     }
     catch (const std::exception& exception)
     {

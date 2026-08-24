@@ -133,11 +133,18 @@ through `evaluateTransition` and `evaluateTransitionIntegral`. The 19 current
 | Quartic power | `QuarticEaseIn`, `QuarticEaseOut`, `QuarticEaseInOut` |
 | Quintic power | `QuinticEaseIn`, `QuinticEaseOut`, `QuinticEaseInOut` |
 
-`GeometricSection` and `ForceSection` currently group three
-`ScalarTransition` channels and validate that their domains match. A
-`GeometricSection` can also evaluate its authored pitch, yaw, and roll channel
-values. Those values do not yet have a connected geometry-solver
-interpretation, and force-section solving is not implemented.
+`GeometricSection` groups three `ChannelProfile` channels. Each
+`ChannelProfile` is an ordered chain of `ProfileSegment`s — stable-id pieces,
+each embedding one `ScalarTransition` — that covers the section-local domain
+`[0, length]` exactly, leaves no gaps between adjacent segments, and enforces
+C0 value continuity across every interior boundary; slope discontinuities at
+boundaries are authored curvature steps. A `GeometricSection` can evaluate its
+authored pitch, yaw, and roll channel values at any distance of that domain.
+`AuthoredTrackSection` owns the authoritative section length plus one
+`GeometricSection`; resizing a section proportionally rescales every segment
+boundary while keeping endpoint values, transition types, and stable segment
+ids. `ForceSection` still groups three `ScalarTransition` channels and
+validates that their domains match; force-section solving is not implemented.
 
 ## Rider-local geometry
 
@@ -161,8 +168,11 @@ The current public operations provide:
 - constant local yaw-rate integration;
 - `ScalarTransition`-authored variable local yaw-rate integration;
 - simultaneous `ScalarTransition`-authored pitch/yaw rate integration;
-- constant local roll-rate integration; and
-- `ScalarTransition`-authored variable local roll-rate integration.
+- constant local roll-rate integration;
+- `ScalarTransition`-authored variable local roll-rate integration; and
+- simultaneous `ScalarTransition`-authored roll/pitch/yaw rate integration,
+  including a breakpoint-aware variant over multi-segment authored
+  `ChannelProfile`s.
 
 The separate roll-rate integrations are implemented and tested. With zero
 pitch and yaw, roll changes the lateral/up orientation while leaving the
@@ -173,7 +183,17 @@ combining independently accumulated Euler angles. Variable-profile frame
 evolution is performed on SO(3) with a fourth-order, two-node Gauss-Legendre
 Magnus increment and quaternion rotation composition. Position is integrated
 from the evolving tangent with matching high-order quadrature and private
-refinement independent of the requested output sample spacing.
+refinement independent of the requested output sample spacing. The full
+roll/pitch/yaw entry point uses the same coupled approach with three-channel
+rate vectors.
+
+For multi-segment `ChannelProfile` inputs, the union of all segment boundaries
+splits the section into spans inside which every channel behaves as a single
+constant-type transition; each span is integrated by the identical
+single-transition solver and spans chain through their shared endpoint states.
+One-segment channels reproduce the single-transition output exactly, and C0
+continuity keeps frames continuous across curvature-step breakpoints. The
+returned sample grid restarts at every profile breakpoint.
 
 ### Full rate-system convention
 
@@ -189,9 +209,9 @@ omega = (r, p, y)
 ```
 
 Here `p`, `y`, and `r` are local pitch, yaw, and roll rates with respect to
-distance. This convention is already covered by the independent frame/rate
-behavior and the coupled pitch/yaw solver, but the complete simultaneous
-pitch/yaw/roll solver is not implemented.
+distance. This convention is implemented by the coupled roll/pitch/yaw
+solver and exercised by the authored-track centerline generation, which
+chains every section's authored channels through that solver.
 
 ## Editor status
 
@@ -230,9 +250,7 @@ and editing remain future work.
 The following are current roadmap areas, not implemented capabilities or fixed
 architectural commitments:
 
-- complete simultaneous rider-local pitch/yaw/roll integration;
-- connection of authored `GeometricSection` data to geometry solving;
-- section chaining and force-based section solving;
+- force-based section solving;
 - velocity, acceleration, and G-force evaluation;
 - launches, brakes, and lift systems;
 - heartline and track offsets;

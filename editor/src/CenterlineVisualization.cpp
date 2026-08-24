@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 
@@ -127,6 +128,89 @@ namespace quantum::editor
                 state.position
             );
         }
+
+        // Section membership comes from authored data: solved distances are
+        // cumulative from the track start, and the section boundaries are
+        // the prefix sums of the authored lengths. The joint sample between
+        // consecutive sections appears exactly once and belongs to the
+        // earlier section here.
+        const std::size_t authoredSectionCount = track.sectionCount();
+        std::vector<double> sectionEndDistances;
+        sectionEndDistances.reserve(authoredSectionCount);
+        double runningLength = 0.0;
+        for (std::size_t index = 0; index < authoredSectionCount; ++index)
+        {
+            runningLength += coaster::sectionLength(track.section(index));
+            sectionEndDistances.push_back(runningLength);
+        }
+
+        visualization.sectionSlices.resize(authoredSectionCount);
+        for (CenterlineSectionSlice& slice : visualization.sectionSlices)
+        {
+            slice.minimumPosition = glm::dvec3{
+                std::numeric_limits<double>::max()
+            };
+            slice.maximumPosition = glm::dvec3{
+                std::numeric_limits<double>::lowest()
+            };
+        }
+
+        std::size_t currentSection = 0;
+        std::vector<std::size_t> firstStateOfSection;
+        firstStateOfSection.reserve(authoredSectionCount);
+        firstStateOfSection.push_back(0);
+
+        for (std::size_t index = 0; index < states.size(); ++index)
+        {
+            while (currentSection + 1 < authoredSectionCount
+                && states[index].distance
+                    > sectionEndDistances[currentSection])
+            {
+                ++currentSection;
+                firstStateOfSection.push_back(index);
+            }
+
+            CenterlineSectionSlice& slice =
+                visualization.sectionSlices[currentSection];
+            slice.minimumPosition = glm::min(
+                slice.minimumPosition,
+                states[index].position
+            );
+            slice.maximumPosition = glm::max(
+                slice.maximumPosition,
+                states[index].position
+            );
+        }
+
+        // Each state s starts one segment pair at vertex 2*s, so a slice's
+        // vertex range spans [2*first, 2*firstOfNext).
+        for (std::size_t index = 0; index < authoredSectionCount; ++index)
+        {
+            CenterlineSectionSlice& slice = visualization.sectionSlices[index];
+            const std::size_t firstState = firstStateOfSection[index];
+            const std::size_t nextState = index + 1
+                    < authoredSectionCount
+                ? firstStateOfSection[index + 1]
+                : states.size();
+
+            slice.firstVertex = static_cast<std::uint32_t>(2 * firstState);
+            slice.vertexCount = static_cast<std::uint32_t>(
+                2 * (nextState - firstState)
+            );
+
+            const coaster::RiderLocalGeometryState& start =
+                states[firstState];
+            slice.startPosition = start.position;
+            const glm::dvec3 tangentLength = start.frame.tangent;
+            const double tangentMagnitude = glm::length(tangentLength);
+            slice.startTangent = tangentMagnitude > 1.0e-9
+                ? tangentLength / tangentMagnitude
+                : glm::dvec3{1.0, 0.0, 0.0};
+        }
+
+        visualization.verticesPerCurve = static_cast<std::uint32_t>(
+            2 * (states.size() - 1)
+        );
 
         visualization.vertices.reserve(4 * 2 * (states.size() - 1));
 

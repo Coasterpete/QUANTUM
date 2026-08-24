@@ -23,10 +23,12 @@ namespace
 {
     using quantum::coaster::AuthoredTrack;
     using quantum::coaster::AuthoredTrackSection;
+    using quantum::coaster::ChannelProfile;
     using quantum::coaster::createDefaultAuthoredTrack;
     using quantum::coaster::defaultNewSectionLength;
     using quantum::coaster::GeometricSection;
     using quantum::coaster::integrateAuthoredTrack;
+    using quantum::coaster::ProfileSegment;
     using quantum::coaster::RiderLocalGeometryState;
     using quantum::coaster::sectionLength;
     using quantum::coaster::setSectionLength;
@@ -71,13 +73,20 @@ namespace
         );
     }
 
-    [[nodiscard]] ScalarTransition transition(
-        const double domainEnd,
+    // Single-segment channel covering [0, length].
+    [[nodiscard]] ChannelProfile singleSegmentChannel(
+        const double length,
         const double valueBegin,
         const double valueEnd,
         const TransitionType type)
     {
-        return {0.0, domainEnd, valueBegin, valueEnd, type};
+        ChannelProfile profile;
+        profile.segments.push_back(ProfileSegment{
+            profile.nextSegmentId,
+            ScalarTransition{0.0, length, valueBegin, valueEnd, type}
+        });
+        ++profile.nextSegmentId;
+        return profile;
     }
 
     [[nodiscard]] AuthoredTrackSection curvedSection(
@@ -88,17 +97,29 @@ namespace
         const double yawEnd)
     {
         AuthoredTrackSection section;
-        section.rateProfiles.roll =
-            transition(length, 0.0, rollEnd, TransitionType::Smootherstep);
-        section.rateProfiles.pitch = transition(
+        section.length = length;
+        section.rateProfileRegion().rateProfiles.roll =
+            singleSegmentChannel(length, 0.0, rollEnd, TransitionType::Smootherstep);
+        section.rateProfileRegion().rateProfiles.pitch = singleSegmentChannel(
             length,
             pitchBegin,
             pitchEnd,
             TransitionType::CosineEaseInOut
         );
-        section.rateProfiles.yaw =
-            transition(length, 0.004, yawEnd, TransitionType::Smoothstep);
+        section.rateProfileRegion().rateProfiles.yaw =
+            singleSegmentChannel(length, 0.004, yawEnd, TransitionType::Smoothstep);
         return section;
+    }
+
+    [[nodiscard]] const ScalarTransition& soleTransition(
+        const ChannelProfile& channel)
+    {
+        return channel.segments.front().transition;
+    }
+
+    [[nodiscard]] ScalarTransition& soleTransition(ChannelProfile& channel)
+    {
+        return channel.segments.front().transition;
     }
 
     void testDefaultDocumentReproducesDemonstrationBehavior()
@@ -107,31 +128,71 @@ namespace
 
         require(track.sectionCount() == 1, "default track has one section");
 
-        const GeometricSection& rates = track.section(0).rateProfiles;
+        const GeometricSection& rates = track.section(0).rateProfileRegion().rateProfiles;
 
-        require(rates.roll.domainBegin == 0.0, "roll domain begins at zero");
-        require(rates.roll.domainEnd == 180.0, "roll domain ends at 180");
-        require(rates.pitch.domainBegin == 0.0, "pitch domain begins at zero");
-        require(rates.pitch.domainEnd == 180.0, "pitch domain ends at 180");
-        require(rates.yaw.domainBegin == 0.0, "yaw domain begins at zero");
-        require(rates.yaw.domainEnd == 180.0, "yaw domain ends at 180");
-
-        require(rates.roll.valueBegin == 0.0, "default roll begin");
-        require(rates.roll.valueEnd == 0.024, "default roll end");
+        require(track.section(0).length == 180.0, "default section length");
         require(
-            rates.roll.transitionType == TransitionType::Smootherstep,
+            soleTransition(rates.roll).domainBegin == 0.0,
+            "roll domain begins at zero"
+        );
+        require(
+            soleTransition(rates.roll).domainEnd == 180.0,
+            "roll domain ends at 180"
+        );
+        require(
+            soleTransition(rates.pitch).domainBegin == 0.0,
+            "pitch domain begins at zero"
+        );
+        require(
+            soleTransition(rates.pitch).domainEnd == 180.0,
+            "pitch domain ends at 180"
+        );
+        require(
+            soleTransition(rates.yaw).domainBegin == 0.0,
+            "yaw domain begins at zero"
+        );
+        require(
+            soleTransition(rates.yaw).domainEnd == 180.0,
+            "yaw domain ends at 180"
+        );
+
+        require(
+            soleTransition(rates.roll).valueBegin == 0.0,
+            "default roll begin"
+        );
+        require(
+            soleTransition(rates.roll).valueEnd == 0.024,
+            "default roll end"
+        );
+        require(
+            soleTransition(rates.roll).transitionType
+                == TransitionType::Smootherstep,
             "default roll transition"
         );
-        require(rates.pitch.valueBegin == 0.018, "default pitch begin");
-        require(rates.pitch.valueEnd == -0.010, "default pitch end");
         require(
-            rates.pitch.transitionType == TransitionType::CosineEaseInOut,
+            soleTransition(rates.pitch).valueBegin == 0.018,
+            "default pitch begin"
+        );
+        require(
+            soleTransition(rates.pitch).valueEnd == -0.010,
+            "default pitch end"
+        );
+        require(
+            soleTransition(rates.pitch).transitionType
+                == TransitionType::CosineEaseInOut,
             "default pitch transition"
         );
-        require(rates.yaw.valueBegin == 0.004, "default yaw begin");
-        require(rates.yaw.valueEnd == 0.022, "default yaw end");
         require(
-            rates.yaw.transitionType == TransitionType::Smoothstep,
+            soleTransition(rates.yaw).valueBegin == 0.004,
+            "default yaw begin"
+        );
+        require(
+            soleTransition(rates.yaw).valueEnd == 0.022,
+            "default yaw end"
+        );
+        require(
+            soleTransition(rates.yaw).transitionType
+                == TransitionType::Smoothstep,
             "default yaw transition"
         );
     }
@@ -154,14 +215,24 @@ namespace
                 "new sections use the default length"
             );
             require(
-                section.rateProfiles.pitch.valueBegin == 0.0
-                    && section.rateProfiles.pitch.valueEnd == 0.0,
+                section.rateProfileRegion().rateProfiles.pitch.segments.size() == 1,
+                "new sections have one segment per channel"
+            );
+            const ScalarTransition& pitch =
+                soleTransition(section.rateProfileRegion().rateProfiles.pitch);
+            require(
+                pitch.valueBegin == 0.0 && pitch.valueEnd == 0.0,
                 "new sections are straight"
             );
             require(
-                section.rateProfiles.pitch.transitionType
-                    == TransitionType::Linear,
+                pitch.transitionType == TransitionType::Linear,
                 "new sections use Linear transitions"
+            );
+            require(
+                section.rateProfileRegion().rateProfiles.pitch.nextSegmentId == 2
+                    && section.rateProfileRegion().rateProfiles.yaw.nextSegmentId == 2
+                    && section.rateProfileRegion().rateProfiles.roll.nextSegmentId == 2,
+                "new sections start their id counters after the first segment"
             );
         }
     }
@@ -245,13 +316,34 @@ namespace
 
         setSectionLength(section, 45.0);
 
-        require(section.rateProfiles.roll.domainBegin == 0.0, "begin stays zero");
-        require(section.rateProfiles.roll.domainEnd == 45.0, "roll rebased");
-        require(section.rateProfiles.pitch.domainEnd == 45.0, "pitch rebased");
-        require(section.rateProfiles.yaw.domainEnd == 45.0, "yaw rebased");
-        require(section.rateProfiles.roll.valueBegin == 0.0, "roll begin kept");
-        require(section.rateProfiles.roll.valueEnd == 0.02, "roll end kept");
-        require(section.rateProfiles.pitch.valueEnd == -0.02, "pitch end kept");
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.roll).domainBegin == 0.0,
+            "begin stays zero"
+        );
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.roll).domainEnd == 45.0,
+            "roll rebased"
+        );
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.pitch).domainEnd == 45.0,
+            "pitch rebased"
+        );
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.yaw).domainEnd == 45.0,
+            "yaw rebased"
+        );
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.roll).valueBegin == 0.0,
+            "roll begin kept"
+        );
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.roll).valueEnd == 0.02,
+            "roll end kept"
+        );
+        require(
+            soleTransition(section.rateProfileRegion().rateProfiles.pitch).valueEnd == -0.02,
+            "pitch end kept"
+        );
 
         require(
             sectionLength(section) == 45.0,
@@ -293,6 +385,80 @@ namespace
         );
     }
 
+    void testSetSectionLengthRescalesMultiSegmentChannels()
+    {
+        AuthoredTrackSection section;
+        section.length = 90.0;
+
+        // Pitch chains two segments joined at distance 30 with value 0.02.
+        ChannelProfile& pitch = section.rateProfileRegion().rateProfiles.pitch;
+        pitch.segments.push_back(ProfileSegment{
+            pitch.nextSegmentId++,
+            ScalarTransition{0.0, 30.0, 0.0, 0.02, TransitionType::Linear}
+        });
+        pitch.segments.push_back(ProfileSegment{
+            pitch.nextSegmentId++,
+            ScalarTransition{
+                30.0,
+                90.0,
+                0.02,
+                -0.04,
+                TransitionType::Smoothstep}
+        });
+        section.rateProfileRegion().rateProfiles.yaw = singleSegmentChannel(
+            90.0,
+            0.004,
+            0.022,
+            TransitionType::Smoothstep
+        );
+        section.rateProfileRegion().rateProfiles.roll = singleSegmentChannel(
+            90.0,
+            0.0,
+            0.024,
+            TransitionType::Smootherstep
+        );
+
+        setSectionLength(section, 30.0);
+
+        constexpr double scaleFactor = 30.0 / 90.0;
+
+        require(section.length == 30.0, "length field updated");
+
+        const ScalarTransition& pitchFirst = pitch.segments[0].transition;
+        const ScalarTransition& pitchSecond = pitch.segments[1].transition;
+        require(
+            pitchFirst.domainBegin == 0.0,
+            "first boundary pinned to zero"
+        );
+        require(
+            pitchFirst.domainEnd == 30.0 * scaleFactor,
+            "interior boundary scaled proportionally"
+        );
+        require(
+            pitchSecond.domainBegin == 30.0 * scaleFactor,
+            "shared boundary stays contiguous after scaling"
+        );
+        require(
+            pitchSecond.domainEnd == 30.0,
+            "last boundary lands exactly on the new length"
+        );
+        require(
+            pitchFirst.valueBegin == 0.0 && pitchFirst.valueEnd == 0.02
+                && pitchSecond.valueEnd == -0.04,
+            "authored values survive rescaling"
+        );
+        require(
+            pitch.segments[0].id == 1 && pitch.segments[1].id == 2
+                && pitch.nextSegmentId == 3,
+            "segment ids stay stable across rescaling"
+        );
+
+        require(
+            sectionLength(section) == 30.0,
+            "rescaled section validates against its new length"
+        );
+    }
+
     void testSectionAccessAndValidation()
     {
         AuthoredTrack track;
@@ -303,21 +469,21 @@ namespace
             "const access rejects out-of-range index"
         );
         requireThrows<std::out_of_range>(
-            [&track] { static_cast<void>(track.section(1).rateProfiles); },
+            [&track] { static_cast<void>(track.section(1).rateProfileRegion().rateProfiles); },
             "mutable access rejects out-of-range index"
         );
 
-        // A malformed section (mismatched channel domains) must be rejected
-        // by generation.
+        // A malformed section (a channel no longer covering its declared
+        // length) must be rejected by generation.
         track.appendSection();
-        track.section(1).rateProfiles.yaw.domainEnd = 11.0;
+        soleTransition(track.section(1).rateProfileRegion().rateProfiles.yaw).domainEnd = 11.0;
 
         requireThrows<std::invalid_argument>(
             [&track]
             {
                 static_cast<void>(integrateAuthoredTrack(track, 0.75));
             },
-            "generation rejects mismatched channel domains"
+            "generation rejects incomplete channel coverage"
         );
     }
 
@@ -328,14 +494,14 @@ namespace
         const std::vector<RiderLocalGeometryState> chained =
             integrateAuthoredTrack(track, 0.75);
 
-        const GeometricSection& rates = track.section(0).rateProfiles;
+        const GeometricSection& rates = track.section(0).rateProfileRegion().rateProfiles;
         const std::vector<RiderLocalGeometryState> direct =
             quantum::coaster::integrateLocalRollPitchYawRateProfiles(
                 {0.0, 0.0, 0.0},
                 {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}},
-                rates.roll,
-                rates.pitch,
-                rates.yaw,
+                soleTransition(rates.roll),
+                soleTransition(rates.pitch),
+                soleTransition(rates.yaw),
                 0.75
             );
 
@@ -355,17 +521,93 @@ namespace
         }
     }
 
+    void testMultiSegmentSectionIntegrationSpansKinks()
+    {
+        AuthoredTrackSection section;
+        section.length = 90.0;
+
+        // Triangular pitch-rate profile with a C0 kink at the midpoint; yaw
+        // breaks at 22.5 so the merged breakpoints come from different
+        // channels; roll stays zero throughout.
+        ChannelProfile& pitch = section.rateProfileRegion().rateProfiles.pitch;
+        pitch.segments.push_back(ProfileSegment{
+            pitch.nextSegmentId++,
+            ScalarTransition{0.0, 45.0, 0.0, 0.03, TransitionType::Linear}
+        });
+        pitch.segments.push_back(ProfileSegment{
+            pitch.nextSegmentId++,
+            ScalarTransition{45.0, 90.0, 0.03, 0.0, TransitionType::Linear}
+        });
+
+        ChannelProfile& yaw = section.rateProfileRegion().rateProfiles.yaw;
+        yaw.segments.push_back(ProfileSegment{
+            yaw.nextSegmentId++,
+            ScalarTransition{0.0, 22.5, 0.004, 0.004, TransitionType::Linear}
+        });
+        yaw.segments.push_back(ProfileSegment{
+            yaw.nextSegmentId++,
+            ScalarTransition{22.5, 90.0, 0.004, 0.004, TransitionType::Linear}
+        });
+
+        section.rateProfileRegion().rateProfiles.roll = singleSegmentChannel(
+            90.0,
+            0.0,
+            0.0,
+            TransitionType::Linear
+        );
+
+        AuthoredTrack track;
+        track.appendSection();
+        track.section(0) = section;
+
+        const std::vector<RiderLocalGeometryState> states =
+            integrateAuthoredTrack(track, 0.75);
+
+        // Each span contributes ceil(span / spacing) + 1 states and shares
+        // exactly one joint state with its neighbor: 60 + 1 spans over 45
+        // and 67.5 units produce 61 + 61 - 1 samples overall.
+        constexpr std::size_t expectedStates = 121u;
+        require(
+            states.size() == expectedStates,
+            "sample grids restart at every profile breakpoint"
+        );
+        require(states.front().distance == 0.0, "integration starts at zero");
+
+        for (std::size_t i = 1; i < states.size(); ++i)
+        {
+            require(
+                states[i].distance > states[i - 1].distance,
+                "distances strictly increase across kinks"
+            );
+        }
+
+        require(
+            std::abs(states.back().distance - 90.0) < 1e-9,
+            "multi-segment integration covers the whole section"
+        );
+
+        // The kink joins C0-continuously: the frame stays continuous, so
+        // consecutive positions remain within one spacing step everywhere,
+        // including across both profile breakpoints.
+        for (std::size_t i = 1; i < states.size(); ++i)
+        {
+            const glm::dvec3 step = states[i].position - states[i - 1].position;
+            require(
+                glm::length(step) <= 0.75 * (1.0 + 1e-9),
+                "consecutive samples remain within one integration spacing"
+            );
+        }
+    }
+
     void testMultiSectionChainIsContinuous()
     {
         AuthoredTrack track;
         track.appendSection();
-        setSectionLength(track.section(0), 90.0);
-        track.section(0).rateProfiles =
-            curvedSection(90.0, 0.024, 0.018, -0.010, 0.022).rateProfiles;
+        track.section(0) =
+            curvedSection(90.0, 0.024, 0.018, -0.010, 0.022);
         track.appendSection();
-        setSectionLength(track.section(1), 45.0);
-        track.section(1).rateProfiles =
-            curvedSection(45.0, 0.0, 0.006, 0.006, 0.0).rateProfiles;
+        track.section(1) =
+            curvedSection(45.0, 0.0, 0.006, 0.006, 0.0);
 
         const std::vector<RiderLocalGeometryState> states =
             integrateAuthoredTrack(track, 0.75);
@@ -431,9 +673,9 @@ namespace
                 quantum::coaster::integrateLocalRollPitchYawRateProfiles(
                     position,
                     frame,
-                    section.rateProfiles.roll,
-                    section.rateProfiles.pitch,
-                    section.rateProfiles.yaw,
+                    soleTransition(section.rateProfileRegion().rateProfiles.roll),
+                    soleTransition(section.rateProfileRegion().rateProfiles.pitch),
+                    soleTransition(section.rateProfileRegion().rateProfiles.yaw),
                     0.75
                 );
 
@@ -504,13 +746,17 @@ namespace
     void testSectionLengthRejectsMalformedSection()
     {
         AuthoredTrackSection section;
-        section.rateProfiles.pitch = transition(60.0, 0.0, 0.0, TransitionType::Linear);
-        section.rateProfiles.yaw = transition(61.0, 0.0, 0.0, TransitionType::Linear);
-        section.rateProfiles.roll = transition(60.0, 0.0, 0.0, TransitionType::Linear);
+        section.length = 60.0;
+        section.rateProfileRegion().rateProfiles.pitch =
+            singleSegmentChannel(60.0, 0.0, 0.0, TransitionType::Linear);
+        section.rateProfileRegion().rateProfiles.yaw =
+            singleSegmentChannel(61.0, 0.0, 0.0, TransitionType::Linear);
+        section.rateProfileRegion().rateProfiles.roll =
+            singleSegmentChannel(60.0, 0.0, 0.0, TransitionType::Linear);
 
         requireThrows<std::invalid_argument>(
             [&section] { static_cast<void>(sectionLength(section)); },
-            "sectionLength validates channel domains"
+            "sectionLength validates channel coverage"
         );
     }
 }
@@ -529,10 +775,18 @@ int main()
         {"remove section", testRemoveSection},
         {"move section", testMoveSection},
         {"set section length rebases domains", testSetSectionLengthRebasesDomains},
+        {
+            "set section length rescales multi-segment channels",
+            testSetSectionLengthRescalesMultiSegmentChannels
+        },
         {"section access and validation", testSectionAccessAndValidation},
         {
             "single section matches direct integration",
             testSingleSectionMatchesDirectIntegration
+        },
+        {
+            "multi-segment section integration spans kinks",
+            testMultiSegmentSectionIntegrationSpansKinks
         },
         {
             "multi-section chain is continuous",
@@ -577,4 +831,3 @@ int main()
     std::cout << std::size(tests) << " test groups passed.\n";
     return 0;
 }
-

@@ -6,10 +6,48 @@
 
 namespace quantum::editor
 {
+    // Wheel-dolly strength used when the caller has no explicit zoom
+    // sensitivity configured; larger exponents dolly faster per wheel unit.
+    inline constexpr double defaultViewportZoomExponentPerWheelUnit = 0.18;
+
     struct ViewportCameraClipPlanes
     {
         double nearPlane = 0.0;
         double farPlane = 0.0;
+    };
+
+    // Orthographic mode derives its half-height at the focus from the same
+    // distance and field of view as perspective mode, so switching between
+    // them preserves apparent object size, pan speed, and zoom feel.
+    enum class ViewportProjection
+    {
+        Perspective,
+        Orthographic
+    };
+
+    // Deterministic camera orientation presets. Perspective and Isometric
+    // additionally switch the projection; the axis presets keep the current
+    // projection and only change yaw/pitch. All of them preserve focus and
+    // distance so the user stays anchored on what they were looking at.
+    enum class ViewportCameraPreset
+    {
+        Perspective,
+        Isometric,
+        Top,
+        Bottom,
+        Left,
+        Right
+    };
+
+    // Explicit camera pose used by geometry-derived views (Track, Walking).
+    // The same orbit-spherical conventions apply: position is focus plus
+    // distance times directionFromFocus(yaw, pitch).
+    struct ViewportCameraPose
+    {
+        glm::dvec3 focus{0.0};
+        double yaw = 0.0;
+        double pitch = 0.0;
+        double distance = 1.0;
     };
 
     class ViewportCamera
@@ -22,6 +60,26 @@ namespace quantum::editor
             const glm::dvec3& maximumPosition
         );
         void frame(double aspectRatio);
+
+        // Frames an arbitrary sphere with the same margin formula as
+        // frame(); returns false (leaving the camera unchanged) for a
+        // non-finite center or a non-positive radius, which is how an
+        // invalid selection is reported to callers.
+        bool frameSphere(
+            const glm::dvec3& center,
+            double radius,
+            double aspectRatio
+        );
+
+        // Applies a canonical orientation (and projection for Perspective/
+        // Isometric) while preserving focus and distance.
+        void applyPreset(ViewportCameraPreset preset);
+
+        // Direct pose assignment for geometry-derived views. Throws
+        // std::invalid_argument for non-finite components or a non-positive
+        // distance; distance is clamped to the bounds-derived limits.
+        void setPose(const ViewportCameraPose& pose);
+
         void orbit(double yawDeltaRadians, double pitchDeltaRadians);
         void pan(
             double horizontalPixels,
@@ -29,7 +87,14 @@ namespace quantum::editor
             double viewportWidth,
             double viewportHeight
         );
-        void zoom(double wheelDelta);
+        void zoom(
+            double wheelDelta,
+            double exponentPerWheelUnit =
+                defaultViewportZoomExponentPerWheelUnit
+        );
+
+        void setProjection(ViewportProjection projection);
+        void setVerticalFieldOfView(double radians);
 
         [[nodiscard]] glm::dvec3 focus() const noexcept;
         [[nodiscard]] glm::dvec3 position() const noexcept;
@@ -37,6 +102,8 @@ namespace quantum::editor
         [[nodiscard]] double yaw() const noexcept;
         [[nodiscard]] double pitch() const noexcept;
         [[nodiscard]] double verticalFieldOfView() const noexcept;
+        [[nodiscard]] ViewportProjection projection() const noexcept;
+        [[nodiscard]] bool hasBounds() const noexcept;
         [[nodiscard]] glm::dvec3 boundsCenter() const noexcept;
         [[nodiscard]] double boundsRadius() const noexcept;
         [[nodiscard]] ViewportCameraClipPlanes clipPlanes() const;
@@ -62,6 +129,7 @@ namespace quantum::editor
         double minimumDistance_ = 1.0;
         double maximumDistance_ = 1.0;
         double verticalFieldOfView_ = 0.0;
+        ViewportProjection projection_ = ViewportProjection::Perspective;
         bool hasBounds_ = false;
     };
 }

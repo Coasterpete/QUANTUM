@@ -1,5 +1,6 @@
 #include <quantum/engine/Application.hpp>
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
@@ -23,7 +24,15 @@ namespace quantum::engine
             );
         }
 
-        SDL_SetLogPriority(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_INFO);
+        // SDL render-category chatter (backend/loader info) is noise during
+        // normal interactive use. Warnings and errors stay visible; Debug
+        // additionally shows render-category warnings such as Vulkan
+        // validation-layer diagnostics. Release stays quieter than Debug.
+#ifdef NDEBUG
+        SDL_SetLogPriority(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_ERROR);
+#else
+        SDL_SetLogPriority(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_WARN);
+#endif
 
         SDL_Window* window = SDL_CreateWindow(
             "QUANTUM",
@@ -68,7 +77,11 @@ namespace quantum::engine
                 );
 
                 quantum::renderer::VulkanContext vulkan;
-                vulkan.initialize(window, centerline.vertices);
+                vulkan.initialize(
+                    window,
+                    centerline.vertices,
+                    centerline.verticesPerCurve
+                );
 
                 quantum::editor::EditorUi editorUi;
                 editorUi.initialize(
@@ -78,6 +91,7 @@ namespace quantum::engine
                     centerline.minimumPosition,
                     centerline.maximumPosition
                 );
+                editorUi.setCenterlineSections(centerline.sectionSlices);
 
                 bool running = true;
 
@@ -113,18 +127,26 @@ namespace quantum::engine
                             editorUi.takeTrackCommand();
                         const auto requestedLengthEdit =
                             editorUi.takeSectionLengthEdit();
+                        const auto requestedRegionCommand =
+                            editorUi.takeRegionCommand();
                         const auto requestedValueEdit =
                             editorUi.takeProfileEndpointValueEdit();
                         const auto requestedTransitionType =
                             editorUi.takeProfileTransitionTypeEdit();
+                        const auto requestedSegmentCommand =
+                            editorUi.takeProfileSegmentCommand();
+                        const auto requestedDistanceEdit =
+                            editorUi.takeProfileSegmentDistanceEdit();
 
-                        // Continuous handle drags queue a changed-value
-                        // edit every motion frame; both success logs stay
-                        // silent for them. The single end-of-drag [EDIT]
-                        // summary is emitted by EditorUi on release.
+                        // Continuous handle drags queue a changed-value or
+                        // changed-boundary edit every motion frame; both
+                        // success logs stay silent for them. The single
+                        // end-of-drag [EDIT] summaries are emitted by
+                        // EditorUi on release.
                         const bool continuousDrag =
-                            requestedValueEdit.has_value()
-                            && requestedValueEdit->continuous;
+                            (requestedValueEdit.has_value()
+                                && requestedValueEdit->continuous)
+                            || requestedDistanceEdit.has_value();
 
                         quantum::coaster::AuthoredTrack candidateTrack =
                             authoredTrack;
@@ -133,6 +155,14 @@ namespace quantum::engine
                         bool lengthEditApplied = false;
                         bool valueEditApplied = false;
                         bool boundsApplied = false;
+                        // Structural segment commands log after acceptance;
+                        // these capture their outcome for that report.
+                        bool segmentCommandApplied = false;
+                        quantum::coaster::SegmentId splitCreatedId =
+                            quantum::coaster::invalidSegmentId;
+                        quantum::coaster::SegmentId removeSurvivorId =
+                            quantum::coaster::invalidSegmentId;
+                        bool regionCommandApplied = false;
 
                         try
                         {
@@ -180,6 +210,113 @@ namespace quantum::engine
                                 trackStructureChanged = true;
                             }
 
+                            if (!trackStructureChanged
+                                && requestedRegionCommand.has_value())
+                            {
+                                const quantum::editor::RegionCommand&
+                                    command = *requestedRegionCommand;
+
+                                // All region-kind mutation rules live in
+                                // Core; the application layer only maps
+                                // editor commands onto them so the
+                                // candidate/commit gate stays uniform.
+                                auto& section = candidateTrack.section(
+                                    command.sectionIndex);
+
+                                using quantum::editor::RegionCommandType;
+                                switch (command.type)
+                                {
+                                case RegionCommandType::
+                                    AppendRateProfiles:
+                                    candidateTrack.appendSection();
+                                    break;
+                                case RegionCommandType::
+                                    PrependRateProfiles:
+                                    candidateTrack.prependSection();
+                                    break;
+                                case RegionCommandType::AppendPlanarArc:
+                                    candidateTrack.appendSection();
+                                    quantum::coaster::
+                                        convertSectionToPlanarArc(
+                                            candidateTrack.section(
+                                                candidateTrack
+                                                    .sectionCount()
+                                                - 1)
+                                        );
+                                    break;
+                                case RegionCommandType::PrependPlanarArc:
+                                    candidateTrack.prependSection();
+                                    quantum::coaster::
+                                        convertSectionToPlanarArc(
+                                            candidateTrack.section(0)
+                                        );
+                                    break;
+                                case RegionCommandType::
+                                    ConvertToRateProfiles:
+                                    quantum::coaster::
+                                        convertSectionToRateProfiles(
+                                            section
+                                        );
+                                    break;
+                                case RegionCommandType::ConvertToPlanarArc:
+                                    quantum::coaster::
+                                        convertSectionToPlanarArc(section);
+                                    break;
+                                case RegionCommandType::SetPlanarArcRadius:
+                                    quantum::coaster::setPlanarArcRadius(
+                                        section,
+                                        command.value
+                                    );
+                                    break;
+                                case RegionCommandType::
+                                    SetPlanarArcSweptAngle:
+                                    quantum::coaster::setPlanarArcSweptAngle(
+                                        section,
+                                        command.value
+                                    );
+                                    break;
+                                case RegionCommandType::
+                                    SetPlanarArcPlaneTilt:
+                                    quantum::coaster::setPlanarArcPlaneTilt(
+                                        section,
+                                        command.value
+                                    );
+                                    break;
+                                case RegionCommandType::
+                                    SetPlanarArcBankChange:
+                                    quantum::coaster::setPlanarArcBankChange(
+                                        section,
+                                        command.value
+                                    );
+                                    break;
+                                }
+
+                                candidateChanged = true;
+                                regionCommandApplied = true;
+
+                                const bool changesEditors =
+                                    command.type
+                                        != RegionCommandType::
+                                            SetPlanarArcRadius
+                                    && command.type
+                                        != RegionCommandType::
+                                            SetPlanarArcSweptAngle
+                                    && command.type
+                                        != RegionCommandType::
+                                            SetPlanarArcPlaneTilt
+                                    && command.type
+                                        != RegionCommandType::
+                                            SetPlanarArcBankChange;
+                                if (changesEditors)
+                                {
+                                    // Creation and conversion change which
+                                    // editor machinery regions support and
+                                    // shift indices, so same-frame profile
+                                    // edits would refer to stale state.
+                                    trackStructureChanged = true;
+                                }
+                            }
+
                             if (!trackStructureChanged)
                             {
                                 if (requestedLengthEdit.has_value())
@@ -205,35 +342,11 @@ namespace quantum::engine
                                         );
                                     }
 
-                                    quantum::math::ScalarTransition&
-                                        candidateProfile =
-                                        quantum::editor::sectionRateProfile(
-                                            candidateTrack.section(
-                                                requestedValueEdit
-                                                    ->sectionIndex),
-                                            requestedValueEdit->channel
-                                        );
-
-                                    double* candidateValue = nullptr;
-
-                                    switch (requestedValueEdit->endpoint)
-                                    {
-                                    case quantum::editor::
-                                        ScalarProfileEndpoint::Begin:
-                                        candidateValue =
-                                            &candidateProfile.valueBegin;
-                                        break;
-                                    case quantum::editor::
-                                        ScalarProfileEndpoint::End:
-                                        candidateValue =
-                                            &candidateProfile.valueEnd;
-                                        break;
-                                    case quantum::editor::
-                                        ScalarProfileEndpoint::None:
-                                        break;
-                                    }
-
-                                    if (candidateValue == nullptr)
+                                    using quantum::editor::ScalarProfileEndpoint;
+                                    if (requestedValueEdit->endpoint
+                                        != ScalarProfileEndpoint::Begin
+                                        && requestedValueEdit->endpoint
+                                            != ScalarProfileEndpoint::End)
                                     {
                                         throw std::invalid_argument(
                                             "the profile rate endpoint is "
@@ -241,29 +354,148 @@ namespace quantum::engine
                                         );
                                     }
 
-                                    *candidateValue =
-                                        requestedValueEdit->value;
+                                    const quantum::coaster::ProfileBoundary
+                                        boundary =
+                                        requestedValueEdit->endpoint
+                                            == ScalarProfileEndpoint::Begin
+                                        ? quantum::coaster::ProfileBoundary
+                                            ::Begin
+                                        : quantum::coaster::ProfileBoundary
+                                            ::End;
+
+                                    // The Core operation propagates shared
+                                    // joint values so C0 continuity holds.
+                                    quantum::coaster::setChannelSegmentValue(
+                                        quantum::editor::sectionRateChannel(
+                                            candidateTrack.section(
+                                                requestedValueEdit
+                                                    ->sectionIndex),
+                                            requestedValueEdit->channel
+                                        ),
+                                        requestedValueEdit->segmentId,
+                                        boundary,
+                                        requestedValueEdit->value
+                                    );
                                     valueEditApplied = true;
+                                    candidateChanged = true;
+                                }
+
+                                if (requestedDistanceEdit.has_value())
+                                {
+                                    if (!std::isfinite(
+                                        requestedDistanceEdit->distance))
+                                    {
+                                        throw std::invalid_argument(
+                                            "the moved boundary distance "
+                                            "must be finite"
+                                        );
+                                    }
+
+                                    using quantum::editor::ScalarProfileEndpoint;
+                                    if (requestedDistanceEdit->endpoint
+                                        != ScalarProfileEndpoint::Begin
+                                        && requestedDistanceEdit->endpoint
+                                            != ScalarProfileEndpoint::End)
+                                    {
+                                        throw std::invalid_argument(
+                                            "the moved boundary endpoint is "
+                                            "invalid"
+                                        );
+                                    }
+
+                                    const quantum::coaster::ProfileBoundary
+                                        boundary =
+                                        requestedDistanceEdit->endpoint
+                                            == ScalarProfileEndpoint::Begin
+                                        ? quantum::coaster::ProfileBoundary
+                                            ::Begin
+                                        : quantum::coaster::ProfileBoundary
+                                            ::End;
+
+                                    quantum::coaster::
+                                        moveChannelSegmentBoundary(
+                                            quantum::editor::
+                                                sectionRateChannel(
+                                                    candidateTrack.section(
+                                                        requestedDistanceEdit
+                                                            ->sectionIndex),
+                                                    requestedDistanceEdit
+                                                        ->channel
+                                                ),
+                                            requestedDistanceEdit->segmentId,
+                                            boundary,
+                                            requestedDistanceEdit->distance
+                                        );
+                                    candidateChanged = true;
+                                }
+
+                                if (requestedSegmentCommand.has_value())
+                                {
+                                    const quantum::editor::
+                                        ProfileSegmentCommand& command =
+                                        *requestedSegmentCommand;
+                                    quantum::coaster::ChannelProfile&
+                                        channelProfile =
+                                        quantum::editor::sectionRateChannel(
+                                            candidateTrack.section(
+                                                command.sectionIndex),
+                                            command.channel
+                                        );
+
+                                    switch (command.operation)
+                                    {
+                                    case quantum::editor::
+                                        ProfileSegmentOperation::Split:
+                                        splitCreatedId =
+                                            quantum::coaster::
+                                                splitChannelSegment(
+                                                    channelProfile,
+                                                    command.segmentId,
+                                                    command.splitDistance
+                                                );
+                                        break;
+                                    case quantum::editor::
+                                        ProfileSegmentOperation::Remove:
+                                        removeSurvivorId =
+                                            quantum::coaster::
+                                                removeChannelSegment(
+                                                    channelProfile,
+                                                    command.segmentId
+                                                );
+                                        break;
+                                    }
+
+                                    segmentCommandApplied = true;
                                     candidateChanged = true;
                                 }
 
                                 if (requestedTransitionType.has_value())
                                 {
-                                    if (!quantum::editor::
-                                        trySetTransitionTypePreset(
-                                            quantum::editor::
-                                                sectionRateProfile(
-                                                    candidateTrack.section(
-                                                        requestedTransitionType
-                                                            ->sectionIndex),
-                                                    requestedTransitionType
-                                                        ->channel
-                                                ),
-                                            requestedTransitionType->type))
+                                    auto& candidateChannel =
+                                        quantum::editor::sectionRateChannel(
+                                            candidateTrack.section(
+                                                requestedTransitionType
+                                                    ->sectionIndex),
+                                            requestedTransitionType->channel
+                                        );
+                                    auto* candidateTransition =
+                                        quantum::coaster::
+                                            findChannelSegmentTransition(
+                                                candidateChannel,
+                                                requestedTransitionType
+                                                    ->segmentId
+                                            );
+
+                                    if (candidateTransition == nullptr
+                                        || !quantum::editor::
+                                            trySetTransitionTypePreset(
+                                                *candidateTransition,
+                                                requestedTransitionType->type))
                                     {
                                         throw std::invalid_argument(
                                             "the transition preset is "
-                                            "unsupported"
+                                            "unsupported or the segment is "
+                                            "unknown"
                                         );
                                     }
 
@@ -273,7 +505,9 @@ namespace quantum::engine
                             else if (
                                 requestedLengthEdit.has_value()
                                 || requestedValueEdit.has_value()
-                                || requestedTransitionType.has_value())
+                                || requestedTransitionType.has_value()
+                                || requestedDistanceEdit.has_value()
+                                || requestedSegmentCommand.has_value())
                             {
                                 SDL_LogInfo(
                                     SDL_LOG_CATEGORY_APPLICATION,
@@ -296,9 +530,13 @@ namespace quantum::engine
                                     candidateCenterline.minimumPosition,
                                     candidateCenterline.maximumPosition
                                 );
+                                editorUi.setCenterlineSections(
+                                    candidateCenterline.sectionSlices
+                                );
                                 boundsApplied = true;
                                 vulkan.updateTrackCurveVertices(
-                                    candidateCenterline.vertices
+                                    candidateCenterline.vertices,
+                                    candidateCenterline.verticesPerCurve
                                 );
 
                                 centerline = std::move(candidateCenterline);
@@ -323,14 +561,204 @@ namespace quantum::engine
                                     SDL_LogInfo(
                                         SDL_LOG_CATEGORY_APPLICATION,
                                         "[EDIT] section=%zu channel=%d "
-                                        "endpoint=%d value=%.6f",
+                                        "endpoint=%d value=%.6f segment=%u",
                                         requestedValueEdit->sectionIndex,
                                         static_cast<int>(
                                             requestedValueEdit->channel),
                                         static_cast<int>(
                                             requestedValueEdit->endpoint),
-                                        requestedValueEdit->value
+                                        requestedValueEdit->value,
+                                        requestedValueEdit->segmentId
                                     );
+                                }
+
+                                if (segmentCommandApplied
+                                    && requestedSegmentCommand)
+                                {
+                                    const quantum::editor::
+                                        ProfileSegmentCommand& command =
+                                        *requestedSegmentCommand;
+                                    switch (command.operation)
+                                    {
+                                    case quantum::editor::
+                                        ProfileSegmentOperation::Split:
+                                        SDL_LogInfo(
+                                            SDL_LOG_CATEGORY_APPLICATION,
+                                            "[EDIT] section=%zu channel=%d "
+                                            "segment=%u split distance=%.6f "
+                                            "newSegment=%u",
+                                            command.sectionIndex,
+                                            static_cast<int>(command.channel),
+                                            command.segmentId,
+                                            command.splitDistance,
+                                            splitCreatedId
+                                        );
+                                        break;
+                                    case quantum::editor::
+                                        ProfileSegmentOperation::Remove:
+                                        SDL_LogInfo(
+                                            SDL_LOG_CATEGORY_APPLICATION,
+                                            "[EDIT] section=%zu channel=%d "
+                                            "segment=%u removed "
+                                            "mergedInto=%u",
+                                            command.sectionIndex,
+                                            static_cast<int>(command.channel),
+                                            command.segmentId,
+                                            removeSurvivorId
+                                        );
+                                        break;
+                                    }
+                                }
+
+                                if (regionCommandApplied
+                                    && requestedRegionCommand)
+                                {
+                                    const quantum::editor::RegionCommand&
+                                        command = *requestedRegionCommand;
+                                    using quantum::editor::
+                                        RegionCommandType;
+
+                                    const bool isCreate =
+                                        command.type ==
+                                            RegionCommandType::
+                                                AppendRateProfiles
+                                        || command.type ==
+                                            RegionCommandType::
+                                                PrependRateProfiles
+                                        || command.type ==
+                                            RegionCommandType::
+                                                AppendPlanarArc
+                                        || command.type ==
+                                            RegionCommandType::
+                                                PrependPlanarArc;
+
+                                    if (isCreate)
+                                    {
+                                        // Appended regions land at the end
+                                        // of the ordering, prepended ones
+                                        // at the front.
+                                        const bool prepended =
+                                            command.type ==
+                                                RegionCommandType::
+                                                    PrependRateProfiles
+                                            || command.type ==
+                                                RegionCommandType::
+                                                    PrependPlanarArc;
+                                        const std::size_t createdIndex =
+                                            prepended
+                                                ? 0
+                                                : authoredTrack
+                                                    .sectionCount()
+                                                - 1;
+                                        const char* verb =
+                                            prepended ? "prepended"
+                                                      : "appended";
+
+                                        if (command.type ==
+                                            RegionCommandType::
+                                                AppendRateProfiles
+                                            || command.type ==
+                                            RegionCommandType::
+                                                PrependRateProfiles)
+                                        {
+                                            SDL_LogInfo(
+                                                SDL_LOG_CATEGORY_APPLICATION,
+                                                "[EDIT] %s region=%zu "
+                                                "kind=rateProfiles",
+                                                verb,
+                                                createdIndex
+                                            );
+                                        }
+                                        else
+                                        {
+                                            const auto& arc =
+                                                std::get<quantum::coaster::
+                                                    PlanarArcRegion>(
+                                                    std::get<quantum::
+                                                        coaster::
+                                                            GeometryRegion>(
+                                                        authoredTrack
+                                                            .section(
+                                                                createdIndex)
+                                                            .region)
+                                                    .construction);
+                                            SDL_LogInfo(
+                                                SDL_LOG_CATEGORY_APPLICATION,
+                                                "[EDIT] %s region=%zu "
+                                                "kind=planarArc "
+                                                "radius=%.6f "
+                                                "sweptAngle=%.6f "
+                                                "planeTilt=%.6f "
+                                                "bankChange=%.6f",
+                                                verb,
+                                                createdIndex,
+                                                arc.radius,
+                                                arc.sweptAngle,
+                                                arc.planeTilt,
+                                                arc.bankChange
+                                            );
+                                        }
+                                    }
+                                    else if (command.type ==
+                                        RegionCommandType::
+                                            ConvertToRateProfiles)
+                                    {
+                                        SDL_LogInfo(
+                                            SDL_LOG_CATEGORY_APPLICATION,
+                                            "[EDIT] section=%zu "
+                                            "kind=rateProfiles",
+                                            command.sectionIndex
+                                        );
+                                    }
+                                    else
+                                    {
+                                        const auto& arc =
+                                            std::get<quantum::coaster::
+                                                PlanarArcRegion>(
+                                                std::get<quantum::coaster::
+                                                    GeometryRegion>(
+                                                    authoredTrack.section(
+                                                        command
+                                                            .sectionIndex)
+                                                    .region)
+                                                .construction);
+
+                                        if (command.type ==
+                                            RegionCommandType::
+                                                ConvertToPlanarArc)
+                                        {
+                                            SDL_LogInfo(
+                                                SDL_LOG_CATEGORY_APPLICATION,
+                                                "[EDIT] section=%zu "
+                                                "kind=planarArc "
+                                                "radius=%.6f "
+                                                "sweptAngle=%.6f "
+                                                "planeTilt=%.6f "
+                                                "bankChange=%.6f",
+                                                command.sectionIndex,
+                                                arc.radius,
+                                                arc.sweptAngle,
+                                                arc.planeTilt,
+                                                arc.bankChange
+                                            );
+                                        }
+                                        else
+                                        {
+                                            SDL_LogInfo(
+                                                SDL_LOG_CATEGORY_APPLICATION,
+                                                "[EDIT] section=%zu "
+                                                "planarArc radius=%.6f "
+                                                "sweptAngle=%.6f "
+                                                "planeTilt=%.6f "
+                                                "bankChange=%.6f",
+                                                command.sectionIndex,
+                                                arc.radius,
+                                                arc.sweptAngle,
+                                                arc.planeTilt,
+                                                arc.bankChange
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -341,6 +769,9 @@ namespace quantum::engine
                                 editorUi.setCenterlineBounds(
                                     centerline.minimumPosition,
                                     centerline.maximumPosition
+                                );
+                                editorUi.setCenterlineSections(
+                                    centerline.sectionSlices
                                 );
                             }
 
@@ -365,13 +796,48 @@ namespace quantum::engine
 
                         if (valueEditApplied && requestedValueEdit)
                         {
-                            editorUi.synchronizeProfileValueEnd(
-                                requestedValueEdit->channel,
-                                quantum::editor::sectionRateProfile(
+                            auto& committedChannel =
+                                quantum::editor::sectionRateChannel(
                                     authoredTrack.section(
                                         requestedValueEdit->sectionIndex),
                                     requestedValueEdit->channel
-                                ).valueEnd
+                                );
+                            auto* committedSegment =
+                                quantum::coaster::
+                                    findChannelSegmentTransition(
+                                        committedChannel,
+                                        requestedValueEdit->segmentId
+                                    );
+                            editorUi.synchronizeSegmentValueEnd(
+                                requestedValueEdit->channel,
+                                requestedValueEdit->segmentId,
+                                committedSegment != nullptr
+                                    ? committedSegment->valueEnd
+                                    : 0.0
+                            );
+                        }
+
+                        if (regionCommandApplied && requestedRegionCommand)
+                        {
+                            const auto& committedSection =
+                                authoredTrack.section(
+                                    requestedRegionCommand->sectionIndex);
+
+                            if (committedSection.kind ==
+                                quantum::coaster::RegionKind::Geometry)
+                            {
+                                editorUi.synchronizePlanarArcParams(
+                                    std::get<quantum::coaster::
+                                        PlanarArcRegion>(
+                                        std::get<quantum::coaster::
+                                            GeometryRegion>(
+                                            committedSection.region)
+                                        .construction));
+                            }
+
+                            editorUi.synchronizeSectionLength(
+                                quantum::coaster::sectionLength(
+                                    committedSection)
                             );
                         }
 

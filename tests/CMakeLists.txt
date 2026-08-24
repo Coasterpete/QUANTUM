@@ -616,3 +616,173 @@ set_tests_properties(
     PROPERTIES
         LABELS "core;coaster"
 )
+
+add_executable(
+    QuantumCoreAuthoredTrackGoldenTests
+    AuthoredTrackGoldenTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreAuthoredTrackGoldenTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreAuthoredTrackGoldenTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreAuthoredTrackGoldenTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.AuthoredTrackGolden
+    COMMAND QuantumCoreAuthoredTrackGoldenTests
+)
+
+set_tests_properties(
+    QuantumCore.AuthoredTrackGolden
+    PROPERTIES
+        LABELS "core;coaster"
+)
+
+add_executable(
+    QuantumCoreChannelProfileTests
+    ChannelProfileTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreChannelProfileTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreChannelProfileTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreChannelProfileTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.ChannelProfile
+    COMMAND QuantumCoreChannelProfileTests
+)
+
+set_tests_properties(
+    QuantumCore.ChannelProfile
+    PROPERTIES
+        LABELS "core;coaster"
+)
+
+add_executable(
+    QuantumCoreChannelProfileEditingTests
+    ChannelProfileEditingTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreChannelProfileEditingTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreChannelProfileEditingTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreChannelProfileEditingTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.ChannelProfileEditing
+    COMMAND QuantumCoreChannelProfileEditingTests
+)
+
+set_tests_properties(
+    QuantumCore.ChannelProfileEditing
+    PROPERTIES
+        LABELS "core;coaster"
+)
+
+add_executable(
+    QuantumCorePlanarArcRegionTests
+    PlanarArcRegionTests.cpp
+)
+
+target_link_libraries(
+    QuantumCorePlanarArcRegionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCorePlanarArcRegionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCorePlanarArcRegionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.PlanarArcRegion
+    COMMAND QuantumCorePlanarArcRegionTests
+)
+
+set_tests_properties(
+    QuantumCore.PlanarArcRegion
+    PROPERTIES
+        LABELS "core;coaster"
+)
+
+add_executable(
+    QuantumCoreRegionAuthoringWorkflowTests
+    RegionAuthoringWorkflowTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreRegionAuthoringWorkflowTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreRegionAuthoringWorkflowTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreRegionAuthoringWorkflowTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.RegionAuthoringWorkflow
+    COMMAND QuantumCoreRegionAuthoringWorkflowTests
+)
+
+set_tests_properties(
+    QuantumCore.RegionAuthoringWorkflow
+    PROPERTIES
+        LABELS "core;coaster"
+)

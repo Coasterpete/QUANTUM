@@ -24,11 +24,15 @@ namespace
     constexpr VkFormat viewportColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
     constexpr VkFormat viewportDepthFormat = VK_FORMAT_D32_SFLOAT;
     constexpr int gridHalfLineCount = 20;
-    constexpr float gridSpacing = 10.0F;
-    constexpr float gridHalfExtent = gridHalfLineCount * gridSpacing;
+    constexpr float defaultGridSpacing = 10.0F;
     constexpr float worldAxisLength = 25.0F;
     constexpr std::size_t viewportAidVertexCount =
         static_cast<std::size_t>(2 * gridHalfLineCount + 1) * 4 + 6;
+
+    // Ascending candidate spacings for the adaptive ground grid.
+    constexpr std::array<float, 8> viewportAidSpacingCandidates{
+        1.0F, 2.0F, 5.0F, 10.0F, 20.0F, 50.0F, 100.0F, 200.0F
+    };
 
     struct CreatedVertexBuffer
     {
@@ -66,16 +70,23 @@ namespace
     }
 
     // The track-curve stream carries complete line segments: each consecutive
-    // vertex pair is one independent segment, so the count must be even.
+    // vertex pair is one independent segment, and the stream concatenates
+    // exactly four equal-length curve runs.
     void requireValidTrackCurveVertices(
         const std::span<const quantum::renderer::LineVertex>
-            trackCurveVertices)
+            trackCurveVertices,
+        const std::uint32_t verticesPerCurve)
     {
-        if (trackCurveVertices.size() < 2
-            || trackCurveVertices.size() % 2 != 0)
+        const std::size_t runLength = verticesPerCurve;
+
+        if (verticesPerCurve < 2 || verticesPerCurve % 2 != 0
+            || trackCurveVertices.size() < 2
+            || trackCurveVertices.size() % 2 != 0
+            || trackCurveVertices.size() != runLength
+                * quantum::renderer::viewportCurveCount)
         {
             throw std::invalid_argument(
-                "VulkanContext requires track-curve vertices to form complete line segments."
+                "VulkanContext requires track-curve vertices to form four equal-length curve runs of complete line segments."
             );
         }
 
@@ -103,12 +114,25 @@ namespace
         }
     }
 
-    std::vector<quantum::renderer::LineVertex> createViewportAidVertices()
+    // Grid lines snap their coordinates to multiples of the spacing so the
+    // modeling plane keeps stable, readable values while recentring around
+    // the solved track.
+    std::vector<quantum::renderer::LineVertex> createViewportAidVertices(
+        const float centerX,
+        const float centerY,
+        const float spacing)
     {
         constexpr std::array gridColor{0.085F, 0.09F, 0.095F, 1.0F};
         constexpr std::array xAxisColor{0.92F, 0.22F, 0.18F, 1.0F};
         constexpr std::array yAxisColor{0.22F, 0.78F, 0.30F, 1.0F};
         constexpr std::array zAxisColor{0.25F, 0.48F, 1.0F, 1.0F};
+
+        const float halfExtent = static_cast<float>(gridHalfLineCount)
+            * spacing;
+        const float snappedCenterX =
+            std::round(centerX / spacing) * spacing;
+        const float snappedCenterY =
+            std::round(centerY / spacing) * spacing;
 
         std::vector<quantum::renderer::LineVertex> vertices;
         vertices.reserve(viewportAidVertexCount);
@@ -117,38 +141,43 @@ namespace
             line <= gridHalfLineCount;
             ++line)
         {
-            const float coordinate = static_cast<float>(line) * gridSpacing;
+            const float coordinate =
+                snappedCenterX + static_cast<float>(line) * spacing;
             appendLine(
                 vertices,
-                {-gridHalfExtent, coordinate, 0.0F},
-                {gridHalfExtent, coordinate, 0.0F},
+                {snappedCenterX - halfExtent, coordinate, 0.0F},
+                {snappedCenterX + halfExtent, coordinate, 0.0F},
                 gridColor
             );
+            const float verticalCoordinate =
+                snappedCenterY + static_cast<float>(line) * spacing;
             appendLine(
                 vertices,
-                {coordinate, -gridHalfExtent, 0.0F},
-                {coordinate, gridHalfExtent, 0.0F},
+                {verticalCoordinate, snappedCenterY - halfExtent, 0.0F},
+                {verticalCoordinate, snappedCenterY + halfExtent, 0.0F},
                 gridColor
             );
         }
 
-        constexpr std::array<float, 3> origin{0.0F, 0.0F, 0.0F};
+        const std::array<float, 3> origin{
+            snappedCenterX, snappedCenterY, 0.0F
+        };
         appendLine(
             vertices,
             origin,
-            {worldAxisLength, 0.0F, 0.0F},
+            {snappedCenterX + worldAxisLength, snappedCenterY, 0.0F},
             xAxisColor
         );
         appendLine(
             vertices,
             origin,
-            {0.0F, worldAxisLength, 0.0F},
+            {snappedCenterX, snappedCenterY + worldAxisLength, 0.0F},
             yAxisColor
         );
         appendLine(
             vertices,
             origin,
-            {0.0F, 0.0F, worldAxisLength},
+            {snappedCenterX, snappedCenterY, worldAxisLength},
             zAxisColor
         );
 
@@ -379,6 +408,13 @@ namespace
             & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0)
         {
             priority = SDL_LOG_PRIORITY_WARN;
+        }
+        else if ((messageSeverity
+            & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) != 0)
+        {
+            // General/loader info messages are chatter during normal use;
+            // they remain available at VERBOSE verbosity.
+            priority = SDL_LOG_PRIORITY_VERBOSE;
         }
         else if ((messageSeverity
             & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) != 0)
@@ -893,7 +929,8 @@ namespace quantum::renderer
 
     void VulkanContext::initialize(
         SDL_Window* window,
-        const std::span<const LineVertex> trackCurveVertices)
+        const std::span<const LineVertex> trackCurveVertices,
+        const std::uint32_t trackVerticesPerCurve)
     {
         if (window == nullptr)
         {
@@ -902,7 +939,10 @@ namespace quantum::renderer
             );
         }
 
-        requireValidTrackCurveVertices(trackCurveVertices);
+        requireValidTrackCurveVertices(
+            trackCurveVertices,
+            trackVerticesPerCurve
+        );
 
         window_ = window;
 
@@ -1087,7 +1127,7 @@ namespace quantum::renderer
                 "window."
             );
         }
-        createVertexBuffers(trackCurveVertices);
+        createVertexBuffers(trackCurveVertices, trackVerticesPerCurve);
         createGraphicsPipeline();
         createCommandResources();
         createSynchronizationResources();
@@ -1485,16 +1525,26 @@ namespace quantum::renderer
     }
 
     void VulkanContext::createVertexBuffers(
-        const std::span<const LineVertex> trackCurveVertices)
+        const std::span<const LineVertex> trackCurveVertices,
+        const std::uint32_t trackVerticesPerCurve)
     {
         const CreatedVertexBuffer staticBuffer =
             createHostVisibleVertexBuffer(
                 allocator_,
-                createViewportAidVertices()
+                createViewportAidVertices(
+                    0.0F,
+                    0.0F,
+                    defaultGridSpacing
+                )
             );
         staticVertexBuffer_ = staticBuffer.buffer;
         staticVertexAllocation_ = staticBuffer.allocation;
+        staticVertexMappedData_ = staticBuffer.mappedData;
+        staticVertexCapacity_ = staticBuffer.capacity;
         staticVertexCount_ = staticBuffer.vertexCount;
+        viewportAidCenterX_ = 0.0F;
+        viewportAidCenterY_ = 0.0F;
+        viewportAidSpacing_ = defaultGridSpacing;
 
         const CreatedVertexBuffer trackCurveBuffer =
             createHostVisibleVertexBuffer(
@@ -1506,6 +1556,30 @@ namespace quantum::renderer
         trackCurveVertexMappedData_ = trackCurveBuffer.mappedData;
         trackCurveVertexCapacity_ = trackCurveBuffer.capacity;
         trackCurveVertexCount_ = trackCurveBuffer.vertexCount;
+        trackVerticesPerCurve_ = trackVerticesPerCurve;
+    }
+
+    // Regenerates the grid and axes in place. The vertex count never changes,
+    // so this only needs the retained persistent mapping of the static aid
+    // buffer; the GPU must not be reading it during a frame, which holds
+    // because updates happen between drawFrame calls.
+    void VulkanContext::rewriteViewportAidVertices(
+        const float centerX,
+        const float centerY,
+        const float spacing)
+    {
+        writeHostVisibleVertexBuffer(
+            allocator_,
+            staticVertexAllocation_,
+            staticVertexMappedData_,
+            staticVertexCapacity_,
+            createViewportAidVertices(centerX, centerY, spacing)
+        );
+        viewportAidCenterX_ =
+            std::round(centerX / spacing) * spacing;
+        viewportAidCenterY_ =
+            std::round(centerY / spacing) * spacing;
+        viewportAidSpacing_ = spacing;
     }
 
     void VulkanContext::createGraphicsPipeline()
@@ -2015,7 +2089,8 @@ namespace quantum::renderer
     }
 
     void VulkanContext::updateTrackCurveVertices(
-        const std::span<const LineVertex> trackCurveVertices)
+        const std::span<const LineVertex> trackCurveVertices,
+        const std::uint32_t trackVerticesPerCurve)
     {
         if (allocator_ == VK_NULL_HANDLE
             || trackCurveVertexBuffer_ == VK_NULL_HANDLE)
@@ -2025,7 +2100,10 @@ namespace quantum::renderer
             );
         }
 
-        requireValidTrackCurveVertices(trackCurveVertices);
+        requireValidTrackCurveVertices(
+            trackCurveVertices,
+            trackVerticesPerCurve
+        );
 
         const std::span<const LineVertex> candidateVertices =
             trackCurveVertices;
@@ -2065,6 +2143,7 @@ namespace quantum::renderer
             trackCurveVertexCount_ = static_cast<std::uint32_t>(
                 candidateVertices.size()
             );
+            trackVerticesPerCurve_ = trackVerticesPerCurve;
             return;
         }
 
@@ -2107,6 +2186,57 @@ namespace quantum::renderer
         trackCurveVertexMappedData_ = candidate.mappedData;
         trackCurveVertexCapacity_ = candidate.capacity;
         trackCurveVertexCount_ = candidate.vertexCount;
+        trackVerticesPerCurve_ = trackVerticesPerCurve;
+    }
+
+    void VulkanContext::setViewportElementVisibility(
+        const bool gridVisible,
+        const std::uint32_t curveVisibilityMask)
+    {
+        viewportGridVisible_ = gridVisible;
+        viewportCurveVisibilityMask_ = curveVisibilityMask;
+    }
+
+    void VulkanContext::updateViewportAidReference(
+        const float centerX,
+        const float centerY,
+        const float referenceRadius)
+    {
+        if (staticVertexMappedData_ == nullptr || !std::isfinite(centerX)
+            || !std::isfinite(centerY) || !std::isfinite(referenceRadius)
+            || referenceRadius <= 0.0F)
+        {
+            return;
+        }
+
+        // Keep the modeled region comfortably larger than the reference
+        // sphere so the track never pokes past the grid edge.
+        constexpr float coverageFactor = 2.5F;
+        float spacing = viewportAidSpacingCandidates.back();
+
+        for (const float candidate : viewportAidSpacingCandidates)
+        {
+            if (static_cast<float>(gridHalfLineCount) * candidate
+                >= coverageFactor * referenceRadius)
+            {
+                spacing = candidate;
+                break;
+            }
+        }
+
+        const float snappedCenterX =
+            std::round(centerX / spacing) * spacing;
+        const float snappedCenterY =
+            std::round(centerY / spacing) * spacing;
+
+        if (spacing == viewportAidSpacing_
+            && snappedCenterX == viewportAidCenterX_
+            && snappedCenterY == viewportAidCenterY_)
+        {
+            return;
+        }
+
+        rewriteViewportAidVertices(snappedCenterX, snappedCenterY, spacing);
     }
 
     void VulkanContext::recordDrawCommands(
@@ -2272,34 +2402,61 @@ namespace quantum::renderer
             );
 
             constexpr VkDeviceSize vertexOffset = 0;
-            vkCmdBindVertexBuffers(
-                commandBuffer_,
-                0,
-                1,
-                &staticVertexBuffer_,
-                &vertexOffset
-            );
-            vkCmdDraw(
-                commandBuffer_,
-                staticVertexCount_,
-                1,
-                0,
-                0
-            );
-            vkCmdBindVertexBuffers(
-                commandBuffer_,
-                0,
-                1,
-                &trackCurveVertexBuffer_,
-                &vertexOffset
-            );
-            vkCmdDraw(
-                commandBuffer_,
-                trackCurveVertexCount_,
-                1,
-                0,
-                0
-            );
+            if (viewportGridVisible_)
+            {
+                vkCmdBindVertexBuffers(
+                    commandBuffer_,
+                    0,
+                    1,
+                    &staticVertexBuffer_,
+                    &vertexOffset
+                );
+                vkCmdDraw(
+                    commandBuffer_,
+                    staticVertexCount_,
+                    1,
+                    0,
+                    0
+                );
+            }
+
+            // One bind, up to four draws: each reference-curve run occupies
+            // its own contiguous vertex range inside the shared buffer.
+            if (viewportCurveVisibilityMask_ != 0
+                && trackCurveVertexCount_ > 0)
+            {
+                const std::uint32_t verticesPerCurve = trackVerticesPerCurve_;
+                vkCmdBindVertexBuffers(
+                    commandBuffer_,
+                    0,
+                    1,
+                    &trackCurveVertexBuffer_,
+                    &vertexOffset
+                );
+
+                constexpr std::uint32_t curveBits[viewportCurveCount]{
+                    viewportLeftRailCurve,
+                    viewportRightRailCurve,
+                    viewportCenterlineCurve,
+                    viewportHeartlineCurve
+                };
+
+                for (const std::uint32_t curve : curveBits)
+                {
+                    if ((viewportCurveVisibilityMask_ & (1u << curve)) == 0)
+                    {
+                        continue;
+                    }
+
+                    vkCmdDraw(
+                        commandBuffer_,
+                        verticesPerCurve,
+                        1,
+                        curve * verticesPerCurve,
+                        0
+                    );
+                }
+            }
 
             vkCmdEndRendering(commandBuffer_);
 
@@ -2752,7 +2909,11 @@ namespace quantum::renderer
                 staticVertexAllocation_ = VK_NULL_HANDLE;
             }
 
+            staticVertexMappedData_ = nullptr;
+            staticVertexCapacity_ = 0;
             staticVertexCount_ = 0;
+            trackCurveVertexCount_ = 0;
+            trackVerticesPerCurve_ = 0;
 
             if (allocator_ != VK_NULL_HANDLE)
             {
