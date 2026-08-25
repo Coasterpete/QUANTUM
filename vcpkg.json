@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "quantum-coasterworks",
+  "version-string": "0.1.0",
+  "builtin-baseline": "0ac8df3b98e3afcd8bf075fa74a6bd2c32613345",
+  "dependencies": [
+    {
+      "name": "sdl3",
+      "features": [
+        "vulkan"
+      ]
+    },
+    {
+      "name": "imgui",
+      "features": [
+        "docking-experimental",
+        "sdl3-binding",
+        "vulkan-binding"
+      ]
+    },
+    "glm",
+    "vulkan-memory-allocator"
+  ]
+}

@@ -73,11 +73,13 @@ target_compile_definitions(
 
 target_link_libraries(
     QuantumEngine
+    PUBLIC
+        # VulkanContext.hpp is a public header that includes <vulkan/vulkan.h>,
+        # so consumers compiling against engine headers need Vulkan includes.
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
     PRIVATE
         SDL3::SDL3
-        Vulkan::Vulkan
-    PUBLIC
-        GPUOpen::VulkanMemoryAllocator
 )
 
 set_target_properties(

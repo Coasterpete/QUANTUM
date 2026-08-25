@@ -102,3 +102,33 @@ rider-local integration scope.
 
 Windows is the current development platform. Other platform support remains a
 future possibility.
+
+## Building on Windows
+
+Prerequisites:
+
+- Visual Studio 2022 or later with the Desktop development with C++ workload
+  (the debug preset uses the Visual Studio generator)
+- CMake 3.25 or newer
+- The [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
+- A bootstrapped checkout of [vcpkg](https://github.com/microsoft/vcpkg) with
+  the `VCPKG_ROOT` environment variable pointing at it
+
+The repository ships a `vcpkg.json` manifest, so configuring the project
+installs the required dependencies (SDL3 with Vulkan support, GLM, Vulkan
+Memory Allocator, and Dear ImGui with docking and SDL3/Vulkan bindings) into
+the build directory automatically. Configure and build with:
+
+```sh
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+```
+
+For a Release configuration, pass `--config Release` to `cmake --build`.
+Run the automated tests with:
+
+```sh
+ctest --test-dir build -C Debug
+```
+
+The editor executable is written to `build/editor/<config>/QUANTUM.exe`.
