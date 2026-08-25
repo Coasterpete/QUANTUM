@@ -35,6 +35,7 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # ------------------------------------------------------------
 # Project targets

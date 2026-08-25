@@ -9,6 +9,7 @@ target_sources(
         src/AuthoredSections.cpp
         src/AuthoredTrack.cpp
         src/ChannelProfileEditing.cpp
+        src/CoasterDocument.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
@@ -18,6 +19,7 @@ target_sources(
         include/quantum/coaster/ForceSection.hpp
         include/quantum/coaster/AuthoredTrack.hpp
         include/quantum/coaster/ChannelProfileEditing.hpp
+        include/quantum/coaster/CoasterDocument.hpp
         include/quantum/coaster/GeometricSection.hpp
         include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
@@ -47,6 +49,7 @@ target_link_libraries(
     QuantumCore
     PUBLIC
         glm::glm
+        nlohmann_json::nlohmann_json
 )
 
 set_target_properties(

@@ -19,6 +19,7 @@
       ]
     },
     "glm",
+    "nlohmann-json",
     "vulkan-memory-allocator"
   ]
 }

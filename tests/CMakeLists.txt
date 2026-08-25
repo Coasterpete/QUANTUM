@@ -861,3 +861,37 @@ set_tests_properties(
     PROPERTIES
         LABELS "core;coaster"
 )
+
+add_executable(
+    QuantumCoreCoasterDocumentTests
+    CoasterDocumentTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCoasterDocumentTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCoasterDocumentTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCoasterDocumentTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CoasterDocument
+    COMMAND QuantumCoreCoasterDocumentTests
+)
+
+set_tests_properties(
+    QuantumCore.CoasterDocument
+    PROPERTIES
+        LABELS "core;coaster;serialization"
+)
