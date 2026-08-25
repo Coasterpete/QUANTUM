@@ -4,10 +4,12 @@ add_executable(
     src/CenterlineVisualization.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
+    src/RegionSummary.cpp
     src/ViewportCamera.cpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/EditorStyle.hpp
     include/quantum/editor/EditorUi.hpp
+    include/quantum/editor/RegionSummary.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp
     ${PROJECT_SOURCE_DIR}/engine/src/Application.cpp

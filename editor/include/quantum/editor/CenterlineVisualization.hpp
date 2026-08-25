@@ -19,6 +19,7 @@ namespace quantum::editor
         std::uint32_t firstVertex = 0;
         std::uint32_t vertexCount = 0;
         glm::dvec3 startPosition{0.0};
+        glm::dvec3 endPosition{0.0};
         glm::dvec3 startTangent{1.0, 0.0, 0.0};
         glm::dvec3 minimumPosition{0.0};
         glm::dvec3 maximumPosition{0.0};

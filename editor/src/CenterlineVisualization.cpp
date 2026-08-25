@@ -201,6 +201,10 @@ namespace quantum::editor
             const coaster::RiderLocalGeometryState& start =
                 states[firstState];
             slice.startPosition = start.position;
+            // The joint sample between consecutive sections belongs to the
+            // earlier section, so the last sample of this range is the
+            // section's exit state.
+            slice.endPosition = states[nextState - 1].position;
             const glm::dvec3 tangentLength = start.frame.tangent;
             const double tangentMagnitude = glm::length(tangentLength);
             slice.startTangent = tangentMagnitude > 1.0e-9

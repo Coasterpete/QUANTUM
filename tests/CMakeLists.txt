@@ -786,3 +786,44 @@ set_tests_properties(
     PROPERTIES
         LABELS "core;coaster"
 )
+
+add_executable(
+    QuantumEditorRegionSummaryTests
+    RegionSummaryTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/RegionSummary.cpp
+)
+
+target_include_directories(
+    QuantumEditorRegionSummaryTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorRegionSummaryTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorRegionSummaryTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorRegionSummaryTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.RegionSummary
+    COMMAND QuantumEditorRegionSummaryTests
+)
+
+set_tests_properties(
+    QuantumEditor.RegionSummary
+    PROPERTIES
+        LABELS "editor;coaster"
+)

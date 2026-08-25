@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/editor/EditorStyle.hpp>
+#include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -708,13 +709,13 @@ namespace
             ImGuiCol_TextDisabled
         );
 
-        drawList->AddText(canvasBegin, textColor, "AUTHORED DOMAIN");
+        drawList->AddText(canvasBegin, textColor, "REGION DISTANCE");
 
         char domainLabel[64]{};
         std::snprintf(
             domainLabel,
             sizeof(domainLabel),
-            "%.0f -> %.0f",
+            "%.0f -> %.0f (region-local)",
             domainView.domainBegin,
             domainView.domainEnd
         );
@@ -868,7 +869,9 @@ namespace
 
             if (ImGui::IsItemHovered())
             {
-                ImGui::SetTooltip("Authored end value");
+                ImGui::SetTooltip(
+                    "Focused segment end rate (radians per unit distance)"
+                );
             }
 
             ImGui::SetCursorScreenPos(ImVec2(
@@ -1476,7 +1479,8 @@ namespace
         const quantum::coaster::AuthoredTrack& track,
         const std::size_t selectedIndex,
         double* const sectionLengthEdit,
-        quantum::editor::RegionCreateFlow& regionCreateFlow)
+        quantum::editor::RegionCreateFlow& regionCreateFlow,
+        const std::optional<double>& selectedHeightDelta)
     {
         TrackWorkspaceEdit edit;
         pushWorkspaceAccent(trackWorkspaceAccent);
@@ -1552,6 +1556,59 @@ namespace
 
                 const quantum::coaster::AuthoredTrackSection& selected =
                     track.section(selectedIndex);
+
+                const quantum::editor::RegionStations stations =
+                    quantum::editor::computeRegionStations(
+                        track,
+                        selectedIndex
+                    );
+                ImGui::Spacing();
+                ImGui::TextUnformatted("Track Position");
+                ImGui::Text(
+                    "Stations %.3f -> %.3f",
+                    stations.startStation,
+                    stations.endStation
+                );
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip(
+                        "Cumulative distance along the whole track at this "
+                        "region's start and end"
+                    );
+                }
+
+                ImGui::Text(
+                    "Track total length %.3f",
+                    stations.totalLength
+                );
+
+                if (selectedHeightDelta.has_value())
+                {
+                    ImGui::Text(
+                        "Entry-to-exit height change %+.3f",
+                        *selectedHeightDelta
+                    );
+                }
+
+                if (selected.kind == quantum::coaster::RegionKind::RateProfiles)
+                {
+                    const quantum::editor::RegionNetRotation netRotation =
+                        quantum::editor::computeNetRotationDegrees(
+                            selected.rateProfileRegion().rateProfiles
+                        );
+                    ImGui::Spacing();
+                    ImGui::TextUnformatted("Net Rotation (integrated)");
+                    ImGui::Text("Roll %+.2f deg", netRotation.rollDegrees);
+                    ImGui::Text("Pitch %+.2f deg", netRotation.pitchDegrees);
+                    ImGui::Text("Yaw %+.2f deg", netRotation.yawDegrees);
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip(
+                            "Total angle accumulated by each rate channel "
+                            "across this region"
+                        );
+                    }
+                }
 
                 // Kind conversion remains a secondary operation; geometry
                 // authoring is discovered through the typed create flow and
@@ -1940,6 +1997,57 @@ namespace
                     profileBeginY,
                     profileEndY
                 );
+
+                // Designer-readable summary of what the three authored rate
+                // channels accumulate to over this region, drawn in the
+                // free right side of the ruler band.
+                if (std::all_of(
+                    profileRows.begin(),
+                    profileRows.end(),
+                    [](const ProfileRowView& row)
+                    {
+                        return row.profile != nullptr;
+                    }))
+                {
+                    const double netRollDegrees =
+                        quantum::editor::computeChannelNetRotationDegrees(
+                            *profileRows[0].profile
+                        );
+                    const double netPitchDegrees =
+                        quantum::editor::computeChannelNetRotationDegrees(
+                            *profileRows[1].profile
+                        );
+                    const double netYawDegrees =
+                        quantum::editor::computeChannelNetRotationDegrees(
+                            *profileRows[2].profile
+                        );
+
+                    char netRotationLabel[128]{};
+                    std::snprintf(
+                        netRotationLabel,
+                        sizeof(netRotationLabel),
+                        "NET ROTATION  Roll %+.1f  Pitch %+.1f  "
+                        "Yaw %+.1f deg",
+                        netRollDegrees,
+                        netPitchDegrees,
+                        netYawDegrees
+                    );
+                    const ImVec2 netLabelSize = ImGui::CalcTextSize(
+                        netRotationLabel
+                    );
+                    drawList->AddText(
+                        ImVec2(
+                            std::max(
+                                plotBeginX + 8.0F,
+                                canvasEnd.x - netLabelSize.x - 10.0F
+                            ),
+                            canvasBegin.y + 4.0F
+                        ),
+                        ImGui::GetColorU32(ImGuiCol_Text),
+                        netRotationLabel
+                    );
+                }
+
 
                 std::array<std::optional<ScalarRowEditGeometry>,
                     quantum::editor::rateChannelCount> rowGeometries{};
@@ -3241,11 +3349,24 @@ namespace quantum::editor
             }
         }
 
+        // Entry-to-exit height change of the selected region read from the
+        // already-solved centerline slices; unavailable before the first
+        // solve arrives.
+        std::optional<double> selectedRegionHeightDelta;
+        if (selectedSection_ < centerlineSlices_.size())
+        {
+            const CenterlineSectionSlice& slice =
+                centerlineSlices_[selectedSection_];
+            selectedRegionHeightDelta =
+                slice.endPosition.y - slice.startPosition.y;
+        }
+
         const TrackWorkspaceEdit workspaceEdit = showTrackWorkspace(
             *authoredTrack_,
             selectedSection_,
             &sectionLengthEditBuffer_,
-            regionCreateFlow_
+            regionCreateFlow_,
+            selectedRegionHeightDelta
         );
 
         if (workspaceEdit.selectRequest.has_value()
