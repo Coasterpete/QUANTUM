@@ -5,7 +5,9 @@
 #include <quantum/coaster/RiderLocalGeometry.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -13,6 +15,21 @@ namespace quantum::coaster
 {
     // Length used by appendSection/prependSection for new sections.
     inline constexpr double defaultNewSectionLength = 60.0;
+
+    // Authored layout intent: whether the track is intended to form a
+    // closed circuit or an intentionally open shuttle layout. This is
+    // authored document state, not derived geometry.
+    enum class LayoutMode : std::uint8_t
+    {
+        Circuit,
+        Shuttle
+    };
+
+    // Stable string representations for persistence.
+    [[nodiscard]] const char* layoutModeToString(LayoutMode mode) noexcept;
+
+    // Throws std::invalid_argument for an unrecognized string.
+    [[nodiscard]] LayoutMode layoutModeFromString(std::string_view name);
 
     // Authoring approach used by one track interval. The taxonomy is
     // deliberately open: geometry-driven constructions join behind a single
@@ -145,6 +162,9 @@ namespace quantum::coaster
     public:
         AuthoredTrack() = default;
 
+        [[nodiscard]] LayoutMode layoutMode() const noexcept;
+        void setLayoutMode(LayoutMode mode) noexcept;
+
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
         // Throws std::out_of_range for an invalid index.
@@ -184,6 +204,7 @@ namespace quantum::coaster
         void moveSection(std::size_t fromIndex, std::size_t toIndex);
 
     private:
+        LayoutMode layoutMode_ = LayoutMode::Circuit;
         std::vector<AuthoredTrackSection> sections_;
     };
 

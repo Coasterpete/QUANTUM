@@ -970,3 +970,37 @@ set_tests_properties(
     PROPERTIES
         LABELS "core;coaster;topology"
 )
+
+add_executable(
+    QuantumCoreLayoutModeTests
+    LayoutModeTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreLayoutModeTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreLayoutModeTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreLayoutModeTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.LayoutMode
+    COMMAND QuantumCoreLayoutModeTests
+)
+
+set_tests_properties(
+    QuantumCore.LayoutMode
+    PROPERTIES
+        LABELS "core;coaster;layout"
+)

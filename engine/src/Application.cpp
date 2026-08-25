@@ -1452,6 +1452,28 @@ namespace quantum::engine
                             );
                         }
 
+                        // Layout mode is metadata-only; no geometry
+                        // recalculation needed.
+                        const auto requestedLayoutMode =
+                            editorUi.takePendingLayoutModeChange();
+
+                        if (requestedLayoutMode.has_value()
+                            && *requestedLayoutMode
+                                != authoredTrack.layoutMode())
+                        {
+                            authoredTrack.setLayoutMode(
+                                *requestedLayoutMode);
+                            documentState.markDirty();
+                            editorUi.updateWindowTitle(
+                                documentState.windowTitle());
+
+                            SDL_LogInfo(
+                                SDL_LOG_CATEGORY_APPLICATION,
+                                "Layout mode set to %s",
+                                quantum::coaster::layoutModeToString(
+                                    authoredTrack.layoutMode()));
+                        }
+
                         // Structural edits that move or create regions
                         // re-target the selection here, after the buffers
                         // above have been resynchronized: selectSection

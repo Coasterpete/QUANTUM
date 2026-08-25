@@ -345,6 +345,7 @@ namespace
         bool convertToGeometryRequested = false;
         bool convertToRateProfilesRequested = false;
         bool completeCircuitRequested = false;
+        std::optional<quantum::coaster::LayoutMode> layoutModeChanged;
         // Present when the user picked an authoring type in the create
         // flow; the append/prepend direction lives in RegionCreateFlow.
         std::optional<quantum::coaster::RegionKind> createdRegionKind;
@@ -1528,15 +1529,51 @@ namespace
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
-            ImGui::TextUnformatted("TRACK TOPOLOGY");
-            if (topology.kind
-                == quantum::coaster::TopologyKind::ClosedCircuit)
+
+            // Layout Mode selector
+            ImGui::TextUnformatted("LAYOUT MODE");
+            const quantum::coaster::LayoutMode currentMode =
+                track.layoutMode();
+            const bool isCircuit =
+                currentMode == quantum::coaster::LayoutMode::Circuit;
+
+            const float layoutModeHalfWidth =
+                (ImGui::GetContentRegionAvail().x
+                - ImGui::GetStyle().ItemSpacing.x) * 0.5F;
+
+            if (ImGui::Button(
+                isCircuit ? "[ Circuit ]" : "Circuit",
+                ImVec2(layoutModeHalfWidth, 0.0F)))
             {
-                ImGui::Text("Closed Circuit");
+                edit.layoutModeChanged =
+                    quantum::coaster::LayoutMode::Circuit;
             }
-            else
+            ImGui::SameLine();
+            if (ImGui::Button(
+                !isCircuit ? "[ Shuttle ]" : "Shuttle",
+                ImVec2(-1.0F, 0.0F)))
             {
-                ImGui::Text("Open Track");
+                edit.layoutModeChanged =
+                    quantum::coaster::LayoutMode::Shuttle;
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            // Track Topology summary
+            const quantum::coaster::LayoutStatus status =
+                quantum::coaster::computeLayoutStatus(
+                    currentMode, topology.kind);
+
+            ImGui::TextUnformatted("TRACK TOPOLOGY");
+            ImGui::Text(
+                "%s",
+                quantum::coaster::layoutStatusLabel(status));
+
+            if (topology.kind
+                == quantum::coaster::TopologyKind::OpenLinear)
+            {
                 ImGui::Text(
                     "Closure gap: %.1f m",
                     topology.diagnostics.positionalGap);
@@ -1805,7 +1842,9 @@ namespace
             ImGui::EndDisabled();
 
             if (topology.kind
-                == quantum::coaster::TopologyKind::OpenLinear)
+                    == quantum::coaster::TopologyKind::OpenLinear
+                && track.layoutMode()
+                    == quantum::coaster::LayoutMode::Circuit)
             {
                 if (ImGui::Button(
                     "Complete Circuit...",
@@ -3544,6 +3583,11 @@ namespace quantum::editor
                                   sectionLengthEditBuffer_};
         }
 
+        if (workspaceEdit.layoutModeChanged.has_value())
+        {
+            pendingLayoutModeChange_ = workspaceEdit.layoutModeChanged;
+        }
+
         if (workspaceEdit.completeCircuitRequested)
         {
             const quantum::coaster::TrackTopology analysis =
@@ -4390,6 +4434,14 @@ namespace quantum::editor
         const auto op = pendingFileOperation_;
         pendingFileOperation_.reset();
         return op;
+    }
+
+    std::optional<coaster::LayoutMode>
+    EditorUi::takePendingLayoutModeChange() noexcept
+    {
+        const auto mode = pendingLayoutModeChange_;
+        pendingLayoutModeChange_.reset();
+        return mode;
     }
 
     void EditorUi::resetTransientState()

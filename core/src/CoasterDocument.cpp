@@ -509,6 +509,7 @@ namespace quantum::coaster
     {
         json root;
         root["formatVersion"] = currentFormatVersion;
+        root["layoutMode"] = layoutModeToString(track.layoutMode());
 
         json sectionsJson = json::array();
 
@@ -539,7 +540,7 @@ namespace quantum::coaster
 
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
-                "formatVersion", "sections"
+                "formatVersion", "sections", "layoutMode"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -630,7 +631,36 @@ namespace quantum::coaster
                 sections.push_back(std::move(section));
             }
 
-            // 7. Build the AuthoredTrack.
+            // 7. Parse optional layoutMode (default Circuit for backward
+            //    compatibility with formatVersion 1 documents that lack
+            //    this field).
+            LayoutMode layoutMode = LayoutMode::Circuit;
+
+            if (root.contains("layoutMode"))
+            {
+                if (!root["layoutMode"].is_string())
+                {
+                    return std::unexpected(
+                        std::string(
+                            "'layoutMode' must be a string"));
+                }
+
+                const std::string modeStr =
+                    root["layoutMode"].get<std::string>();
+
+                try
+                {
+                    layoutMode = layoutModeFromString(modeStr);
+                }
+                catch (const std::invalid_argument&)
+                {
+                    return std::unexpected(
+                        "Unknown layoutMode '" + modeStr
+                        + "' (expected 'Circuit' or 'Shuttle')");
+                }
+            }
+
+            // 8. Build the AuthoredTrack.
             AuthoredTrack track;
 
             for (std::size_t i = 0; i < sections.size(); ++i)
@@ -647,6 +677,8 @@ namespace quantum::coaster
                         sections[i]);
                 }
             }
+
+            track.setLayoutMode(layoutMode);
 
             return track;
         }

@@ -332,6 +332,11 @@ namespace quantum::editor
         [[nodiscard]] std::optional<FileOperationType>
         takePendingFileOperation() noexcept;
 
+        // Layout mode: returns any pending layout mode change requested
+        // through the Track Workspace selector buttons.
+        [[nodiscard]] std::optional<coaster::LayoutMode>
+        takePendingLayoutModeChange() noexcept;
+
         // Resets all transient editing state (selections, drags, edit
         // buffers) so the editor is clean for a new document.
         void resetTransientState();
@@ -445,5 +450,6 @@ namespace quantum::editor
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
         std::optional<FileOperationType> pendingFileOperation_;
+        std::optional<coaster::LayoutMode> pendingLayoutModeChange_;
     };
 }

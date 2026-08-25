@@ -120,4 +120,29 @@ namespace quantum::coaster
 
         return topology;
     }
+
+    const char* layoutStatusLabel(const LayoutStatus status) noexcept
+    {
+        switch (status)
+        {
+        case LayoutStatus::CircuitIncomplete: return "Circuit — Incomplete";
+        case LayoutStatus::CircuitComplete:   return "Circuit — Complete";
+        case LayoutStatus::ShuttleValid:      return "Shuttle — Valid Open Layout";
+        }
+        return "Unknown";
+    }
+
+    LayoutStatus computeLayoutStatus(
+        const LayoutMode mode,
+        const TopologyKind topology) noexcept
+    {
+        if (mode == LayoutMode::Shuttle)
+        {
+            return LayoutStatus::ShuttleValid;
+        }
+
+        return topology == TopologyKind::ClosedCircuit
+            ? LayoutStatus::CircuitComplete
+            : LayoutStatus::CircuitIncomplete;
+    }
 }

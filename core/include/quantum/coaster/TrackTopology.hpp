@@ -49,6 +49,23 @@ namespace quantum::coaster
         ClosureDiagnostics diagnostics{};
     };
 
+    // Combined status of authored layout intent + derived geometry.
+    enum class LayoutStatus
+    {
+        CircuitIncomplete,
+        CircuitComplete,
+        ShuttleValid
+    };
+
+    // Returns a human-readable label for the layout status.
+    [[nodiscard]] const char* layoutStatusLabel(LayoutStatus status) noexcept;
+
+    // Combines authored LayoutMode with derived TopologyKind to answer
+    // what this layout currently means.
+    [[nodiscard]] LayoutStatus computeLayoutStatus(
+        LayoutMode mode,
+        TopologyKind topology) noexcept;
+
     [[nodiscard]] TrackEndpoint extractStartEndpoint(
         const AuthoredTrack& track,
         double integrationSpacing = 0.75

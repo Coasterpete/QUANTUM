@@ -1,7 +1,9 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -369,6 +371,39 @@ namespace quantum::coaster
         arc.bankChange = bankChange;
 
         validatePlanarArcRegion(arc, section.length);
+    }
+
+    // ----------------------------------------------------------------
+    // LayoutMode
+    // ----------------------------------------------------------------
+
+    const char* layoutModeToString(const LayoutMode mode) noexcept
+    {
+        switch (mode)
+        {
+        case LayoutMode::Circuit: return "Circuit";
+        case LayoutMode::Shuttle: return "Shuttle";
+        }
+        return "Circuit";
+    }
+
+    LayoutMode layoutModeFromString(const std::string_view name)
+    {
+        if (name == "Circuit") return LayoutMode::Circuit;
+        if (name == "Shuttle") return LayoutMode::Shuttle;
+        throw std::invalid_argument(
+            std::string("Unknown layout mode '") + std::string(name)
+            + "' (expected 'Circuit' or 'Shuttle')");
+    }
+
+    LayoutMode AuthoredTrack::layoutMode() const noexcept
+    {
+        return layoutMode_;
+    }
+
+    void AuthoredTrack::setLayoutMode(const LayoutMode mode) noexcept
+    {
+        layoutMode_ = mode;
     }
 
     std::size_t AuthoredTrack::sectionCount() const noexcept
