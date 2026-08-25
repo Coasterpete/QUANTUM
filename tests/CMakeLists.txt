@@ -936,3 +936,37 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;document"
 )
+
+add_executable(
+    QuantumCoreTrackTopologyTests
+    TrackTopologyTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreTrackTopologyTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreTrackTopologyTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreTrackTopologyTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.TrackTopology
+    COMMAND QuantumCoreTrackTopologyTests
+)
+
+set_tests_properties(
+    QuantumCore.TrackTopology
+    PROPERTIES
+        LABELS "core;coaster;topology"
+)

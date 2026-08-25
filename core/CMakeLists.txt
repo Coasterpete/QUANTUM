@@ -15,6 +15,7 @@ target_sources(
         src/PlanarArcRegion.cpp
         src/RiderLocalGeometry.cpp
         src/ScalarTransition.cpp
+        src/TrackTopology.cpp
         src/TransitionFunctions.cpp
         include/quantum/coaster/ForceSection.hpp
         include/quantum/coaster/AuthoredTrack.hpp
@@ -23,6 +24,7 @@ target_sources(
         include/quantum/coaster/GeometricSection.hpp
         include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
+        include/quantum/coaster/TrackTopology.hpp
         include/quantum/geometry/ArcLengthLUT.hpp
         include/quantum/geometry/BSplineCurve.hpp
         include/quantum/geometry/CurveGeometry.hpp

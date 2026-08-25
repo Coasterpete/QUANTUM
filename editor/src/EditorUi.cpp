@@ -1,6 +1,7 @@
 #include <quantum/editor/EditorUi.hpp>
 
 #include <quantum/coaster/ChannelProfileEditing.hpp>
+#include <quantum/coaster/TrackTopology.hpp>
 #include <quantum/editor/EditorStyle.hpp>
 #include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
@@ -8,6 +9,7 @@
 
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_stdinc.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -342,6 +344,7 @@ namespace
         bool lengthEdited = false;
         bool convertToGeometryRequested = false;
         bool convertToRateProfilesRequested = false;
+        bool completeCircuitRequested = false;
         // Present when the user picked an authoring type in the create
         // flow; the append/prepend direction lives in RegionCreateFlow.
         std::optional<quantum::coaster::RegionKind> createdRegionKind;
@@ -1498,7 +1501,8 @@ namespace
         const std::size_t selectedIndex,
         double* const sectionLengthEdit,
         quantum::editor::RegionCreateFlow& regionCreateFlow,
-        const std::optional<double>& selectedHeightDelta)
+        const std::optional<double>& selectedHeightDelta,
+        const quantum::coaster::TrackTopology& topology)
     {
         TrackWorkspaceEdit edit;
         pushWorkspaceAccent(trackWorkspaceAccent);
@@ -1520,6 +1524,33 @@ namespace
             ImGuiChildFlags_Borders))
         {
             ImGui::TextUnformatted("Section List");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextUnformatted("TRACK TOPOLOGY");
+            if (topology.kind
+                == quantum::coaster::TopologyKind::ClosedCircuit)
+            {
+                ImGui::Text("Closed Circuit");
+            }
+            else
+            {
+                ImGui::Text("Open Track");
+                ImGui::Text(
+                    "Closure gap: %.1f m",
+                    topology.diagnostics.positionalGap);
+                ImGui::Text(
+                    "Tangent mismatch: %.1f deg",
+                    topology.diagnostics.tangentMismatchDegrees);
+                ImGui::Text(
+                    "Frame mismatch: %.1f deg",
+                    topology.diagnostics.frameMismatchDegrees);
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
 
             const std::size_t sectionCount = track.sectionCount();
             for (std::size_t index = 0; index < sectionCount; ++index)
@@ -1650,8 +1681,8 @@ namespace
             }
 
             const ImGuiStyle& style = ImGui::GetStyle();
-            const float buttonAreaHeight = 4.0F * ImGui::GetFrameHeight()
-                + 3.0F * style.ItemSpacing.y;
+            const float buttonAreaHeight = 5.0F * ImGui::GetFrameHeight()
+                + 4.0F * style.ItemSpacing.y;
             const float buttonAreaY = ImGui::GetWindowHeight()
                 - style.WindowPadding.y
                 - buttonAreaHeight;
@@ -1772,6 +1803,17 @@ namespace
                 edit.moveDownRequested = true;
             }
             ImGui::EndDisabled();
+
+            if (topology.kind
+                == quantum::coaster::TopologyKind::OpenLinear)
+            {
+                if (ImGui::Button(
+                    "Complete Circuit...",
+                    ImVec2(-1.0F, 0.0F)))
+                {
+                    edit.completeCircuitRequested = true;
+                }
+            }
         }
         ImGui::EndChild();
 
@@ -3430,7 +3472,8 @@ namespace quantum::editor
             selectedSection_,
             &sectionLengthEditBuffer_,
             regionCreateFlow_,
-            selectedRegionHeightDelta
+            selectedRegionHeightDelta,
+            quantum::coaster::computeTrackTopology(*authoredTrack_)
         );
 
         if (workspaceEdit.selectRequest.has_value())
@@ -3499,6 +3542,46 @@ namespace quantum::editor
             sectionLengthEdit_ = {TrackCommandType::SetSectionLength,
                                   selectedSection_,
                                   sectionLengthEditBuffer_};
+        }
+
+        if (workspaceEdit.completeCircuitRequested)
+        {
+            const quantum::coaster::TrackTopology analysis =
+                quantum::coaster::computeTrackTopology(*authoredTrack_);
+
+            char message[256]{};
+            if (analysis.kind
+                == quantum::coaster::TopologyKind::ClosedCircuit)
+            {
+                std::snprintf(
+                    message,
+                    sizeof(message),
+                    "Track is already a closed circuit.\n\n"
+                    "Gap: %.4f m\nTangent: %.4f deg\nFrame: %.4f deg",
+                    analysis.diagnostics.positionalGap,
+                    analysis.diagnostics.tangentMismatchDegrees,
+                    analysis.diagnostics.frameMismatchDegrees);
+            }
+            else
+            {
+                std::snprintf(
+                    message,
+                    sizeof(message),
+                    "Geometry must be added or adjusted before exact "
+                    "closure is possible.\n\n"
+                    "End -> Start gap: %.1f m\n"
+                    "Tangent mismatch: %.1f deg\n"
+                    "Frame mismatch: %.1f deg",
+                    analysis.diagnostics.positionalGap,
+                    analysis.diagnostics.tangentMismatchDegrees,
+                    analysis.diagnostics.frameMismatchDegrees);
+            }
+
+            SDL_ShowSimpleMessageBox(
+                SDL_MESSAGEBOX_INFORMATION,
+                "Complete Circuit Analysis",
+                message,
+                window_);
         }
 
         // Conversions stay available as secondary operations from the
