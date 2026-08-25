@@ -2,13 +2,17 @@ add_executable(
     QUANTUM
     src/main.cpp
     src/CenterlineVisualization.cpp
+    src/DocumentState.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
+    src/PlatformDialogs.cpp
     src/RegionSummary.cpp
     src/ViewportCamera.cpp
     include/quantum/editor/CenterlineVisualization.hpp
+    include/quantum/editor/DocumentState.hpp
     include/quantum/editor/EditorStyle.hpp
     include/quantum/editor/EditorUi.hpp
+    include/quantum/editor/PlatformDialogs.hpp
     include/quantum/editor/RegionSummary.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp

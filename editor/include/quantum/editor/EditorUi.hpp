@@ -238,6 +238,16 @@ namespace quantum::editor
         double value = 0.0;
     };
 
+    // File workflow operations requested by the user through the menu
+    // bar or command area. The Application layer processes these.
+    enum class FileOperationType
+    {
+        New,
+        Open,
+        Save,
+        SaveAs
+    };
+
     // Authoritative viewport display configuration. The editor owns these
     // values and pushes them into the camera and renderer every frame.
     struct ViewportSettings
@@ -316,6 +326,18 @@ namespace quantum::editor
         );
         void render(VkCommandBuffer commandBuffer);
         void shutdown() noexcept;
+
+        // File workflow: returns any pending file operation requested
+        // by the user through menu items or command area buttons.
+        [[nodiscard]] std::optional<FileOperationType>
+        takePendingFileOperation() noexcept;
+
+        // Resets all transient editing state (selections, drags, edit
+        // buffers) so the editor is clean for a new document.
+        void resetTransientState();
+
+        // Updates the SDL window title bar.
+        void updateWindowTitle(const std::string& title);
 
     private:
         enum class CameraGesture
@@ -422,5 +444,6 @@ namespace quantum::editor
         std::optional<RegionCommand> regionCommand_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
+        std::optional<FileOperationType> pendingFileOperation_;
     };
 }

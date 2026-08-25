@@ -895,3 +895,44 @@ set_tests_properties(
     PROPERTIES
         LABELS "core;coaster;serialization"
 )
+
+add_executable(
+    QuantumEditorDocumentTests
+    EditorDocumentTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentState.cpp
+)
+
+target_include_directories(
+    QuantumEditorDocumentTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorDocumentTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorDocumentTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorDocumentTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.DocumentState
+    COMMAND QuantumEditorDocumentTests
+)
+
+set_tests_properties(
+    QuantumEditor.DocumentState
+    PROPERTIES
+        LABELS "editor;document"
+)

@@ -1,8 +1,11 @@
 #include <quantum/engine/Application.hpp>
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/ChannelProfileEditing.hpp>
+#include <quantum/coaster/CoasterDocument.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/DocumentState.hpp>
 #include <quantum/editor/EditorUi.hpp>
+#include <quantum/editor/PlatformDialogs.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -10,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -56,7 +61,8 @@ namespace quantum::engine
         {
             {
                 quantum::coaster::AuthoredTrack authoredTrack =
-                    quantum::coaster::createDefaultAuthoredTrack();
+                    quantum::coaster::createNewDocument();
+                quantum::editor::DocumentState documentState;
                 quantum::editor::CenterlineVisualization centerline =
                     quantum::editor::createCenterlineVisualization(
                         authoredTrack
@@ -93,6 +99,7 @@ namespace quantum::engine
                     centerline.maximumPosition
                 );
                 editorUi.setCenterlineSections(centerline.sectionSlices);
+                editorUi.updateWindowTitle(documentState.windowTitle());
 
                 bool running = true;
 
@@ -106,7 +113,120 @@ namespace quantum::engine
 
                         if (event.type == SDL_EVENT_QUIT)
                         {
-                            running = false;
+                            if (documentState.isDirty())
+                            {
+                                const SDL_MessageBoxButtonData buttons[] = {
+                                    {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,
+                                        0, "Save"},
+                                    {0, 1, "Don't Save"},
+                                    {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,
+                                        2, "Cancel"}
+                                };
+                                const SDL_MessageBoxData messageBoxData{
+                                    SDL_MESSAGEBOX_WARNING,
+                                    window,
+                                    "Unsaved Changes",
+                                    "This document has unsaved changes.",
+                                    3,
+                                    buttons,
+                                    nullptr
+                                };
+                                int buttonId = 2;
+                                SDL_ShowMessageBox(
+                                    &messageBoxData,
+                                    &buttonId
+                                );
+
+                                if (buttonId == 0)
+                                {
+                                    if (documentState.hasPath())
+                                    {
+                                        const std::string json =
+                                            quantum::coaster::
+                                                serializeCoasterDocument(
+                                                    authoredTrack);
+                                        const auto path =
+                                            documentState.currentPath();
+                                        std::ofstream ofs(path);
+
+                                        if (ofs.is_open()
+                                            && ofs.write(
+                                                json.data(),
+                                                static_cast<
+                                                    std::streamsize>(
+                                                    json.size())))
+                                        {
+                                            documentState.clearDirty();
+                                            running = false;
+                                        }
+                                        else
+                                        {
+                                            SDL_ShowSimpleMessageBox(
+                                                SDL_MESSAGEBOX_ERROR,
+                                                "Save Failed",
+                                                "Could not write the "
+                                                "document file.",
+                                                window
+                                            );
+                                        }
+                                    }
+                                    else
+                                    {
+                                        auto savePath =
+                                            quantum::editor::
+                                                saveFileDialog(window);
+
+                                        if (savePath.has_value())
+                                        {
+                                            if (savePath->extension()
+                                                .empty())
+                                            {
+                                                *savePath += ".quantum";
+                                            }
+
+                                            const std::string json =
+                                                quantum::coaster::
+                                                    serializeCoasterDocument(
+                                                        authoredTrack);
+                                            std::ofstream ofs(
+                                                *savePath);
+
+                                            if (ofs.is_open()
+                                                && ofs.write(
+                                                    json.data(),
+                                                    static_cast<
+                                                        std::streamsize>(
+                                                        json.size())))
+                                            {
+                                                documentState
+                                                    .setOpenDocument(
+                                                        *savePath);
+                                                running = false;
+                                            }
+                                            else
+                                            {
+                                                SDL_ShowSimpleMessageBox(
+                                                    SDL_MESSAGEBOX_ERROR,
+                                                    "Save Failed",
+                                                    "Could not write "
+                                                    "the document "
+                                                    "file.",
+                                                    window
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (buttonId == 1)
+                                {
+                                    running = false;
+                                }
+                                // buttonId == 2: Cancel, do nothing
+                            }
+                            else
+                            {
+                                running = false;
+                            }
                         }
                     }
 
@@ -117,6 +237,406 @@ namespace quantum::engine
                         {
                             SDL_Delay(10);
                             continue;
+                        }
+
+                        // Process file operations requested through the
+                        // menu bar or command area.
+                        const auto pendingFileOp =
+                            editorUi.takePendingFileOperation();
+
+                        if (pendingFileOp.has_value())
+                        {
+                            using quantum::editor::FileOperationType;
+
+                            auto confirmUnsaved = [&]() -> bool
+                            {
+                                if (!documentState.isDirty())
+                                {
+                                    return true;
+                                }
+
+                                const SDL_MessageBoxButtonData buttons[] = {
+                                    {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,
+                                        0, "Save"},
+                                    {0, 1, "Don't Save"},
+                                    {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,
+                                        2, "Cancel"}
+                                };
+                                const SDL_MessageBoxData messageBoxData{
+                                    SDL_MESSAGEBOX_WARNING,
+                                    window,
+                                    "Unsaved Changes",
+                                    "This document has unsaved changes.",
+                                    3,
+                                    buttons,
+                                    nullptr
+                                };
+                                int buttonId = 2;
+                                SDL_ShowMessageBox(
+                                    &messageBoxData,
+                                    &buttonId
+                                );
+
+                                if (buttonId == 0)
+                                {
+                                    if (documentState.hasPath())
+                                    {
+                                        const std::string json =
+                                            quantum::coaster::
+                                                serializeCoasterDocument(
+                                                    authoredTrack);
+                                        const auto path =
+                                            documentState.currentPath();
+                                        std::ofstream ofs(path);
+
+                                        if (ofs.is_open()
+                                            && ofs.write(
+                                                json.data(),
+                                                static_cast<
+                                                    std::streamsize>(
+                                                    json.size())))
+                                        {
+                                            documentState.clearDirty();
+                                            editorUi.updateWindowTitle(
+                                                documentState.windowTitle()
+                                            );
+                                            return true;
+                                        }
+
+                                        SDL_ShowSimpleMessageBox(
+                                            SDL_MESSAGEBOX_ERROR,
+                                            "Save Failed",
+                                            "Could not write the "
+                                            "document file.",
+                                            window
+                                        );
+                                        return false;
+                                    }
+
+                                    auto savePath =
+                                        quantum::editor::
+                                            saveFileDialog(window);
+
+                                    if (savePath.has_value())
+                                    {
+                                        if (savePath->extension().empty())
+                                        {
+                                            *savePath += ".quantum";
+                                        }
+
+                                        const std::string json =
+                                            quantum::coaster::
+                                                serializeCoasterDocument(
+                                                    authoredTrack);
+                                        std::ofstream ofs(*savePath);
+
+                                        if (ofs.is_open()
+                                            && ofs.write(
+                                                json.data(),
+                                                static_cast<
+                                                    std::streamsize>(
+                                                    json.size())))
+                                        {
+                                            documentState.setOpenDocument(
+                                                *savePath
+                                            );
+                                            editorUi.updateWindowTitle(
+                                                documentState.windowTitle()
+                                            );
+                                            return true;
+                                        }
+
+                                        SDL_ShowSimpleMessageBox(
+                                            SDL_MESSAGEBOX_ERROR,
+                                            "Save Failed",
+                                            "Could not write the "
+                                            "document file.",
+                                            window
+                                        );
+                                    }
+
+                                    return false;
+                                }
+
+                                if (buttonId == 1)
+                                {
+                                    return true;
+                                }
+
+                                return false;
+                            };
+
+                            if (*pendingFileOp == FileOperationType::New)
+                            {
+                                if (!confirmUnsaved())
+                                {
+                                    editorUi.updateWindowTitle(
+                                        documentState.windowTitle()
+                                    );
+                                }
+                                else
+                                {
+                                    authoredTrack =
+                                        quantum::coaster::createNewDocument();
+                                    documentState.newDocument();
+                                    editorUi.resetTransientState();
+                                    editorUi.selectSection(0);
+
+                                    centerline =
+                                        quantum::editor::
+                                            createCenterlineVisualization(
+                                                authoredTrack
+                                            );
+                                    editorUi.setCenterlineBounds(
+                                        centerline.minimumPosition,
+                                        centerline.maximumPosition
+                                    );
+                                    editorUi.setCenterlineSections(
+                                        centerline.sectionSlices
+                                    );
+                                    vulkan.updateTrackCurveVertices(
+                                        centerline.vertices,
+                                        centerline.verticesPerCurve
+                                    );
+                                    editorUi.updateWindowTitle(
+                                        documentState.windowTitle()
+                                    );
+
+                                    SDL_LogInfo(
+                                        SDL_LOG_CATEGORY_APPLICATION,
+                                        "[FILE] New document created"
+                                    );
+                                }
+                            }
+                            else if (
+                                *pendingFileOp == FileOperationType::Open)
+                            {
+                                if (!confirmUnsaved())
+                                {
+                                    editorUi.updateWindowTitle(
+                                        documentState.windowTitle()
+                                    );
+                                }
+                                else
+                                {
+                                    auto openPath =
+                                        quantum::editor::openFileDialog(
+                                            window
+                                        );
+
+                                    if (openPath.has_value())
+                                    {
+                                        std::ifstream ifs(*openPath);
+                                        std::string json(
+                                            (std::istreambuf_iterator<char>(
+                                                ifs)),
+                                            std::istreambuf_iterator<char>()
+                                        );
+
+                                        auto result =
+                                            quantum::coaster::
+                                                deserializeCoasterDocument(
+                                                    json);
+
+                                        if (result.has_value())
+                                        {
+                                            authoredTrack =
+                                                std::move(*result);
+                                            documentState.setOpenDocument(
+                                                *openPath
+                                            );
+                                            editorUi.resetTransientState();
+                                            editorUi.selectSection(0);
+
+                                            centerline =
+                                                quantum::editor::
+                                                    createCenterlineVisualization(
+                                                        authoredTrack
+                                                    );
+                                            editorUi.setCenterlineBounds(
+                                                centerline.minimumPosition,
+                                                centerline.maximumPosition
+                                            );
+                                            editorUi.setCenterlineSections(
+                                                centerline.sectionSlices
+                                            );
+                                            vulkan.updateTrackCurveVertices(
+                                                centerline.vertices,
+                                                centerline.verticesPerCurve
+                                            );
+                                            editorUi.updateWindowTitle(
+                                                documentState.windowTitle()
+                                            );
+
+                                            SDL_LogInfo(
+                                                SDL_LOG_CATEGORY_APPLICATION,
+                                                "[FILE] Opened %s "
+                                                "(%zu section(s))",
+                                                openPath->string()
+                                                    .c_str(),
+                                                authoredTrack
+                                                    .sectionCount()
+                                            );
+                                        }
+                                        else
+                                        {
+                                            SDL_ShowSimpleMessageBox(
+                                                SDL_MESSAGEBOX_ERROR,
+                                                "Open Failed",
+                                                result.error().c_str(),
+                                                window
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            else if (
+                                *pendingFileOp == FileOperationType::Save)
+                            {
+                                if (!documentState.hasPath())
+                                {
+                                    auto savePath =
+                                        quantum::editor::
+                                            saveFileDialog(window);
+
+                                    if (savePath.has_value())
+                                    {
+                                        if (savePath->extension().empty())
+                                        {
+                                            *savePath += ".quantum";
+                                        }
+
+                                        const std::string json =
+                                            quantum::coaster::
+                                                serializeCoasterDocument(
+                                                    authoredTrack);
+                                        std::ofstream ofs(*savePath);
+
+                                        if (ofs.is_open()
+                                            && ofs.write(
+                                                json.data(),
+                                                static_cast<
+                                                    std::streamsize>(
+                                                    json.size())))
+                                        {
+                                            documentState.setOpenDocument(
+                                                *savePath
+                                            );
+                                            editorUi.updateWindowTitle(
+                                                documentState.windowTitle()
+                                            );
+
+                                            SDL_LogInfo(
+                                                SDL_LOG_CATEGORY_APPLICATION,
+                                                "[FILE] Saved %s",
+                                                savePath->string()
+                                                    .c_str()
+                                            );
+                                        }
+                                        else
+                                        {
+                                            SDL_ShowSimpleMessageBox(
+                                                SDL_MESSAGEBOX_ERROR,
+                                                "Save Failed",
+                                                "Could not write the "
+                                                "document file.",
+                                                window
+                                            );
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    const std::string json =
+                                        quantum::coaster::
+                                            serializeCoasterDocument(
+                                                authoredTrack);
+                                    const auto path =
+                                        documentState.currentPath();
+                                    std::ofstream ofs(path);
+
+                                    if (ofs.is_open()
+                                        && ofs.write(
+                                            json.data(),
+                                            static_cast<
+                                                std::streamsize>(
+                                                json.size())))
+                                    {
+                                        documentState.clearDirty();
+                                        editorUi.updateWindowTitle(
+                                            documentState.windowTitle()
+                                        );
+
+                                        SDL_LogInfo(
+                                            SDL_LOG_CATEGORY_APPLICATION,
+                                            "[FILE] Saved %s",
+                                            path.string().c_str()
+                                        );
+                                    }
+                                    else
+                                    {
+                                        SDL_ShowSimpleMessageBox(
+                                            SDL_MESSAGEBOX_ERROR,
+                                            "Save Failed",
+                                            "Could not write the "
+                                            "document file.",
+                                            window
+                                        );
+                                    }
+                                }
+                            }
+                            else if (
+                                *pendingFileOp
+                                == FileOperationType::SaveAs)
+                            {
+                                auto savePath =
+                                    quantum::editor::saveFileDialog(window);
+
+                                if (savePath.has_value())
+                                {
+                                    if (savePath->extension().empty())
+                                    {
+                                        *savePath += ".quantum";
+                                    }
+
+                                    const std::string json =
+                                        quantum::coaster::
+                                            serializeCoasterDocument(
+                                                authoredTrack);
+                                    std::ofstream ofs(*savePath);
+
+                                    if (ofs.is_open()
+                                        && ofs.write(
+                                            json.data(),
+                                            static_cast<
+                                                std::streamsize>(
+                                                json.size())))
+                                    {
+                                        documentState.setOpenDocument(
+                                            *savePath
+                                        );
+                                        editorUi.updateWindowTitle(
+                                            documentState.windowTitle()
+                                        );
+
+                                        SDL_LogInfo(
+                                            SDL_LOG_CATEGORY_APPLICATION,
+                                            "[FILE] Saved As %s",
+                                            savePath->string().c_str()
+                                        );
+                                    }
+                                    else
+                                    {
+                                        SDL_ShowSimpleMessageBox(
+                                            SDL_MESSAGEBOX_ERROR,
+                                            "Save Failed",
+                                            "Could not write the "
+                                            "document file.",
+                                            window
+                                        );
+                                    }
+                                }
+                            }
                         }
 
                         // Editor requests are queued during render and
@@ -608,6 +1128,10 @@ namespace quantum::engine
 
                                 centerline = std::move(candidateCenterline);
                                 authoredTrack = std::move(candidateTrack);
+                                documentState.markDirty();
+                                editorUi.updateWindowTitle(
+                                    documentState.windowTitle()
+                                );
 
                                 if (!continuousDrag)
                                 {

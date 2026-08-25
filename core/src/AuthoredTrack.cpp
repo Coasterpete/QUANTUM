@@ -521,6 +521,13 @@ namespace quantum::coaster
         return track;
     }
 
+    AuthoredTrack createNewDocument()
+    {
+        AuthoredTrack track;
+        track.appendSection();
+        return track;
+    }
+
     std::vector<RiderLocalGeometryState> integrateAuthoredTrack(
         const AuthoredTrack& track,
         const double integrationSpacing)

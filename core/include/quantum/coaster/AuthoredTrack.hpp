@@ -191,6 +191,10 @@ namespace quantum::coaster
     // original demonstration centerline behavior.
     [[nodiscard]] AuthoredTrack createDefaultAuthoredTrack();
 
+    // Clean default document: exactly one Rate/Profile Region, length 60,
+    // straight/neutral zero-rate channels, no demo layout.
+    [[nodiscard]] AuthoredTrack createNewDocument();
+
     // Chains every authored section through the rider-local roll/pitch/yaw
     // rate integration into one continuous centerline. Each section starts
     // where the previous one ended; returned distances are cumulative from

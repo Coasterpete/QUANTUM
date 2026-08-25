@@ -1415,7 +1415,10 @@ namespace
         ImGui::End();
     }
 
-    float showCommandArea(ImGuiViewport* const mainViewport)
+    float showCommandArea(
+        ImGuiViewport* const mainViewport,
+        std::optional<quantum::editor::FileOperationType>&
+            pendingFileOperation)
     {
         const ImGuiStyle& style = ImGui::GetStyle();
         const float height = style.WindowPadding.y * 2.0F
@@ -1449,15 +1452,29 @@ namespace
             ImGui::TextUnformatted("COMMAND");
             ImGui::PopStyleColor();
 
+            if (ImGui::Button("New"))
+            {
+                pendingFileOperation =
+                    quantum::editor::FileOperationType::New;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Open"))
+            {
+                pendingFileOperation =
+                    quantum::editor::FileOperationType::Open;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save"))
+            {
+                pendingFileOperation =
+                    quantum::editor::FileOperationType::Save;
+            }
+            ImGui::SameLine();
             ImGui::BeginDisabled();
-            ImGui::Button("New");
-            ImGui::SameLine();
-            ImGui::Button("Open");
-            ImGui::SameLine();
-            ImGui::Button("Save");
-            ImGui::SameLine();
             ImGui::Button("Undo");
+            ImGui::EndDisabled();
             ImGui::SameLine();
+            ImGui::BeginDisabled();
             ImGui::Button("Toggle");
             ImGui::SameLine();
             ImGui::Button("Visualization");
@@ -2882,9 +2899,22 @@ namespace quantum::editor
 
         if (ImGui::BeginMenu("File"))
         {
-            ImGui::MenuItem("New", nullptr, false, false);
-            ImGui::MenuItem("Open", nullptr, false, false);
-            ImGui::MenuItem("Save", nullptr, false, false);
+            if (ImGui::MenuItem("New"))
+            {
+                pendingFileOperation_ = FileOperationType::New;
+            }
+            if (ImGui::MenuItem("Open"))
+            {
+                pendingFileOperation_ = FileOperationType::Open;
+            }
+            if (ImGui::MenuItem("Save"))
+            {
+                pendingFileOperation_ = FileOperationType::Save;
+            }
+            if (ImGui::MenuItem("Save As"))
+            {
+                pendingFileOperation_ = FileOperationType::SaveAs;
+            }
             ImGui::EndMenu();
         }
 
@@ -3207,7 +3237,8 @@ namespace quantum::editor
         const float menuBarHeight = showMainMenuBar();
 
         ImGuiViewport* const mainViewport = ImGui::GetMainViewport();
-        const float commandAreaHeight = showCommandArea(mainViewport);
+        const float commandAreaHeight = showCommandArea(
+            mainViewport, pendingFileOperation_);
 
         showTransitionEditorInputSettings(
             transitionEditorInputSettings_,
@@ -4267,5 +4298,64 @@ namespace quantum::editor
         trackCommand_.reset();
         sectionLengthEdit_.reset();
         iniPath_.clear();
+        pendingFileOperation_.reset();
+    }
+
+    std::optional<FileOperationType>
+    EditorUi::takePendingFileOperation() noexcept
+    {
+        const auto op = pendingFileOperation_;
+        pendingFileOperation_.reset();
+        return op;
+    }
+
+    void EditorUi::resetTransientState()
+    {
+        selectedSection_ = 0;
+        valueEndEditBuffers_.fill(0.0);
+        endpointSelections_.fill(ScalarProfileEndpoint::None);
+        endpointDrags_.fill(ScalarProfileEndpoint::None);
+        selectedSegmentIds_.fill(coaster::invalidSegmentId);
+        dragSegmentIds_.fill(coaster::invalidSegmentId);
+        dragAxisLocks_.fill(DragAxisLock::None);
+        dragAxisTravelX_.fill(0.0);
+        dragAxisTravelY_.fill(0.0);
+        pendingDragSummary_ = false;
+        pendingDistanceSummary_ = false;
+
+        for (std::optional<double>& lastValue : dragLastValues_)
+        {
+            lastValue.reset();
+        }
+
+        for (std::optional<ScalarDragAnchor>& anchor : scalarDragAnchors_)
+        {
+            anchor.reset();
+        }
+
+        for (double& splitDistance : contextMenuSplitDistances_)
+        {
+            splitDistance = 0.0;
+        }
+
+        regionCreateFlow_.choicePending = false;
+        regionCreateFlow_.anchor = RegionCreateAnchor::Append;
+        sectionLengthEditBuffer_ = 0.0;
+        planarArcEditBuffers_.fill(0.0);
+        profileEndpointValueEdit_.reset();
+        profileTransitionTypeEdit_.reset();
+        profileSegmentCommand_.reset();
+        profileSegmentDistanceEdit_.reset();
+        trackCommand_.reset();
+        sectionLengthEdit_.reset();
+        regionCommand_.reset();
+    }
+
+    void EditorUi::updateWindowTitle(const std::string& title)
+    {
+        if (window_ != nullptr)
+        {
+            SDL_SetWindowTitle(window_, title.c_str());
+        }
     }
 }
