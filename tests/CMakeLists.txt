@@ -1004,3 +1004,169 @@ set_tests_properties(
     PROPERTIES
         LABELS "core;coaster;layout"
 )
+
+add_executable(
+    QuantumCoreCircuitCompletionTests
+    CircuitCompletionTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCircuitCompletionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCircuitCompletionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCircuitCompletionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CircuitCompletion
+    COMMAND QuantumCoreCircuitCompletionTests
+)
+
+set_tests_properties(
+    QuantumCore.CircuitCompletion
+    PROPERTIES
+        LABELS "core;coaster;topology"
+)
+
+add_executable(
+    CompletionDebug
+    CompletionDebugMain.cpp
+)
+
+target_link_libraries(
+    CompletionDebug
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    CompletionDebug
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    CompletionDebug
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_executable(
+    FeasibilityTest
+    FeasibilityTest.cpp
+)
+
+target_link_libraries(
+    FeasibilityTest
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    FeasibilityTest
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    FeasibilityTest
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_executable(
+    InitialSeedSweep
+    InitialSeedSweep.cpp
+)
+
+target_link_libraries(
+    InitialSeedSweep
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    InitialSeedSweep
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    InitialSeedSweep
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_executable(
+    QuickSeedTest
+    QuickSeedTest.cpp
+)
+
+target_link_libraries(
+    QuickSeedTest
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuickSeedTest
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuickSeedTest
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_executable(
+    OmegaSweep
+    OmegaSweep.cpp
+)
+
+target_compile_features(
+    OmegaSweep
+    PRIVATE
+        cxx_std_23
+)
+
+add_executable(
+    JacobianRankTest
+    JacobianRankTest.cpp
+)
+
+target_link_libraries(
+    JacobianRankTest
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    JacobianRankTest
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    JacobianRankTest
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+set_target_properties(
+    OmegaSweep
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)

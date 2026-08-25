@@ -337,6 +337,11 @@ namespace quantum::editor
         [[nodiscard]] std::optional<coaster::LayoutMode>
         takePendingLayoutModeChange() noexcept;
 
+        // Circuit completion: returns true once when the user clicks
+        // Complete Circuit....  Application processes the actual
+        // completion attempt.
+        [[nodiscard]] bool takeCircuitCompletionRequest() noexcept;
+
         // Resets all transient editing state (selections, drags, edit
         // buffers) so the editor is clean for a new document.
         void resetTransientState();
@@ -451,5 +456,6 @@ namespace quantum::editor
         SDL_Window* window_ = nullptr;
         std::optional<FileOperationType> pendingFileOperation_;
         std::optional<coaster::LayoutMode> pendingLayoutModeChange_;
+        bool pendingCircuitCompletion_ = false;
     };
 }
