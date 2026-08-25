@@ -159,6 +159,21 @@ namespace quantum::coaster
         void appendSection();
         void prependSection();
 
+        // Inserts one copy of section immediately after the existing section
+        // at index; later sections shift back by one. Throws
+        // std::out_of_range for an invalid index and std::invalid_argument
+        // when the inserted section fails its local-domain validation, so
+        // malformed regions cannot enter the document.
+        void insertSectionAfter(
+            std::size_t index,
+            const AuthoredTrackSection& section);
+
+        // Inserts an exact independent copy of the section at index
+        // immediately after it. Every profile is owned by value, so the
+        // duplicate shares no mutable state with the original. Throws
+        // std::out_of_range for an invalid index.
+        void duplicateSection(std::size_t index);
+
         // Throws std::out_of_range for an invalid index and
         // std::invalid_argument when removing the last remaining section.
         void removeSection(std::size_t index);

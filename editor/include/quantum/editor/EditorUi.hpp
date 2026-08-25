@@ -180,7 +180,8 @@ namespace quantum::editor
         RemoveSection,
         MoveSectionUp,
         MoveSectionDown,
-        SetSectionLength
+        SetSectionLength,
+        DuplicateSection
     };
 
     struct TrackCommand
@@ -190,13 +191,23 @@ namespace quantum::editor
         double length = 0.0;
     };
 
+    // Which ordering position a typed region creation targets. The
+    // choice strip is shared by all three triggers.
+    enum class RegionCreateAnchor
+    {
+        Append,
+        Prepend,
+        AfterSelected
+    };
+
     // Two-step typed region creation in the track workspace: clicking
-    // "Append/Prepend Region..." opens the authoring-type choice strip,
-    // and choosing a kind or cancelling resolves it.
+    // "Append/Prepend Region..." or "Insert After Selected..." opens the
+    // authoring-type choice strip, and choosing a kind or cancelling
+    // resolves it.
     struct RegionCreateFlow
     {
         bool choicePending = false;
-        bool prependDirection = false;
+        RegionCreateAnchor anchor = RegionCreateAnchor::Append;
     };
 
     // Region-level authoring commands for one section: typed creation of a
@@ -210,6 +221,8 @@ namespace quantum::editor
         PrependRateProfiles,
         AppendPlanarArc,
         PrependPlanarArc,
+        InsertAfterRateProfiles,
+        InsertAfterPlanarArc,
         ConvertToRateProfiles,
         ConvertToPlanarArc,
         SetPlanarArcRadius,
@@ -275,6 +288,12 @@ namespace quantum::editor
         takeSectionLengthEdit() noexcept;
         [[nodiscard]] std::optional<RegionCommand>
         takeRegionCommand() noexcept;
+        // Selects a region programmatically after an accepted structural
+        // edit so newly created, duplicated, and reordered regions keep the
+        // working selection on the intended region. Requests naming an
+        // index outside the live document are ignored; the same interaction
+        // resets and [SEL] logging apply as for list-click selection.
+        void selectSection(std::size_t index);
         // Refreshes the numeric edit buffer for a channel, but only when
         // the committed segment is the one the row currently addresses.
         void synchronizeSegmentValueEnd(

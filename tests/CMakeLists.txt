@@ -827,3 +827,37 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;coaster"
 )
+
+add_executable(
+    QuantumCoreAuthoredTrackStructureTests
+    AuthoredTrackStructureTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreAuthoredTrackStructureTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreAuthoredTrackStructureTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreAuthoredTrackStructureTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.AuthoredTrackStructure
+    COMMAND QuantumCoreAuthoredTrackStructureTests
+)
+
+set_tests_properties(
+    QuantumCore.AuthoredTrackStructure
+    PROPERTIES
+        LABELS "core;coaster"
+)

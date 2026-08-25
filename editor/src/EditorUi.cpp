@@ -338,6 +338,7 @@ namespace
         bool removeRequested = false;
         bool moveUpRequested = false;
         bool moveDownRequested = false;
+        bool duplicateRequested = false;
         bool lengthEdited = false;
         bool convertToGeometryRequested = false;
         bool convertToRateProfilesRequested = false;
@@ -1632,8 +1633,8 @@ namespace
             }
 
             const ImGuiStyle& style = ImGui::GetStyle();
-            const float buttonAreaHeight = 3.0F * ImGui::GetFrameHeight()
-                + 2.0F * style.ItemSpacing.y;
+            const float buttonAreaHeight = 4.0F * ImGui::GetFrameHeight()
+                + 3.0F * style.ItemSpacing.y;
             const float buttonAreaY = ImGui::GetWindowHeight()
                 - style.WindowPadding.y
                 - buttonAreaHeight;
@@ -1650,7 +1651,9 @@ namespace
             // Typed region creation: the first click swaps this row's
             // content to the authoring-type choice. The row keeps its
             // height in both states so nothing below it shifts while a
-            // choice is pending.
+            // choice is pending. The strip is shared by all three
+            // creation anchors; the clicked trigger button carries the
+            // direction context.
             if (!regionCreateFlow.choicePending)
             {
                 if (ImGui::Button(
@@ -1658,7 +1661,8 @@ namespace
                     ImVec2(halfWidth, 0.0F)))
                 {
                     regionCreateFlow.choicePending = true;
-                    regionCreateFlow.prependDirection = false;
+                    regionCreateFlow.anchor =
+                        quantum::editor::RegionCreateAnchor::Append;
                 }
 
                 ImGui::SameLine();
@@ -1667,7 +1671,8 @@ namespace
                     ImVec2(-1.0F, 0.0F)))
                 {
                     regionCreateFlow.choicePending = true;
-                    regionCreateFlow.prependDirection = true;
+                    regionCreateFlow.anchor =
+                        quantum::editor::RegionCreateAnchor::Prepend;
                 }
             }
             else
@@ -1700,6 +1705,41 @@ namespace
                 }
             }
 
+            ImGui::BeginDisabled(!hasSelection);
+            if (ImGui::Button(
+                "Insert After Selected...",
+                ImVec2(-1.0F, 0.0F)))
+            {
+                regionCreateFlow.choicePending = true;
+                regionCreateFlow.anchor =
+                    quantum::editor::RegionCreateAnchor::AfterSelected;
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip(
+                    "Creates a new region immediately after the selected "
+                    "region"
+                );
+            }
+
+            ImGui::BeginDisabled(!hasSelection);
+            if (ImGui::Button(
+                "Duplicate Selected",
+                ImVec2(halfWidth, 0.0F)))
+            {
+                edit.duplicateRequested = true;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            ImGui::BeginDisabled(sectionCount <= 1);
+            if (ImGui::Button("Remove Selected", ImVec2(-1.0F, 0.0F)))
+            {
+                edit.removeRequested = true;
+            }
+            ImGui::EndDisabled();
+
             ImGui::BeginDisabled(!hasSelection || selectedIndex == 0);
             if (ImGui::Button("Move Up", ImVec2(halfWidth, 0.0F)))
             {
@@ -1713,13 +1753,6 @@ namespace
             if (ImGui::Button("Move Down", ImVec2(-1.0F, 0.0F)))
             {
                 edit.moveDownRequested = true;
-            }
-            ImGui::EndDisabled();
-
-            ImGui::BeginDisabled(sectionCount <= 1);
-            if (ImGui::Button("Remove Selected", ImVec2(-1.0F, 0.0F)))
-            {
-                edit.removeRequested = true;
             }
             ImGui::EndDisabled();
         }
@@ -3369,110 +3402,50 @@ namespace quantum::editor
             selectedRegionHeightDelta
         );
 
-        if (workspaceEdit.selectRequest.has_value()
-            && *workspaceEdit.selectRequest != selectedSection_)
+        if (workspaceEdit.selectRequest.has_value())
         {
-            selectedSection_ = *workspaceEdit.selectRequest;
-            regionCreateFlow_.choicePending = false;
-            endpointSelections_.fill(ScalarProfileEndpoint::None);
-            endpointDrags_.fill(ScalarProfileEndpoint::None);
-            selectedSegmentIds_.fill(coaster::invalidSegmentId);
-            dragSegmentIds_.fill(coaster::invalidSegmentId);
-            dragAxisLocks_.fill(DragAxisLock::None);
-            dragAxisTravelX_.fill(0.0);
-            dragAxisTravelY_.fill(0.0);
-            for (std::optional<double>& lastValue : dragLastValues_)
-            {
-                lastValue.reset();
-            }
-            for (std::optional<ScalarDragAnchor>& anchor :
-                scalarDragAnchors_)
-            {
-                anchor.reset();
-            }
-
-            const coaster::AuthoredTrackSection& selected =
-                authoredTrack_->section(selectedSection_);
-
-            // Both selection log formats are consumed by tooling; keep
-            // the rate-profile format byte-identical to its historical
-            // shape and give geometry sections their own line.
-            if (selected.kind == coaster::RegionKind::RateProfiles)
-            {
-                const auto& rollProfile =
-                    sectionRateChannel(selected, RateChannel::Roll);
-                const auto& pitchProfile =
-                    sectionRateChannel(selected, RateChannel::Pitch);
-                const auto& yawProfile =
-                    sectionRateChannel(selected, RateChannel::Yaw);
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[SEL] selected=%zu rollEnd=%.6f pitchEnd=%.6f "
-                    "yawEnd=%.6f",
-                    selectedSection_,
-                    rollProfile.segments.back().transition.valueEnd,
-                    pitchProfile.segments.back().transition.valueEnd,
-                    yawProfile.segments.back().transition.valueEnd
-                );
-                for (std::size_t channelIndex = 0;
-                    channelIndex < rateChannelCount;
-                    ++channelIndex)
-                {
-                    valueEndEditBuffers_[channelIndex] =
-                        sectionRateChannel(
-                            selected,
-                            static_cast<RateChannel>(channelIndex)
-                        ).segments.back().transition.valueEnd;
-                }
-            }
-            else
-            {
-                const auto& arc = std::get<coaster::PlanarArcRegion>(
-                    std::get<coaster::GeometryRegion>(
-                        selected.region).construction);
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[SEL] selected=%zu kind=planarArc length=%.6f "
-                    "radius=%.6f sweptAngle=%.6f planeTilt=%.6f "
-                    "bankChange=%.6f",
-                    selectedSection_,
-                    selected.length,
-                    arc.radius,
-                    arc.sweptAngle,
-                    arc.planeTilt,
-                    arc.bankChange
-                );
-            }
-
-            if (selected.kind == coaster::RegionKind::Geometry)
-            {
-                const auto& arc = std::get<coaster::PlanarArcRegion>(
-                    std::get<coaster::GeometryRegion>(
-                        selected.region).construction);
-                planarArcEditBuffers_ = {
-                    arc.radius,
-                    arc.sweptAngle * degreesPerRadian,
-                    arc.planeTilt * degreesPerRadian,
-                    arc.bankChange * degreesPerRadian};
-            }
-
-            sectionLengthEditBuffer_ =
-                coaster::sectionLength(selected);
+            selectSection(*workspaceEdit.selectRequest);
         }
 
         if (workspaceEdit.createdRegionKind.has_value())
         {
-            const bool prepend = regionCreateFlow_.prependDirection;
+            const quantum::editor::RegionCreateAnchor anchor =
+                regionCreateFlow_.anchor;
             regionCreateFlow_.choicePending = false;
 
-            const RegionCommandType createType =
-                *workspaceEdit.createdRegionKind
-                        == coaster::RegionKind::Geometry
-                    ? (prepend ? RegionCommandType::PrependPlanarArc
-                               : RegionCommandType::AppendPlanarArc)
-                    : (prepend ? RegionCommandType::PrependRateProfiles
-                               : RegionCommandType::AppendRateProfiles);
+            RegionCommandType createType =
+                RegionCommandType::AppendRateProfiles;
+            switch (anchor)
+            {
+            case quantum::editor::RegionCreateAnchor::Prepend:
+                createType =
+                    *workspaceEdit.createdRegionKind
+                            == coaster::RegionKind::Geometry
+                        ? RegionCommandType::PrependPlanarArc
+                        : RegionCommandType::PrependRateProfiles;
+                break;
+            case quantum::editor::RegionCreateAnchor::AfterSelected:
+                createType =
+                    *workspaceEdit.createdRegionKind
+                            == coaster::RegionKind::Geometry
+                        ? RegionCommandType::InsertAfterPlanarArc
+                        : RegionCommandType::InsertAfterRateProfiles;
+                break;
+            case quantum::editor::RegionCreateAnchor::Append:
+                createType =
+                    *workspaceEdit.createdRegionKind
+                            == coaster::RegionKind::Geometry
+                        ? RegionCommandType::AppendPlanarArc
+                        : RegionCommandType::AppendRateProfiles;
+                break;
+            }
+
             regionCommand_ = {createType, selectedSection_, 0.0};
+        }
+        else if (workspaceEdit.duplicateRequested)
+        {
+            trackCommand_ = {TrackCommandType::DuplicateSection,
+                             selectedSection_, 0.0};
         }
         else if (workspaceEdit.removeRequested)
         {
@@ -4055,6 +4028,105 @@ namespace quantum::editor
         const std::optional<RegionCommand> command = regionCommand_;
         regionCommand_.reset();
         return command;
+    }
+
+    void EditorUi::selectSection(const std::size_t index)
+    {
+        const std::size_t sectionCount = authoredTrack_ != nullptr
+            ? authoredTrack_->sectionCount()
+            : 0;
+        if (sectionCount == 0 || index >= sectionCount
+            || index == selectedSection_)
+        {
+            return;
+        }
+
+        selectedSection_ = index;
+        regionCreateFlow_.choicePending = false;
+        endpointSelections_.fill(ScalarProfileEndpoint::None);
+        endpointDrags_.fill(ScalarProfileEndpoint::None);
+        selectedSegmentIds_.fill(coaster::invalidSegmentId);
+        dragSegmentIds_.fill(coaster::invalidSegmentId);
+        dragAxisLocks_.fill(DragAxisLock::None);
+        dragAxisTravelX_.fill(0.0);
+        dragAxisTravelY_.fill(0.0);
+        for (std::optional<double>& lastValue : dragLastValues_)
+        {
+            lastValue.reset();
+        }
+        for (std::optional<ScalarDragAnchor>& anchor :
+            scalarDragAnchors_)
+        {
+            anchor.reset();
+        }
+
+        const coaster::AuthoredTrackSection& selected =
+            authoredTrack_->section(selectedSection_);
+
+        // Both selection log formats are consumed by tooling; keep
+        // the rate-profile format byte-identical to its historical
+        // shape and give geometry sections their own line.
+        if (selected.kind == coaster::RegionKind::RateProfiles)
+        {
+            const auto& rollProfile =
+                sectionRateChannel(selected, RateChannel::Roll);
+            const auto& pitchProfile =
+                sectionRateChannel(selected, RateChannel::Pitch);
+            const auto& yawProfile =
+                sectionRateChannel(selected, RateChannel::Yaw);
+            SDL_LogInfo(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "[SEL] selected=%zu rollEnd=%.6f pitchEnd=%.6f "
+                "yawEnd=%.6f",
+                selectedSection_,
+                rollProfile.segments.back().transition.valueEnd,
+                pitchProfile.segments.back().transition.valueEnd,
+                yawProfile.segments.back().transition.valueEnd
+            );
+            for (std::size_t channelIndex = 0;
+                channelIndex < rateChannelCount;
+                ++channelIndex)
+            {
+                valueEndEditBuffers_[channelIndex] =
+                    sectionRateChannel(
+                        selected,
+                        static_cast<RateChannel>(channelIndex)
+                    ).segments.back().transition.valueEnd;
+            }
+        }
+        else
+        {
+            const auto& arc = std::get<coaster::PlanarArcRegion>(
+                std::get<coaster::GeometryRegion>(
+                    selected.region).construction);
+            SDL_LogInfo(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "[SEL] selected=%zu kind=planarArc length=%.6f "
+                "radius=%.6f sweptAngle=%.6f planeTilt=%.6f "
+                "bankChange=%.6f",
+                selectedSection_,
+                selected.length,
+                arc.radius,
+                arc.sweptAngle,
+                arc.planeTilt,
+                arc.bankChange
+            );
+        }
+
+        if (selected.kind == coaster::RegionKind::Geometry)
+        {
+            const auto& arc = std::get<coaster::PlanarArcRegion>(
+                std::get<coaster::GeometryRegion>(
+                    selected.region).construction);
+            planarArcEditBuffers_ = {
+                arc.radius,
+                arc.sweptAngle * degreesPerRadian,
+                arc.planeTilt * degreesPerRadian,
+                arc.bankChange * degreesPerRadian};
+        }
+
+        sectionLengthEditBuffer_ =
+            coaster::sectionLength(selected);
     }
 
     void EditorUi::synchronizeSegmentValueEnd(

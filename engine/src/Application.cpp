@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -163,6 +164,10 @@ namespace quantum::engine
                         quantum::coaster::SegmentId removeSurvivorId =
                             quantum::coaster::invalidSegmentId;
                         bool regionCommandApplied = false;
+                        // Selection the editor should follow after an
+                        // accepted structural edit; empty when indices
+                        // stay stable.
+                        std::optional<std::size_t> selectionAfterCommand;
 
                         try
                         {
@@ -186,6 +191,14 @@ namespace quantum::engine
                                     candidateTrack.removeSection(
                                         command.sectionIndex
                                     );
+                                    // Prefer whichever region now occupies
+                                    // the removed index; fall back to the
+                                    // previous final region when the tail
+                                    // region was removed.
+                                    selectionAfterCommand = std::min(
+                                        command.sectionIndex,
+                                        candidateTrack.sectionCount() - 1
+                                    );
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     MoveSectionUp:
@@ -193,6 +206,10 @@ namespace quantum::engine
                                         command.sectionIndex,
                                         command.sectionIndex - 1
                                     );
+                                    // Follow the moved region to its new
+                                    // slot so selection keeps its identity.
+                                    selectionAfterCommand =
+                                        command.sectionIndex - 1;
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     MoveSectionDown:
@@ -200,6 +217,18 @@ namespace quantum::engine
                                         command.sectionIndex,
                                         command.sectionIndex + 1
                                     );
+                                    selectionAfterCommand =
+                                        command.sectionIndex + 1;
+                                    break;
+                                case quantum::editor::TrackCommandType::
+                                    DuplicateSection:
+                                    candidateTrack.duplicateSection(
+                                        command.sectionIndex
+                                    );
+                                    // The duplicate occupies the slot right
+                                    // after its origin.
+                                    selectionAfterCommand =
+                                        command.sectionIndex + 1;
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     SetSectionLength:
@@ -250,6 +279,44 @@ namespace quantum::engine
                                         convertSectionToPlanarArc(
                                             candidateTrack.section(0)
                                         );
+                                    break;
+                                case RegionCommandType::
+                                    InsertAfterRateProfiles:
+                                    candidateTrack.insertSectionAfter(
+                                        command.sectionIndex,
+                                        quantum::coaster::
+                                            createRateProfileSection(
+                                                quantum::coaster::
+                                                    defaultNewSectionLength
+                                            )
+                                    );
+                                    selectionAfterCommand =
+                                        command.sectionIndex + 1;
+                                    break;
+                                case RegionCommandType::
+                                    InsertAfterPlanarArc:
+                                    {
+                                        // Same safe defaults as typed
+                                        // append/prepend; conversion owns
+                                        // the planar-arc length policy.
+                                        quantum::coaster::AuthoredTrackSection
+                                            insertedArc =
+                                                quantum::coaster::
+                                                    createRateProfileSection(
+                                                        quantum::coaster::
+                                                            defaultNewSectionLength
+                                                    );
+                                        quantum::coaster::
+                                            convertSectionToPlanarArc(
+                                                insertedArc
+                                            );
+                                        candidateTrack.insertSectionAfter(
+                                            command.sectionIndex,
+                                            insertedArc
+                                        );
+                                    }
+                                    selectionAfterCommand =
+                                        command.sectionIndex + 1;
                                     break;
                                 case RegionCommandType::
                                     ConvertToRateProfiles:
@@ -627,16 +694,23 @@ namespace quantum::engine
                                                 PrependRateProfiles
                                         || command.type ==
                                             RegionCommandType::
+                                                InsertAfterRateProfiles
+                                        || command.type ==
+                                            RegionCommandType::
                                                 AppendPlanarArc
                                         || command.type ==
                                             RegionCommandType::
-                                                PrependPlanarArc;
+                                                PrependPlanarArc
+                                        || command.type ==
+                                            RegionCommandType::
+                                                InsertAfterPlanarArc;
 
                                     if (isCreate)
                                     {
                                         // Appended regions land at the end
                                         // of the ordering, prepended ones
-                                        // at the front.
+                                        // at the front, and inserted ones
+                                        // right after their anchor region.
                                         const bool prepended =
                                             command.type ==
                                                 RegionCommandType::
@@ -644,22 +718,35 @@ namespace quantum::engine
                                             || command.type ==
                                                 RegionCommandType::
                                                     PrependPlanarArc;
+                                        const bool insertedAfter =
+                                            command.type ==
+                                                RegionCommandType::
+                                                    InsertAfterRateProfiles
+                                            || command.type ==
+                                                RegionCommandType::
+                                                    InsertAfterPlanarArc;
                                         const std::size_t createdIndex =
-                                            prepended
-                                                ? 0
-                                                : authoredTrack
-                                                    .sectionCount()
-                                                - 1;
+                                            insertedAfter
+                                                ? command.sectionIndex + 1
+                                                : prepended
+                                                    ? 0
+                                                    : authoredTrack
+                                                        .sectionCount()
+                                                    - 1;
                                         const char* verb =
                                             prepended ? "prepended"
-                                                      : "appended";
+                                            : insertedAfter ? "inserted"
+                                                            : "appended";
 
                                         if (command.type ==
                                             RegionCommandType::
                                                 AppendRateProfiles
                                             || command.type ==
                                             RegionCommandType::
-                                                PrependRateProfiles)
+                                                PrependRateProfiles
+                                            || command.type ==
+                                            RegionCommandType::
+                                                InsertAfterRateProfiles)
                                         {
                                             SDL_LogInfo(
                                                 SDL_LOG_CATEGORY_APPLICATION,
@@ -839,6 +926,16 @@ namespace quantum::engine
                                 quantum::coaster::sectionLength(
                                     committedSection)
                             );
+                        }
+
+                        // Structural edits that move or create regions
+                        // re-target the selection here, after the buffers
+                        // above have been resynchronized: selectSection
+                        // then refreshes every editor surface from the
+                        // region the user should now be working on.
+                        if (selectionAfterCommand.has_value())
+                        {
+                            editorUi.selectSection(*selectionAfterCommand);
                         }
 
                         editorUi.beginFrame(vulkan);

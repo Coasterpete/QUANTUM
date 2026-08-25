@@ -397,6 +397,47 @@ namespace quantum::coaster
         sections_.insert(sections_.begin(), createDefaultSection());
     }
 
+    void AuthoredTrack::insertSectionAfter(
+        const std::size_t index,
+        const AuthoredTrackSection& section)
+    {
+        if (index >= sections_.size())
+        {
+            throw std::out_of_range(
+                "Authored track section index is out of range."
+            );
+        }
+
+        // Reject malformed input before it can enter the document; the
+        // candidate/commit gate would also catch it, but a rejected insert
+        // should be identifiable at the Core operation itself.
+        validateSectionLocalDomain(section);
+
+        sections_.insert(
+            sections_.begin()
+                + static_cast<std::ptrdiff_t>(index) + 1,
+            section);
+    }
+
+    void AuthoredTrack::duplicateSection(const std::size_t index)
+    {
+        if (index >= sections_.size())
+        {
+            throw std::out_of_range(
+                "Authored track section index is out of range."
+            );
+        }
+
+        // Copy explicitly rather than inserting from a reference into the
+        // same vector so reallocation during the insert can never alias.
+        AuthoredTrackSection duplicate = sections_.at(index);
+
+        sections_.insert(
+            sections_.begin()
+                + static_cast<std::ptrdiff_t>(index) + 1,
+            std::move(duplicate));
+    }
+
     void AuthoredTrack::removeSection(const std::size_t index)
     {
         if (index >= sections_.size())
