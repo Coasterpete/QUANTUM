@@ -1,4 +1,5 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/math/ScalarTransition.hpp>
 
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
@@ -81,6 +82,22 @@ namespace
     {
         return std::get<PlanarArcRegion>(
             std::get<GeometryRegion>(section.region).construction);
+    }
+
+    [[nodiscard]] double integratedRateChange(
+        const ChannelProfile& profile)
+    {
+        double change = 0.0;
+        for (const quantum::coaster::ProfileSegment& segment :
+            profile.segments)
+        {
+            change += quantum::math::integrateScalarTransition(
+                segment.transition,
+                segment.transition.domainBegin,
+                segment.transition.domainEnd
+            );
+        }
+        return change;
     }
 
     // Exact field comparison; the authoring structs intentionally do not
@@ -248,6 +265,7 @@ namespace
             && constructionOf(section).bankChange == 0.0,
             "re-converting an existing geometry region is a no-op");
 
+        const double expectedSweep = constructionOf(section).sweptAngle;
         convertSectionToRateProfiles(section);
         require(section.kind == RegionKind::RateProfiles,
             "converting back restores rate-profile authoring");
@@ -266,10 +284,81 @@ namespace
             require(channel->segments.front().transition.domainBegin == 0.0
                 && channel->segments.front().transition.domainEnd == 37.5,
                 "converted-back channels cover the preserved length");
-            require(channel->segments.front().transition.valueBegin == 0.0
-                && channel->segments.front().transition.valueEnd == 0.0,
-                "converted-back channels start as zero rates");
         }
+
+        require(integratedRateChange(restored.rateProfiles.pitch) == 0.0
+                && integratedRateChange(restored.rateProfiles.roll) == 0.0,
+            "the default planar arc converts to zero pitch and roll");
+        require(std::abs(
+                integratedRateChange(restored.rateProfiles.yaw)
+                - expectedSweep) <= 1e-12,
+            "the converted yaw profile carries the planar-arc sweep");
+    }
+
+    void verifyHorizontalPlanarArcConversion(const double sweptAngle)
+    {
+        AuthoredTrack track;
+        track.appendSection();
+
+        AuthoredTrackSection& section = track.section(0);
+        convertSectionToPlanarArc(section);
+        setPlanarArcRadius(section, 25.0);
+        setPlanarArcSweptAngle(section, sweptAngle);
+        setPlanarArcPlaneTilt(section, 0.0);
+        setPlanarArcBankChange(section, 0.0);
+
+        const double expectedLength = 25.0 * std::abs(sweptAngle);
+        constexpr double integrationSpacing = 0.25;
+        const auto planarStates = integrateAuthoredTrack(
+            track, integrationSpacing);
+
+        convertSectionToRateProfiles(section);
+
+        require(section.kind == RegionKind::RateProfiles,
+            "planar-arc conversion produces a rate-profile region");
+        require(std::abs(sectionLength(section) - expectedLength) <= 1e-12,
+            "planar-arc conversion preserves the authored length");
+
+        const RateProfileRegion& converted = section.rateProfileRegion();
+        const double yawChange = integratedRateChange(
+            converted.rateProfiles.yaw);
+        require(std::abs(yawChange) > 1.0,
+            "converted planar arc has a nonzero yaw-rate profile");
+        require(std::abs(yawChange - sweptAngle) <= 1e-12,
+            "integrated yaw change matches the authored sweep");
+        require(integratedRateChange(converted.rateProfiles.pitch) == 0.0,
+            "horizontal planar arc converts to zero pitch rate");
+        require(integratedRateChange(converted.rateProfiles.roll) == 0.0,
+            "unbanked planar arc converts to zero roll rate");
+
+        const auto convertedStates = integrateAuthoredTrack(
+            track, integrationSpacing);
+        require(convertedStates.size() == planarStates.size(),
+            "conversion preserves the planar arc sample grid");
+
+        constexpr double positionTolerance = 1e-9;
+        constexpr double frameTolerance = 1e-10;
+        for (std::size_t index = 0; index < planarStates.size(); ++index)
+        {
+            require(glm::length(convertedStates[index].position
+                    - planarStates[index].position) <= positionTolerance,
+                "converted samples preserve the planar-arc centerline");
+            require(glm::length(convertedStates[index].frame.tangent
+                    - planarStates[index].frame.tangent) <= frameTolerance,
+                "converted samples preserve the planar-arc tangent");
+            require(glm::length(convertedStates[index].frame.lateral
+                    - planarStates[index].frame.lateral) <= frameTolerance,
+                "converted samples preserve the planar-arc lateral axis");
+            require(glm::length(convertedStates[index].frame.up
+                    - planarStates[index].frame.up) <= frameTolerance,
+                "converted samples preserve the planar-arc up axis");
+        }
+    }
+
+    void testPlanarArcConversionPreservesGeometry()
+    {
+        verifyHorizontalPlanarArcConversion(3.0 * pi / 2.0);
+        verifyHorizontalPlanarArcConversion(-3.0 * pi / 2.0);
     }
 
     void testRadiusEditKeepsStoredLengthAuthoritative()
@@ -347,6 +436,13 @@ namespace
         require(section.length == lengthBefore,
             "bank edit never touches the stored length");
         (void)sectionLength(section);
+
+        requireThrows<std::invalid_argument>(
+            [&] { convertSectionToRateProfiles(section); },
+            "banked planar-arc conversion");
+        require(section.kind == RegionKind::Geometry
+                && constructionOf(section).bankChange == pi / 8.0,
+            "rejected banked conversion leaves the geometry unchanged");
 
         // Orientation-only edits must not disturb the centerline length
         // contract of any other parameter.
@@ -492,6 +588,8 @@ int main()
             testTypedCreationPrependsBothKinds},
         {"kind conversions preserve authored length",
             testKindConversionsPreserveAuthoredLength},
+        {"planar arc conversion preserves geometry",
+            testPlanarArcConversionPreservesGeometry},
         {"radius edit keeps stored length authoritative",
             testRadiusEditKeepsStoredLengthAuthoritative},
         {"swept angle edit defines resulting length",

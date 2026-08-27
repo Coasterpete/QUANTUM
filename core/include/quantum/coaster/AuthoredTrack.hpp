@@ -118,10 +118,8 @@ namespace quantum::coaster
     );
 
     // Creates one rate-profile section whose zero-rate channels cover
-    // [0, length] exactly. Used for new sections and for converting a
-    // geometry section back to rate-profile authoring at its current
-    // length. Throws std::invalid_argument for a non-positive or
-    // non-finite length.
+    // [0, length] exactly. Throws std::invalid_argument for a non-positive
+    // or non-finite length.
     [[nodiscard]] AuthoredTrackSection createRateProfileSection(
         double length
     );
@@ -131,7 +129,10 @@ namespace quantum::coaster
     // std::invalid_argument for malformed input.
     //
     // Conversions preserve the section's current authored length; they are
-    // no-ops when the section already has the target kind.
+    // no-ops when the section already has the target kind. Converting an
+    // unbanked planar arc compiles its geometry-driving pitch/yaw rates.
+    // Banked planar arcs cannot be represented exactly by the current
+    // coupled rate profiles and are rejected rather than changed.
     void convertSectionToRateProfiles(AuthoredTrackSection& section);
     void convertSectionToPlanarArc(AuthoredTrackSection& section);
 
