@@ -1,6 +1,7 @@
 #include <quantum/engine/Application.hpp>
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/ChannelProfileEditing.hpp>
+#include <quantum/coaster/CircuitCompletion.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/DocumentState.hpp>
@@ -1482,6 +1483,97 @@ namespace quantum::engine
                         if (selectionAfterCommand.has_value())
                         {
                             editorUi.selectSection(*selectionAfterCommand);
+                        }
+
+                        // Circuit completion: run solver and show
+                        // result.
+                        if (editorUi.takeCircuitCompletionRequest())
+                        {
+                            const quantum::coaster::
+                                CircuitCompletionResult result =
+                                    quantum::coaster::
+                                        completeCircuitCandidate(
+                                            authoredTrack);
+
+                            char message[512]{};
+
+                            if (result.success)
+                            {
+                                std::snprintf(
+                                    message,
+                                    sizeof(message),
+                                    "Circuit Completed\n\n"
+                                    "Connector Regions: %zu\n"
+                                    "Final gap: %.4f m\n"
+                                    "Tangent error: %.2f deg\n"
+                                    "Frame error: %.2f deg",
+                                    result.connectorRegionCount,
+                                    result.finalPositionalGap,
+                                    result.finalTangentErrorDegrees,
+                                    result.finalFrameErrorDegrees);
+
+                                // Commit: replace document with the
+                                // completed track.
+                                authoredTrack =
+                                    std::move(
+                                        result.completedTrack);
+
+                                const quantum::editor::
+                                    CenterlineVisualization
+                                        newCenterline =
+                                            quantum::editor::
+                                                createCenterlineVisualization(
+                                                    authoredTrack);
+
+                                editorUi.setCenterlineBounds(
+                                    newCenterline.minimumPosition,
+                                    newCenterline.maximumPosition);
+                                editorUi.setCenterlineSections(
+                                    newCenterline.sectionSlices);
+                                vulkan.updateTrackCurveVertices(
+                                    newCenterline.vertices,
+                                    newCenterline.verticesPerCurve);
+
+                                centerline =
+                                    std::move(newCenterline);
+                                documentState.markDirty();
+                                editorUi.updateWindowTitle(
+                                    documentState.windowTitle());
+
+                                // Select the newly created connector.
+                                editorUi.selectSection(
+                                    authoredTrack.sectionCount() - 1);
+
+                                SDL_LogInfo(
+                                    SDL_LOG_CATEGORY_APPLICATION,
+                                    "Circuit completed: gap=%.4f m "
+                                    "tang=%.2f deg frame=%.2f deg "
+                                    "iter=%u",
+                                    result.finalPositionalGap,
+                                    result.finalTangentErrorDegrees,
+                                    result.finalFrameErrorDegrees,
+                                    result.iterationCount);
+                            }
+                            else
+                            {
+                                std::snprintf(
+                                    message,
+                                    sizeof(message),
+                                    "Circuit Completion Failed\n\n"
+                                    "Reason: %s",
+                                    result.failureMessage
+                                        .c_str());
+                            }
+
+                            SDL_ShowSimpleMessageBox(
+                                result.success
+                                    ? SDL_MESSAGEBOX_INFORMATION
+                                    : SDL_MESSAGEBOX_WARNING,
+                                result.success
+                                    ? "Circuit Completed"
+                                    : "Circuit Completion Failed",
+                                message,
+                                window);
                         }
 
                         editorUi.beginFrame(vulkan);

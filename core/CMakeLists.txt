@@ -9,6 +9,7 @@ target_sources(
         src/AuthoredSections.cpp
         src/AuthoredTrack.cpp
         src/ChannelProfileEditing.cpp
+        src/CircuitCompletion.cpp
         src/CoasterDocument.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
@@ -20,6 +21,7 @@ target_sources(
         include/quantum/coaster/ForceSection.hpp
         include/quantum/coaster/AuthoredTrack.hpp
         include/quantum/coaster/ChannelProfileEditing.hpp
+        include/quantum/coaster/CircuitCompletion.hpp
         include/quantum/coaster/CoasterDocument.hpp
         include/quantum/coaster/GeometricSection.hpp
         include/quantum/coaster/PlanarArcRegion.hpp

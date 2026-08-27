@@ -3590,42 +3590,7 @@ namespace quantum::editor
 
         if (workspaceEdit.completeCircuitRequested)
         {
-            const quantum::coaster::TrackTopology analysis =
-                quantum::coaster::computeTrackTopology(*authoredTrack_);
-
-            char message[256]{};
-            if (analysis.kind
-                == quantum::coaster::TopologyKind::ClosedCircuit)
-            {
-                std::snprintf(
-                    message,
-                    sizeof(message),
-                    "Track is already a closed circuit.\n\n"
-                    "Gap: %.4f m\nTangent: %.4f deg\nFrame: %.4f deg",
-                    analysis.diagnostics.positionalGap,
-                    analysis.diagnostics.tangentMismatchDegrees,
-                    analysis.diagnostics.frameMismatchDegrees);
-            }
-            else
-            {
-                std::snprintf(
-                    message,
-                    sizeof(message),
-                    "Geometry must be added or adjusted before exact "
-                    "closure is possible.\n\n"
-                    "End -> Start gap: %.1f m\n"
-                    "Tangent mismatch: %.1f deg\n"
-                    "Frame mismatch: %.1f deg",
-                    analysis.diagnostics.positionalGap,
-                    analysis.diagnostics.tangentMismatchDegrees,
-                    analysis.diagnostics.frameMismatchDegrees);
-            }
-
-            SDL_ShowSimpleMessageBox(
-                SDL_MESSAGEBOX_INFORMATION,
-                "Complete Circuit Analysis",
-                message,
-                window_);
+            pendingCircuitCompletion_ = true;
         }
 
         // Conversions stay available as secondary operations from the
@@ -4442,6 +4407,13 @@ namespace quantum::editor
         const auto mode = pendingLayoutModeChange_;
         pendingLayoutModeChange_.reset();
         return mode;
+    }
+
+    bool EditorUi::takeCircuitCompletionRequest() noexcept
+    {
+        const bool requested = pendingCircuitCompletion_;
+        pendingCircuitCompletion_ = false;
+        return requested;
     }
 
     void EditorUi::resetTransientState()
