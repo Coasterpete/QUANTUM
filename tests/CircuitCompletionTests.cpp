@@ -598,10 +598,8 @@ namespace
             "Current 30m/40m fixture must fail cleanly");
         require(
             result.failureReason
-                == CircuitCompletionFailure::DidNotConverge
-                || result.failureReason
-                    == CircuitCompletionFailure::UnsupportedGeometry,
-            "Failure reason must be DidNotConverge or UnsupportedGeometry");
+                == CircuitCompletionFailure::DidNotConverge,
+            "Failure reason must remain DidNotConverge");
         // Source must be unchanged.
         require(
             track.sectionCount() == 1,

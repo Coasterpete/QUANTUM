@@ -280,7 +280,17 @@ namespace quantum::coaster
         // A null roll profile preserves the established pitch/yaw path.
         // The positive commutator sign is the right-acting counterpart of the
         // usual left-acting Magnus formula.
-        [[nodiscard]] glm::dvec3 coupledMagnusRotationVector(
+        struct CoupledMagnusIncrement
+        {
+            double intervalLength;
+            double lowerProfileCoordinate;
+            double upperProfileCoordinate;
+            glm::dvec3 lowerRate;
+            glm::dvec3 upperRate;
+            glm::dvec3 rotationVector;
+        };
+
+        [[nodiscard]] CoupledMagnusIncrement coupledMagnusIncrement(
             const math::ScalarTransition* rollRateTransition,
             const math::ScalarTransition& pitchRateTransition,
             const math::ScalarTransition& yawRateTransition,
@@ -293,18 +303,22 @@ namespace quantum::coaster
                 0.5 / std::numbers::sqrt3_v<double>;
             constexpr double lowerNode = 0.5 - nodeOffset;
             constexpr double upperNode = 0.5 + nodeOffset;
+            const double lowerDistance =
+                traveledBegin + lowerNode * intervalLength;
+            const double upperDistance =
+                traveledBegin + upperNode * intervalLength;
             const glm::dvec3 lowerRate = coupledLocalRate(
                 rollRateTransition,
                 pitchRateTransition,
                 yawRateTransition,
-                traveledBegin + lowerNode * intervalLength,
+                lowerDistance,
                 profileLength
             );
             const glm::dvec3 upperRate = coupledLocalRate(
                 rollRateTransition,
                 pitchRateTransition,
                 yawRateTransition,
-                traveledBegin + upperNode * intervalLength,
+                upperDistance,
                 profileLength
             );
             const double commutatorScale =
@@ -321,7 +335,71 @@ namespace quantum::coaster
                 );
             }
 
-            return rotationVector;
+            return {
+                intervalLength,
+                transitionDomainValue(
+                    pitchRateTransition,
+                    lowerDistance,
+                    profileLength
+                ),
+                transitionDomainValue(
+                    pitchRateTransition,
+                    upperDistance,
+                    profileLength
+                ),
+                lowerRate,
+                upperRate,
+                rotationVector
+            };
+        }
+
+        [[nodiscard]] detail::CoupledLocalRateDerivatives
+        coupledMagnusRotationDerivatives(
+            const CoupledMagnusIncrement& increment,
+            const double derivativeProfileLength,
+            const detail::CoupledLocalRateDerivativeEvaluator
+                evaluateRateDerivatives
+        ) noexcept
+        {
+            // Exact differential of the discrete fourth-order increment
+            // above; lower and upper rates belong to this specific interval.
+            detail::CoupledLocalRateDerivatives lowerDerivatives{};
+            detail::CoupledLocalRateDerivatives upperDerivatives{};
+            evaluateRateDerivatives(
+                increment.lowerProfileCoordinate,
+                derivativeProfileLength,
+                lowerDerivatives
+            );
+            evaluateRateDerivatives(
+                increment.upperProfileCoordinate,
+                derivativeProfileLength,
+                upperDerivatives
+            );
+
+            const double commutatorScale =
+                std::numbers::sqrt3_v<double>
+                * increment.intervalLength * increment.intervalLength / 12.0;
+            detail::CoupledLocalRateDerivatives derivatives{};
+            for (std::size_t parameter = 0;
+                 parameter < derivatives.size();
+                 ++parameter)
+            {
+                derivatives[parameter] =
+                    0.5 * increment.intervalLength
+                        * (lowerDerivatives[parameter]
+                            + upperDerivatives[parameter])
+                    + commutatorScale * (
+                        glm::cross(
+                            lowerDerivatives[parameter],
+                            increment.upperRate
+                        )
+                        + glm::cross(
+                            increment.lowerRate,
+                            upperDerivatives[parameter]
+                        )
+                    );
+            }
+            return derivatives;
         }
 
         struct CoupledIntegrationState
@@ -331,8 +409,20 @@ namespace quantum::coaster
             glm::dquat orientation;
         };
 
-        void integrateCoupledSubstep(
-            CoupledIntegrationState& state,
+        struct CoupledSubstepData
+        {
+            double stepLength;
+            CoupledMagnusIncrement lowerIncrement;
+            CoupledMagnusIncrement upperIncrement;
+            CoupledMagnusIncrement fullIncrement;
+            glm::dquat lowerOrientation;
+            glm::dquat upperOrientation;
+            glm::dvec3 lowerTangent;
+            glm::dvec3 upperTangent;
+        };
+
+        [[nodiscard]] CoupledSubstepData makeCoupledSubstepData(
+            const CoupledIntegrationState& state,
             const math::ScalarTransition* rollRateTransition,
             const math::ScalarTransition& pitchRateTransition,
             const math::ScalarTransition& yawRateTransition,
@@ -345,47 +435,70 @@ namespace quantum::coaster
             constexpr double lowerNode = 0.5 - nodeOffset;
             constexpr double upperNode = 0.5 + nodeOffset;
 
-            const glm::dquat lowerOrientation = composeLocalRotation(
-                state.orientation,
-                coupledMagnusRotationVector(
+            const CoupledMagnusIncrement lowerIncrement =
+                coupledMagnusIncrement(
                     rollRateTransition,
                     pitchRateTransition,
                     yawRateTransition,
                     state.distance,
                     lowerNode * stepLength,
                     profileLength
-                )
-            );
-            const glm::dquat upperOrientation = composeLocalRotation(
-                state.orientation,
-                coupledMagnusRotationVector(
+                );
+            const CoupledMagnusIncrement upperIncrement =
+                coupledMagnusIncrement(
                     rollRateTransition,
                     pitchRateTransition,
                     yawRateTransition,
                     state.distance,
                     upperNode * stepLength,
                     profileLength
-                )
-            );
-            const glm::dvec3 lowerTangent =
-                lowerOrientation * glm::dvec3{1.0, 0.0, 0.0};
-            const glm::dvec3 upperTangent =
-                upperOrientation * glm::dvec3{1.0, 0.0, 0.0};
-
-            state.position += 0.5 * stepLength
-                * (lowerTangent + upperTangent);
-            state.orientation = composeLocalRotation(
-                state.orientation,
-                coupledMagnusRotationVector(
+                );
+            const CoupledMagnusIncrement fullIncrement =
+                coupledMagnusIncrement(
                     rollRateTransition,
                     pitchRateTransition,
                     yawRateTransition,
                     state.distance,
                     stepLength,
                     profileLength
-                )
+                );
+            const glm::dquat lowerOrientation = composeLocalRotation(
+                state.orientation,
+                lowerIncrement.rotationVector
             );
-            state.distance += stepLength;
+            const glm::dquat upperOrientation = composeLocalRotation(
+                state.orientation,
+                upperIncrement.rotationVector
+            );
+            const glm::dvec3 lowerTangent =
+                lowerOrientation * glm::dvec3{1.0, 0.0, 0.0};
+            const glm::dvec3 upperTangent =
+                upperOrientation * glm::dvec3{1.0, 0.0, 0.0};
+
+            return {
+                stepLength,
+                lowerIncrement,
+                upperIncrement,
+                fullIncrement,
+                lowerOrientation,
+                upperOrientation,
+                lowerTangent,
+                upperTangent
+            };
+        }
+
+        void applyCoupledSubstep(
+            CoupledIntegrationState& state,
+            const CoupledSubstepData& substep
+        )
+        {
+            state.position += 0.5 * substep.stepLength
+                * (substep.lowerTangent + substep.upperTangent);
+            state.orientation = composeLocalRotation(
+                state.orientation,
+                substep.fullIncrement.rotationVector
+            );
+            state.distance += substep.stepLength;
 
             if (!isFinitePosition(state.position))
             {
@@ -640,7 +753,7 @@ namespace quantum::coaster
             return states;
         }
 
-        template<typename OutputObserver>
+        template<typename SubstepObserver, typename OutputObserver>
         [[nodiscard]] CoupledIntegrationState walkCoupledIntegrationSchedule(
             const glm::dvec3& startingPosition,
             const geometry::CurveFrame& startingFrame,
@@ -648,6 +761,7 @@ namespace quantum::coaster
             const math::ScalarTransition& pitchRateTransition,
             const math::ScalarTransition& yawRateTransition,
             const detail::CoupledIntegrationSchedule& schedule,
+            SubstepObserver&& observeSubstep,
             OutputObserver&& observeOutput
         )
         {
@@ -665,13 +779,19 @@ namespace quantum::coaster
                      substepIndex < boundary.completedSubstepCount;
                      ++substepIndex)
                 {
-                    integrateCoupledSubstep(
+                    const CoupledSubstepData substep =
+                        makeCoupledSubstepData(
+                            integrationState,
+                            rollRateTransition,
+                            pitchRateTransition,
+                            yawRateTransition,
+                            schedule.substepLengths[substepIndex],
+                            schedule.profileLength
+                        );
+                    observeSubstep(integrationState, substep);
+                    applyCoupledSubstep(
                         integrationState,
-                        rollRateTransition,
-                        pitchRateTransition,
-                        yawRateTransition,
-                        schedule.substepLengths[substepIndex],
-                        schedule.profileLength
+                        substep
                     );
                 }
 
@@ -1180,6 +1300,7 @@ namespace quantum::coaster
             pitchRateTransition,
             yawRateTransition,
             schedule,
+            [](const CoupledIntegrationState&, const CoupledSubstepData&) {},
             [&states](const CoupledIntegrationState& state)
             {
                 states.push_back({
@@ -1211,6 +1332,8 @@ namespace quantum::coaster
                 pitchRateTransition,
                 yawRateTransition,
                 schedule,
+                [](const CoupledIntegrationState&,
+                   const CoupledSubstepData&) {},
                 [](const CoupledIntegrationState&) {}
             );
 
@@ -1218,6 +1341,167 @@ namespace quantum::coaster
             endpoint.distance,
             endpoint.position,
             frameFromOrientation(endpoint.orientation)
+        };
+    }
+
+    glm::dvec3 detail::applySo3LeftJacobian(
+        const glm::dvec3& rotationVector,
+        const glm::dvec3& vector
+    ) noexcept
+    {
+        const double angleSquared = glm::dot(
+            rotationVector,
+            rotationVector
+        );
+        const double smallAngleSquaredThreshold = std::sqrt(
+            std::numeric_limits<double>::epsilon()
+        );
+
+        double firstCoefficient = 0.0;
+        double secondCoefficient = 0.0;
+        if (angleSquared <= smallAngleSquaredThreshold)
+        {
+            // This corresponds to |phi| <= epsilon^(1/4). Below that point
+            // direct 1-cos(phi) evaluation loses at least sqrt(epsilon)
+            // relatively, while the first omitted series terms are O(phi^8).
+            firstCoefficient = 0.5 + angleSquared * (
+                -1.0 / 24.0 + angleSquared * (
+                    1.0 / 720.0 - angleSquared / 40'320.0
+                )
+            );
+            secondCoefficient = 1.0 / 6.0 + angleSquared * (
+                -1.0 / 120.0 + angleSquared * (
+                    1.0 / 5'040.0 - angleSquared / 362'880.0
+                )
+            );
+        }
+        else
+        {
+            const double angle = std::sqrt(angleSquared);
+            firstCoefficient =
+                (1.0 - std::cos(angle)) / angleSquared;
+            secondCoefficient =
+                (angle - std::sin(angle)) / (angleSquared * angle);
+        }
+
+        const glm::dvec3 firstCross = glm::cross(
+            rotationVector,
+            vector
+        );
+        return vector
+            + firstCoefficient * firstCross
+            + secondCoefficient * glm::cross(
+                rotationVector,
+                firstCross
+            );
+    }
+
+    detail::CoupledEndpointSensitivityState
+    detail::integrateCoupledRateProfileSensitivitiesEndpoint(
+        const CoupledEndpointSensitivityState& startingState,
+        const math::ScalarTransition* rollRateTransition,
+        const math::ScalarTransition& pitchRateTransition,
+        const math::ScalarTransition& yawRateTransition,
+        const CoupledIntegrationSchedule& schedule,
+        const double derivativeProfileLength,
+        const CoupledLocalRateDerivativeEvaluator evaluateRateDerivatives
+    )
+    {
+        if (!std::isfinite(derivativeProfileLength)
+            || derivativeProfileLength <= 0.0)
+        {
+            throw std::invalid_argument(
+                "The derivative profile length must be positive and finite."
+            );
+        }
+        if (evaluateRateDerivatives == nullptr)
+        {
+            throw std::invalid_argument(
+                "A coupled local-rate derivative evaluator is required."
+            );
+        }
+
+        auto dPosition = startingState.dPosition;
+        auto rotationSensitivity =
+            startingState.rotationSensitivity;
+        const CoupledIntegrationState endpoint =
+            walkCoupledIntegrationSchedule(
+                startingState.endpoint.position,
+                startingState.endpoint.frame,
+                rollRateTransition,
+                pitchRateTransition,
+                yawRateTransition,
+                schedule,
+                [&](const CoupledIntegrationState& nominalState,
+                    const CoupledSubstepData& substep)
+                {
+                    const CoupledLocalRateDerivatives lowerDerivatives =
+                        coupledMagnusRotationDerivatives(
+                            substep.lowerIncrement,
+                            derivativeProfileLength,
+                            evaluateRateDerivatives
+                        );
+                    const CoupledLocalRateDerivatives upperDerivatives =
+                        coupledMagnusRotationDerivatives(
+                            substep.upperIncrement,
+                            derivativeProfileLength,
+                            evaluateRateDerivatives
+                        );
+                    const CoupledLocalRateDerivatives fullDerivatives =
+                        coupledMagnusRotationDerivatives(
+                            substep.fullIncrement,
+                            derivativeProfileLength,
+                            evaluateRateDerivatives
+                        );
+
+                    for (std::size_t parameter = 0;
+                         parameter < coupledSensitivityParameterCount;
+                         ++parameter)
+                    {
+                        const glm::dvec3 lowerRotationSensitivity =
+                            rotationSensitivity[parameter]
+                            + nominalState.orientation
+                                * applySo3LeftJacobian(
+                                    substep.lowerIncrement.rotationVector,
+                                    lowerDerivatives[parameter]
+                                );
+                        const glm::dvec3 upperRotationSensitivity =
+                            rotationSensitivity[parameter]
+                            + nominalState.orientation
+                                * applySo3LeftJacobian(
+                                    substep.upperIncrement.rotationVector,
+                                    upperDerivatives[parameter]
+                                );
+                        const glm::dvec3 dLowerTangent = glm::cross(
+                            lowerRotationSensitivity,
+                            substep.lowerTangent
+                        );
+                        const glm::dvec3 dUpperTangent = glm::cross(
+                            upperRotationSensitivity,
+                            substep.upperTangent
+                        );
+
+                        dPosition[parameter] += 0.5 * substep.stepLength
+                            * (dLowerTangent + dUpperTangent);
+                        rotationSensitivity[parameter] +=
+                            nominalState.orientation
+                                * applySo3LeftJacobian(
+                                    substep.fullIncrement.rotationVector,
+                                    fullDerivatives[parameter]
+                                );
+                    }
+                },
+                [](const CoupledIntegrationState&) {}
+            );
+
+        return {
+            {
+                startingState.endpoint.distance + endpoint.distance,
+                endpoint.position,
+                frameFromOrientation(endpoint.orientation)
+            },
+            dPosition,
+            rotationSensitivity
         };
     }
 
