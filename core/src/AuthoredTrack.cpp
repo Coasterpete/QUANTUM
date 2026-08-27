@@ -238,10 +238,42 @@ namespace quantum::coaster
             return;
         }
 
-        // Conversions preserve the currently authored length so the track
-        // shape at the boundary is unaffected by the kind switch itself.
         const double length = sectionLength(section);
-        section = createRateProfileSection(length);
+        const PlanarArcRegion arc = planarArcConstruction(
+            std::get<GeometryRegion>(section.region));
+
+        if (arc.bankChange != 0.0)
+        {
+            // Planar-arc bank is superposed after centerline integration.
+            // A plain constant roll rate would instead participate in the
+            // coupled rate solve and move the centerline, so do not silently
+            // create a non-equivalent rate-profile section.
+            throw std::invalid_argument(
+                "A banked planar arc cannot be converted exactly to the "
+                "current coupled rate-profile representation."
+            );
+        }
+
+        const PlanarArcCompiledRates compiled = compilePlanarArcRates(
+            arc, length);
+
+        AuthoredTrackSection converted = createRateProfileSection(length);
+        GeometricSection& profiles =
+            converted.rateProfileRegion().rateProfiles;
+        profiles.pitch = createSingleSegmentChannel(
+            length,
+            compiled.pitchRate.valueBegin,
+            compiled.pitchRate.valueEnd,
+            compiled.pitchRate.transitionType
+        );
+        profiles.yaw = createSingleSegmentChannel(
+            length,
+            compiled.yawRate.valueBegin,
+            compiled.yawRate.valueEnd,
+            compiled.yawRate.transitionType
+        );
+
+        section = std::move(converted);
     }
 
     void convertSectionToPlanarArc(AuthoredTrackSection& section)
