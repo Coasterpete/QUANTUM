@@ -27,6 +27,7 @@ target_sources(
         include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
         include/quantum/coaster/TrackTopology.hpp
+        include/quantum/coaster/detail/RiderLocalGeometryDetail.hpp
         include/quantum/geometry/ArcLengthLUT.hpp
         include/quantum/geometry/BSplineCurve.hpp
         include/quantum/geometry/CurveGeometry.hpp

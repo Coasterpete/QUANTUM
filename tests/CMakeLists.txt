@@ -373,6 +373,40 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumCoreRiderLocalGeometryEndpointTests
+    RiderLocalGeometryEndpointTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreRiderLocalGeometryEndpointTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreRiderLocalGeometryEndpointTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreRiderLocalGeometryEndpointTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.RiderLocalGeometryEndpoint
+    COMMAND QuantumCoreRiderLocalGeometryEndpointTests
+)
+
+set_tests_properties(
+    QuantumCore.RiderLocalGeometryEndpoint
+    PROPERTIES
+        LABELS "core;coaster;geometry"
+)
+
+add_executable(
     QuantumCoreVariableLocalPitchRateTests
     VariableLocalPitchRateTests.cpp
 )

@@ -1,4 +1,5 @@
 #include <quantum/coaster/RiderLocalGeometry.hpp>
+#include <quantum/coaster/detail/RiderLocalGeometryDetail.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat3x3.hpp>
@@ -639,119 +640,48 @@ namespace quantum::coaster
             return states;
         }
 
-        [[nodiscard]] std::vector<RiderLocalGeometryState>
-        integrateCoupledRateProfilesNumerically(
+        template<typename OutputObserver>
+        [[nodiscard]] CoupledIntegrationState walkCoupledIntegrationSchedule(
             const glm::dvec3& startingPosition,
             const geometry::CurveFrame& startingFrame,
             const math::ScalarTransition* rollRateTransition,
             const math::ScalarTransition& pitchRateTransition,
             const math::ScalarTransition& yawRateTransition,
-            const double integrationSpacing
+            const detail::CoupledIntegrationSchedule& schedule,
+            OutputObserver&& observeOutput
         )
         {
-            const double profileLength = pitchRateTransition.domainEnd
-                - pitchRateTransition.domainBegin;
-            std::vector<RiderLocalGeometryState> states;
-            const std::size_t stepCount = resultStepCount(
-                profileLength,
-                integrationSpacing,
-                states
-            );
-            states.reserve(stepCount + 1);
-            states.push_back({0.0, startingPosition, startingFrame});
-
-            const std::size_t internalPanelCount = coupledInternalPanelCount(
-                rollRateTransition,
-                pitchRateTransition,
-                yawRateTransition,
-                profileLength
-            );
-            const double maximumInternalSpacing = profileLength
-                / static_cast<double>(internalPanelCount);
-
-            if (!std::isfinite(maximumInternalSpacing)
-                || maximumInternalSpacing <= 0.0)
-            {
-                throw std::length_error(
-                    "Coupled rider-local integration cannot represent its internal spacing."
-                );
-            }
-
             CoupledIntegrationState integrationState{
                 0.0,
                 startingPosition,
                 orientationFromFrame(startingFrame)
             };
+            std::size_t substepIndex = 0;
 
-            const auto appendState = [&](const double nextDistance)
+            for (const detail::CoupledIntegrationOutputBoundary& boundary
+                : schedule.outputBoundaries)
             {
-                const double intervalLength =
-                    nextDistance - integrationState.distance;
-                const double requiredInternalStepCount = std::max(
-                    1.0,
-                    std::ceil(intervalLength / maximumInternalSpacing)
-                );
-
-                if (!std::isfinite(requiredInternalStepCount)
-                    || requiredInternalStepCount
-                        > static_cast<double>(
-                            std::numeric_limits<std::size_t>::max()
-                        ))
+                for (;
+                     substepIndex < boundary.completedSubstepCount;
+                     ++substepIndex)
                 {
-                    throw std::length_error(
-                        "Coupled rider-local integration requires too many internal steps."
-                    );
-                }
-
-                const std::size_t internalStepCount =
-                    static_cast<std::size_t>(requiredInternalStepCount);
-                for (std::size_t internalStepIndex = 0;
-                     internalStepIndex < internalStepCount;
-                     ++internalStepIndex)
-                {
-                    const double remainingDistance =
-                        nextDistance - integrationState.distance;
-                    const double stepLength = remainingDistance
-                        / static_cast<double>(
-                            internalStepCount - internalStepIndex
-                        );
                     integrateCoupledSubstep(
                         integrationState,
                         rollRateTransition,
                         pitchRateTransition,
                         yawRateTransition,
-                        stepLength,
-                        profileLength
+                        schedule.substepLengths[substepIndex],
+                        schedule.profileLength
                     );
                 }
 
                 // Preserve authored sample distances exactly even if the
                 // repeated floating-point additions finish one ulp away.
-                integrationState.distance = nextDistance;
-                states.push_back({
-                    nextDistance,
-                    integrationState.position,
-                    frameFromOrientation(integrationState.orientation)
-                });
-            };
-
-            for (std::size_t stepIndex = 1;
-                 stepIndex < stepCount;
-                 ++stepIndex)
-            {
-                const double nextDistance =
-                    static_cast<double>(stepIndex) * integrationSpacing;
-
-                if (!(nextDistance < profileLength))
-                {
-                    break;
-                }
-
-                appendState(nextDistance);
+                integrationState.distance = boundary.distance;
+                observeOutput(integrationState);
             }
 
-            appendState(profileLength);
-            return states;
+            return integrationState;
         }
 
         [[nodiscard]] glm::dvec3 integrateVariableTangent(
@@ -1120,6 +1050,175 @@ namespace quantum::coaster
             appendState(profileLength);
             return states;
         }
+    }
+
+    detail::CoupledIntegrationSchedule
+    detail::makeCoupledIntegrationSchedule(
+        const math::ScalarTransition* rollRateTransition,
+        const math::ScalarTransition& pitchRateTransition,
+        const math::ScalarTransition& yawRateTransition,
+        const double integrationSpacing
+    )
+    {
+        const double profileLength = pitchRateTransition.domainEnd
+            - pitchRateTransition.domainBegin;
+        std::vector<RiderLocalGeometryState> stateCapacityProbe;
+        const std::size_t outputStepCount = resultStepCount(
+            profileLength,
+            integrationSpacing,
+            stateCapacityProbe
+        );
+        const std::size_t internalPanelCount = coupledInternalPanelCount(
+            rollRateTransition,
+            pitchRateTransition,
+            yawRateTransition,
+            profileLength
+        );
+        const double maximumInternalSpacing = profileLength
+            / static_cast<double>(internalPanelCount);
+
+        if (!std::isfinite(maximumInternalSpacing)
+            || maximumInternalSpacing <= 0.0)
+        {
+            throw std::length_error(
+                "Coupled rider-local integration cannot represent its internal spacing."
+            );
+        }
+
+        CoupledIntegrationSchedule schedule{
+            profileLength,
+            internalPanelCount,
+            {},
+            {}
+        };
+        schedule.substepLengths.reserve(std::max(
+            internalPanelCount,
+            outputStepCount
+        ));
+        schedule.outputBoundaries.reserve(outputStepCount);
+
+        double scheduledDistance = 0.0;
+        const auto appendOutputInterval = [&](const double nextDistance)
+        {
+            const double intervalLength = nextDistance - scheduledDistance;
+            const double requiredInternalStepCount = std::max(
+                1.0,
+                std::ceil(intervalLength / maximumInternalSpacing)
+            );
+
+            if (!std::isfinite(requiredInternalStepCount)
+                || requiredInternalStepCount
+                    > static_cast<double>(
+                        std::numeric_limits<std::size_t>::max()
+                    ))
+            {
+                throw std::length_error(
+                    "Coupled rider-local integration requires too many internal steps."
+                );
+            }
+
+            const std::size_t internalStepCount =
+                static_cast<std::size_t>(requiredInternalStepCount);
+            for (std::size_t internalStepIndex = 0;
+                 internalStepIndex < internalStepCount;
+                 ++internalStepIndex)
+            {
+                const double remainingDistance =
+                    nextDistance - scheduledDistance;
+                const double stepLength = remainingDistance
+                    / static_cast<double>(
+                        internalStepCount - internalStepIndex
+                    );
+                schedule.substepLengths.push_back(stepLength);
+                scheduledDistance += stepLength;
+            }
+
+            scheduledDistance = nextDistance;
+            schedule.outputBoundaries.push_back({
+                schedule.substepLengths.size(),
+                nextDistance
+            });
+        };
+
+        for (std::size_t stepIndex = 1;
+             stepIndex < outputStepCount;
+             ++stepIndex)
+        {
+            const double nextDistance =
+                static_cast<double>(stepIndex) * integrationSpacing;
+
+            if (!(nextDistance < profileLength))
+            {
+                break;
+            }
+
+            appendOutputInterval(nextDistance);
+        }
+
+        appendOutputInterval(profileLength);
+        return schedule;
+    }
+
+    std::vector<RiderLocalGeometryState>
+    detail::integrateCoupledRateProfilesNumerically(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const math::ScalarTransition* rollRateTransition,
+        const math::ScalarTransition& pitchRateTransition,
+        const math::ScalarTransition& yawRateTransition,
+        const CoupledIntegrationSchedule& schedule
+    )
+    {
+        std::vector<RiderLocalGeometryState> states;
+        states.reserve(schedule.outputBoundaries.size() + 1);
+        states.push_back({0.0, startingPosition, startingFrame});
+
+        static_cast<void>(walkCoupledIntegrationSchedule(
+            startingPosition,
+            startingFrame,
+            rollRateTransition,
+            pitchRateTransition,
+            yawRateTransition,
+            schedule,
+            [&states](const CoupledIntegrationState& state)
+            {
+                states.push_back({
+                    state.distance,
+                    state.position,
+                    frameFromOrientation(state.orientation)
+                });
+            }
+        ));
+
+        return states;
+    }
+
+    RiderLocalGeometryState
+    detail::integrateCoupledRateProfilesEndpoint(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const math::ScalarTransition* rollRateTransition,
+        const math::ScalarTransition& pitchRateTransition,
+        const math::ScalarTransition& yawRateTransition,
+        const CoupledIntegrationSchedule& schedule
+    )
+    {
+        const CoupledIntegrationState endpoint =
+            walkCoupledIntegrationSchedule(
+                startingPosition,
+                startingFrame,
+                rollRateTransition,
+                pitchRateTransition,
+                yawRateTransition,
+                schedule,
+                [](const CoupledIntegrationState&) {}
+            );
+
+        return {
+            endpoint.distance,
+            endpoint.position,
+            frameFromOrientation(endpoint.orientation)
+        };
     }
 
     std::vector<RiderLocalGeometryState>
@@ -1502,13 +1601,20 @@ namespace quantum::coaster
             );
         }
 
-        return integrateCoupledRateProfilesNumerically(
+        const detail::CoupledIntegrationSchedule schedule =
+            detail::makeCoupledIntegrationSchedule(
+                nullptr,
+                pitchRateTransition,
+                yawRateTransition,
+                integrationSpacing
+            );
+        return detail::integrateCoupledRateProfilesNumerically(
             startingPosition,
             startingFrame,
             nullptr,
             pitchRateTransition,
             yawRateTransition,
-            integrationSpacing
+            schedule
         );
     }
 
@@ -1622,13 +1728,20 @@ namespace quantum::coaster
             );
         }
 
-        return integrateCoupledRateProfilesNumerically(
+        const detail::CoupledIntegrationSchedule schedule =
+            detail::makeCoupledIntegrationSchedule(
+                &rollRateTransition,
+                pitchRateTransition,
+                yawRateTransition,
+                integrationSpacing
+            );
+        return detail::integrateCoupledRateProfilesNumerically(
             startingPosition,
             startingFrame,
             &rollRateTransition,
             pitchRateTransition,
             yawRateTransition,
-            integrationSpacing
+            schedule
         );
     }
 
