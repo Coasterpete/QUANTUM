@@ -1074,6 +1074,63 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumCoreCircuitCompletionSensitivityTests
+    CircuitCompletionSensitivityTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCircuitCompletionSensitivityTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCircuitCompletionSensitivityTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCircuitCompletionSensitivityTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CircuitCompletionSensitivity
+    COMMAND QuantumCoreCircuitCompletionSensitivityTests
+)
+
+set_tests_properties(
+    QuantumCore.CircuitCompletionSensitivity
+    PROPERTIES
+        LABELS "core;coaster;geometry;topology"
+)
+
+add_executable(
+    QuantumCoreCircuitCompletionSensitivityBenchmark
+    CircuitCompletionSensitivityBenchmark.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCircuitCompletionSensitivityBenchmark
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCircuitCompletionSensitivityBenchmark
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCircuitCompletionSensitivityBenchmark
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_executable(
     CompletionDebug
     CompletionDebugMain.cpp
 )

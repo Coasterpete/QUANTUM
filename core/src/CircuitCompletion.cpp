@@ -39,8 +39,7 @@ namespace quantum::coaster
 
         using ParameterVector =
             detail::CircuitCompletionParameterVector;
-        using ErrorVector =
-            std::array<double, residualCount>;
+        using ErrorVector = detail::CircuitCompletionResidual;
         using JacobianMatrix =
             std::array<ErrorVector, parameterCount>;
         using AugmentedRow =
@@ -166,12 +165,7 @@ namespace quantum::coaster
 
         // Integrate a connector from a given starting state and
         // return the endpoint state {position, tangent, up}.
-        struct EndpointState
-        {
-            glm::dvec3 position;
-            glm::dvec3 tangent;
-            glm::dvec3 up;
-        };
+        using EndpointState = detail::CircuitCompletionEndpoint;
 
         [[nodiscard]] EndpointState integrateConnector(
             const EndpointState& startState,
@@ -215,22 +209,11 @@ namespace quantum::coaster
             const EndpointState& trackStart,
             const double length)
         {
-            const glm::dvec3 posGap =
-                connectorEnd.position - trackStart.position;
-            const detail::CircuitCompletionOrientationResidual
-                orientationError =
-                    detail::computeCircuitCompletionOrientationResidual(
-                        connectorEnd.tangent,
-                        connectorEnd.up,
-                        trackStart.tangent,
-                        trackStart.up);
-
-            const double invL = 1.0 / length;
-            return {
-                posGap.x * invL, posGap.y * invL, posGap.z * invL,
-                orientationError[0], orientationError[1],
-                orientationError[2], orientationError[3],
-                orientationError[4], orientationError[5]};
+            return detail::computeCircuitCompletionResidual(
+                connectorEnd,
+                trackStart,
+                length
+            );
         }
 
         // RMS norm of the normalised error vector.
@@ -697,6 +680,236 @@ namespace quantum::coaster
             }
             return uniqueSeeds;
         }
+    }
+
+    detail::CircuitCompletionRateBasis
+    detail::evaluateCircuitCompletionRateBasis(
+        const double normalizedCoordinate
+    ) noexcept
+    {
+        if (normalizedCoordinate <= 0.5)
+        {
+            return {
+                1.0 - 2.0 * normalizedCoordinate,
+                2.0 * normalizedCoordinate,
+                0.0
+            };
+        }
+
+        return {
+            0.0,
+            2.0 - 2.0 * normalizedCoordinate,
+            2.0 * normalizedCoordinate - 1.0
+        };
+    }
+
+    void detail::evaluateCircuitCompletionLocalRateDerivatives(
+        const double profileCoordinate,
+        const double profileLength,
+        CoupledLocalRateDerivatives& derivatives
+    ) noexcept
+    {
+        const CircuitCompletionRateBasis basis =
+            evaluateCircuitCompletionRateBasis(
+                profileCoordinate / profileLength
+            );
+        const std::array<double, 3> knotBasis{
+            basis.start,
+            basis.midpoint,
+            basis.end
+        };
+
+        for (std::size_t knot = 0; knot < knotBasis.size(); ++knot)
+        {
+            derivatives[knot] = {0.0, knotBasis[knot], 0.0};
+            derivatives[3 + knot] = {0.0, 0.0, knotBasis[knot]};
+            derivatives[6 + knot] = {knotBasis[knot], 0.0, 0.0};
+        }
+    }
+
+    detail::CircuitCompletionIntegrationSchedule
+    detail::makeCircuitCompletionIntegrationSchedule(
+        const CircuitCompletionParameterVector& parameters,
+        const double connectorLength
+    )
+    {
+        const GeometricSection profiles = buildConnectorProfiles(
+            parameters,
+            connectorLength
+        );
+        CircuitCompletionIntegrationSchedule schedule{};
+        for (std::size_t span = 0; span < schedule.spans.size(); ++span)
+        {
+            schedule.spans[span] = makeCoupledIntegrationSchedule(
+                &profiles.roll.segments[span].transition,
+                profiles.pitch.segments[span].transition,
+                profiles.yaw.segments[span].transition,
+                integrationSpacing
+            );
+        }
+        return schedule;
+    }
+
+    detail::CircuitCompletionEndpoint
+    detail::evaluateCircuitCompletionFullCoupledEndpoint(
+        const CircuitCompletionEndpoint& startingEndpoint,
+        const CircuitCompletionParameterVector& parameters,
+        const double connectorLength,
+        const CircuitCompletionIntegrationSchedule& schedule
+    )
+    {
+        const GeometricSection profiles = buildConnectorProfiles(
+            parameters,
+            connectorLength
+        );
+        glm::dvec3 position = startingEndpoint.position;
+        geometry::CurveFrame frame{
+            startingEndpoint.tangent,
+            glm::normalize(glm::cross(
+                startingEndpoint.up,
+                startingEndpoint.tangent
+            )),
+            startingEndpoint.up
+        };
+
+        for (std::size_t span = 0; span < schedule.spans.size(); ++span)
+        {
+            const RiderLocalGeometryState endpoint =
+                integrateCoupledRateProfilesEndpoint(
+                    position,
+                    frame,
+                    &profiles.roll.segments[span].transition,
+                    profiles.pitch.segments[span].transition,
+                    profiles.yaw.segments[span].transition,
+                    schedule.spans[span]
+                );
+            position = endpoint.position;
+            frame = endpoint.frame;
+        }
+
+        return {position, frame.tangent, frame.up};
+    }
+
+    detail::CircuitCompletionEndpoint
+    detail::evaluateCircuitCompletionProductionEndpoint(
+        const CircuitCompletionEndpoint& startingEndpoint,
+        const CircuitCompletionParameterVector& parameters,
+        const double connectorLength
+    )
+    {
+        return integrateConnector(
+            startingEndpoint,
+            parameters,
+            connectorLength
+        );
+    }
+
+    detail::CircuitCompletionSensitivityResult
+    detail::evaluateCircuitCompletionEndpointSensitivities(
+        const CircuitCompletionEndpoint& startingEndpoint,
+        const CircuitCompletionParameterVector& parameters,
+        const double connectorLength,
+        const CircuitCompletionIntegrationSchedule& schedule
+    )
+    {
+        const GeometricSection profiles = buildConnectorProfiles(
+            parameters,
+            connectorLength
+        );
+        CoupledEndpointSensitivityState sensitivity{
+            {
+                0.0,
+                startingEndpoint.position,
+                {
+                    startingEndpoint.tangent,
+                    glm::normalize(glm::cross(
+                        startingEndpoint.up,
+                        startingEndpoint.tangent
+                    )),
+                    startingEndpoint.up
+                }
+            },
+            {},
+            {}
+        };
+
+        for (std::size_t span = 0; span < schedule.spans.size(); ++span)
+        {
+            sensitivity =
+                integrateCoupledRateProfileSensitivitiesEndpoint(
+                    sensitivity,
+                    &profiles.roll.segments[span].transition,
+                    profiles.pitch.segments[span].transition,
+                    profiles.yaw.segments[span].transition,
+                    schedule.spans[span],
+                    connectorLength,
+                    evaluateCircuitCompletionLocalRateDerivatives
+                );
+        }
+
+        CircuitCompletionJacobian jacobian{};
+        const geometry::CurveFrame& endpointFrame =
+            sensitivity.endpoint.frame;
+        const double inverseLength = 1.0 / connectorLength;
+        for (std::size_t parameter = 0;
+             parameter < circuitCompletionParameterCount;
+             ++parameter)
+        {
+            const glm::dvec3 dTangent = glm::cross(
+                sensitivity.rotationSensitivity[parameter],
+                endpointFrame.tangent
+            );
+            const glm::dvec3 dUp = glm::cross(
+                sensitivity.rotationSensitivity[parameter],
+                endpointFrame.up
+            );
+            const glm::dvec3 dPosition =
+                inverseLength * sensitivity.dPosition[parameter];
+            jacobian[parameter] = {
+                dPosition.x,
+                dPosition.y,
+                dPosition.z,
+                dTangent.x,
+                dTangent.y,
+                dTangent.z,
+                dUp.x,
+                dUp.y,
+                dUp.z
+            };
+        }
+
+        return {sensitivity, jacobian};
+    }
+
+    detail::CircuitCompletionResidual
+    detail::computeCircuitCompletionResidual(
+        const CircuitCompletionEndpoint& actualEndpoint,
+        const CircuitCompletionEndpoint& desiredEndpoint,
+        const double connectorLength
+    )
+    {
+        const glm::dvec3 positionDifference =
+            actualEndpoint.position - desiredEndpoint.position;
+        const CircuitCompletionOrientationResidual orientationResidual =
+            computeCircuitCompletionOrientationResidual(
+                actualEndpoint.tangent,
+                actualEndpoint.up,
+                desiredEndpoint.tangent,
+                desiredEndpoint.up
+            );
+        const double inverseLength = 1.0 / connectorLength;
+
+        return {
+            positionDifference.x * inverseLength,
+            positionDifference.y * inverseLength,
+            positionDifference.z * inverseLength,
+            orientationResidual[0],
+            orientationResidual[1],
+            orientationResidual[2],
+            orientationResidual[3],
+            orientationResidual[4],
+            orientationResidual[5]
+        };
     }
 
     // ----------------------------------------------------------------
