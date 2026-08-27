@@ -1,11 +1,15 @@
 #pragma once
 
+#include <quantum/coaster/CircuitCompletion.hpp>
 #include <quantum/coaster/detail/RiderLocalGeometryDetail.hpp>
 
 #include <glm/vec3.hpp>
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <vector>
 
 namespace quantum::coaster::detail
 {
@@ -47,6 +51,79 @@ namespace quantum::coaster::detail
     {
         CoupledEndpointSensitivityState endpointSensitivity;
         CircuitCompletionJacobian residualJacobian;
+    };
+
+    // Internal/test-only selector. The public completion entry point always
+    // uses FiniteDifference until a later production-switch milestone.
+    enum class CircuitCompletionJacobianStrategy : std::uint8_t
+    {
+        FiniteDifference,
+        Sensitivity
+    };
+
+    [[nodiscard]] const char* circuitCompletionJacobianStrategyLabel(
+        CircuitCompletionJacobianStrategy strategy) noexcept;
+
+    struct CircuitCompletionLmWorkCounts
+    {
+        std::uint64_t jacobianConstructions = 0;
+        std::uint64_t connectorIntegrations = 0;
+        std::uint64_t sensitivityTraversals = 0;
+        std::uint64_t trialIntegrations = 0;
+        std::uint64_t dampingTrials = 0;
+        std::uint64_t rejectedDampingTrials = 0;
+        std::uint64_t clampedParameters = 0;
+    };
+
+    struct CircuitCompletionLmIterationDiagnostics
+    {
+        std::size_t seedIndex = 0;
+        std::uint32_t iterationIndex = 0;
+        double residualRmsBefore = 0.0;
+        std::array<double, circuitCompletionParameterCount> singularValues{};
+        std::size_t numericalRank = 0;
+        double gradientNorm = 0.0;
+        double proposedStepNorm = 0.0;
+        double approximateNullSpaceStepNorm = 0.0;
+        double parameterNorm = 0.0;
+        double lambdaEntering = 0.0;
+        std::uint32_t dampingTrials = 0;
+        std::uint32_t rejectedDampingTrials = 0;
+        bool stepAccepted = false;
+        double acceptedResidualRms = 0.0;
+        double lambdaAfterStep = 0.0;
+        std::uint32_t clampedParameters = 0;
+        CircuitCompletionLmWorkCounts cumulativeWork{};
+    };
+
+    struct CircuitCompletionLmSeedDiagnostics
+    {
+        std::size_t seedIndex = 0;
+        CircuitCompletionParameterVector initialParameters{};
+        CircuitCompletionParameterVector finalParameters{};
+        bool converged = false;
+        bool hitIterationLimit = false;
+        std::uint32_t iterationCount = 0;
+        double finalResidualRms = 0.0;
+        double finalPositionError = 0.0;
+        double finalTangentErrorDegrees = 0.0;
+        double finalFrameErrorDegrees = 0.0;
+        CircuitCompletionLmWorkCounts work{};
+        std::vector<double> residualProgression;
+        std::vector<CircuitCompletionLmIterationDiagnostics> iterations;
+    };
+
+    struct CircuitCompletionLmDiagnostics
+    {
+        CircuitCompletionJacobianStrategy strategy =
+            CircuitCompletionJacobianStrategy::FiniteDifference;
+        std::vector<CircuitCompletionLmSeedDiagnostics> seeds;
+        std::size_t selectedSeedIndex =
+            std::numeric_limits<std::size_t>::max();
+        std::uint32_t totalIterationsSpent = 0;
+        CircuitCompletionParameterVector finalParameters{};
+        double finalResidualRms = 0.0;
+        CircuitCompletionLmWorkCounts work{};
     };
 
     [[nodiscard]] CircuitCompletionRateBasis
@@ -92,6 +169,14 @@ namespace quantum::coaster::detail
         const CircuitCompletionEndpoint& actualEndpoint,
         const CircuitCompletionEndpoint& desiredEndpoint,
         double connectorLength
+    );
+
+    [[nodiscard]] CircuitCompletionResult
+    completeCircuitCandidateWithJacobianStrategy(
+        const AuthoredTrack& source,
+        const CircuitCompletionSettings& settings,
+        CircuitCompletionJacobianStrategy strategy,
+        CircuitCompletionLmDiagnostics* diagnostics = nullptr
     );
 
     [[nodiscard]] inline CircuitCompletionOrientationResidual

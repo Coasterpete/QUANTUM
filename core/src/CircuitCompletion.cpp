@@ -44,6 +44,179 @@ namespace quantum::coaster
             std::array<ErrorVector, parameterCount>;
         using AugmentedRow =
             std::array<double, parameterCount + 1>;
+        using NormalMatrix =
+            std::array<std::array<double, parameterCount>, parameterCount>;
+        using RhsVector = std::array<double, parameterCount>;
+
+        struct JacobianSpectrum
+        {
+            std::array<double, parameterCount> singularValues{};
+            std::array<ParameterVector, parameterCount> rightSingularVectors{};
+            std::size_t numericalRank = 0;
+        };
+
+        [[nodiscard]] double parameterNorm(const ParameterVector& values)
+        {
+            double squaredNorm = 0.0;
+            for (const double value : values)
+            {
+                squaredNorm += value * value;
+            }
+            return std::sqrt(squaredNorm);
+        }
+
+        // Diagnostics use a small symmetric Jacobi eigensolve of J^T J. This
+        // is intentionally skipped in ordinary production execution.
+        [[nodiscard]] JacobianSpectrum analyzeJacobian(
+            NormalMatrix gram)
+        {
+            std::array<ParameterVector, parameterCount> eigenvectors{};
+            for (std::size_t index = 0; index < parameterCount; ++index)
+            {
+                eigenvectors[index][index] = 1.0;
+            }
+
+            for (std::size_t iteration = 0; iteration < 256; ++iteration)
+            {
+                std::size_t first = 0;
+                std::size_t second = 1;
+                double maximumOffDiagonal = 0.0;
+                for (std::size_t row = 0; row < parameterCount; ++row)
+                {
+                    for (std::size_t column = row + 1;
+                         column < parameterCount; ++column)
+                    {
+                        const double magnitude =
+                            std::abs(gram[row][column]);
+                        if (magnitude > maximumOffDiagonal)
+                        {
+                            maximumOffDiagonal = magnitude;
+                            first = row;
+                            second = column;
+                        }
+                    }
+                }
+
+                if (maximumOffDiagonal <= 1.0e-15)
+                {
+                    break;
+                }
+
+                const double angle = 0.5 * std::atan2(
+                    2.0 * gram[first][second],
+                    gram[second][second] - gram[first][first]);
+                const double cosine = std::cos(angle);
+                const double sine = std::sin(angle);
+                const double firstDiagonal = gram[first][first];
+                const double secondDiagonal = gram[second][second];
+                const double cross = gram[first][second];
+                gram[first][first] = cosine * cosine * firstDiagonal
+                    - 2.0 * sine * cosine * cross
+                    + sine * sine * secondDiagonal;
+                gram[second][second] = sine * sine * firstDiagonal
+                    + 2.0 * sine * cosine * cross
+                    + cosine * cosine * secondDiagonal;
+                gram[first][second] = 0.0;
+                gram[second][first] = 0.0;
+
+                for (std::size_t index = 0;
+                     index < parameterCount; ++index)
+                {
+                    if (index != first && index != second)
+                    {
+                        const double firstValue = gram[index][first];
+                        const double secondValue = gram[index][second];
+                        gram[index][first] =
+                            cosine * firstValue - sine * secondValue;
+                        gram[first][index] = gram[index][first];
+                        gram[index][second] =
+                            sine * firstValue + cosine * secondValue;
+                        gram[second][index] = gram[index][second];
+                    }
+
+                    const double firstVectorValue =
+                        eigenvectors[first][index];
+                    const double secondVectorValue =
+                        eigenvectors[second][index];
+                    eigenvectors[first][index] =
+                        cosine * firstVectorValue
+                        - sine * secondVectorValue;
+                    eigenvectors[second][index] =
+                        sine * firstVectorValue
+                        + cosine * secondVectorValue;
+                }
+            }
+
+            std::array<std::size_t, parameterCount> order{};
+            for (std::size_t index = 0; index < parameterCount; ++index)
+            {
+                order[index] = index;
+            }
+            std::sort(
+                order.begin(),
+                order.end(),
+                [&gram](const std::size_t left, const std::size_t right)
+                {
+                    return gram[left][left] > gram[right][right];
+                });
+
+            JacobianSpectrum spectrum;
+            for (std::size_t sortedIndex = 0;
+                 sortedIndex < parameterCount; ++sortedIndex)
+            {
+                const std::size_t originalIndex = order[sortedIndex];
+                spectrum.singularValues[sortedIndex] = std::sqrt(
+                    std::max(0.0, gram[originalIndex][originalIndex]));
+                spectrum.rightSingularVectors[sortedIndex] =
+                    eigenvectors[originalIndex];
+            }
+
+            const double rankThreshold =
+                spectrum.singularValues.front() * 1.0e-7;
+            spectrum.numericalRank = static_cast<std::size_t>(std::count_if(
+                spectrum.singularValues.begin(),
+                spectrum.singularValues.end(),
+                [rankThreshold](const double value)
+                {
+                    return value > rankThreshold;
+                }));
+            return spectrum;
+        }
+
+        [[nodiscard]] double approximateNullSpaceStepNorm(
+            const ParameterVector& step,
+            const JacobianSpectrum& spectrum)
+        {
+            double squaredNorm = 0.0;
+            constexpr std::size_t physicalEndpointDofs = 6;
+            for (std::size_t vectorIndex = physicalEndpointDofs;
+                 vectorIndex < parameterCount; ++vectorIndex)
+            {
+                double component = 0.0;
+                for (std::size_t parameter = 0;
+                     parameter < parameterCount; ++parameter)
+                {
+                    component += step[parameter]
+                        * spectrum.rightSingularVectors[vectorIndex][parameter];
+                }
+                squaredNorm += component * component;
+            }
+            return std::sqrt(squaredNorm);
+        }
+
+        [[nodiscard]] detail::CircuitCompletionLmWorkCounts subtractWork(
+            const detail::CircuitCompletionLmWorkCounts& end,
+            const detail::CircuitCompletionLmWorkCounts& begin)
+        {
+            return {
+                end.jacobianConstructions - begin.jacobianConstructions,
+                end.connectorIntegrations - begin.connectorIntegrations,
+                end.sensitivityTraversals - begin.sensitivityTraversals,
+                end.trialIntegrations - begin.trialIntegrations,
+                end.dampingTrials - begin.dampingTrials,
+                end.rejectedDampingTrials - begin.rejectedDampingTrials,
+                end.clampedParameters - begin.clampedParameters};
+        }
 
         // Build a single-segment ChannelProfile covering [0, length]
         // with the given constant value.
@@ -334,17 +507,40 @@ namespace quantum::coaster
             const EndpointState& trackEnd,
             const EndpointState& trackStart,
             const double length,
-            ParameterVector params)
+            ParameterVector params,
+            const detail::CircuitCompletionJacobianStrategy strategy,
+            const std::size_t seedIndex,
+            detail::CircuitCompletionLmSeedDiagnostics* seedDiagnostics,
+            detail::CircuitCompletionLmWorkCounts* work)
         {
             LevenbergMarquardtAttempt attempt;
             attempt.params = params;
 
+            const detail::CircuitCompletionLmWorkCounts workAtSeedStart =
+                work != nullptr
+                    ? *work
+                    : detail::CircuitCompletionLmWorkCounts{};
+            if (seedDiagnostics != nullptr)
+            {
+                seedDiagnostics->seedIndex = seedIndex;
+                seedDiagnostics->initialParameters = params;
+            }
+
             EndpointState connectorEnd =
                 integrateConnector(trackEnd, params, length);
+            if (work != nullptr)
+            {
+                ++work->connectorIntegrations;
+            }
 
             ErrorVector normErrors =
                 computeNormalisedError(
                     connectorEnd, trackStart, length);
+            if (seedDiagnostics != nullptr)
+            {
+                seedDiagnostics->residualProgression.push_back(
+                    normalisedRms(normErrors));
+            }
 
             // Levenberg-Marquardt damping parameter.
             double lambda = 1e-3;
@@ -391,39 +587,77 @@ namespace quantum::coaster
                     break;
                 }
 
-                // Finite-difference Jacobian of the normalised error.
-                JacobianMatrix jacobian;
-
-                for (std::size_t col = 0;
-                     col < parameterCount; ++col)
+                detail::CircuitCompletionLmIterationDiagnostics
+                    iterationDiagnostics;
+                if (seedDiagnostics != nullptr)
                 {
-                    ParameterVector perturbed = params;
-                    perturbed[col] += finiteDiffEpsilon;
+                    iterationDiagnostics.seedIndex = seedIndex;
+                    iterationDiagnostics.iterationIndex = iteration;
+                    iterationDiagnostics.residualRmsBefore =
+                        normalisedRms(normErrors);
+                    iterationDiagnostics.parameterNorm =
+                        parameterNorm(params);
+                    iterationDiagnostics.lambdaEntering = lambda;
+                }
 
-                    const EndpointState perturbedEnd =
-                        integrateConnector(
-                            trackEnd, perturbed, length);
-                    const ErrorVector perturbedNorm =
-                        computeNormalisedError(
-                            perturbedEnd, trackStart, length);
+                JacobianMatrix jacobian{};
+                if (work != nullptr)
+                {
+                    ++work->jacobianConstructions;
+                }
 
-                    for (std::size_t row = 0;
-                         row < residualCount; ++row)
+                if (strategy
+                    == detail::CircuitCompletionJacobianStrategy::
+                        FiniteDifference)
+                {
+                    for (std::size_t col = 0;
+                         col < parameterCount; ++col)
                     {
-                        jacobian[col][row] =
-                            (perturbedNorm[row] - normErrors[row])
-                            / finiteDiffEpsilon;
+                        ParameterVector perturbed = params;
+                        perturbed[col] += finiteDiffEpsilon;
+
+                        const EndpointState perturbedEnd =
+                            integrateConnector(
+                                trackEnd, perturbed, length);
+                        if (work != nullptr)
+                        {
+                            ++work->connectorIntegrations;
+                        }
+                        const ErrorVector perturbedNorm =
+                            computeNormalisedError(
+                                perturbedEnd, trackStart, length);
+
+                        for (std::size_t row = 0;
+                             row < residualCount; ++row)
+                        {
+                            jacobian[col][row] =
+                                (perturbedNorm[row] - normErrors[row])
+                                / finiteDiffEpsilon;
+                        }
+                    }
+                }
+                else
+                {
+                    const detail::CircuitCompletionIntegrationSchedule
+                        schedule = detail::
+                            makeCircuitCompletionIntegrationSchedule(
+                                params,
+                                length);
+                    jacobian = detail::
+                        evaluateCircuitCompletionEndpointSensitivities(
+                            trackEnd,
+                            params,
+                            length,
+                            schedule)
+                        .residualJacobian;
+                    if (work != nullptr)
+                    {
+                        ++work->sensitivityTraversals;
                     }
                 }
 
                 // Build normal equations:
                 // (J^T J + lambda I) dx = -J^T e.
-                using NormalMatrix =
-                    std::array<std::array<double, parameterCount>,
-                        parameterCount>;
-                using RhsVector =
-                    std::array<double, parameterCount>;
-
                 NormalMatrix jtj{};
                 RhsVector jte{};
 
@@ -453,6 +687,18 @@ namespace quantum::coaster
                     jte[i] = -sum;
                 }
 
+                JacobianSpectrum spectrum;
+                if (seedDiagnostics != nullptr)
+                {
+                    spectrum = analyzeJacobian(jtj);
+                    iterationDiagnostics.singularValues =
+                        spectrum.singularValues;
+                    iterationDiagnostics.numericalRank =
+                        spectrum.numericalRank;
+                    iterationDiagnostics.gradientNorm =
+                        parameterNorm(jte);
+                }
+
                 // LM inner loop: try increasing damping until the
                 // step improves the normalised residual.
                 const double oldNorm = normalisedRms(normErrors);
@@ -461,6 +707,15 @@ namespace quantum::coaster
                 for (int lmRetry = 0;
                      lmRetry < maxLmRetries; ++lmRetry)
                 {
+                    if (work != nullptr)
+                    {
+                        ++work->dampingTrials;
+                    }
+                    if (seedDiagnostics != nullptr)
+                    {
+                        ++iterationDiagnostics.dampingTrials;
+                    }
+
                     // Augmented system:
                     // (J^T J + lambda*I) dx = -J^T e.
                     std::array<AugmentedRow, parameterCount>
@@ -542,6 +797,13 @@ namespace quantum::coaster
                             ? sum / diag
                             : 0.0;
                     }
+                    if (seedDiagnostics != nullptr)
+                    {
+                        iterationDiagnostics.proposedStepNorm =
+                            parameterNorm(dx);
+                        iterationDiagnostics.approximateNullSpaceStepNorm =
+                            approximateNullSpaceStepNorm(dx, spectrum);
+                    }
 
                     // Trial step.
                     ParameterVector trialParams = params;
@@ -552,17 +814,34 @@ namespace quantum::coaster
                     }
 
                     // Parameter magnitude guard.
+                    std::uint32_t clampedParameters = 0;
                     for (double& p : trialParams)
                     {
-                        p = std::clamp(
+                        const double clamped = std::clamp(
                             p,
                             -maxParamMagnitude,
                             maxParamMagnitude);
+                        clampedParameters += clamped != p ? 1u : 0u;
+                        p = clamped;
+                    }
+                    if (work != nullptr)
+                    {
+                        work->clampedParameters += clampedParameters;
+                    }
+                    if (seedDiagnostics != nullptr)
+                    {
+                        iterationDiagnostics.clampedParameters +=
+                            clampedParameters;
                     }
 
                     const EndpointState trialEnd =
                         integrateConnector(
                             trackEnd, trialParams, length);
+                    if (work != nullptr)
+                    {
+                        ++work->connectorIntegrations;
+                        ++work->trialIntegrations;
+                    }
                     const ErrorVector trialNorm =
                         computeNormalisedError(
                             trialEnd, trackStart, length);
@@ -577,10 +856,24 @@ namespace quantum::coaster
                         lambda = std::max(
                             lambda * lambdaDown, lambdaMin);
                         stepAccepted = true;
+                        if (seedDiagnostics != nullptr)
+                        {
+                            iterationDiagnostics.stepAccepted = true;
+                            iterationDiagnostics.acceptedResidualRms =
+                                trialRms;
+                        }
                         break;
                     }
 
                     // Increase damping and retry.
+                    if (work != nullptr)
+                    {
+                        ++work->rejectedDampingTrials;
+                    }
+                    if (seedDiagnostics != nullptr)
+                    {
+                        ++iterationDiagnostics.rejectedDampingTrials;
+                    }
                     lambda = std::min(
                         lambda * lambdaUp, lambdaMax);
                 }
@@ -592,6 +885,16 @@ namespace quantum::coaster
                     // and hope the landscape improves.
                     lambda = std::min(
                         lambda * lambdaUp, lambdaMax);
+                }
+
+                if (seedDiagnostics != nullptr)
+                {
+                    iterationDiagnostics.lambdaAfterStep = lambda;
+                    iterationDiagnostics.cumulativeWork = *work;
+                    seedDiagnostics->residualProgression.push_back(
+                        normalisedRms(normErrors));
+                    seedDiagnostics->iterations.push_back(
+                        iterationDiagnostics);
                 }
 
                 // Divergence guard.
@@ -608,6 +911,31 @@ namespace quantum::coaster
             attempt.hitIterationLimit =
                 !converged && !diverged && iteration >= maxIterations;
             attempt.iterationCount = iteration;
+            if (seedDiagnostics != nullptr)
+            {
+                seedDiagnostics->finalParameters = params;
+                seedDiagnostics->converged = converged;
+                seedDiagnostics->hitIterationLimit =
+                    attempt.hitIterationLimit;
+                seedDiagnostics->iterationCount = iteration;
+                seedDiagnostics->finalResidualRms =
+                    normalisedRms(normErrors);
+                seedDiagnostics->finalPositionError = glm::length(
+                    connectorEnd.position - trackStart.position);
+                seedDiagnostics->finalTangentErrorDegrees = std::acos(
+                    glm::clamp(
+                        glm::dot(connectorEnd.tangent, trackStart.tangent),
+                        -1.0,
+                        1.0)) * degreesPerRadian;
+                seedDiagnostics->finalFrameErrorDegrees = std::acos(
+                    glm::clamp(
+                        glm::dot(connectorEnd.up, trackStart.up),
+                        -1.0,
+                        1.0)) * degreesPerRadian;
+                seedDiagnostics->work = subtractWork(
+                    *work,
+                    workAtSeedStart);
+            }
             return attempt;
         }
 
@@ -943,11 +1271,32 @@ namespace quantum::coaster
         return "Unknown failure";
     }
 
-    CircuitCompletionResult
-    completeCircuitCandidate(
-        const AuthoredTrack& source,
-        const CircuitCompletionSettings& settings)
+    const char* detail::circuitCompletionJacobianStrategyLabel(
+        const CircuitCompletionJacobianStrategy strategy) noexcept
     {
+        switch (strategy)
+        {
+        case CircuitCompletionJacobianStrategy::FiniteDifference:
+            return "FiniteDifference";
+        case CircuitCompletionJacobianStrategy::Sensitivity:
+            return "Sensitivity";
+        }
+        return "Unknown";
+    }
+
+    CircuitCompletionResult
+    detail::completeCircuitCandidateWithJacobianStrategy(
+        const AuthoredTrack& source,
+        const CircuitCompletionSettings& settings,
+        const CircuitCompletionJacobianStrategy strategy,
+        CircuitCompletionLmDiagnostics* diagnostics)
+    {
+        if (diagnostics != nullptr)
+        {
+            *diagnostics = {};
+            diagnostics->strategy = strategy;
+        }
+
         auto fail = [](CircuitCompletionFailure reason,
                        std::string message,
                        double gap = 0.0,
@@ -1041,6 +1390,20 @@ namespace quantum::coaster
                 "Connector length must be positive and finite");
         }
 
+        if (settings.initialParamOverride.has_value()
+            && !std::all_of(
+                settings.initialParamOverride->begin(),
+                settings.initialParamOverride->end(),
+                [](const double value)
+                {
+                    return std::isfinite(value);
+                }))
+        {
+            return fail(
+                CircuitCompletionFailure::InvalidInput,
+                "Initial parameter override must contain finite values");
+        }
+
         // --- Levenberg-Marquardt solver ---
 
         // Deterministic seed candidates are tried in order until one
@@ -1063,13 +1426,31 @@ namespace quantum::coaster
         bool haveBestAttempt = false;
         LevenbergMarquardtAttempt bestAttempt;
         double bestResidualRms = 0.0;
+        std::size_t bestSeedIndex =
+            std::numeric_limits<std::size_t>::max();
         std::uint32_t totalIterationsSpent = 0;
 
-        for (const ParameterVector& seed : seeds)
+        for (std::size_t seedIndex = 0;
+             seedIndex < seeds.size(); ++seedIndex)
         {
+            detail::CircuitCompletionLmSeedDiagnostics* seedDiagnostics =
+                nullptr;
+            if (diagnostics != nullptr)
+            {
+                diagnostics->seeds.emplace_back();
+                seedDiagnostics = &diagnostics->seeds.back();
+            }
+
             LevenbergMarquardtAttempt attempt =
                 runLevenbergMarquardt(
-                    trackEnd, trackStart, length, seed);
+                    trackEnd,
+                    trackStart,
+                    length,
+                    seeds[seedIndex],
+                    strategy,
+                    seedIndex,
+                    seedDiagnostics,
+                    diagnostics != nullptr ? &diagnostics->work : nullptr);
 
             totalIterationsSpent += attempt.iterationCount;
 
@@ -1087,6 +1468,7 @@ namespace quantum::coaster
                 haveBestAttempt = true;
                 bestAttempt = attempt;
                 bestResidualRms = residualRms;
+                bestSeedIndex = seedIndex;
             }
 
             if (attempt.converged
@@ -1094,6 +1476,14 @@ namespace quantum::coaster
             {
                 break;
             }
+        }
+
+        if (diagnostics != nullptr)
+        {
+            diagnostics->selectedSeedIndex = bestSeedIndex;
+            diagnostics->totalIterationsSpent = totalIterationsSpent;
+            diagnostics->finalParameters = bestAttempt.params;
+            diagnostics->finalResidualRms = bestResidualRms;
         }
 
         const EndpointState& connectorEnd =
@@ -1199,5 +1589,16 @@ namespace quantum::coaster
         }
         result.iterationCount = bestAttempt.iterationCount;
         return result;
+    }
+
+    CircuitCompletionResult completeCircuitCandidate(
+        const AuthoredTrack& source,
+        const CircuitCompletionSettings& settings)
+    {
+        return detail::completeCircuitCandidateWithJacobianStrategy(
+            source,
+            settings,
+            detail::CircuitCompletionJacobianStrategy::FiniteDifference,
+            nullptr);
     }
 }
