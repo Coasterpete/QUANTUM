@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/ChannelProfileEditing.hpp>
+#include <quantum/coaster/detail/CircuitCompletionDetail.hpp>
 #include <quantum/coaster/GeometricSection.hpp>
 #include <quantum/coaster/RiderLocalGeometry.hpp>
 #include <quantum/coaster/TrackTopology.hpp>
@@ -9,10 +10,7 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
-#include <cstdio>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,14 +28,19 @@ namespace quantum::coaster
         constexpr double defaultConnectorLength = 40.0;
         constexpr double integrationSpacing = 0.5;
 
-        // Number of free parameters: start/end rates for
+        // Number of free parameters: start/mid/end rates for
         // pitch, yaw, roll.
-        constexpr std::size_t parameterCount = 6;
+        constexpr std::size_t parameterCount =
+            detail::circuitCompletionParameterCount;
+
+        // Position difference plus full tangent and up-vector differences.
+        constexpr std::size_t residualCount =
+            detail::circuitCompletionResidualCount;
 
         using ParameterVector =
-            std::array<double, parameterCount>;
+            detail::CircuitCompletionParameterVector;
         using ErrorVector =
-            std::array<double, parameterCount>;
+            std::array<double, residualCount>;
         using JacobianMatrix =
             std::array<ErrorVector, parameterCount>;
         using AugmentedRow =
@@ -65,42 +68,99 @@ namespace quantum::coaster
             return profile;
         }
 
-        // Build a single-segment ChannelProfile with linear
-        // interpolation from valueBegin to valueEnd over [0, length].
-        [[nodiscard]] ChannelProfile makeLinearProfile(
-            const double valueBegin,
-            const double valueEnd,
-            const double length)
-        {
-            ChannelProfile profile;
-            profile.nextSegmentId = 2;
-
-            ProfileSegment segment;
-            segment.id = 1;
-            segment.transition.domainBegin = 0.0;
-            segment.transition.domainEnd = length;
-            segment.transition.valueBegin = valueBegin;
-            segment.transition.valueEnd = valueEnd;
-            segment.transition.transitionType =
-                math::TransitionType::Linear;
-
-            profile.segments.push_back(segment);
-            return profile;
-        }
-
         // Build the 3-channel rate profile for a connector section
-        // from the 6-element parameter vector.
+        // from the 9-element parameter vector [p0,p_m,p_1, y0,y_m,y_1, r0,r_m,r_1].
+        // Each channel uses a piecewise-linear rate with a breakpoint at s = L/2:
+        //
+        //   c(s) = c_0 + (c_m - c_0) * (2s/L),  0 <= s <= L/2
+        //   c(s) = c_m + (c_1 - c_m) * (2(s-L/2)/L),  L/2 < s <= L
+        //
+        // The old six-parameter profile is reproduced exactly in function space
+        // when p_m=(p_0+p_1)/2, y_m=(y_0+y_1)/2, r_m=(r_0+r_1)/2.
         [[nodiscard]] GeometricSection buildConnectorProfiles(
             const ParameterVector& params,
             const double length)
         {
             GeometricSection profiles;
-            profiles.pitch = makeLinearProfile(
-                params[0], params[1], length);
-            profiles.yaw = makeLinearProfile(
-                params[2], params[3], length);
-            profiles.roll = makeLinearProfile(
-                params[4], params[5], length);
+
+            // --- Pitch: 2 segments, breakpoint at L/2 ---
+            profiles.pitch.nextSegmentId = 3;
+            {
+                // Segment 1: [0, L/2], from p_0 to p_m
+                ProfileSegment seg1;
+                seg1.id = 1;
+                seg1.transition.domainBegin = 0.0;
+                seg1.transition.domainEnd = length * 0.5;
+                seg1.transition.valueBegin = params[0];
+                seg1.transition.valueEnd = params[1];
+                seg1.transition.transitionType =
+                    math::TransitionType::Linear;
+                profiles.pitch.segments.push_back(seg1);
+
+                // Segment 2: [L/2, L], from p_m to p_1
+                ProfileSegment seg2;
+                seg2.id = 2;
+                seg2.transition.domainBegin = length * 0.5;
+                seg2.transition.domainEnd = length;
+                seg2.transition.valueBegin = params[1];
+                seg2.transition.valueEnd = params[2];
+                seg2.transition.transitionType =
+                    math::TransitionType::Linear;
+                profiles.pitch.segments.push_back(seg2);
+            }
+
+            // --- Yaw: 2 segments, breakpoint at L/2 ---
+            profiles.yaw.nextSegmentId = 5;
+            {
+                // Segment 1: [0, L/2], from y_0 to y_m
+                ProfileSegment seg1;
+                seg1.id = 3;
+                seg1.transition.domainBegin = 0.0;
+                seg1.transition.domainEnd = length * 0.5;
+                seg1.transition.valueBegin = params[3];
+                seg1.transition.valueEnd = params[4];
+                seg1.transition.transitionType =
+                    math::TransitionType::Linear;
+                profiles.yaw.segments.push_back(seg1);
+
+                // Segment 2: [L/2, L], from y_m to y_1
+                ProfileSegment seg2;
+                seg2.id = 4;
+                seg2.transition.domainBegin = length * 0.5;
+                seg2.transition.domainEnd = length;
+                seg2.transition.valueBegin = params[4];
+                seg2.transition.valueEnd = params[5];
+                seg2.transition.transitionType =
+                    math::TransitionType::Linear;
+                profiles.yaw.segments.push_back(seg2);
+            }
+
+            // --- Roll: 2 segments, breakpoint at L/2 ---
+            profiles.roll.nextSegmentId = 7;
+            {
+                // Segment 1: [0, L/2], from r_0 to r_m
+                ProfileSegment seg1;
+                seg1.id = 5;
+                seg1.transition.domainBegin = 0.0;
+                seg1.transition.domainEnd = length * 0.5;
+                seg1.transition.valueBegin = params[6];
+                seg1.transition.valueEnd = params[7];
+                seg1.transition.transitionType =
+                    math::TransitionType::Linear;
+                profiles.roll.segments.push_back(seg1);
+
+                // Segment 2: [L/2, L], from r_m to r_1
+                ProfileSegment seg2;
+                seg2.id = 6;
+                seg2.transition.domainBegin = length * 0.5;
+                seg2.transition.domainEnd = length;
+                seg2.transition.valueBegin = params[7];
+                seg2.transition.valueEnd = params[8];
+                seg2.transition.transitionType =
+                    math::TransitionType::Linear;
+                profiles.roll.segments.push_back(seg2);
+            }
+
             return profiles;
         }
 
@@ -143,44 +203,13 @@ namespace quantum::coaster
                     endState.frame.up};
         }
 
-        // Compute the raw error vector for the closure.
-        //
-        // Error layout:
-        //   [0] = position.x gap  (metres)
-        //   [1] = position.y gap  (metres)
-        //   [2] = position.z gap  (metres)
-        //   [3] = tangent error x (dimensionless)
-        //   [4] = tangent error y (dimensionless)
-        //   [5] = frame error z   (dimensionless)
-        [[nodiscard]] ErrorVector computeClosureError(
-            const EndpointState& connectorEnd,
-            const EndpointState& trackStart)
-        {
-            const glm::dvec3 posGap =
-                connectorEnd.position - trackStart.position;
-            const glm::dvec3 tangentError =
-                connectorEnd.tangent - trackStart.tangent;
-            const glm::dvec3 frameError =
-                connectorEnd.up - trackStart.up;
-
-            return {posGap.x, posGap.y, posGap.z,
-                    tangentError.x, tangentError.y,
-                    frameError.z};
-        }
-
         // Compute a scale-normalised error vector.  Position
         // components are divided by connector length so that the
         // six components have comparable magnitude.
         //
-        // Orientation errors use two locally linear projections
-        // of the tangent error onto the start-frame right and up
-        // directions, plus the frame roll projection:
-        //   [3] = tangent-up error    (linear in pitch heading)
-        //   [4] = tangent-right error (linear in yaw heading)
-        //   [5] = frame roll error    (linear in roll)
-        //
-        // All three orientation components are linear in their
-        // respective angles, providing gradient everywhere.
+        // Orientation uses full tangent and up-vector differences.
+        // These chordal residuals are smooth, linear near the target,
+        // and distinguish the intended frame from a 180-degree reversal.
         [[nodiscard]] ErrorVector computeNormalisedError(
             const EndpointState& connectorEnd,
             const EndpointState& trackStart,
@@ -188,35 +217,20 @@ namespace quantum::coaster
         {
             const glm::dvec3 posGap =
                 connectorEnd.position - trackStart.position;
-            const glm::dvec3 tangentError =
-                connectorEnd.tangent - trackStart.tangent;
-
-            // Local perpendicular frame at the track start.
-            const glm::dvec3 right = glm::normalize(
-                glm::cross(trackStart.tangent, trackStart.up));
-
-            // Tangent-up component: projects the tangent error onto
-            // the start-frame up direction.  This is linear in the
-            // pitch component of the heading error and provides
-            // gradient everywhere the heading deviates from nominal.
-            const double tangentUp =
-                glm::dot(tangentError, trackStart.up);
-
-            // Tangent-right component: projects the tangent error
-            // onto the start-frame right direction.  This is linear
-            // in the yaw component of the heading error.
-            const double tangentRight =
-                glm::dot(tangentError, right);
-
-            // Frame roll error: projects the frame error onto the
-            // start-frame right direction.  Linear for all angles.
-            const double frameRoll =
-                glm::dot(connectorEnd.up - trackStart.up, right);
+            const detail::CircuitCompletionOrientationResidual
+                orientationError =
+                    detail::computeCircuitCompletionOrientationResidual(
+                        connectorEnd.tangent,
+                        connectorEnd.up,
+                        trackStart.tangent,
+                        trackStart.up);
 
             const double invL = 1.0 / length;
             return {
                 posGap.x * invL, posGap.y * invL, posGap.z * invL,
-                tangentUp, tangentRight, frameRoll};
+                orientationError[0], orientationError[1],
+                orientationError[2], orientationError[3],
+                orientationError[4], orientationError[5]};
         }
 
         // RMS norm of the normalised error vector.
@@ -228,7 +242,7 @@ namespace quantum::coaster
             {
                 sum += v * v;
             }
-            return std::sqrt(sum / static_cast<double>(parameterCount));
+            return std::sqrt(sum / static_cast<double>(residualCount));
         }
 
         // Compute initial parameter guess based on the gap between
@@ -312,9 +326,376 @@ namespace quantum::coaster
             const double rollStart = 0.0;
             const double rollEnd = 0.0;
 
-            return {pitchStart, pitchEnd,
-                    yawStart, yawEnd,
-                    rollStart, rollEnd};
+            return {
+                pitchStart, (pitchStart + pitchEnd) * 0.5, pitchEnd,
+                yawStart, (yawStart + yawEnd) * 0.5, yawEnd,
+                rollStart, (rollStart + rollEnd) * 0.5, rollEnd};
+        }
+
+        struct LevenbergMarquardtAttempt
+        {
+            ParameterVector params{};
+            EndpointState connectorEnd{};
+            bool converged = false;
+
+            // True when the iteration budget was exhausted without
+            // meeting the tolerances (as opposed to an early divergence
+            // guard trip).
+            bool hitIterationLimit = false;
+            std::uint32_t iterationCount = 0;
+        };
+
+        // Runs the Levenberg-Marquardt refinement from `initialParams`
+        // and returns the final state of that single attempt.
+        [[nodiscard]] LevenbergMarquardtAttempt runLevenbergMarquardt(
+            const EndpointState& trackEnd,
+            const EndpointState& trackStart,
+            const double length,
+            ParameterVector params)
+        {
+            LevenbergMarquardtAttempt attempt;
+            attempt.params = params;
+
+            EndpointState connectorEnd =
+                integrateConnector(trackEnd, params, length);
+
+            ErrorVector normErrors =
+                computeNormalisedError(
+                    connectorEnd, trackStart, length);
+
+            // Levenberg-Marquardt damping parameter.
+            double lambda = 1e-3;
+            constexpr double lambdaMin = 1e-12;
+            constexpr double lambdaMax = 1e4;
+            constexpr double lambdaUp = 10.0;
+            constexpr double lambdaDown = 0.1;
+            // Maximum LM retries per iteration (re-solve with
+            // increased damping if no improvement found).
+            constexpr int maxLmRetries = 8;
+
+            // Parameter magnitude guard.
+            constexpr double maxParamMagnitude = 10.0;
+
+            constexpr TopologyTolerances tolerances;
+
+            bool converged = false;
+            bool diverged = false;
+
+            std::uint32_t iteration = 0;
+            for (; iteration < maxIterations; ++iteration)
+            {
+                // Check convergence against real tolerances.
+                const double posGap =
+                    glm::length(connectorEnd.position
+                        - trackStart.position);
+                const double tangDot = glm::clamp(
+                    glm::dot(connectorEnd.tangent,
+                        trackStart.tangent),
+                    -1.0, 1.0);
+                const double tangDeg =
+                    std::acos(tangDot) * degreesPerRadian;
+                const double frameDot = glm::clamp(
+                    glm::dot(connectorEnd.up, trackStart.up),
+                    -1.0, 1.0);
+                const double frameDeg =
+                    std::acos(frameDot) * degreesPerRadian;
+
+                if (posGap <= tolerances.closureGapTolerance
+                    && tangDeg <= tolerances.angleTolerance
+                    && frameDeg <= tolerances.angleTolerance)
+                {
+                    converged = true;
+                    break;
+                }
+
+                // Finite-difference Jacobian of the normalised error.
+                JacobianMatrix jacobian;
+
+                for (std::size_t col = 0;
+                     col < parameterCount; ++col)
+                {
+                    ParameterVector perturbed = params;
+                    perturbed[col] += finiteDiffEpsilon;
+
+                    const EndpointState perturbedEnd =
+                        integrateConnector(
+                            trackEnd, perturbed, length);
+                    const ErrorVector perturbedNorm =
+                        computeNormalisedError(
+                            perturbedEnd, trackStart, length);
+
+                    for (std::size_t row = 0;
+                         row < residualCount; ++row)
+                    {
+                        jacobian[col][row] =
+                            (perturbedNorm[row] - normErrors[row])
+                            / finiteDiffEpsilon;
+                    }
+                }
+
+                // Build normal equations:
+                // (J^T J + lambda I) dx = -J^T e.
+                using NormalMatrix =
+                    std::array<std::array<double, parameterCount>,
+                        parameterCount>;
+                using RhsVector =
+                    std::array<double, parameterCount>;
+
+                NormalMatrix jtj{};
+                RhsVector jte{};
+
+                for (std::size_t i = 0;
+                     i < parameterCount; ++i)
+                {
+                    for (std::size_t j = 0;
+                         j < parameterCount; ++j)
+                    {
+                        double sum = 0.0;
+                        for (std::size_t k = 0;
+                             k < residualCount; ++k)
+                        {
+                            sum += jacobian[j][k]
+                                * jacobian[i][k];
+                        }
+                        jtj[i][j] = sum;
+                    }
+
+                    double sum = 0.0;
+                    for (std::size_t k = 0;
+                         k < residualCount; ++k)
+                    {
+                        sum += jacobian[i][k]
+                            * normErrors[k];
+                    }
+                    jte[i] = -sum;
+                }
+
+                // LM inner loop: try increasing damping until the
+                // step improves the normalised residual.
+                const double oldNorm = normalisedRms(normErrors);
+                bool stepAccepted = false;
+
+                for (int lmRetry = 0;
+                     lmRetry < maxLmRetries; ++lmRetry)
+                {
+                    // Augmented system:
+                    // (J^T J + lambda*I) dx = -J^T e.
+                    std::array<AugmentedRow, parameterCount>
+                        augmented;
+                    for (std::size_t r = 0;
+                         r < parameterCount; ++r)
+                    {
+                        for (std::size_t c = 0;
+                             c < parameterCount; ++c)
+                        {
+                            augmented[r][c] = jtj[r][c];
+                        }
+                        augmented[r][r] += lambda;
+                        augmented[r][parameterCount] = jte[r];
+                    }
+
+                    // Gaussian elimination with partial pivoting.
+                    for (std::size_t col = 0;
+                         col < parameterCount; ++col)
+                    {
+                        std::size_t pivotRow = col;
+                        double pivotVal =
+                            std::abs(augmented[col][col]);
+                        for (std::size_t row = col + 1;
+                             row < parameterCount; ++row)
+                        {
+                            const double val =
+                                std::abs(augmented[row][col]);
+                            if (val > pivotVal)
+                            {
+                                pivotVal = val;
+                                pivotRow = row;
+                            }
+                        }
+
+                        if (pivotVal < 1e-14)
+                        {
+                            break;
+                        }
+
+                        if (pivotRow != col)
+                        {
+                            std::swap(
+                                augmented[col],
+                                augmented[pivotRow]);
+                        }
+
+                        const double invPivot =
+                            1.0 / augmented[col][col];
+                        for (std::size_t row = col + 1;
+                             row < parameterCount; ++row)
+                        {
+                            const double factor =
+                                augmented[row][col] * invPivot;
+                            for (std::size_t k = col;
+                                 k <= parameterCount; ++k)
+                            {
+                                augmented[row][k] -=
+                                    factor * augmented[col][k];
+                            }
+                        }
+                    }
+
+                    // Back-substitution.
+                    ParameterVector dx{};
+                    for (std::size_t row = parameterCount;
+                         row > 0; --row)
+                    {
+                        const std::size_t r = row - 1;
+                        double sum =
+                            augmented[r][parameterCount];
+                        for (std::size_t col = r + 1;
+                             col < parameterCount; ++col)
+                        {
+                            sum -= augmented[r][col] * dx[col];
+                        }
+                        const double diag = augmented[r][r];
+                        dx[r] = std::abs(diag) > 1e-14
+                            ? sum / diag
+                            : 0.0;
+                    }
+
+                    // Trial step.
+                    ParameterVector trialParams = params;
+                    for (std::size_t i = 0;
+                         i < parameterCount; ++i)
+                    {
+                        trialParams[i] += dx[i];
+                    }
+
+                    // Parameter magnitude guard.
+                    for (double& p : trialParams)
+                    {
+                        p = std::clamp(
+                            p,
+                            -maxParamMagnitude,
+                            maxParamMagnitude);
+                    }
+
+                    const EndpointState trialEnd =
+                        integrateConnector(
+                            trackEnd, trialParams, length);
+                    const ErrorVector trialNorm =
+                        computeNormalisedError(
+                            trialEnd, trackStart, length);
+                    const double trialRms =
+                        normalisedRms(trialNorm);
+
+                    if (trialRms < oldNorm)
+                    {
+                        params = trialParams;
+                        connectorEnd = trialEnd;
+                        normErrors = trialNorm;
+                        lambda = std::max(
+                            lambda * lambdaDown, lambdaMin);
+                        stepAccepted = true;
+                        break;
+                    }
+
+                    // Increase damping and retry.
+                    lambda = std::min(
+                        lambda * lambdaUp, lambdaMax);
+                }
+
+                if (!stepAccepted)
+                {
+                    // Even maximal damping did not help.
+                    // Increase lambda further for the next iteration
+                    // and hope the landscape improves.
+                    lambda = std::min(
+                        lambda * lambdaUp, lambdaMax);
+                }
+
+                // Divergence guard.
+                if (normalisedRms(normErrors) > 1e4)
+                {
+                    diverged = true;
+                    break;
+                }
+            }
+
+            attempt.connectorEnd = connectorEnd;
+            attempt.params = params;
+            attempt.converged = converged;
+            attempt.hitIterationLimit =
+                !converged && !diverged && iteration >= maxIterations;
+            attempt.iterationCount = iteration;
+            return attempt;
+        }
+
+        // Total LM iteration budget across all seed candidates.  Bounds
+        // the worst-case cost of open-ended geometry while keeping the
+        // search deterministic.
+        constexpr std::uint32_t maxTotalSolverIterations =
+            maxIterations * 5u;
+
+        // Deterministic ordered seed candidates for the solver.  The
+        // heuristic guess comes first; the remaining candidates are
+        // anti-symmetric rate pairs (curve one way then back, returning
+        // the heading to its start direction) on successive branches.
+        // Parameter sweeps show the first such branch peaks near
+        // omega*L ~= 16.8; later branches and coupled pitch+yaw spirals
+        // reach connector shapes unavailable to planar seeds.  LM is a
+        // local method, so the branch the seed lands in decides the
+        // basin it converges towards.
+        [[nodiscard]] std::vector<ParameterVector>
+        computeSeedCandidates(
+            const EndpointState& trackEnd,
+            const EndpointState& trackStart,
+            const double length)
+        {
+            std::vector<ParameterVector> seeds;
+            seeds.push_back(
+                computeInitialGuess(trackEnd, trackStart, length));
+
+            const double invL = 1.0 / length;
+
+            for (const double omegaLength : {8.0, 16.79, 25.0})
+            {
+                for (const double sign : {1.0, -1.0})
+                {
+                    ParameterVector yawSeed{};
+                    yawSeed[3] = -sign * omegaLength * invL;
+                    yawSeed[5] = sign * omegaLength * invL;
+                    seeds.push_back(yawSeed);
+
+                    ParameterVector pitchSeed{};
+                    pitchSeed[0] = -sign * omegaLength * invL;
+                    pitchSeed[2] = sign * omegaLength * invL;
+                    seeds.push_back(pitchSeed);
+                }
+            }
+
+            ParameterVector spiralSeed{};
+            spiralSeed[0] = -16.79 * invL;
+            spiralSeed[2] = 16.79 * invL;
+            spiralSeed[3] = -16.79 * invL;
+            spiralSeed[5] = 16.79 * invL;
+            seeds.push_back(spiralSeed);
+
+            // Skip seeds identical to an earlier candidate (the
+            // heuristic already uses one of the anti-symmetric
+            // branches when the gap is mostly along the tangent).
+            std::vector<ParameterVector> uniqueSeeds;
+            uniqueSeeds.reserve(seeds.size());
+            for (const ParameterVector& seed : seeds)
+            {
+                bool duplicate = false;
+                for (const ParameterVector& existing : uniqueSeeds)
+                {
+                    duplicate = duplicate || (seed == existing);
+                }
+                if (!duplicate)
+                {
+                    uniqueSeeds.push_back(seed);
+                }
+            }
+            return uniqueSeeds;
         }
     }
 
@@ -449,354 +830,65 @@ namespace quantum::coaster
 
         // --- Levenberg-Marquardt solver ---
 
-        ParameterVector params{};
+        // Deterministic seed candidates are tried in order until one
+        // converges; otherwise the attempt with the smallest residual
+        // is kept for reporting.
+        std::vector<ParameterVector> seeds;
+
         if (settings.initialParamOverride.has_value())
         {
-            for (std::size_t i = 0; i < parameterCount; ++i)
-            {
-                params[i] = (*settings.initialParamOverride)[i];
-            }
+            seeds.push_back(
+                detail::expandLegacyCircuitCompletionParameters(
+                    *settings.initialParamOverride));
         }
         else
         {
-            params =
-                computeInitialGuess(trackEnd, trackStart, length);
+            seeds = computeSeedCandidates(
+                trackEnd, trackStart, length);
         }
 
-        EndpointState connectorEnd =
-            integrateConnector(trackEnd, params, length);
+        bool haveBestAttempt = false;
+        LevenbergMarquardtAttempt bestAttempt;
+        double bestResidualRms = 0.0;
+        std::uint32_t totalIterationsSpent = 0;
 
-        // Compute raw errors for the convergence check
-        // (position in metres, angles in radians).
-        ErrorVector rawErrors =
-            computeClosureError(connectorEnd, trackStart);
-
-        // Compute normalised errors for the Jacobian and LM solve.
-        ErrorVector normErrors =
-            computeNormalisedError(
-                connectorEnd, trackStart, length);
-
-        using Clock = std::chrono::steady_clock;
-
-        std::uint32_t iteration = 0;
-        double totalJacobianMs = 0.0;
-        double totalSolveMs = 0.0;
-        double totalStepMs = 0.0;
-
-        // Levenberg-Marquardt damping parameter.
-        double lambda = 1e-3;
-        constexpr double lambdaMin = 1e-12;
-        constexpr double lambdaMax = 1e4;
-        constexpr double lambdaUp = 10.0;
-        constexpr double lambdaDown = 0.1;
-        // Maximum LM retries per iteration (re-solve with
-        // increased damping if no improvement found).
-        constexpr int maxLmRetries = 8;
-
-        // Parameter magnitude guard.
-        constexpr double maxParamMagnitude = 10.0;
-
-        constexpr TopologyTolerances tolerances;
-
-        for (iteration = 0; iteration < maxIterations; ++iteration)
+        for (const ParameterVector& seed : seeds)
         {
-            // Check convergence against real tolerances.
-            const double posGap =
-                glm::length(connectorEnd.position
-                    - trackStart.position);
-            const double tangDot = glm::clamp(
-                glm::dot(connectorEnd.tangent,
-                    trackStart.tangent),
-                -1.0, 1.0);
-            const double tangDeg =
-                std::acos(tangDot) * degreesPerRadian;
-            const double frameDot = glm::clamp(
-                glm::dot(connectorEnd.up, trackStart.up),
-                -1.0, 1.0);
-            const double frameDeg =
-                std::acos(frameDot) * degreesPerRadian;
+            LevenbergMarquardtAttempt attempt =
+                runLevenbergMarquardt(
+                    trackEnd, trackStart, length, seed);
 
-            if (posGap <= tolerances.closureGapTolerance
-                && tangDeg <= tolerances.angleTolerance
-                && frameDeg <= tolerances.angleTolerance)
+            totalIterationsSpent += attempt.iterationCount;
+
+            const double residualRms = normalisedRms(
+                computeNormalisedError(
+                    attempt.connectorEnd, trackStart, length));
+
+            if (detail::shouldReplaceCircuitCompletionAttempt(
+                    haveBestAttempt,
+                    haveBestAttempt && bestAttempt.converged,
+                    bestResidualRms,
+                    attempt.converged,
+                    residualRms))
             {
-                break;
+                haveBestAttempt = true;
+                bestAttempt = attempt;
+                bestResidualRms = residualRms;
             }
 
-            if (iteration < 8 || iteration % 20 == 0)
-            {
-                std::fprintf(stderr,
-                    "[solver] iter=%u posGap=%.4f "
-                    "tang=%.4f frame=%.4f "
-                    "p=(%.4f,%.4f) y=(%.4f,%.4f) "
-                    "lam=%.2e\n",
-                    iteration, posGap, tangDeg, frameDeg,
-                    params[0], params[1], params[2],
-                    params[3], lambda);
-                fflush(stderr);
-            }
-
-            // Finite-difference Jacobian of the normalised error.
-            JacobianMatrix jacobian;
-
-            auto tJac0 = Clock::now();
-
-            for (std::size_t col = 0;
-                 col < parameterCount; ++col)
-            {
-                ParameterVector perturbed = params;
-                perturbed[col] += finiteDiffEpsilon;
-
-                const EndpointState perturbedEnd =
-                    integrateConnector(
-                        trackEnd, perturbed, length);
-                const ErrorVector perturbedNorm =
-                    computeNormalisedError(
-                        perturbedEnd, trackStart, length);
-
-                for (std::size_t row = 0;
-                     row < parameterCount; ++row)
-                {
-                    jacobian[col][row] =
-                        (perturbedNorm[row] - normErrors[row])
-                        / finiteDiffEpsilon;
-                }
-            }
-
-            auto tJac1 = Clock::now();
-            totalJacobianMs += std::chrono::duration<double,
-                std::milli>(tJac1 - tJac0).count();
-
-            // Report Jacobian conditioning on first iteration.
-            if (iteration == 0)
-            {
-                double maxCol = 0.0;
-                double minCol =
-                    std::numeric_limits<double>::max();
-                for (std::size_t c = 0;
-                     c < parameterCount; ++c)
-                {
-                    double cn = 0.0;
-                    for (std::size_t r = 0;
-                         r < parameterCount; ++r)
-                    {
-                        cn += jacobian[c][r]
-                            * jacobian[c][r];
-                    }
-                    cn = std::sqrt(cn);
-                    maxCol = std::max(maxCol, cn);
-                    minCol = std::min(minCol, cn);
-                }
-                std::fprintf(stderr,
-                    "[solver] jacobian cond: %.2f "
-                    "(maxCol=%.4f minCol=%.6f)\n",
-                    minCol > 0.0
-                        ? maxCol / minCol
-                        : std::numeric_limits<double>::infinity(),
-                    maxCol, minCol);
-                fflush(stderr);
-            }
-
-            // Build normal equations:  (J^T J + lambda I) dx = -J^T e.
-            using NormalMatrix =
-                std::array<std::array<double, parameterCount>,
-                    parameterCount>;
-            using RhsVector =
-                std::array<double, parameterCount>;
-
-            NormalMatrix jtj{};
-            RhsVector jte{};
-
-            for (std::size_t i = 0;
-                 i < parameterCount; ++i)
-            {
-                for (std::size_t j = 0;
-                     j < parameterCount; ++j)
-                {
-                    double sum = 0.0;
-                    for (std::size_t k = 0;
-                         k < parameterCount; ++k)
-                    {
-                        sum += jacobian[j][k]
-                            * jacobian[i][k];
-                    }
-                    jtj[i][j] = sum;
-                }
-
-                double sum = 0.0;
-                for (std::size_t k = 0;
-                     k < parameterCount; ++k)
-                {
-                    sum += jacobian[i][k]
-                        * normErrors[k];
-                }
-                jte[i] = -sum;
-            }
-
-            // LM inner loop: try increasing damping until the
-            // step improves the normalised residual.
-            const double oldNorm = normalisedRms(normErrors);
-            bool stepAccepted = false;
-
-            auto tStep0 = Clock::now();
-
-            for (int lmRetry = 0;
-                 lmRetry < maxLmRetries; ++lmRetry)
-            {
-                // Augmented system: (J^T J + lambda*I) dx = -J^T e.
-                std::array<AugmentedRow, parameterCount>
-                    augmented;
-                for (std::size_t r = 0;
-                     r < parameterCount; ++r)
-                {
-                    for (std::size_t c = 0;
-                         c < parameterCount; ++c)
-                    {
-                        augmented[r][c] = jtj[r][c];
-                    }
-                    augmented[r][r] += lambda;
-                    augmented[r][parameterCount] = jte[r];
-                }
-
-                // Gaussian elimination with partial pivoting.
-                for (std::size_t col = 0;
-                     col < parameterCount; ++col)
-                {
-                    std::size_t pivotRow = col;
-                    double pivotVal =
-                        std::abs(augmented[col][col]);
-                    for (std::size_t row = col + 1;
-                         row < parameterCount; ++row)
-                    {
-                        const double val =
-                            std::abs(augmented[row][col]);
-                        if (val > pivotVal)
-                        {
-                            pivotVal = val;
-                            pivotRow = row;
-                        }
-                    }
-
-                    if (pivotVal < 1e-14)
-                    {
-                        break;
-                    }
-
-                    if (pivotRow != col)
-                    {
-                        std::swap(
-                            augmented[col],
-                            augmented[pivotRow]);
-                    }
-
-                    const double invPivot =
-                        1.0 / augmented[col][col];
-                    for (std::size_t row = col + 1;
-                         row < parameterCount; ++row)
-                    {
-                        const double factor =
-                            augmented[row][col] * invPivot;
-                        for (std::size_t k = col;
-                             k <= parameterCount; ++k)
-                        {
-                            augmented[row][k] -=
-                                factor * augmented[col][k];
-                        }
-                    }
-                }
-
-                // Back-substitution.
-                ParameterVector dx{};
-                for (std::size_t row = parameterCount;
-                     row > 0; --row)
-                {
-                    const std::size_t r = row - 1;
-                    double sum =
-                        augmented[r][parameterCount];
-                    for (std::size_t col = r + 1;
-                         col < parameterCount; ++col)
-                    {
-                        sum -= augmented[r][col] * dx[col];
-                    }
-                    const double diag = augmented[r][r];
-                    dx[r] = std::abs(diag) > 1e-14
-                        ? sum / diag
-                        : 0.0;
-                }
-
-                // Clamp step magnitude.
-                double maxDx = 0.0;
-                for (std::size_t i = 0;
-                     i < parameterCount; ++i)
-                {
-                    maxDx = std::max(maxDx, std::abs(dx[i]));
-                }
-
-                // Trial step.
-                ParameterVector trialParams = params;
-                for (std::size_t i = 0;
-                     i < parameterCount; ++i)
-                {
-                    trialParams[i] += dx[i];
-                }
-
-                // Parameter magnitude guard.
-                for (double& p : trialParams)
-                {
-                    p = std::clamp(
-                        p,
-                        -maxParamMagnitude,
-                        maxParamMagnitude);
-                }
-
-                const EndpointState trialEnd =
-                    integrateConnector(
-                        trackEnd, trialParams, length);
-                const ErrorVector trialNorm =
-                    computeNormalisedError(
-                        trialEnd, trackStart, length);
-                const double trialRms =
-                    normalisedRms(trialNorm);
-
-                if (trialRms < oldNorm)
-                {
-                    params = trialParams;
-                    connectorEnd = trialEnd;
-                    normErrors = trialNorm;
-                    rawErrors = computeClosureError(
-                        connectorEnd, trackStart);
-                    lambda = std::max(
-                        lambda * lambdaDown, lambdaMin);
-                    stepAccepted = true;
-                    break;
-                }
-
-                // Increase damping and retry.
-                lambda = std::min(
-                    lambda * lambdaUp, lambdaMax);
-            }
-
-            auto tStep1 = Clock::now();
-            totalStepMs += std::chrono::duration<double,
-                std::milli>(tStep1 - tStep0).count();
-
-            if (!stepAccepted)
-            {
-                // Even maximal damping did not help.
-                // Increase lambda further for the next iteration
-                // and hope the landscape improves.
-                lambda = std::min(
-                    lambda * lambdaUp, lambdaMax);
-            }
-
-            // Divergence guard.
-            if (normalisedRms(normErrors) > 1e4)
+            if (attempt.converged
+                || totalIterationsSpent >= maxTotalSolverIterations)
             {
                 break;
             }
         }
+
+        const EndpointState& connectorEnd =
+            bestAttempt.connectorEnd;
 
         // --- Evaluate convergence ---
+
+        constexpr TopologyTolerances tolerances;
 
         const double positionalGap =
             glm::length(connectorEnd.position - trackStart.position);
@@ -815,17 +907,20 @@ namespace quantum::coaster
             || tangentErrorDeg > tolerances.angleTolerance
             || frameErrorDeg > tolerances.angleTolerance)
         {
+            const bool exhaustedIterations =
+                bestAttempt.hitIterationLimit;
+
             return fail(
-                iteration >= maxIterations
+                exhaustedIterations
                     ? CircuitCompletionFailure::DidNotConverge
                     : CircuitCompletionFailure::UnsupportedGeometry,
-                iteration >= maxIterations
+                exhaustedIterations
                     ? circuitCompletionFailureLabel(
                         CircuitCompletionFailure::DidNotConverge)
                     : circuitCompletionFailureLabel(
                         CircuitCompletionFailure::UnsupportedGeometry),
                 positionalGap, tangentErrorDeg, frameErrorDeg,
-                iteration);
+                bestAttempt.iterationCount);
         }
 
         // --- Build the candidate ---
@@ -837,7 +932,7 @@ namespace quantum::coaster
         connectorSection.length = length;
 
         const GeometricSection profiles =
-            buildConnectorProfiles(params, length);
+            buildConnectorProfiles(bestAttempt.params, length);
         connectorSection.region = RateProfileRegion{profiles};
 
         try
@@ -853,7 +948,7 @@ namespace quantum::coaster
                 std::string("Generated connector failed "
                     "validation: ") + e.what(),
                 positionalGap, tangentErrorDeg, frameErrorDeg,
-                iteration);
+                bestAttempt.iterationCount);
         }
 
         // --- Verify closure on the full candidate ---
@@ -869,7 +964,7 @@ namespace quantum::coaster
                 verifyTopology.diagnostics.positionalGap,
                 verifyTopology.diagnostics.tangentMismatchDegrees,
                 verifyTopology.diagnostics.frameMismatchDegrees,
-                iteration);
+                bestAttempt.iterationCount);
         }
 
         CircuitCompletionResult result;
@@ -887,9 +982,9 @@ namespace quantum::coaster
         {
             result.finalMaxAbsParam =
                 std::max(result.finalMaxAbsParam,
-                    std::abs(params[i]));
+                    std::abs(bestAttempt.params[i]));
         }
-        result.iterationCount = iteration;
+        result.iterationCount = bestAttempt.iterationCount;
         return result;
     }
 }

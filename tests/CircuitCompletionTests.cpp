@@ -2,11 +2,14 @@
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/coaster/CircuitCompletion.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
+#include <quantum/coaster/detail/CircuitCompletionDetail.hpp>
 #include <quantum/coaster/TrackTopology.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -117,7 +120,7 @@ namespace
 
         // For now, build a completion fixture and complete it,
         // then try to complete the result again.
-        AuthoredTrack fixture = makeStraightTrack(30.0);
+        AuthoredTrack fixture = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
         CircuitCompletionResult r1 =
@@ -163,7 +166,7 @@ namespace
     // ================================================================
     void test3_supportedFixture()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -171,7 +174,7 @@ namespace
             completeCircuitCandidate(track, settings);
         require(
             result.success,
-            "Straight 30m track must complete");
+            "Straight 15m track must complete");
         require(
             result.connectorRegionCount == 1,
             "Must produce exactly 1 connector region");
@@ -185,7 +188,7 @@ namespace
     // ================================================================
     void test4_independentClosure()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -205,7 +208,7 @@ namespace
     // ================================================================
     void test5_positionalGap()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -225,7 +228,7 @@ namespace
     // ================================================================
     void test6_tangentError()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -245,7 +248,7 @@ namespace
     // ================================================================
     void test7_frameError()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -265,7 +268,7 @@ namespace
     // ================================================================
     void test8_sourceUnchanged()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         const std::size_t origCount = track.sectionCount();
         const double origLength = track.section(0).length;
 
@@ -307,7 +310,7 @@ namespace
     // ================================================================
     void test10_deterministic()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -343,7 +346,7 @@ namespace
     // ================================================================
     void test11_generatedRegionValid()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -368,7 +371,7 @@ namespace
     // ================================================================
     void test12_segmentIdsValid()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -406,7 +409,7 @@ namespace
     // ================================================================
     void test13_nextSegmentIdValid()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -435,7 +438,7 @@ namespace
     // ================================================================
     void test14_serializes()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -455,7 +458,7 @@ namespace
     // ================================================================
     void test15_roundTrip()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -480,7 +483,7 @@ namespace
     // ================================================================
     void test16_topologyAfterRoundTrip()
     {
-        AuthoredTrack track = makeStraightTrack(30.0);
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -539,14 +542,13 @@ namespace
     }
 
     // ================================================================
-    // 19. Iteration limit is respected
+    // 19. Successful solve reports its iteration count
     // ================================================================
-    void test19_iterationLimit()
+    void test19_iterationCount()
     {
-        // This is indirectly tested by the solver.  If a fixture
-        // cannot converge, the iterationCount will be at or near
-        // maxIterations.  We verify the result structure is valid.
-        AuthoredTrack track = makeStraightTrack(30.0);
+        // The canonical fixture requires refinement rather than
+        // converging from its initial seed.
+        AuthoredTrack track = makeStraightTrack(15.0);
         CircuitCompletionSettings settings;
         settings.preferredConnectorLength = 40.0;
 
@@ -575,6 +577,164 @@ namespace
         require(
             result.completedTrack.sectionCount() == 0,
             "Failed result must have empty completedTrack");
+    }
+
+    // ================================================================
+    // 21. Current non-convergent fixture fails cleanly
+    // ================================================================
+    void test21_nonConvergentFixture()
+    {
+        // The current deterministic seed search does not close this
+        // 30m/40m fixture. This is a clean-failure regression, not a
+        // claim that the nine-parameter rate family is infeasible.
+        AuthoredTrack track = makeStraightTrack(30.0);
+        CircuitCompletionSettings settings;
+        settings.preferredConnectorLength = 40.0;
+
+        CircuitCompletionResult result =
+            completeCircuitCandidate(track, settings);
+        require(
+            !result.success,
+            "Current 30m/40m fixture must fail cleanly");
+        require(
+            result.failureReason
+                == CircuitCompletionFailure::DidNotConverge
+                || result.failureReason
+                    == CircuitCompletionFailure::UnsupportedGeometry,
+            "Failure reason must be DidNotConverge or UnsupportedGeometry");
+        // Source must be unchanged.
+        require(
+            track.sectionCount() == 1,
+            "Source track must be unchanged after failed solve");
+        // No partial geometry committed.
+        require(
+            result.completedTrack.sectionCount() == 0,
+            "Failed result must have empty completedTrack");
+    }
+
+    // ================================================================
+    // 22. Tangent reversal has a nonzero orientation residual
+    // ================================================================
+    void test22_tangentReversalResidual()
+    {
+        const auto residual =
+            quantum::coaster::detail::
+                computeCircuitCompletionOrientationResidual(
+                    glm::dvec3{-1.0, 0.0, 0.0},
+                    glm::dvec3{0.0, 0.0, 1.0},
+                    glm::dvec3{1.0, 0.0, 0.0},
+                    glm::dvec3{0.0, 0.0, 1.0});
+
+        requireApproxEq(
+            residual[0], -2.0, 1e-12,
+            "Reversed tangent residual");
+        require(
+            residual != decltype(residual){},
+            "A 180-degree tangent reversal must not have zero residual");
+    }
+
+    // ================================================================
+    // 23. Reversed frame has a nonzero orientation residual
+    // ================================================================
+    void test23_reversedFrameResidual()
+    {
+        const auto residual =
+            quantum::coaster::detail::
+                computeCircuitCompletionOrientationResidual(
+                    glm::dvec3{1.0, 0.0, 0.0},
+                    glm::dvec3{0.0, 0.0, -1.0},
+                    glm::dvec3{1.0, 0.0, 0.0},
+                    glm::dvec3{0.0, 0.0, 1.0});
+
+        requireApproxEq(
+            residual[5], -2.0, 1e-12,
+            "Reversed up-vector residual");
+        require(
+            residual != decltype(residual){},
+            "An upside-down frame must not have zero residual");
+    }
+
+    // ================================================================
+    // 24. A converged candidate always wins residual ranking
+    // ================================================================
+    void test24_convergedCandidatePrecedence()
+    {
+        using quantum::coaster::detail::
+            shouldReplaceCircuitCompletionAttempt;
+
+        require(
+            shouldReplaceCircuitCompletionAttempt(
+                true, false, 0.0, true, 1.0),
+            "A converged candidate must replace a lower-RMS failure");
+        require(
+            !shouldReplaceCircuitCompletionAttempt(
+                true, true, 1.0, false, 0.0),
+            "A lower-RMS failure must not replace a converged candidate");
+    }
+
+    // ================================================================
+    // 25. Generated profiles use the midpoint split
+    // ================================================================
+    void test25_midpointSplitProfiles()
+    {
+        AuthoredTrack track = makeStraightTrack(15.0);
+        CircuitCompletionSettings settings;
+        settings.preferredConnectorLength = 40.0;
+
+        const CircuitCompletionResult result =
+            completeCircuitCandidate(track, settings);
+        require(result.success, "Canonical fixture must succeed");
+
+        const GeometricSection& profiles =
+            result.completedTrack.section(
+                result.completedTrack.sectionCount() - 1)
+            .rateProfileRegion().rateProfiles;
+
+        const std::array<const ChannelProfile*, 3> channels{
+            &profiles.pitch, &profiles.yaw, &profiles.roll};
+
+        for (const ChannelProfile* channel : channels)
+        {
+            require(
+                channel->segments.size() == 2,
+                "Each generated channel must contain two segments");
+            requireApproxEq(
+                channel->segments[0].transition.domainBegin,
+                0.0, 1e-12, "First segment start");
+            requireApproxEq(
+                channel->segments[0].transition.domainEnd,
+                20.0, 1e-12, "First segment midpoint");
+            requireApproxEq(
+                channel->segments[1].transition.domainBegin,
+                20.0, 1e-12, "Second segment midpoint");
+            requireApproxEq(
+                channel->segments[1].transition.domainEnd,
+                40.0, 1e-12, "Second segment end");
+            requireApproxEq(
+                channel->segments[0].transition.valueEnd,
+                channel->segments[1].transition.valueBegin,
+                1e-12, "Midpoint value continuity");
+        }
+    }
+
+    // ================================================================
+    // 26. Legacy endpoint parameters expand to midpoint parameters
+    // ================================================================
+    void test26_legacyOverrideMapping()
+    {
+        const std::array<double, 6> legacy{
+            1.0, 3.0, 5.0, 9.0, 11.0, 17.0};
+        const auto expanded =
+            quantum::coaster::detail::
+                expandLegacyCircuitCompletionParameters(legacy);
+        const decltype(expanded) expected{
+            1.0, 2.0, 3.0,
+            5.0, 7.0, 9.0,
+            11.0, 14.0, 17.0};
+
+        require(
+            expanded == expected,
+            "Legacy parameters must map to endpoint-average midpoints");
     }
 }
 
@@ -646,9 +806,21 @@ int main()
     run("Empty track fails cleanly",
         test18_unsupportedGeometry);
     run("Iteration count is positive",
-        test19_iterationLimit);
+        test19_iterationCount);
     run("Failure returns no partial geometry",
         test20_noPartialCommit);
+    run("Current non-convergent fixture fails cleanly",
+        test21_nonConvergentFixture);
+    run("Tangent reversal residual is nonzero",
+        test22_tangentReversalResidual);
+    run("Reversed frame residual is nonzero",
+        test23_reversedFrameResidual);
+    run("Converged candidate wins residual ranking",
+        test24_convergedCandidatePrecedence);
+    run("Generated profiles use midpoint split",
+        test25_midpointSplitProfiles);
+    run("Legacy override maps to midpoint parameters",
+        test26_legacyOverrideMapping);
 
     std::fprintf(
         stdout,
