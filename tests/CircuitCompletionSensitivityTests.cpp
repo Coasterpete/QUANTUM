@@ -62,6 +62,12 @@ namespace
         std::size_t worstRow = 0;
         double worstAnalyticEntry = 0.0;
         double worstOracleEntry = 0.0;
+        std::size_t worstRelativeColumn = 0;
+        double worstRelativeAnalyticColumnL2 = 0.0;
+        double worstRelativeOracleColumnL2 = 0.0;
+        double worstRelativeDifferenceColumnL2 = 0.0;
+        double worstRelativeMaximumAbsoluteDifference = 0.0;
+        double worstRelativeMaximumComponentMagnitude = 0.0;
     };
 
     struct VerificationSummary
@@ -82,6 +88,14 @@ namespace
         double worstAnalyticEntry = 0.0;
         double worstOracleEntry = 0.0;
         double worstStepScale = 0.0;
+        std::string worstRelativeFixture;
+        std::size_t worstRelativeParameter = 0;
+        double worstRelativeStepScale = 0.0;
+        double worstRelativeAnalyticColumnL2 = 0.0;
+        double worstRelativeOracleColumnL2 = 0.0;
+        double worstRelativeDifferenceColumnL2 = 0.0;
+        double worstRelativeMaximumAbsoluteDifference = 0.0;
+        double worstRelativeMaximumComponentMagnitude = 0.0;
         std::array<double, 9> representativeSingularValues{};
         std::size_t representativeRank = 0;
         double productionAwayRelativeDifference = 0.0;
@@ -455,6 +469,8 @@ namespace
             double analyticColumnSquaredNorm = 0.0;
             double oracleColumnSquaredNorm = 0.0;
             double differenceColumnSquaredNorm = 0.0;
+            double maximumAbsoluteDifference = 0.0;
+            double maximumComponentMagnitude = 0.0;
             for (std::size_t row = 0;
                  row < analytic[parameter].size();
                  ++row)
@@ -486,17 +502,42 @@ namespace
                 analyticColumnSquaredNorm += analyticEntry * analyticEntry;
                 oracleColumnSquaredNorm += oracleEntry * oracleEntry;
                 differenceColumnSquaredNorm += difference * difference;
+                maximumAbsoluteDifference = std::max(
+                    maximumAbsoluteDifference,
+                    difference
+                );
+                maximumComponentMagnitude = std::max({
+                    maximumComponentMagnitude,
+                    std::abs(analyticEntry),
+                    std::abs(oracleEntry)
+                });
             }
 
+            const double analyticColumnL2 =
+                std::sqrt(analyticColumnSquaredNorm);
+            const double oracleColumnL2 =
+                std::sqrt(oracleColumnSquaredNorm);
+            const double differenceColumnL2 =
+                std::sqrt(differenceColumnSquaredNorm);
             const double columnScale = std::max({
-                std::sqrt(analyticColumnSquaredNorm),
-                std::sqrt(oracleColumnSquaredNorm),
+                analyticColumnL2,
+                oracleColumnL2,
                 absoluteTolerance
             });
-            metrics.worstColumnRelativeL2Error = std::max(
-                metrics.worstColumnRelativeL2Error,
-                std::sqrt(differenceColumnSquaredNorm) / columnScale
-            );
+            const double relativeColumnError =
+                differenceColumnL2 / columnScale;
+            if (relativeColumnError > metrics.worstColumnRelativeL2Error)
+            {
+                metrics.worstColumnRelativeL2Error = relativeColumnError;
+                metrics.worstRelativeColumn = parameter;
+                metrics.worstRelativeAnalyticColumnL2 = analyticColumnL2;
+                metrics.worstRelativeOracleColumnL2 = oracleColumnL2;
+                metrics.worstRelativeDifferenceColumnL2 = differenceColumnL2;
+                metrics.worstRelativeMaximumAbsoluteDifference =
+                    maximumAbsoluteDifference;
+                metrics.worstRelativeMaximumComponentMagnitude =
+                    maximumComponentMagnitude;
+            }
             analyticSquaredNorm += analyticColumnSquaredNorm;
             oracleSquaredNorm += oracleColumnSquaredNorm;
             differenceSquaredNorm += differenceColumnSquaredNorm;
@@ -806,10 +847,26 @@ namespace
                 summary.maximumAbsoluteJacobianError,
                 metrics.maximumAbsoluteError
             );
-            summary.worstColumnRelativeL2Error = std::max(
-                summary.worstColumnRelativeL2Error,
-                metrics.worstColumnRelativeL2Error
-            );
+            if (metrics.worstColumnRelativeL2Error
+                > summary.worstColumnRelativeL2Error)
+            {
+                summary.worstColumnRelativeL2Error =
+                    metrics.worstColumnRelativeL2Error;
+                summary.worstRelativeFixture = fixture.name;
+                summary.worstRelativeParameter =
+                    metrics.worstRelativeColumn;
+                summary.worstRelativeStepScale = stepScales[scaleIndex];
+                summary.worstRelativeAnalyticColumnL2 =
+                    metrics.worstRelativeAnalyticColumnL2;
+                summary.worstRelativeOracleColumnL2 =
+                    metrics.worstRelativeOracleColumnL2;
+                summary.worstRelativeDifferenceColumnL2 =
+                    metrics.worstRelativeDifferenceColumnL2;
+                summary.worstRelativeMaximumAbsoluteDifference =
+                    metrics.worstRelativeMaximumAbsoluteDifference;
+                summary.worstRelativeMaximumComponentMagnitude =
+                    metrics.worstRelativeMaximumComponentMagnitude;
+            }
             summary.maximumNormalizedFrobeniusError = std::max(
                 summary.maximumNormalizedFrobeniusError,
                 metrics.normalizedFrobeniusError
@@ -1194,6 +1251,20 @@ int main()
               << ", fixture=" << summary.worstFixture
               << ", parameter=" << summary.worstParameter
               << ", step-scale=" << summary.worstStepScale << '\n';
+    std::cout << "[METRIC] worst relative column fixture="
+              << summary.worstRelativeFixture
+              << ", parameter=" << summary.worstRelativeParameter
+              << ", step-scale=" << summary.worstRelativeStepScale
+              << ", sensitivity-L2="
+              << summary.worstRelativeAnalyticColumnL2
+              << ", frozen-central-FD-L2="
+              << summary.worstRelativeOracleColumnL2
+              << ", difference-L2="
+              << summary.worstRelativeDifferenceColumnL2
+              << ", max-absolute-difference="
+              << summary.worstRelativeMaximumAbsoluteDifference
+              << ", max-component-magnitude="
+              << summary.worstRelativeMaximumComponentMagnitude << '\n';
     std::cout << "[METRIC] FD max-abs by scale h/2,h,2h="
               << summary.maximumErrorByStepScale[0] << ','
               << summary.maximumErrorByStepScale[1] << ','

@@ -1108,6 +1108,40 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumCoreCircuitCompletionLmShadowTests
+    CircuitCompletionLmShadowTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreCircuitCompletionLmShadowTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreCircuitCompletionLmShadowTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreCircuitCompletionLmShadowTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.CircuitCompletionLmShadow
+    COMMAND QuantumCoreCircuitCompletionLmShadowTests
+)
+
+set_tests_properties(
+    QuantumCore.CircuitCompletionLmShadow
+    PROPERTIES
+        LABELS "core;coaster;geometry;topology;performance"
+)
+
+add_executable(
     QuantumCoreCircuitCompletionSensitivityBenchmark
     CircuitCompletionSensitivityBenchmark.cpp
 )
