@@ -18,6 +18,8 @@ namespace quantum::editor
     {
         std::uint32_t firstVertex = 0;
         std::uint32_t vertexCount = 0;
+        double startDistance = 0.0;
+        double endDistance = 0.0;
         glm::dvec3 startPosition{0.0};
         glm::dvec3 endPosition{0.0};
         glm::dvec3 startTangent{1.0, 0.0, 0.0};
@@ -27,6 +29,11 @@ namespace quantum::editor
 
     struct CenterlineVisualization
     {
+        // Authoritative solved samples used to build the renderer vertices.
+        // These are retained on the editor side for section metadata, tests,
+        // and camera tools; renderer upload still receives only line vertices.
+        std::vector<coaster::RiderLocalGeometryState> samples;
+
         // Concatenated line-list segments for the solved track's spatial
         // reference curves: left rail, right rail, centerline, heartline.
         std::vector<renderer::LineVertex> vertices;
@@ -44,10 +51,34 @@ namespace quantum::editor
         glm::dvec3 maximumPosition{0.0};
     };
 
+    // Distance-domain spacing used for viewport visualization samples.
+    inline constexpr double centerlineVisualizationSampleSpacing = 0.75;
+
     // Integrates the authored track document through QuantumCore into one
     // continuous whole-track solve and derives its viewport reference curves
     // from the per-sample solved frames.
     [[nodiscard]] CenterlineVisualization createCenterlineVisualization(
         const coaster::AuthoredTrack& track
     );
+
+    // Tiny editor-side dirty/version wrapper for the generated visualization.
+    // The caller remains responsible for marking geometry edits dirty; pure
+    // selection changes intentionally do not touch this state.
+    class CenterlineVisualizationCache
+    {
+    public:
+        void markDirty() noexcept;
+        [[nodiscard]] bool rebuildIfDirty(const coaster::AuthoredTrack& track);
+        void replace(CenterlineVisualization visualization);
+
+        [[nodiscard]] bool isDirty() const noexcept;
+        [[nodiscard]] std::uint64_t generation() const noexcept;
+        [[nodiscard]] const CenterlineVisualization& visualization()
+            const noexcept;
+
+    private:
+        CenterlineVisualization visualization_;
+        std::uint64_t generation_ = 0;
+        bool dirty_ = true;
+    };
 }

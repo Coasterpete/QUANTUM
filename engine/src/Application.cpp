@@ -14,11 +14,122 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
+
+namespace
+{
+    constexpr double piRadians = 3.14159265358979323846;
+    constexpr double radiansPerDegree = piRadians / 180.0;
+
+    [[nodiscard]] bool interactiveAuthoringDemoEnabled() noexcept
+    {
+        const char* const value =
+            std::getenv("QUANTUM_INTERACTIVE_AUTHORING_DEMO");
+        return value != nullptr && value[0] != '\0'
+            && std::string_view{value} != "0";
+    }
+
+    void setSingleSegmentChannel(
+        quantum::coaster::ChannelProfile& channel,
+        const double valueBegin,
+        const double valueEnd,
+        const quantum::math::TransitionType transitionType)
+    {
+        quantum::coaster::ProfileSegment& segment =
+            channel.segments.front();
+        segment.transition.valueBegin = valueBegin;
+        segment.transition.valueEnd = valueEnd;
+        segment.transition.transitionType = transitionType;
+    }
+
+    void shapeRateProfileSection(
+        quantum::coaster::AuthoredTrackSection& section,
+        const double rollBegin,
+        const double rollEnd,
+        const double pitchBegin,
+        const double pitchEnd,
+        const double yawBegin,
+        const double yawEnd)
+    {
+        quantum::coaster::GeometricSection& profiles =
+            section.rateProfileRegion().rateProfiles;
+        setSingleSegmentChannel(
+            profiles.roll,
+            rollBegin,
+            rollEnd,
+            quantum::math::TransitionType::Smoothstep
+        );
+        setSingleSegmentChannel(
+            profiles.pitch,
+            pitchBegin,
+            pitchEnd,
+            quantum::math::TransitionType::CosineEaseInOut
+        );
+        setSingleSegmentChannel(
+            profiles.yaw,
+            yawBegin,
+            yawEnd,
+            quantum::math::TransitionType::Smootherstep
+        );
+    }
+
+    [[nodiscard]] quantum::coaster::AuthoredTrack
+    createInteractiveAuthoringDemoTrack()
+    {
+        quantum::coaster::AuthoredTrack track;
+
+        track.appendSection();
+        quantum::coaster::setSectionLength(track.section(0), 20.0);
+
+        track.appendSection();
+        quantum::coaster::convertSectionToPlanarArc(track.section(1));
+        quantum::coaster::setPlanarArcRadius(track.section(1), 32.0);
+        quantum::coaster::setPlanarArcSweptAngle(
+            track.section(1),
+            70.0 * radiansPerDegree
+        );
+        quantum::coaster::setPlanarArcPlaneTilt(
+            track.section(1),
+            12.0 * radiansPerDegree
+        );
+        quantum::coaster::setPlanarArcBankChange(
+            track.section(1),
+            22.0 * radiansPerDegree
+        );
+
+        track.appendSection();
+        quantum::coaster::setSectionLength(track.section(2), 36.0);
+        shapeRateProfileSection(
+            track.section(2),
+            0.002,
+            0.014,
+            -0.004,
+            0.007,
+            0.006,
+            0.003
+        );
+
+        track.appendSection();
+        quantum::coaster::setSectionLength(track.section(3), 28.0);
+        shapeRateProfileSection(
+            track.section(3),
+            0.012,
+            -0.004,
+            0.006,
+            0.002,
+            -0.003,
+            0.004
+        );
+
+        return track;
+    }
+}
 
 namespace quantum::engine
 {
@@ -62,12 +173,16 @@ namespace quantum::engine
         {
             {
                 quantum::coaster::AuthoredTrack authoredTrack =
-                    quantum::coaster::createNewDocument();
+                    interactiveAuthoringDemoEnabled()
+                    ? createInteractiveAuthoringDemoTrack()
+                    : quantum::coaster::createNewDocument();
                 quantum::editor::DocumentState documentState;
-                quantum::editor::CenterlineVisualization centerline =
-                    quantum::editor::createCenterlineVisualization(
-                        authoredTrack
-                    );
+                quantum::editor::CenterlineVisualizationCache
+                    centerlineCache;
+                static_cast<void>(
+                    centerlineCache.rebuildIfDirty(authoredTrack));
+                const quantum::editor::CenterlineVisualization& centerline =
+                    centerlineCache.visualization();
 
                 SDL_LogInfo(
                     SDL_LOG_CATEGORY_APPLICATION,
@@ -383,11 +498,10 @@ namespace quantum::engine
                                     editorUi.resetTransientState();
                                     editorUi.selectSection(0);
 
-                                    centerline =
-                                        quantum::editor::
-                                            createCenterlineVisualization(
-                                                authoredTrack
-                                            );
+                                    centerlineCache.markDirty();
+                                    static_cast<void>(
+                                        centerlineCache.rebuildIfDirty(
+                                            authoredTrack));
                                     editorUi.setCenterlineBounds(
                                         centerline.minimumPosition,
                                         centerline.maximumPosition
@@ -449,11 +563,11 @@ namespace quantum::engine
                                             editorUi.resetTransientState();
                                             editorUi.selectSection(0);
 
-                                            centerline =
-                                                quantum::editor::
-                                                    createCenterlineVisualization(
-                                                        authoredTrack
-                                                    );
+                                            centerlineCache.markDirty();
+                                            static_cast<void>(
+                                                centerlineCache
+                                                    .rebuildIfDirty(
+                                                        authoredTrack));
                                             editorUi.setCenterlineBounds(
                                                 centerline.minimumPosition,
                                                 centerline.maximumPosition
@@ -1127,7 +1241,9 @@ namespace quantum::engine
                                     candidateCenterline.verticesPerCurve
                                 );
 
-                                centerline = std::move(candidateCenterline);
+                                centerlineCache.markDirty();
+                                centerlineCache.replace(
+                                    std::move(candidateCenterline));
                                 authoredTrack = std::move(candidateTrack);
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
@@ -1142,7 +1258,7 @@ namespace quantum::engine
                                         "has %zu section(s), %zu centerline "
                                         "samples.",
                                         authoredTrack.sectionCount(),
-                                        centerline.vertices.size()
+                                        centerline.samples.size()
                                     );
                                 }
 
@@ -1518,7 +1634,7 @@ namespace quantum::engine
                                     std::move(
                                         result.completedTrack);
 
-                                const quantum::editor::
+                                quantum::editor::
                                     CenterlineVisualization
                                         newCenterline =
                                             quantum::editor::
@@ -1534,8 +1650,9 @@ namespace quantum::engine
                                     newCenterline.vertices,
                                     newCenterline.verticesPerCurve);
 
-                                centerline =
-                                    std::move(newCenterline);
+                                centerlineCache.markDirty();
+                                centerlineCache.replace(
+                                    std::move(newCenterline));
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
                                     documentState.windowTitle());

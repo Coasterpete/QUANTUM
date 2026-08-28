@@ -863,6 +863,48 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorCenterlineVisualizationTests
+    CenterlineVisualizationTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+)
+
+target_include_directories(
+    QuantumEditorCenterlineVisualizationTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorCenterlineVisualizationTests
+    PRIVATE
+        Quantum::Core
+        Quantum::Engine
+)
+
+target_compile_features(
+    QuantumEditorCenterlineVisualizationTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorCenterlineVisualizationTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.CenterlineVisualization
+    COMMAND QuantumEditorCenterlineVisualizationTests
+)
+
+set_tests_properties(
+    QuantumEditor.CenterlineVisualization
+    PROPERTIES
+        LABELS "editor;coaster;visualization"
+)
+
+add_executable(
     QuantumCoreAuthoredTrackStructureTests
     AuthoredTrackStructureTests.cpp
 )

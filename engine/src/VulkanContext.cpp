@@ -77,6 +77,11 @@ namespace
             trackCurveVertices,
         const std::uint32_t verticesPerCurve)
     {
+        if (trackCurveVertices.empty() && verticesPerCurve == 0)
+        {
+            return;
+        }
+
         const std::size_t runLength = verticesPerCurve;
 
         if (verticesPerCurve < 2 || verticesPerCurve % 2 != 0
@@ -1547,7 +1552,9 @@ namespace quantum::renderer
         viewportAidSpacing_ = defaultGridSpacing;
 
         const CreatedVertexBuffer trackCurveBuffer =
-            createHostVisibleVertexBuffer(
+            trackCurveVertices.empty()
+            ? CreatedVertexBuffer{}
+            : createHostVisibleVertexBuffer(
                 allocator_,
                 trackCurveVertices
             );
@@ -1556,7 +1563,9 @@ namespace quantum::renderer
         trackCurveVertexMappedData_ = trackCurveBuffer.mappedData;
         trackCurveVertexCapacity_ = trackCurveBuffer.capacity;
         trackCurveVertexCount_ = trackCurveBuffer.vertexCount;
-        trackVerticesPerCurve_ = trackVerticesPerCurve;
+        trackVerticesPerCurve_ = trackCurveVertices.empty()
+            ? 0
+            : trackVerticesPerCurve;
     }
 
     // Regenerates the grid and axes in place. The vertex count never changes,
@@ -2092,8 +2101,7 @@ namespace quantum::renderer
         const std::span<const LineVertex> trackCurveVertices,
         const std::uint32_t trackVerticesPerCurve)
     {
-        if (allocator_ == VK_NULL_HANDLE
-            || trackCurveVertexBuffer_ == VK_NULL_HANDLE)
+        if (allocator_ == VK_NULL_HANDLE)
         {
             throw std::logic_error(
                 "VulkanContext cannot update track-curve vertices before initialization."
@@ -2109,6 +2117,32 @@ namespace quantum::renderer
             trackCurveVertices;
         const VkDeviceSize candidateSize = sizeof(LineVertex)
             * candidateVertices.size();
+
+        if (candidateVertices.empty())
+        {
+            waitForFrameCompletion();
+            trackCurveVertexCount_ = 0;
+            trackVerticesPerCurve_ = 0;
+            return;
+        }
+
+        if (trackCurveVertexBuffer_ != VK_NULL_HANDLE
+            && candidateSize <= trackCurveVertexCapacity_)
+        {
+            waitForFrameCompletion();
+            writeHostVisibleVertexBuffer(
+                allocator_,
+                trackCurveVertexAllocation_,
+                trackCurveVertexMappedData_,
+                trackCurveVertexCapacity_,
+                candidateVertices
+            );
+            trackCurveVertexCount_ = static_cast<std::uint32_t>(
+                candidateVertices.size()
+            );
+            trackVerticesPerCurve_ = trackVerticesPerCurve;
+            return;
+        }
 
         if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE
             && candidateSize <= spareTrackCurveVertexCapacity_)
