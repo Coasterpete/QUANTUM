@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -277,6 +278,10 @@ namespace
                   << observation.result.finalTangentErrorDegrees
                   << " frame-deg=" << observation.result.finalFrameErrorDegrees
                   << " runtime-ms=" << observation.elapsedMilliseconds
+                  << " topology="
+                  << (observation.result.success
+                        ? "ClosedCircuit"
+                        : "NoCandidateTrack")
                   << " params=";
         printParameters(diagnostics.finalParameters);
         std::cout << '\n';
@@ -296,6 +301,9 @@ namespace
                       << " rejected=" << seed.work.rejectedDampingTrials
                       << " trial-integrations=" << seed.work.trialIntegrations
                       << " final-rms=" << seed.finalResidualRms
+                      << " initial=";
+            printParameters(seed.initialParameters);
+            std::cout
                       << " progression=";
             printResidualProgression(seed);
             std::cout << '\n';
@@ -323,6 +331,7 @@ namespace
         double maximumCenterlineDisplacement = 0.0;
         double rmsCenterlineDisplacement = 0.0;
         double maximumTangentAngleDegrees = 0.0;
+        double maximumLateralAngleDegrees = 0.0;
         double maximumUpAngleDegrees = 0.0;
         double maximumPitchRateDifference = 0.0;
         double maximumYawRateDifference = 0.0;
@@ -388,6 +397,9 @@ namespace
             comparison.maximumTangentAngleDegrees = std::max(
                 comparison.maximumTangentAngleDegrees,
                 angleDegrees(first.frame.tangent, second.frame.tangent));
+            comparison.maximumLateralAngleDegrees = std::max(
+                comparison.maximumLateralAngleDegrees,
+                angleDegrees(first.frame.lateral, second.frame.lateral));
             comparison.maximumUpAngleDegrees = std::max(
                 comparison.maximumUpAngleDegrees,
                 angleDegrees(first.frame.up, second.frame.up));
@@ -452,6 +464,7 @@ namespace
         const bool material =
             comparison.maximumCenterlineDisplacement > 0.5
             || comparison.maximumTangentAngleDegrees > 2.0
+            || comparison.maximumLateralAngleDegrees > 2.0
             || comparison.maximumUpAngleDegrees > 2.0
             || comparison.maximumCurvatureDifference > 0.02;
         comparison.classification = negligible
@@ -474,6 +487,8 @@ namespace
                   << comparison.rmsCenterlineDisplacement
                   << " max-tangent-deg="
                   << comparison.maximumTangentAngleDegrees
+                  << " max-lateral-deg="
+                  << comparison.maximumLateralAngleDegrees
                   << " max-up-deg=" << comparison.maximumUpAngleDegrees
                   << " max-pitch-rate="
                   << comparison.maximumPitchRateDifference
@@ -695,17 +710,11 @@ namespace
                 && nonconvergent.finiteDifference.result.failureReason
                     == CircuitCompletionFailure::DidNotConverge,
             "30m/40m FD classification changed");
-        if (nonconvergent.sensitivity.result.success)
-        {
-            validateSuccessfulResult(nonconvergent.sensitivity);
-        }
-        else
-        {
-            require(
-                nonconvergent.sensitivity.result.failureReason
+        require(
+            !nonconvergent.sensitivity.result.success
+                && nonconvergent.sensitivity.result.failureReason
                     == CircuitCompletionFailure::DidNotConverge,
-                "30m/40m sensitivity failed through a different status");
-        }
+            "30m/40m sensitivity classification changed");
 
         require(
             additional.finiteDifference.result.success,
@@ -724,18 +733,11 @@ namespace
                 pair->finiteDifference.result.success,
                 pair->name + " established FD success regressed");
             validateSuccessfulResult(pair->finiteDifference);
-            if (pair->sensitivity.result.success)
-            {
-                validateSuccessfulResult(pair->sensitivity);
-            }
-            else
-            {
-                require(
-                    pair->sensitivity.result.failureReason
-                        == CircuitCompletionFailure::DidNotConverge,
-                    pair->name
-                        + " sensitivity regression did not fail cleanly");
-            }
+            require(
+                pair->sensitivity.result.success,
+                pair->name
+                    + " sensitivity basin-access seed did not converge");
+            validateSuccessfulResult(pair->sensitivity);
         }
 
         std::cout << "[FIXTURES] 15m/40m=Equivalent-success"
@@ -752,6 +754,49 @@ namespace
                   << (focusedThirtySixty.sensitivity.result.success
                         ? "Equivalent-success"
                         : "Classification-changed") << '\n';
+    }
+
+    void testBasinAccessSeedFamily(const FixturePair& nonconvergent)
+    {
+        const auto& finiteDifferenceSeeds =
+            nonconvergent.finiteDifference.diagnostics.seeds;
+        const auto& sensitivitySeeds =
+            nonconvergent.sensitivity.diagnostics.seeds;
+        require(
+            finiteDifferenceSeeds.size() == 5
+                && sensitivitySeeds.size() == 5,
+            "30m/40m did not consume the expected five-seed budget");
+        for (std::size_t index = 0;
+             index < finiteDifferenceSeeds.size(); ++index)
+        {
+            require(
+                finiteDifferenceSeeds[index].initialParameters
+                    == sensitivitySeeds[index].initialParameters,
+                "Seed family depends on the Jacobian strategy");
+        }
+
+        constexpr double inverseLength = 1.0 / 40.0;
+        constexpr double pitchBiasAngle = 0.025;
+        for (const auto& reflectedSeed :
+             std::array<std::pair<std::size_t, double>, 2>{{
+                 {2, 1.0},
+                 {3, -1.0}}})
+        {
+            CircuitCompletionParameterVector expected{};
+            expected[0] =
+                reflectedSeed.second * pitchBiasAngle * inverseLength;
+            expected[1] = expected[0];
+            expected[2] = expected[0];
+            expected[3] = -8.0 * inverseLength;
+            expected[5] = 8.0 * inverseLength;
+            require(
+                sensitivitySeeds[reflectedSeed.first].initialParameters
+                    == expected,
+                "Basin-access seed values changed");
+        }
+        std::cout << "[BASIN-SEEDS] jacobian-independent=yes"
+                  << " pitch-angle=0.025 pair=reflected"
+                  << " insertion=after-first-yaw-fallback\n";
     }
 
     struct OverrideCases
@@ -1271,6 +1316,10 @@ namespace
                 focusedTwentyForty,
                 focusedThirtySixty);
         });
+        run("Jacobian-independent basin seed family", [&]
+        {
+            testBasinAccessSeedFamily(nonconvergent);
+        });
 
         const OverrideCases overrides = testInitialParamOverride();
         ++passed;
@@ -1282,6 +1331,10 @@ namespace
             canonicalSettings.preferredConnectorLength = 40.0;
             const AuthoredTrack canonicalTrack = makeStraightTrack(15.0);
             const AuthoredTrack nonconvergentTrack = makeStraightTrack(30.0);
+            const AuthoredTrack focusedTwentyFortyTrack =
+                makeStraightTrack(20.0);
+            const AuthoredTrack focusedThirtySixtyTrack =
+                makeStraightTrack(30.0);
             CircuitCompletionSettings additionalSettings;
             additionalSettings.preferredConnectorLength = 60.0;
             const AuthoredTrack additionalTrack = makeStraightTrack(20.0);
@@ -1316,6 +1369,22 @@ namespace
                         ? additional.finiteDifference
                         : additional.sensitivity,
                     "20m/60m");
+                requireDeterministic(
+                    focusedTwentyFortyTrack,
+                    canonicalSettings,
+                    strategy,
+                    finiteDifference
+                        ? focusedTwentyForty.finiteDifference
+                        : focusedTwentyForty.sensitivity,
+                    "20m/40m");
+                requireDeterministic(
+                    focusedThirtySixtyTrack,
+                    additionalSettings,
+                    strategy,
+                    finiteDifference
+                        ? focusedThirtySixty.finiteDifference
+                        : focusedThirtySixty.sensitivity,
+                    "30m/60m");
 
                 CircuitCompletionSettings overrideSettings;
                 overrideSettings.preferredConnectorLength = 40.0;
@@ -1351,6 +1420,36 @@ namespace
                     additional.sensitivity,
                     additional.sourceLength,
                     additional.connectorLength));
+            const GeometryComparison twentyForty = compareInteriorGeometry(
+                focusedTwentyForty.finiteDifference,
+                focusedTwentyForty.sensitivity,
+                focusedTwentyForty.sourceLength,
+                focusedTwentyForty.connectorLength);
+            printGeometry("20m/40m", twentyForty);
+            require(
+                twentyForty.maximumCenterlineDisplacement <= 0.25
+                    && twentyForty.maximumTangentAngleDegrees <= 2.0
+                    && twentyForty.maximumLateralAngleDegrees <= 2.0
+                    && twentyForty.maximumUpAngleDegrees <= 2.0
+                    && twentyForty.maximumPitchRateDifference <= 0.01
+                    && twentyForty.maximumYawRateDifference <= 0.01
+                    && twentyForty.maximumRollRateDifference <= 0.01,
+                "20m/40m recovered geometry left the FD-like basin");
+            const GeometryComparison thirtySixty = compareInteriorGeometry(
+                focusedThirtySixty.finiteDifference,
+                focusedThirtySixty.sensitivity,
+                focusedThirtySixty.sourceLength,
+                focusedThirtySixty.connectorLength);
+            printGeometry("30m/60m", thirtySixty);
+            require(
+                thirtySixty.maximumCenterlineDisplacement <= 0.25
+                    && thirtySixty.maximumTangentAngleDegrees <= 2.0
+                    && thirtySixty.maximumLateralAngleDegrees <= 2.0
+                    && thirtySixty.maximumUpAngleDegrees <= 2.0
+                    && thirtySixty.maximumPitchRateDifference <= 0.01
+                    && thirtySixty.maximumYawRateDifference <= 0.01
+                    && thirtySixty.maximumRollRateDifference <= 0.01,
+                "30m/60m recovered geometry left the FD-like basin");
         });
 
         run("null-space diagnostics", [&]
