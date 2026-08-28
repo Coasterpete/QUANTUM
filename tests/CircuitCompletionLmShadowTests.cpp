@@ -59,6 +59,21 @@ namespace
         }
     }
 
+    [[nodiscard]] bool sameWorkCounts(
+        const CircuitCompletionLmWorkCounts& first,
+        const CircuitCompletionLmWorkCounts& second)
+    {
+        return first.jacobianConstructions == second.jacobianConstructions
+            && first.connectorIntegrations == second.connectorIntegrations
+            && first.sensitivityTraversals
+                == second.sensitivityTraversals
+            && first.trialIntegrations == second.trialIntegrations
+            && first.dampingTrials == second.dampingTrials
+            && first.rejectedDampingTrials
+                == second.rejectedDampingTrials
+            && first.clampedParameters == second.clampedParameters;
+    }
+
     [[nodiscard]] AuthoredTrack makeStraightTrack(const double length)
     {
         AuthoredTrack track = quantum::coaster::createNewDocument();
@@ -600,10 +615,9 @@ namespace
             require(
                 repeated.diagnostics.totalIterationsSpent
                     == reference.diagnostics.totalIterationsSpent
-                    && repeated.diagnostics.work.jacobianConstructions
-                        == reference.diagnostics.work.jacobianConstructions
-                    && repeated.diagnostics.work.dampingTrials
-                        == reference.diagnostics.work.dampingTrials,
+                    && sameWorkCounts(
+                        repeated.diagnostics.work,
+                        reference.diagnostics.work),
                 std::string(label) + " solver path is not deterministic");
             if (reference.result.success)
             {
@@ -667,7 +681,7 @@ namespace
         return pair;
     }
 
-    void testProductionDefaultUsesFiniteDifference(
+    void testProductionDefaultUsesSensitivity(
         const FixturePair& canonical)
     {
         const AuthoredTrack track = makeStraightTrack(15.0);
@@ -676,17 +690,53 @@ namespace
         const CircuitCompletionResult production =
             quantum::coaster::completeCircuitCandidate(track, settings);
         require(
-            production.success == canonical.finiteDifference.result.success
+            production.success == canonical.sensitivity.result.success
                 && production.failureReason
-                    == canonical.finiteDifference.result.failureReason
+                    == canonical.sensitivity.result.failureReason
                 && production.iterationCount
-                    == canonical.finiteDifference.result.iterationCount
+                    == canonical.sensitivity.result.iterationCount
                 && production.finalPositionalGap
-                    == canonical.finiteDifference.result.finalPositionalGap
+                    == canonical.sensitivity.result.finalPositionalGap
                 && profileKnots(production)
-                    == profileKnots(canonical.finiteDifference.result),
-            "Production entry point does not exactly select finite differences");
-        std::cout << "[PRODUCTION] default-strategy=FiniteDifference exact=yes\n";
+                    == profileKnots(canonical.sensitivity.result),
+            "Production entry point does not exactly select sensitivities");
+        std::cout << "[PRODUCTION] default-strategy=Sensitivity exact=yes\n";
+    }
+
+    void testJacobianWorkAccounting(
+        const std::array<const FixturePair*, 5>& fixtures)
+    {
+        for (const FixturePair* fixture : fixtures)
+        {
+            const CircuitCompletionLmWorkCounts& finiteDifference =
+                fixture->finiteDifference.diagnostics.work;
+            const CircuitCompletionLmWorkCounts& sensitivity =
+                fixture->sensitivity.diagnostics.work;
+            const std::uint64_t finiteDifferenceNominalIntegrations =
+                fixture->finiteDifference.diagnostics.seeds.size();
+            const std::uint64_t sensitivityNominalIntegrations =
+                fixture->sensitivity.diagnostics.seeds.size();
+
+            require(
+                finiteDifference.sensitivityTraversals == 0
+                    && finiteDifference.connectorIntegrations
+                        == finiteDifferenceNominalIntegrations
+                            + finiteDifference.trialIntegrations
+                            + 9 * finiteDifference.jacobianConstructions,
+                fixture->name
+                    + " finite-difference work accounting changed");
+            require(
+                sensitivity.sensitivityTraversals
+                        == sensitivity.jacobianConstructions
+                    && sensitivity.connectorIntegrations
+                        == sensitivityNominalIntegrations
+                            + sensitivity.trialIntegrations,
+                fixture->name + " sensitivity work accounting changed");
+        }
+
+        std::cout << "[PRODUCTION-WORK] nominal-per-seed=yes"
+                  << " sensitivity-per-jacobian=yes"
+                  << " finite-difference-perturbations=none\n";
     }
 
     void testFixturePairs(
@@ -756,7 +806,12 @@ namespace
                         : "Classification-changed") << '\n';
     }
 
-    void testBasinAccessSeedFamily(const FixturePair& nonconvergent)
+    void testSeedBudgetReachability(
+        const FixturePair& canonical,
+        const FixturePair& nonconvergent,
+        const FixturePair& additional,
+        const FixturePair& focusedTwentyForty,
+        const FixturePair& focusedThirtySixty)
     {
         const auto& finiteDifferenceSeeds =
             nonconvergent.finiteDifference.diagnostics.seeds;
@@ -764,7 +819,11 @@ namespace
             nonconvergent.sensitivity.diagnostics.seeds;
         require(
             finiteDifferenceSeeds.size() == 5
-                && sensitivitySeeds.size() == 5,
+                && sensitivitySeeds.size() == 5
+                && nonconvergent.finiteDifference.diagnostics
+                        .totalIterationsSpent == 600
+                && nonconvergent.sensitivity.diagnostics
+                        .totalIterationsSpent == 600,
             "30m/40m did not consume the expected five-seed budget");
         for (std::size_t index = 0;
              index < finiteDifferenceSeeds.size(); ++index)
@@ -773,6 +832,10 @@ namespace
                 finiteDifferenceSeeds[index].initialParameters
                     == sensitivitySeeds[index].initialParameters,
                 "Seed family depends on the Jacobian strategy");
+            require(
+                finiteDifferenceSeeds[index].iterationCount == 120
+                    && sensitivitySeeds[index].iterationCount == 120,
+                "Budget-exhaustion fixture did not spend 120 iterations per seed");
         }
 
         constexpr double inverseLength = 1.0 / 40.0;
@@ -794,9 +857,25 @@ namespace
                     == expected,
                 "Basin-access seed values changed");
         }
+        for (const FixturePair* successful : {
+                 &canonical,
+                 &additional,
+                 &focusedTwentyForty,
+                 &focusedThirtySixty})
+        {
+            require(
+                successful->finiteDifference.diagnostics.selectedSeedIndex
+                    <= 1,
+                successful->name
+                    + " established FD success depended on a starved seed");
+        }
+
         std::cout << "[BASIN-SEEDS] jacobian-independent=yes"
                   << " pitch-angle=0.025 pair=reflected"
-                  << " insertion=after-first-yaw-fallback\n";
+                  << " insertion=after-first-yaw-fallback"
+                  << " budget-reachable=0-4"
+                  << " original-starved=old-3,old-4"
+                  << " established-success-dependency=none\n";
     }
 
     struct OverrideCases
@@ -1004,6 +1083,37 @@ namespace
         return std::chrono::duration<double, std::milli>(end - start).count();
     }
 
+    [[nodiscard]] double timedProductionSolveMilliseconds(
+        const AuthoredTrack& track,
+        const CircuitCompletionSettings& settings)
+    {
+        using Clock = std::chrono::steady_clock;
+        const auto start = Clock::now();
+        const CircuitCompletionResult result =
+            quantum::coaster::completeCircuitCandidate(track, settings);
+        const auto end = Clock::now();
+        volatile double benchmarkSink = result.finalPositionalGap;
+        (void)benchmarkSink;
+        return std::chrono::duration<double, std::milli>(end - start).count();
+    }
+
+    [[nodiscard]] TimingSummary benchmarkProductionSolve(
+        const AuthoredTrack& track,
+        const CircuitCompletionSettings& settings,
+        const std::size_t repetitions)
+    {
+        (void)timedProductionSolveMilliseconds(track, settings);
+        std::vector<double> samples;
+        samples.reserve(repetitions);
+        for (std::size_t repetition = 0;
+             repetition < repetitions; ++repetition)
+        {
+            samples.push_back(
+                timedProductionSolveMilliseconds(track, settings));
+        }
+        return summarizeTimings(std::move(samples));
+    }
+
     [[nodiscard]] TimingPair benchmarkSolvePair(
         const AuthoredTrack& track,
         const CircuitCompletionSettings& settings,
@@ -1122,6 +1232,44 @@ namespace
             summarizeTimings(std::move(sensitivitySamples))};
     }
 
+    [[nodiscard]] double timedProductionFocusedWorkload()
+    {
+        using Clock = std::chrono::steady_clock;
+        const auto start = Clock::now();
+        for (const auto& fixture : std::array<std::array<double, 2>, 5>{{
+                 {15.0, 40.0},
+                 {30.0, 40.0},
+                 {20.0, 40.0},
+                 {20.0, 60.0},
+                 {30.0, 60.0}}})
+        {
+            CircuitCompletionSettings settings;
+            settings.preferredConnectorLength = fixture[1];
+            const CircuitCompletionResult result =
+                quantum::coaster::completeCircuitCandidate(
+                    makeStraightTrack(fixture[0]),
+                    settings);
+            volatile double benchmarkSink = result.finalPositionalGap;
+            (void)benchmarkSink;
+        }
+        const auto end = Clock::now();
+        return std::chrono::duration<double, std::milli>(end - start).count();
+    }
+
+    [[nodiscard]] TimingSummary benchmarkProductionFocusedWorkload(
+        const std::size_t repetitions)
+    {
+        (void)timedProductionFocusedWorkload();
+        std::vector<double> samples;
+        samples.reserve(repetitions);
+        for (std::size_t repetition = 0;
+             repetition < repetitions; ++repetition)
+        {
+            samples.push_back(timedProductionFocusedWorkload());
+        }
+        return summarizeTimings(std::move(samples));
+    }
+
     CircuitCompletionLmWorkCounts& operator+=(
         CircuitCompletionLmWorkCounts& left,
         const CircuitCompletionLmWorkCounts& right)
@@ -1207,6 +1355,27 @@ namespace
                   << sensitivityWork.dampingTrials << '\n';
     }
 
+    void printProductionBenchmark(
+        const std::string_view fixture,
+        const TimingSummary& timings,
+        const CircuitCompletionLmWorkCounts& work,
+        const std::size_t repetitions)
+    {
+        std::cout << "[PRODUCTION-BENCHMARK] fixture=" << fixture
+                  << " repetitions=" << repetitions
+                  << " min-ms=" << timings.minimumMilliseconds
+                  << " median-ms=" << timings.medianMilliseconds
+                  << " max-ms=" << timings.maximumMilliseconds
+                  << " jacobians=" << work.jacobianConstructions
+                  << " nominal-integrations="
+                  << work.connectorIntegrations - work.trialIntegrations
+                  << " connector-integrations=" << work.connectorIntegrations
+                  << " sensitivity-traversals="
+                  << work.sensitivityTraversals
+                  << " trial-integrations=" << work.trialIntegrations
+                  << " damping-trials=" << work.dampingTrials << '\n';
+    }
+
     int runBenchmarks()
     {
         constexpr std::size_t successRepetitions = 7;
@@ -1233,6 +1402,44 @@ namespace
             canonicalFiniteDifference.diagnostics.work,
             canonicalSensitivity.diagnostics.work,
             successRepetitions);
+        printProductionBenchmark(
+            "15m/40m",
+            benchmarkProductionSolve(
+                canonical,
+                canonicalSettings,
+                successRepetitions),
+            canonicalSensitivity.diagnostics.work,
+            successRepetitions);
+
+        const AuthoredTrack focusedTwentyForty = makeStraightTrack(20.0);
+        const SolveObservation focusedTwentyFortySensitivity = solve(
+            focusedTwentyForty,
+            canonicalSettings,
+            CircuitCompletionJacobianStrategy::Sensitivity);
+        printProductionBenchmark(
+            "20m/40m",
+            benchmarkProductionSolve(
+                focusedTwentyForty,
+                canonicalSettings,
+                successRepetitions),
+            focusedTwentyFortySensitivity.diagnostics.work,
+            successRepetitions);
+
+        CircuitCompletionSettings longSettings;
+        longSettings.preferredConnectorLength = 60.0;
+        const AuthoredTrack focusedThirtySixty = makeStraightTrack(30.0);
+        const SolveObservation focusedThirtySixtySensitivity = solve(
+            focusedThirtySixty,
+            longSettings,
+            CircuitCompletionJacobianStrategy::Sensitivity);
+        printProductionBenchmark(
+            "30m/60m",
+            benchmarkProductionSolve(
+                focusedThirtySixty,
+                longSettings,
+                successRepetitions),
+            focusedThirtySixtySensitivity.diagnostics.work,
+            successRepetitions);
 
         const AuthoredTrack nonconvergent = makeStraightTrack(30.0);
         const SolveObservation failureFiniteDifference = solve(
@@ -1253,6 +1460,14 @@ namespace
             failureFiniteDifference.diagnostics.work,
             failureSensitivity.diagnostics.work,
             failureRepetitions);
+        printProductionBenchmark(
+            "30m/40m",
+            benchmarkProductionSolve(
+                nonconvergent,
+                canonicalSettings,
+                failureRepetitions),
+            failureSensitivity.diagnostics.work,
+            failureRepetitions);
 
         const CircuitCompletionLmWorkCounts focusedFiniteDifference =
             focusedWorkCounts(
@@ -1265,6 +1480,11 @@ namespace
             "focused-five-fixture-workload",
             focusedTimings,
             focusedFiniteDifference,
+            focusedSensitivity,
+            workloadRepetitions);
+        printProductionBenchmark(
+            "focused-five-fixture-workload",
+            benchmarkProductionFocusedWorkload(workloadRepetitions),
             focusedSensitivity,
             workloadRepetitions);
         return 0;
@@ -1303,9 +1523,9 @@ namespace
             30.0,
             60.0);
 
-        run("production default remains finite differences", [&]
+        run("production default uses sensitivities", [&]
         {
-            testProductionDefaultUsesFiniteDifference(canonical);
+            testProductionDefaultUsesSensitivity(canonical);
         });
         run("solver fixture A/B classifications", [&]
         {
@@ -1316,9 +1536,23 @@ namespace
                 focusedTwentyForty,
                 focusedThirtySixty);
         });
-        run("Jacobian-independent basin seed family", [&]
+        run("Jacobian work accounting", [&]
         {
-            testBasinAccessSeedFamily(nonconvergent);
+            testJacobianWorkAccounting({
+                &canonical,
+                &nonconvergent,
+                &additional,
+                &focusedTwentyForty,
+                &focusedThirtySixty});
+        });
+        run("seed budget reachability", [&]
+        {
+            testSeedBudgetReachability(
+                canonical,
+                nonconvergent,
+                additional,
+                focusedTwentyForty,
+                focusedThirtySixty);
         });
 
         const OverrideCases overrides = testInitialParamOverride();

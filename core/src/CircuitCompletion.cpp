@@ -1618,7 +1618,7 @@ namespace quantum::coaster
         return detail::completeCircuitCandidateWithJacobianStrategy(
             source,
             settings,
-            detail::CircuitCompletionJacobianStrategy::FiniteDifference,
+            detail::CircuitCompletionJacobianStrategy::Sensitivity,
             nullptr);
     }
 }

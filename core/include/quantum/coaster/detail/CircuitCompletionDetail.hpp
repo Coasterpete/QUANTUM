@@ -53,8 +53,8 @@ namespace quantum::coaster::detail
         CircuitCompletionJacobian residualJacobian;
     };
 
-    // Internal/test-only selector. The public completion entry point always
-    // uses FiniteDifference until a later production-switch milestone.
+    // Internal/test-only selector. The public completion entry point uses
+    // Sensitivity; FiniteDifference remains available as a regression oracle.
     enum class CircuitCompletionJacobianStrategy : std::uint8_t
     {
         FiniteDifference,
@@ -116,7 +116,7 @@ namespace quantum::coaster::detail
     struct CircuitCompletionLmDiagnostics
     {
         CircuitCompletionJacobianStrategy strategy =
-            CircuitCompletionJacobianStrategy::FiniteDifference;
+            CircuitCompletionJacobianStrategy::Sensitivity;
         std::vector<CircuitCompletionLmSeedDiagnostics> seeds;
         std::size_t selectedSeedIndex =
             std::numeric_limits<std::size_t>::max();
