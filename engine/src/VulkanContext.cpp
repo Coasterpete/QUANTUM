@@ -1598,7 +1598,8 @@ namespace quantum::renderer
             VkPushConstantRange pushConstantRange{};
             pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
             pushConstantRange.offset = 0;
-            pushConstantRange.size = sizeof(viewportViewProjection_);
+            pushConstantRange.size = sizeof(viewportViewProjection_)
+                + 4 * sizeof(float);
 
             VkPipelineLayoutCreateInfo layoutCreateInfo{};
             layoutCreateInfo.sType =
@@ -2231,6 +2232,24 @@ namespace quantum::renderer
         viewportCurveVisibilityMask_ = curveVisibilityMask;
     }
 
+    void VulkanContext::setTrackCurveHighlight(
+        const std::uint32_t firstVertex,
+        const std::uint32_t vertexCount)
+    {
+        if (vertexCount != 0
+            && (firstVertex > trackVerticesPerCurve_
+                || vertexCount
+                    > trackVerticesPerCurve_ - firstVertex))
+        {
+            throw std::out_of_range(
+                "The selected track-curve range is outside one curve run."
+            );
+        }
+
+        trackHighlightFirstVertex_ = firstVertex;
+        trackHighlightVertexCount_ = vertexCount;
+    }
+
     void VulkanContext::updateViewportAidReference(
         const float centerX,
         const float centerY,
@@ -2434,6 +2453,17 @@ namespace quantum::renderer
                 sizeof(viewportViewProjection_),
                 viewportViewProjection_.data()
             );
+            constexpr std::array<float, 4> noHighlight{
+                1.0F, 0.82F, 0.12F, 0.0F
+            };
+            vkCmdPushConstants(
+                commandBuffer_,
+                pipelineLayout_,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                sizeof(viewportViewProjection_),
+                sizeof(noHighlight),
+                noHighlight.data()
+            );
 
             constexpr VkDeviceSize vertexOffset = 0;
             if (viewportGridVisible_)
@@ -2489,6 +2519,39 @@ namespace quantum::renderer
                         curve * verticesPerCurve,
                         0
                     );
+                }
+
+                if (trackHighlightVertexCount_ > 0)
+                {
+                    constexpr std::array<float, 4> highlightColor{
+                        1.0F, 0.82F, 0.12F, 0.78F
+                    };
+                    vkCmdPushConstants(
+                        commandBuffer_,
+                        pipelineLayout_,
+                        VK_SHADER_STAGE_VERTEX_BIT,
+                        sizeof(viewportViewProjection_),
+                        sizeof(highlightColor),
+                        highlightColor.data()
+                    );
+
+                    for (const std::uint32_t curve : curveBits)
+                    {
+                        if ((viewportCurveVisibilityMask_
+                            & (1u << curve)) == 0)
+                        {
+                            continue;
+                        }
+
+                        vkCmdDraw(
+                            commandBuffer_,
+                            trackHighlightVertexCount_,
+                            1,
+                            curve * verticesPerCurve
+                                + trackHighlightFirstVertex_,
+                            0
+                        );
+                    }
                 }
             }
 

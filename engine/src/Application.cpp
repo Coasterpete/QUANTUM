@@ -7,6 +7,7 @@
 #include <quantum/editor/DocumentState.hpp>
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/PlatformDialogs.hpp>
+#include <quantum/editor/RegionSelection.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -215,6 +216,7 @@ namespace quantum::engine
                     centerline.maximumPosition
                 );
                 editorUi.setCenterlineSections(centerline.sectionSlices);
+                editorUi.setCenterlineVisualization(centerline);
                 editorUi.updateWindowTitle(documentState.windowTitle());
 
                 bool running = true;
@@ -816,10 +818,13 @@ namespace quantum::engine
                                 case quantum::editor::TrackCommandType::
                                     AppendSection:
                                     candidateTrack.appendSection();
+                                    selectionAfterCommand =
+                                        candidateTrack.sectionCount() - 1;
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     PrependSection:
                                     candidateTrack.prependSection();
+                                    selectionAfterCommand = 0;
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     RemoveSection:
@@ -830,9 +835,12 @@ namespace quantum::engine
                                     // the removed index; fall back to the
                                     // previous final region when the tail
                                     // region was removed.
-                                    selectionAfterCommand = std::min(
-                                        command.sectionIndex,
-                                        candidateTrack.sectionCount() - 1
+                                    selectionAfterCommand =
+                                        quantum::editor::
+                                            selectionAfterRemoval(
+                                                editorUi.selectedSection(),
+                                                command.sectionIndex,
+                                                candidateTrack.sectionCount()
                                     );
                                     break;
                                 case quantum::editor::TrackCommandType::
@@ -844,7 +852,11 @@ namespace quantum::engine
                                     // Follow the moved region to its new
                                     // slot so selection keeps its identity.
                                     selectionAfterCommand =
-                                        command.sectionIndex - 1;
+                                        quantum::editor::selectionAfterMove(
+                                            editorUi.selectedSection(),
+                                            command.sectionIndex,
+                                            command.sectionIndex - 1
+                                        );
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     MoveSectionDown:
@@ -853,7 +865,11 @@ namespace quantum::engine
                                         command.sectionIndex + 1
                                     );
                                     selectionAfterCommand =
-                                        command.sectionIndex + 1;
+                                        quantum::editor::selectionAfterMove(
+                                            editorUi.selectedSection(),
+                                            command.sectionIndex,
+                                            command.sectionIndex + 1
+                                        );
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     DuplicateSection:
@@ -893,10 +909,13 @@ namespace quantum::engine
                                 case RegionCommandType::
                                     AppendRateProfiles:
                                     candidateTrack.appendSection();
+                                    selectionAfterCommand =
+                                        candidateTrack.sectionCount() - 1;
                                     break;
                                 case RegionCommandType::
                                     PrependRateProfiles:
                                     candidateTrack.prependSection();
+                                    selectionAfterCommand = 0;
                                     break;
                                 case RegionCommandType::AppendPlanarArc:
                                     candidateTrack.appendSection();
@@ -907,6 +926,8 @@ namespace quantum::engine
                                                     .sectionCount()
                                                 - 1)
                                         );
+                                    selectionAfterCommand =
+                                        candidateTrack.sectionCount() - 1;
                                     break;
                                 case RegionCommandType::PrependPlanarArc:
                                     candidateTrack.prependSection();
@@ -914,6 +935,7 @@ namespace quantum::engine
                                         convertSectionToPlanarArc(
                                             candidateTrack.section(0)
                                         );
+                                    selectionAfterCommand = 0;
                                     break;
                                 case RegionCommandType::
                                     InsertAfterRateProfiles:

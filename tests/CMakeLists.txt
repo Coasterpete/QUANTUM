@@ -618,6 +618,50 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorViewportPickingTests
+    ViewportPickingTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportPicking.cpp
+)
+
+target_include_directories(
+    QuantumEditorViewportPickingTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorViewportPickingTests
+    PRIVATE
+        Quantum::Core
+        Quantum::Engine
+        glm::glm
+)
+
+target_compile_features(
+    QuantumEditorViewportPickingTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorViewportPickingTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.ViewportPicking
+    COMMAND QuantumEditorViewportPickingTests
+)
+
+set_tests_properties(
+    QuantumEditor.ViewportPicking
+    PROPERTIES
+        LABELS "editor;camera;selection;math"
+)
+
+add_executable(
     QuantumCoreAuthoredTrackTests
     AuthoredTrackTests.cpp
 )

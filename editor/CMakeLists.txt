@@ -8,14 +8,17 @@ add_executable(
     src/PlatformDialogs.cpp
     src/RegionSummary.cpp
     src/ViewportCamera.cpp
+    src/ViewportPicking.cpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/DocumentState.hpp
     include/quantum/editor/EditorStyle.hpp
     include/quantum/editor/EditorUi.hpp
     include/quantum/editor/PlatformDialogs.hpp
     include/quantum/editor/RegionSummary.hpp
+    include/quantum/editor/RegionSelection.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp
+    include/quantum/editor/ViewportPicking.hpp
     ${PROJECT_SOURCE_DIR}/engine/src/Application.cpp
     ${PROJECT_SOURCE_DIR}/engine/include/quantum/engine/Application.hpp
 )
