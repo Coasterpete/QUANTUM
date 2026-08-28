@@ -43,8 +43,9 @@ namespace quantum::renderer
         VulkanContext(const VulkanContext&) = delete;
         VulkanContext& operator=(const VulkanContext&) = delete;
 
-        // The track-curve vertices must consist of exactly four runs of
-        // `trackVerticesPerCurve` vertices each.
+        // The track-curve vertices must be empty with zero vertices per curve,
+        // or consist of exactly four runs of `trackVerticesPerCurve` vertices
+        // each.
         void initialize(
             SDL_Window* window,
             std::span<const LineVertex> trackCurveVertices,
