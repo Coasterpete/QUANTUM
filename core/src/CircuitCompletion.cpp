@@ -953,7 +953,10 @@ namespace quantum::coaster
         // omega*L ~= 16.8; later branches and coupled pitch+yaw spirals
         // reach connector shapes unavailable to planar seeds.  LM is a
         // local method, so the branch the seed lands in decides the
-        // basin it converges towards.
+        // basin it converges towards. A small, length-scaled pitch pair
+        // beside the first yaw fallback gives exact Jacobians access to
+        // the corresponding non-planar basins without changing the
+        // earlier canonical path.
         [[nodiscard]] std::vector<ParameterVector>
         computeSeedCandidates(
             const EndpointState& trackEnd,
@@ -974,6 +977,23 @@ namespace quantum::coaster
                     yawSeed[3] = -sign * omegaLength * invL;
                     yawSeed[5] = sign * omegaLength * invL;
                     seeds.push_back(yawSeed);
+
+                    if (omegaLength == 8.0 && sign == 1.0)
+                    {
+                        // A constant pitch rate integrates to a small,
+                        // controlled pitch angle. The reflected pair avoids
+                        // privileging either side of the planar subspace.
+                        constexpr double pitchBiasAngle = 0.025;
+                        for (const double pitchSign : {1.0, -1.0})
+                        {
+                            ParameterVector pitchedYawSeed = yawSeed;
+                            pitchedYawSeed[0] =
+                                pitchSign * pitchBiasAngle * invL;
+                            pitchedYawSeed[1] = pitchedYawSeed[0];
+                            pitchedYawSeed[2] = pitchedYawSeed[0];
+                            seeds.push_back(pitchedYawSeed);
+                        }
+                    }
 
                     ParameterVector pitchSeed{};
                     pitchSeed[0] = -sign * omegaLength * invL;
