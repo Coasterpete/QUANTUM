@@ -508,6 +508,61 @@ namespace quantum::editor
         return rendererMatrix;
     }
 
+    ViewportRay ViewportCamera::viewportRay(
+        const double normalizedX,
+        const double normalizedY,
+        const double aspectRatio) const
+    {
+        requireValidAspectRatio(aspectRatio);
+
+        if (!std::isfinite(normalizedX)
+            || !std::isfinite(normalizedY)
+            || normalizedX < 0.0
+            || normalizedX > 1.0
+            || normalizedY < 0.0
+            || normalizedY > 1.0)
+        {
+            throw std::invalid_argument(
+                "ViewportCamera ray coordinates must be finite and inside the viewport."
+            );
+        }
+
+        const double horizontal = 2.0 * normalizedX - 1.0;
+        const double vertical = 1.0 - 2.0 * normalizedY;
+        const double halfHeight = distance_
+            * std::tan(0.5 * verticalFieldOfView_);
+        const glm::dvec3 forward = -directionFromFocus();
+        const glm::dvec3 rightVector = right();
+        const glm::dvec3 upVector = up();
+
+        if (projection_ == ViewportProjection::Orthographic)
+        {
+            return {
+                position()
+                    + horizontal * halfHeight * aspectRatio * rightVector
+                    + vertical * halfHeight * upVector,
+                forward
+            };
+        }
+
+        const glm::dvec3 direction = glm::normalize(
+            forward
+                + horizontal * std::tan(0.5 * verticalFieldOfView_)
+                    * aspectRatio * rightVector
+                + vertical * std::tan(0.5 * verticalFieldOfView_)
+                    * upVector
+        );
+
+        if (!isFinite(direction))
+        {
+            throw std::runtime_error(
+                "ViewportCamera produced a non-finite picking ray."
+            );
+        }
+
+        return {position(), direction};
+    }
+
     glm::dvec3 ViewportCamera::directionFromFocus() const noexcept
     {
         const double horizontalScale = std::cos(pitch_);

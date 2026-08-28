@@ -324,6 +324,13 @@ namespace quantum::editor
         void setCenterlineSections(
             std::vector<CenterlineSectionSlice> sectionSlices
         );
+        // Retains a non-owning view of the cache-owned visualization for
+        // viewport picking. CenterlineVisualizationCache keeps the object
+        // address stable when replacing its contents after geometry edits.
+        void setCenterlineVisualization(
+            const CenterlineVisualization& visualization
+        ) noexcept;
+        [[nodiscard]] std::size_t selectedSection() const noexcept;
         void render(VkCommandBuffer commandBuffer);
         void shutdown() noexcept;
 
@@ -437,6 +444,7 @@ namespace quantum::editor
         ViewportSettings viewportSettings_;
         bool viewportSettingsWindowOpen_ = false;
         std::vector<CenterlineSectionSlice> centerlineSlices_;
+        const CenterlineVisualization* centerlineVisualization_ = nullptr;
         double sectionLengthEditBuffer_ = 0.0;
         // Planar-arc numeric edit buffers, indexed by
         // planarArcParamIndex: radius, swept angle, plane tilt, bank.

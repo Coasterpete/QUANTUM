@@ -630,6 +630,57 @@ namespace
         }
         require(threwNonFiniteFov, "non-finite FOV must be rejected");
     }
+
+    void testWorldSpaceViewportRays()
+    {
+        using quantum::editor::ViewportCameraPose;
+        using quantum::editor::ViewportProjection;
+
+        ViewportCamera camera;
+        camera.setBounds({-5.0, -5.0, -5.0}, {5.0, 5.0, 5.0});
+        camera.setPose(ViewportCameraPose{
+            .focus = {0.0, 0.0, 0.0},
+            .yaw = 0.0,
+            .pitch = 0.0,
+            .distance = 10.0
+        });
+
+        const auto centerPerspective = camera.viewportRay(0.5, 0.5, 1.0);
+        requireVectorNear(centerPerspective.origin, {10.0, 0.0, 0.0},
+            "perspective center ray origin");
+        requireVectorNear(centerPerspective.direction, {-1.0, 0.0, 0.0},
+            "perspective center ray direction");
+
+        const auto upperRight = camera.viewportRay(1.0, 0.0, 1.0);
+        require(upperRight.direction.y > 0.0,
+            "right viewport edge must point toward camera-right");
+        require(upperRight.direction.z > 0.0,
+            "top viewport edge must point toward camera-up");
+        requireNear(glm::length(upperRight.direction), 1.0,
+            "perspective ray direction normalization");
+
+        camera.setProjection(ViewportProjection::Orthographic);
+        const auto centerOrthographic = camera.viewportRay(0.5, 0.5, 1.0);
+        const auto cornerOrthographic = camera.viewportRay(1.0, 0.0, 1.0);
+        requireVectorNear(centerOrthographic.direction,
+            cornerOrthographic.direction,
+            "orthographic rays are parallel");
+        require(glm::length(centerOrthographic.origin
+                - cornerOrthographic.origin) > 1.0,
+            "orthographic viewport position changes ray origin");
+
+        bool threwOutsideViewport = false;
+        try
+        {
+            static_cast<void>(camera.viewportRay(-0.01, 0.5, 1.0));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threwOutsideViewport = true;
+        }
+        require(threwOutsideViewport,
+            "ray generation must reject coordinates outside the viewport");
+    }
 }
 
 int main()
@@ -649,6 +700,7 @@ int main()
         testFocusSphereFraming();
         testPoseApplication();
         testConfigurableInteractionResponse();
+        testWorldSpaceViewportRays();
     }
     catch (const std::exception& exception)
     {

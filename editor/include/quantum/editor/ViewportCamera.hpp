@@ -50,6 +50,15 @@ namespace quantum::editor
         double distance = 1.0;
     };
 
+    // World-space ray through one normalized viewport location. Viewport
+    // coordinates use the ImGui image convention: (0, 0) is the top-left
+    // corner and (1, 1) is the bottom-right corner.
+    struct ViewportRay
+    {
+        glm::dvec3 origin{0.0};
+        glm::dvec3 direction{1.0, 0.0, 0.0};
+    };
+
     class ViewportCamera
     {
     public:
@@ -112,6 +121,17 @@ namespace quantum::editor
         // range and Y-flipped projection. Conversion to float happens here at
         // the Editor-to-renderer boundary.
         [[nodiscard]] std::array<float, 16> viewProjection(
+            double aspectRatio
+        ) const;
+
+        // Derives the world-space ray used by viewport picking. Perspective
+        // rays originate at the eye; orthographic rays share the camera's
+        // forward direction and originate at the corresponding image-plane
+        // position. Throws for coordinates outside [0, 1] or an invalid
+        // aspect ratio.
+        [[nodiscard]] ViewportRay viewportRay(
+            double normalizedX,
+            double normalizedY,
             double aspectRatio
         ) const;
 

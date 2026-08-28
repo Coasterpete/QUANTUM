@@ -5,6 +5,7 @@
 #include <quantum/editor/EditorStyle.hpp>
 #include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
+#include <quantum/editor/ViewportPicking.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <SDL3/SDL_filesystem.h>
@@ -50,6 +51,33 @@ namespace
     // the Transition Editor for those selections instead of idling beside
     // it, so each region kind owns exactly one primary editor surface.
     constexpr char geometryEditorWindowName[] = "Geometry Editor";
+
+    [[nodiscard]] std::uint32_t visibleTrackCurveMask(
+        const quantum::editor::ViewportSettings& settings) noexcept
+    {
+        std::uint32_t curveMask = 0;
+        if (settings.leftRailVisible)
+        {
+            curveMask |= 1u
+                << quantum::renderer::viewportLeftRailCurve;
+        }
+        if (settings.rightRailVisible)
+        {
+            curveMask |= 1u
+                << quantum::renderer::viewportRightRailCurve;
+        }
+        if (settings.centerlineVisible)
+        {
+            curveMask |= 1u
+                << quantum::renderer::viewportCenterlineCurve;
+        }
+        if (settings.heartlineVisible)
+        {
+            curveMask |= 1u
+                << quantum::renderer::viewportHeartlineCurve;
+        }
+        return curveMask;
+    }
 
     struct WorkspaceAccent
     {
@@ -2887,6 +2915,57 @@ namespace quantum::editor
             cameraGesture_ = CameraGesture::None;
         }
 
+        // ImGui owns the raw SDL event stream. Treat a left click as a
+        // viewport action only when the submitted viewport Image itself is
+        // hovered; popup/modal blocking and clicks on the toolbar therefore
+        // remain UI input even while WantCaptureMouse is true for the editor.
+        if (viewportHovered
+            && !io.AppFocusLost
+            && cameraGesture_ == CameraGesture::None
+            && firstActiveEndpoint(endpointDrags_)
+                == ScalarProfileEndpoint::None
+            && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+            && centerlineVisualization_ != nullptr)
+        {
+            const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+            const ImVec2 imageMaximum = ImGui::GetItemRectMax();
+            const double imageWidth = static_cast<double>(
+                imageMaximum.x - imageMinimum.x
+            );
+            const double imageHeight = static_cast<double>(
+                imageMaximum.y - imageMinimum.y
+            );
+
+            if (imageWidth > 0.0 && imageHeight > 0.0)
+            {
+                const double normalizedX =
+                    (static_cast<double>(io.MousePos.x)
+                        - imageMinimum.x) / imageWidth;
+                const double normalizedY =
+                    (static_cast<double>(io.MousePos.y)
+                        - imageMinimum.y) / imageHeight;
+                const ViewportRay ray = viewportCamera_.viewportRay(
+                    normalizedX,
+                    normalizedY,
+                    aspectRatio
+                );
+                const auto hit = pickViewportSection(
+                    *centerlineVisualization_,
+                    viewportCamera_,
+                    ray,
+                    pixelHeight,
+                    visibleTrackCurveMask(viewportSettings_)
+                );
+
+                // Empty viewport space deliberately preserves selection,
+                // matching the Section List's always-selected behavior.
+                if (hit.has_value())
+                {
+                    selectSection(hit->sectionIndex);
+                }
+            }
+        }
+
         if (cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
@@ -2960,6 +3039,19 @@ namespace quantum::editor
             {
                 frameWholeTrack();
             }
+        }
+
+        if (const CenterlineSectionSlice* const selectedSlice =
+            selectedSectionSlice())
+        {
+            vulkan.setTrackCurveHighlight(
+                selectedSlice->firstVertex,
+                selectedSlice->vertexCount
+            );
+        }
+        else
+        {
+            vulkan.setTrackCurveHighlight(0, 0);
         }
 
         vulkan.setViewportViewProjection(
@@ -3254,28 +3346,9 @@ namespace quantum::editor
                 * piRadians / 180.0
         );
 
-        std::uint32_t curveMask = 0;
-
-        if (viewportSettings_.leftRailVisible)
-        {
-            curveMask |= 1u << renderer::viewportLeftRailCurve;
-        }
-        if (viewportSettings_.rightRailVisible)
-        {
-            curveMask |= 1u << renderer::viewportRightRailCurve;
-        }
-        if (viewportSettings_.centerlineVisible)
-        {
-            curveMask |= 1u << renderer::viewportCenterlineCurve;
-        }
-        if (viewportSettings_.heartlineVisible)
-        {
-            curveMask |= 1u << renderer::viewportHeartlineCurve;
-        }
-
         vulkan.setViewportElementVisibility(
             viewportSettings_.gridVisible,
-            curveMask
+            visibleTrackCurveMask(viewportSettings_)
         );
 
         // Recentre the ground grid around the solved track's bounds so it
@@ -4324,6 +4397,17 @@ namespace quantum::editor
         centerlineSlices_ = std::move(sectionSlices);
     }
 
+    void EditorUi::setCenterlineVisualization(
+        const CenterlineVisualization& visualization) noexcept
+    {
+        centerlineVisualization_ = &visualization;
+    }
+
+    std::size_t EditorUi::selectedSection() const noexcept
+    {
+        return selectedSection_;
+    }
+
     void EditorUi::render(const VkCommandBuffer commandBuffer)
     {
         if (!vulkanBackendInitialized_)
@@ -4360,6 +4444,7 @@ namespace quantum::editor
         cameraGesture_ = CameraGesture::None;
         initialViewportFramePending_ = true;
         authoredTrack_ = nullptr;
+        centerlineVisualization_ = nullptr;
         selectedSection_ = 0;
         valueEndEditBuffers_.fill(0.0);
         endpointSelections_.fill(ScalarProfileEndpoint::None);

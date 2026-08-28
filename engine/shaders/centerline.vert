@@ -8,10 +8,15 @@ layout(location = 0) out vec4 vertexColor;
 layout(push_constant) uniform CameraTransform
 {
     mat4 viewProjection;
+    vec4 highlightColor;
 } camera;
 
 void main()
 {
     gl_Position = camera.viewProjection * vec4(inPosition, 1.0);
-    vertexColor = inColor;
+    vertexColor = vec4(
+        mix(inColor.rgb, camera.highlightColor.rgb,
+            camera.highlightColor.a),
+        inColor.a
+    );
 }

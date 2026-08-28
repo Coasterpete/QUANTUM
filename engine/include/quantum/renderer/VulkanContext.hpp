@@ -77,6 +77,15 @@ namespace quantum::renderer
             std::uint32_t curveVisibilityMask
         );
 
+        // Draws the same authored-section range once more over every visible
+        // track curve with the highlight color blend. A zero vertex count
+        // disables highlighting. This changes draw state only; it never
+        // rewrites or reallocates the retained geometry buffer.
+        void setTrackCurveHighlight(
+            std::uint32_t firstVertex,
+            std::uint32_t vertexCount
+        );
+
         // Recenters and rescales the ground grid toward a reference sphere
         // (usually the solved-track bounds), snapping to the chosen spacing
         // so the grid only rewrites its buffer when it actually moves.
@@ -179,6 +188,8 @@ namespace quantum::renderer
         bool viewportGridVisible_ = true;
         std::uint32_t viewportCurveVisibilityMask_ =
             viewportAllCurvesVisibleMask;
+        std::uint32_t trackHighlightFirstVertex_ = 0;
+        std::uint32_t trackHighlightVertexCount_ = 0;
         VkBuffer trackCurveVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* trackCurveVertexMappedData_ = nullptr;
