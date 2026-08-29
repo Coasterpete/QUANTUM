@@ -1220,37 +1220,11 @@ Development should therefore continue moving mathematical foundations into real 
 
 # AI-Assisted Development
 
-QUANTUM is an independently directed project developed with substantial use of modern AI-assisted programming tools.
+QUANTUM is a **human-directed** project developed with the assistance of AI programming tools.
 
-AI coding agents may be used for tasks including:
+AI may assist with implementation, testing, debugging, and documentation, while project direction, architecture, coaster-domain design, UX, assets, acceptance criteria, and engineering decisions remain human-directed.
 
-- implementation;
-- boilerplate;
-- refactoring;
-- unit-test generation;
-- numerical experiments;
-- profiling;
-- debugging assistance;
-- documentation assistance.
-
-The project remains **human-directed**.
-
-Product direction, coaster-domain concepts, architecture requirements, UX goals, visual design, assets, acceptance criteria, testing decisions, and engineering review are determined by the project's author.
-
-AI-generated code is **not considered correct merely because it compiles**.
-
-Changes are expected to survive appropriate combinations of:
-
-- code review;
-- Debug builds;
-- Release builds;
-- automated tests;
-- numerical verification;
-- deterministic regression checks;
-- manual editor testing;
-- Vulkan validation.
-
-The intent is to use AI as an engineering tool rather than as a replacement for engineering judgment.
+AI-assisted changes are reviewed and validated through appropriate builds, automated tests, numerical verification, and manual testing.
 
 ---
 
