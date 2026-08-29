@@ -1558,12 +1558,22 @@ namespace quantum::engine
                                         committedChannel,
                                         requestedValueEdit->segmentId
                                     );
-                            editorUi.synchronizeSegmentValueEnd(
+                            const quantum::editor::ScalarProfileEndpoint
+                                endpoint = requestedValueEdit->endpoint;
+                            double committedValue = 0.0;
+                            if (committedSegment != nullptr)
+                            {
+                                committedValue = endpoint
+                                        == quantum::editor::
+                                            ScalarProfileEndpoint::Begin
+                                    ? committedSegment->valueBegin
+                                    : committedSegment->valueEnd;
+                            }
+                            editorUi.synchronizeSegmentEndpointValue(
                                 requestedValueEdit->channel,
                                 requestedValueEdit->segmentId,
-                                committedSegment != nullptr
-                                    ? committedSegment->valueEnd
-                                    : 0.0
+                                endpoint,
+                                committedValue
                             );
                         }
 
