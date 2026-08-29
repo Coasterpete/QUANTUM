@@ -30,13 +30,6 @@ namespace quantum::editor
         float y = 0.0f;
     };
 
-    enum class ScalarProfileEndpoint
-    {
-        None,
-        Begin,
-        End
-    };
-
     // Authoring interaction configuration for the Transition Editor,
     // shared by every section and every rate channel. Defaults preserve
     // the original drag feel; snapping starts disabled. A future
@@ -263,11 +256,12 @@ namespace quantum::editor
         // resets and [SEL] logging apply as for list-click selection.
         void selectSection(std::size_t index);
         // Refreshes the numeric edit buffer for a channel, but only when
-        // the committed segment is the one the row currently addresses.
-        void synchronizeSegmentValueEnd(
+        // the committed semantic endpoint is the one the controls address.
+        void synchronizeSegmentEndpointValue(
             RateChannel channel,
             std::uint32_t segmentId,
-            double acceptedValueEnd
+            ScalarProfileEndpoint endpoint,
+            double acceptedValue
         );
         void synchronizeSectionLength(double acceptedLength);
         // Refreshes the planar-arc numeric edit buffers with committed
@@ -365,8 +359,9 @@ namespace quantum::editor
         std::size_t selectedSection_ = 0;
 
         // Per-channel editing state, indexed by RateChannel. Numeric buffers
-        // present each focused segment End value in degrees per meter; drag
-        // anchors and authoritative profiles remain radians per meter.
+        // present the selected marker value (or a selected segment's End
+        // value) in degrees per meter; drag anchors and authoritative
+        // profiles remain radians per meter.
         // Interaction slots track the selected/dragged endpoint.
         std::array<double, rateChannelCount> valueEndEditBuffers_{};
         std::array<ScalarProfileEndpoint, rateChannelCount>
@@ -380,6 +375,7 @@ namespace quantum::editor
         std::array<GraphValueRange, rateChannelCount> graphValueRanges_{};
         RateChannel activeRateChannel_ = RateChannel::Pitch;
         std::optional<RateChannel> hoveredRateChannel_;
+        std::optional<GraphMarkerId> hoveredGraphMarker_;
         std::array<DragAxisLock, rateChannelCount> dragAxisLocks_{};
         // Cumulative cursor travel per active drag; picks the drag axis
         // once motion becomes unambiguous.

@@ -3,8 +3,10 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace quantum::editor
 {
@@ -18,6 +20,13 @@ namespace quantum::editor
     };
 
     inline constexpr std::size_t rateChannelCount = 3;
+
+    enum class ScalarProfileEndpoint
+    {
+        None,
+        Begin,
+        End
+    };
 
     [[nodiscard]] coaster::ChannelProfile& sectionRateChannel(
         coaster::AuthoredTrackSection& section,
@@ -138,6 +147,69 @@ namespace quantum::editor
         double pixelHeight
     );
 
+    [[nodiscard]] double graphDistanceToNormalized(
+        double distance,
+        double domainBegin,
+        double domainEnd
+    );
+
+    [[nodiscard]] double normalizedToGraphDistance(
+        double normalizedDistance,
+        double domainBegin,
+        double domainEnd
+    );
+
+    // One real authored boundary value in an analytic channel profile. A
+    // valid N-segment profile produces N+1 markers: the first segment Begin
+    // plus every segment End. An interior marker is deliberately owned by
+    // the left segment's End endpoint, matching Core's shared-boundary edit
+    // semantics; sampled curve vertices never appear here.
+    struct SemanticProfileMarker
+    {
+        double distance = 0.0;
+        double value = 0.0;
+        coaster::SegmentId segmentId = coaster::invalidSegmentId;
+        ScalarProfileEndpoint endpoint = ScalarProfileEndpoint::None;
+        bool regionBoundary = false;
+    };
+
+    [[nodiscard]] std::vector<SemanticProfileMarker>
+    extractSemanticProfileMarkers(const coaster::ChannelProfile& profile);
+
+    struct ProfileBoundaryMoveBounds
+    {
+        double minimum = 0.0;
+        double maximum = 0.0;
+    };
+
+    // Returns the neighbouring outer bounds for a movable interior marker.
+    // Region start/end markers are pinned and therefore return no bounds.
+    [[nodiscard]] std::optional<ProfileBoundaryMoveBounds>
+    profileBoundaryMoveBounds(
+        const coaster::ChannelProfile& profile,
+        coaster::SegmentId segmentId,
+        ScalarProfileEndpoint endpoint
+    ) noexcept;
+
+    // Deterministic engineering-space proposals shared by marker drags and
+    // their tests. Screen Y grows down while authored values grow up.
+    [[nodiscard]] double proposeMarkerValueDrag(
+        double currentValue,
+        double pixelDeltaY,
+        double valueUnitsPerPixel,
+        double gain,
+        std::optional<double> snapIncrement = std::nullopt
+    );
+
+    [[nodiscard]] double proposeBoundaryDistanceDrag(
+        double currentDistance,
+        double pixelDeltaX,
+        double distanceUnitsPerPixel,
+        double gain,
+        ProfileBoundaryMoveBounds bounds,
+        std::optional<double> snapIncrement = std::nullopt
+    );
+
     struct CurveHitCandidate
     {
         RateChannel channel = RateChannel::Roll;
@@ -151,6 +223,31 @@ namespace quantum::editor
         double hitRadius,
         RateChannel activeChannel,
         std::optional<RateChannel> previouslyHovered
+    );
+
+    struct GraphMarkerId
+    {
+        RateChannel channel = RateChannel::Roll;
+        coaster::SegmentId segmentId = coaster::invalidSegmentId;
+        ScalarProfileEndpoint endpoint = ScalarProfileEndpoint::None;
+
+        [[nodiscard]] bool operator==(const GraphMarkerId&) const = default;
+    };
+
+    struct MarkerHitCandidate
+    {
+        GraphMarkerId marker;
+        double distanceSquared = 0.0;
+    };
+
+    // Marker acquisition precedes curve acquisition. Eligible markers use
+    // active channel, the exact previously hovered marker, nearest distance,
+    // then stable semantic identity; draw order never affects the result.
+    [[nodiscard]] std::optional<GraphMarkerId> chooseMarkerHit(
+        std::span<const MarkerHitCandidate> candidates,
+        double hitRadius,
+        RateChannel activeChannel,
+        std::optional<GraphMarkerId> previouslyHovered
     );
 
     [[nodiscard]] double squaredDistanceToLineSegment(

@@ -177,8 +177,12 @@ namespace
 
         [[nodiscard]] float toPixel(const double domainValue) const
         {
-            const double progress = (domainValue - domainBegin)
-                / (domainEnd - domainBegin);
+            const double progress = quantum::editor::
+                graphDistanceToNormalized(
+                    domainValue,
+                    domainBegin,
+                    domainEnd
+                );
             return pixelBegin + static_cast<float>(progress)
                 * (pixelEnd - pixelBegin);
         }
@@ -187,8 +191,8 @@ namespace
     constexpr int domainDivisionCount = 5;
     constexpr int valueDivisionCount = 4;
     constexpr std::size_t profileSampleCount = 129;
-    constexpr float endpointHandleRadius = 4.0F;
-    constexpr float endpointHoverRadius = 8.0F;
+    constexpr float endpointHandleRadius = 5.0F;
+    constexpr float endpointHoverRadius = 10.0F;
     constexpr float curveHoverRadius = 7.0F;
     // Interior joints idle as small dots so a multi-segment curve stays
     // readable; they grow into full handles on hover.
@@ -399,107 +403,26 @@ namespace
         ScalarRowEditGeometry editGeometry;
     };
 
-    // Interactive clamp window for horizontally dragging one interior
-    // boundary; mirrors the authoritative Core constraints so a live drag
-    // never proposes a candidate the move operation would reject. Returns
-    // false when the addressed boundary is pinned or unknown.
-    [[nodiscard]] bool boundaryMoveBounds(
-        const quantum::coaster::ChannelProfile& profile,
-        const std::uint32_t segmentId,
-        const quantum::editor::ScalarProfileEndpoint endpoint,
-        double& lowerBound,
-        double& upperBound) noexcept
-    {
-        using quantum::editor::ScalarProfileEndpoint;
-
-        if (endpoint == ScalarProfileEndpoint::None)
-        {
-            return false;
-        }
-
-        for (std::size_t index = 0;
-            index < profile.segments.size();
-            ++index)
-        {
-            if (profile.segments[index].id != segmentId)
-            {
-                continue;
-            }
-
-            if (endpoint == ScalarProfileEndpoint::Begin)
-            {
-                if (index == 0)
-                {
-                    return false;
-                }
-                lowerBound = index >= 2
-                    ? profile.segments[index - 2].transition.domainEnd
-                    : profile.segments.front().transition.domainBegin;
-                upperBound =
-                    profile.segments[index].transition.domainEnd;
-            }
-            else
-            {
-                if (index + 1 >= profile.segments.size())
-                {
-                    return false;
-                }
-                lowerBound =
-                    profile.segments[index].transition.domainBegin;
-                upperBound = index + 2 < profile.segments.size()
-                    ? profile.segments[index + 2].transition.domainBegin
-                    : profile.segments.back().transition.domainEnd;
-            }
-
-            return true;
-        }
-
-        return false;
-    }
-
     [[nodiscard]] std::vector<RowHandlePoint> buildProfileHandles(
         const ScalarProfileMapping& mapping,
         const quantum::coaster::ChannelProfile& profile)
     {
         using quantum::editor::ScalarProfileEndpoint;
 
+        const std::vector<quantum::editor::SemanticProfileMarker> markers =
+            quantum::editor::extractSemanticProfileMarkers(profile);
         std::vector<RowHandlePoint> handles;
-        handles.reserve(profile.segments.size() + 1);
+        handles.reserve(markers.size());
 
-        for (std::size_t index = 0;
-            index < profile.segments.size();
-            ++index)
+        for (const quantum::editor::SemanticProfileMarker& marker : markers)
         {
-            const quantum::coaster::ProfileSegment& segment =
-                profile.segments[index];
-
-            if (index == 0
-                || profile.segments[index - 1].transition.domainEnd
-                    != segment.transition.domainBegin)
-            {
-                handles.push_back(RowHandlePoint{
-                    mapping.toPixel(
-                        segment.transition.domainBegin,
-                        segment.transition.valueBegin
-                    ),
-                    segment.transition.domainBegin,
-                    segment.transition.valueBegin,
-                    segment.id,
-                    ScalarProfileEndpoint::Begin,
-                    index == 0
-                });
-            }
-
             handles.push_back(RowHandlePoint{
-                mapping.toPixel(
-                    segment.transition.domainEnd,
-                    segment.transition.valueEnd
-                ),
-                segment.transition.domainEnd,
-                segment.transition.valueEnd,
-                segment.id,
-                ScalarProfileEndpoint::End,
-                index + 1 == profile.segments.size()
+                mapping.toPixel(marker.distance, marker.value),
+                marker.distance,
+                marker.value,
+                marker.segmentId,
+                marker.endpoint,
+                marker.regionBoundary
             });
         }
 
@@ -510,75 +433,151 @@ namespace
         ImDrawList* const drawList,
         const std::span<const RowHandlePoint> handles,
         const ImU32 curveColor,
+        const quantum::editor::RateChannel channel,
         const std::uint32_t selectedSegmentId,
         const quantum::editor::ScalarProfileEndpoint selectedEndpoint,
-        const std::optional<std::size_t> hoveredIndex,
+        const std::optional<quantum::editor::GraphMarkerId> hoveredMarker,
         const bool activeChannel)
     {
         using quantum::editor::ScalarProfileEndpoint;
+
+        const auto drawFilledMarker = [drawList, channel](
+            const ImVec2 position,
+            const float radius,
+            const ImU32 color)
+        {
+            switch (channel)
+            {
+            case quantum::editor::RateChannel::Roll:
+                drawList->AddRectFilled(
+                    ImVec2(position.x - radius, position.y - radius),
+                    ImVec2(position.x + radius, position.y + radius),
+                    color
+                );
+                break;
+            case quantum::editor::RateChannel::Yaw:
+                drawList->AddQuadFilled(
+                    ImVec2(position.x, position.y - radius),
+                    ImVec2(position.x + radius, position.y),
+                    ImVec2(position.x, position.y + radius),
+                    ImVec2(position.x - radius, position.y),
+                    color
+                );
+                break;
+            case quantum::editor::RateChannel::Pitch:
+            default:
+                drawList->AddCircleFilled(position, radius, color);
+                break;
+            }
+        };
+        const auto drawOpenMarker = [drawList, channel](
+            const ImVec2 position,
+            const float radius,
+            const ImU32 color)
+        {
+            switch (channel)
+            {
+            case quantum::editor::RateChannel::Roll:
+                drawList->AddRect(
+                    ImVec2(position.x - radius, position.y - radius),
+                    ImVec2(position.x + radius, position.y + radius),
+                    color,
+                    0.0F,
+                    ImDrawFlags_None,
+                    1.5F
+                );
+                break;
+            case quantum::editor::RateChannel::Yaw:
+                drawList->AddQuad(
+                    ImVec2(position.x, position.y - radius),
+                    ImVec2(position.x + radius, position.y),
+                    ImVec2(position.x, position.y + radius),
+                    ImVec2(position.x - radius, position.y),
+                    color,
+                    1.5F
+                );
+                break;
+            case quantum::editor::RateChannel::Pitch:
+            default:
+                drawList->AddCircle(
+                    position,
+                    radius,
+                    color,
+                    0,
+                    1.5F
+                );
+                break;
+            }
+        };
 
         for (std::size_t handleIndex = 0;
             handleIndex < handles.size();
             ++handleIndex)
         {
             const RowHandlePoint& handle = handles[handleIndex];
-            const bool hovered = hoveredIndex.has_value()
-                && handleIndex == *hoveredIndex;
+            const bool hovered = hoveredMarker.has_value()
+                && hoveredMarker->channel == channel
+                && hoveredMarker->segmentId == handle.segmentId
+                && hoveredMarker->endpoint == handle.endpoint;
             const bool ownedBySelected =
                 handle.segmentId == selectedSegmentId;
+            const bool selectedMarker = ownedBySelected
+                && selectedEndpoint == handle.endpoint;
+            const float baseRadius = handle.outer
+                ? endpointHandleRadius
+                : (ownedBySelected
+                    ? jointSelectedRadius
+                    : jointHandleRadius);
+            const float radius = hovered ? baseRadius + 1.5F : baseRadius;
+            const ImU32 inactiveColor =
+                (curveColor & ~IM_COL32_A_MASK)
+                | (static_cast<ImU32>(190) << IM_COL32_A_SHIFT);
 
-            if (!handle.outer && !hovered && !activeChannel)
+            // Active authored points are filled; inactive points remain open
+            // at their exact coordinates. This preserves coincident values
+            // while making the foreground channel visually deterministic.
+            if (activeChannel || hovered)
             {
-                continue;
-            }
-
-            if (!handle.outer && !hovered)
-            {
-                // Idle interior joints stay visually quiet.
-                const ImU32 dotColor = ownedBySelected
-                    ? curveColor
-                    : ImGui::GetColorU32(ImGuiCol_TextDisabled);
-                drawList->AddCircleFilled(
+                drawFilledMarker(
                     handle.position,
-                    ownedBySelected ? jointSelectedRadius
-                        : jointHandleRadius,
-                    dotColor
+                    radius,
+                    curveColor
                 );
-
-                if (ownedBySelected
-                    && selectedEndpoint == handle.endpoint)
-                {
-                    drawList->AddCircle(
-                        handle.position,
-                        jointSelectedRadius + 3.0F,
-                        ImGui::GetColorU32(ImGuiCol_Text),
-                        0,
-                        1.5F
-                    );
-                }
-                continue;
+            }
+            else
+            {
+                drawOpenMarker(
+                    handle.position,
+                    radius + 1.0F,
+                    inactiveColor
+                );
             }
 
-            const float radius = hovered
-                ? endpointHandleRadius + 1.5F
-                : endpointHandleRadius;
-            drawList->AddCircleFilled(handle.position, radius, curveColor);
-
-            if (ownedBySelected && selectedEndpoint == handle.endpoint)
+            if (selectedMarker)
             {
                 drawList->AddCircle(
                     handle.position,
-                    endpointHandleRadius + 3.0F,
+                    radius + 3.0F,
                     ImGui::GetColorU32(ImGuiCol_Text),
                     0,
-                    1.5F
+                    2.0F
+                );
+            }
+            else if (ownedBySelected && activeChannel)
+            {
+                drawList->AddCircle(
+                    handle.position,
+                    radius + 1.75F,
+                    curveColor,
+                    0,
+                    1.25F
                 );
             }
             else if (hovered)
             {
                 drawList->AddCircle(
                     handle.position,
-                    endpointHandleRadius + 2.5F,
+                    radius + 2.0F,
                     curveColor,
                     0,
                     1.5F
@@ -730,12 +729,11 @@ namespace
         return nullptr;
     }
 
-    [[nodiscard]] ScalarProfileRowEdit drawCompactProfileControls(
+    [[nodiscard]] ScalarProfileRowEdit drawSelectedProfileControls(
         const ProfileRowView& row,
-        const ImU32 curveColor,
-        double* const valueEndBuffer,
+        double* const selectedValueBuffer,
         const std::uint32_t selectedSegmentId,
-        const bool activeChannel,
+        const quantum::editor::ScalarProfileEndpoint selectedEndpoint,
         const float groupWidth)
     {
         ScalarProfileRowEdit edit;
@@ -747,42 +745,39 @@ namespace
         }
 
         ImGui::PushID(row.label);
-        ImGui::PushStyleColor(
-            ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(curveColor)
-        );
-        char channelButtonLabel[48]{};
-        std::snprintf(
-            channelButtonLabel,
-            sizeof(channelButtonLabel),
-            activeChannel ? "[%s]###Activate" : "%s###Activate",
-            row.label
-        );
-        edit.activateRequested = ImGui::SmallButton(channelButtonLabel);
-        ImGui::PopStyleColor();
-
-        ImGui::SameLine();
         const float spacing = ImGui::GetStyle().ItemSpacing.x;
-        const float selectorWidth = ImGui::CalcTextSize("[Pitch]").x
-            + 2.0F * ImGui::GetStyle().FramePadding.x;
         const float remainingWidth = std::max(
-            200.0F,
-            groupWidth - selectorWidth - spacing
+            260.0F,
+            groupWidth
         );
         const float valueWidth = std::clamp(
-            remainingWidth * 0.42F,
-            100.0F,
-            142.0F
+            remainingWidth * 0.34F,
+            120.0F,
+            180.0F
         );
         const float typeWidth = std::max(
-            92.0F,
-            remainingWidth - valueWidth - spacing
+            140.0F,
+            std::min(
+                260.0F,
+                remainingWidth - valueWidth - 4.0F * spacing
+            )
         );
 
+        const quantum::editor::ScalarProfileEndpoint numericEndpoint =
+            selectedEndpoint
+                == quantum::editor::ScalarProfileEndpoint::Begin
+            ? quantum::editor::ScalarProfileEndpoint::Begin
+            : quantum::editor::ScalarProfileEndpoint::End;
+        ImGui::TextDisabled(
+            numericEndpoint == quantum::editor::ScalarProfileEndpoint::Begin
+                ? "Begin Value"
+                : "End Value"
+        );
+        ImGui::SameLine();
         ImGui::SetNextItemWidth(valueWidth);
         edit.valueEndEdited = ImGui::InputDouble(
-            "##ValueEnd",
-            valueEndBuffer,
+            "##SelectedValue",
+            selectedValueBuffer,
             0.25,
             1.0,
             "%.5f deg/m"
@@ -790,10 +785,15 @@ namespace
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip(
-                "Focused segment end angular rate (degrees per meter)"
+                numericEndpoint
+                    == quantum::editor::ScalarProfileEndpoint::Begin
+                ? "Selected marker angular rate (degrees per meter)"
+                : "Selected segment end angular rate (degrees per meter)"
             );
         }
 
+        ImGui::SameLine();
+        ImGui::TextDisabled("Shape");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(typeWidth);
         edit.transitionType = drawTransitionTypeCombo(
@@ -929,6 +929,37 @@ namespace
                     ImDrawFlags_None,
                     4.0F
                 );
+
+                const quantum::math::ScalarTransition& selected =
+                    row.profile->segments[index].transition;
+                const ImU32 boundaryColor =
+                    (curveColor & ~IM_COL32_A_MASK)
+                    | (static_cast<ImU32>(150) << IM_COL32_A_SHIFT);
+                const std::array<double, 2> selectedBoundaries{
+                    selected.domainBegin,
+                    selected.domainEnd
+                };
+                for (const double boundary : selectedBoundaries)
+                {
+                    if (boundary <= domainView.domainBegin
+                        || boundary >= domainView.domainEnd)
+                    {
+                        continue;
+                    }
+                    const float x = domainView.toPixel(boundary);
+                    drawList->AddLine(
+                        ImVec2(x, plotBeginY),
+                        ImVec2(x, plotEndY),
+                        boundaryColor,
+                        1.5F
+                    );
+                    drawList->AddTriangleFilled(
+                        ImVec2(x - 4.0F, plotBeginY),
+                        ImVec2(x + 4.0F, plotBeginY),
+                        ImVec2(x, plotBeginY + 6.0F),
+                        curveColor
+                    );
+                }
             }
             break;
         }
@@ -2064,6 +2095,7 @@ namespace
             quantum::editor::rateChannelCount>& graphRanges,
         quantum::editor::RateChannel& activeChannel,
         std::optional<quantum::editor::RateChannel>& hoveredChannel,
+        std::optional<quantum::editor::GraphMarkerId>& hoveredMarker,
         const quantum::editor::TransitionEditorInputSettings&
             inputSettings)
     {
@@ -2116,97 +2148,130 @@ namespace
             return std::pair{tail.domainEnd, tail.valueEnd};
         };
 
-        // Channel controls belong to one compact header, not to the graph.
-        // Wide editor windows keep all three on one line; narrow layouts
-        // wrap to three compact lines without recreating graph lanes.
+        // Channel choice is the only persistent three-channel control row.
+        // Precise value/shape controls below address the active channel's
+        // selected semantic object, leaving the graph as the dominant area.
         const float controlsAvailableWidth = ImGui::GetContentRegionAvail().x;
-        const float controlsSpacing = ImGui::GetStyle().ItemSpacing.x;
-        const bool controlsOnOneLine = controlsAvailableWidth >= 1050.0F;
-        const float controlGroupWidth = controlsOnOneLine
-            ? (controlsAvailableWidth
-                - controlsSpacing
-                    * static_cast<float>(profileRows.size() - 1))
-                / static_cast<float>(profileRows.size())
-            : controlsAvailableWidth;
-
         for (std::size_t rowIndex = 0;
             rowIndex < profileRows.size();
             ++rowIndex)
         {
-            if (controlsOnOneLine && rowIndex > 0)
+            if (rowIndex > 0)
             {
                 ImGui::SameLine();
             }
-
             const ProfileRowView& row = profileRows[rowIndex];
             const std::size_t channelIndex = static_cast<std::size_t>(
                 row.channel
             );
-            ImGui::BeginGroup();
-            const ScalarProfileRowEdit controlEdit =
-                drawCompactProfileControls(
-                    row,
-                    profileCurveColors[channelIndex],
-                    &valueEndBuffers[channelIndex],
-                    selectedSegmentIds[channelIndex],
-                    row.channel == activeChannel,
-                    controlGroupWidth
-                );
-            ImGui::EndGroup();
-
-            if (controlEdit.activateRequested)
+            ImGui::PushID(row.label);
+            ImGui::PushStyleColor(
+                ImGuiCol_Text,
+                ImGui::ColorConvertU32ToFloat4(
+                    profileCurveColors[channelIndex]
+                )
+            );
+            char channelButtonLabel[48]{};
+            std::snprintf(
+                channelButtonLabel,
+                sizeof(channelButtonLabel),
+                row.channel == activeChannel
+                    ? "[%s]###Channel"
+                    : "%s###Channel",
+                row.label
+            );
+            if (ImGui::SmallButton(channelButtonLabel))
             {
                 activeChannel = row.channel;
             }
-            if (controlEdit.valueEndEdited)
-            {
-                activeChannel = row.channel;
-                if (std::isfinite(valueEndBuffers[channelIndex]))
-                {
-                    const double valueRadians = quantum::editor::
-                        angularRateDegreesToRadians(
-                            valueEndBuffers[channelIndex]
-                        );
-                    graphRanges[channelIndex] = quantum::editor::
-                        expandGraphRangeToInclude(
-                            graphRanges[channelIndex],
-                            valueRadians
-                        );
-                    edit.endpointValueEdit = {
-                        .endpoint = quantum::editor::
-                            ScalarProfileEndpoint::End,
-                        .value = valueRadians,
-                        .continuous = false,
-                        .channel = row.channel,
-                        .segmentId = selectedSegmentIds[channelIndex]
-                    };
-                }
-                else
-                {
-                    // Core accepts every finite rate but never non-finite
-                    // data. Restore the committed value instead of letting
-                    // a malformed text entry escape the header.
-                    valueEndBuffers[channelIndex] =
-                        focusedEndpoint(channelIndex).second
-                            * quantum::editor::degreesPerRadian;
-                }
-            }
-            if (controlEdit.transitionType.has_value())
-            {
-                activeChannel = row.channel;
-                edit.transitionType = TransitionEditorEdit::TypeChange{
-                    row.channel,
-                    *controlEdit.transitionType,
-                    selectedSegmentIds[channelIndex]
-                };
-            }
+            ImGui::PopStyleColor();
+            ImGui::PopID();
         }
 
         const std::size_t activeIndex = static_cast<std::size_t>(
             activeChannel
         );
         const char* const activeLabel = profileRows[activeIndex].label;
+        ImGui::SameLine();
         ImGui::Text("Active: %s", activeLabel);
+
+        const quantum::coaster::ProfileSegment* const focusedSegment =
+            findProfileSegment(
+                *profileRows[activeIndex].profile,
+                selectedSegmentIds[activeIndex]
+            );
+        const quantum::editor::ScalarProfileEndpoint selectedEndpoint =
+            endpointSelections[activeIndex];
+        const char* const selectionKind = selectedEndpoint
+                == quantum::editor::ScalarProfileEndpoint::Begin
+            ? "begin marker"
+            : selectedEndpoint
+                == quantum::editor::ScalarProfileEndpoint::End
+            ? "end marker"
+            : "analytic segment";
+        if (focusedSegment != nullptr)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled(
+                "| Selected: segment %u - %s [%.6g to %.6g m]",
+                selectedSegmentIds[activeIndex],
+                selectionKind,
+                focusedSegment->transition.domainBegin,
+                focusedSegment->transition.domainEnd
+            );
+        }
+
+        const ScalarProfileRowEdit controlEdit =
+            drawSelectedProfileControls(
+                profileRows[activeIndex],
+                &valueEndBuffers[activeIndex],
+                selectedSegmentIds[activeIndex],
+                selectedEndpoint,
+                controlsAvailableWidth
+            );
+        const quantum::editor::ScalarProfileEndpoint numericEndpoint =
+            selectedEndpoint
+                == quantum::editor::ScalarProfileEndpoint::Begin
+            ? quantum::editor::ScalarProfileEndpoint::Begin
+            : quantum::editor::ScalarProfileEndpoint::End;
+        if (controlEdit.valueEndEdited)
+        {
+            if (std::isfinite(valueEndBuffers[activeIndex]))
+            {
+                const double valueRadians = quantum::editor::
+                    angularRateDegreesToRadians(
+                        valueEndBuffers[activeIndex]
+                    );
+                graphRanges[activeIndex] = quantum::editor::
+                    expandGraphRangeToInclude(
+                        graphRanges[activeIndex],
+                        valueRadians
+                    );
+                edit.endpointValueEdit = {
+                    .endpoint = numericEndpoint,
+                    .value = valueRadians,
+                    .continuous = false,
+                    .channel = activeChannel,
+                    .segmentId = selectedSegmentIds[activeIndex]
+                };
+            }
+            else
+            {
+                // Core accepts every finite rate but never non-finite data.
+                valueEndBuffers[activeIndex] =
+                    focusedEndpoint(activeIndex).second
+                        * quantum::editor::degreesPerRadian;
+            }
+        }
+        if (controlEdit.transitionType.has_value())
+        {
+            edit.transitionType = TransitionEditorEdit::TypeChange{
+                activeChannel,
+                *controlEdit.transitionType,
+                selectedSegmentIds[activeIndex]
+            };
+        }
+
         ImGui::SameLine();
         if (ImGui::SmallButton("Fit Y"))
         {
@@ -2477,7 +2542,10 @@ namespace
                     && mousePosition.y <= plotEndY;
                 const std::optional<quantum::editor::RateChannel>
                     previousHovered = hoveredChannel;
+                const std::optional<quantum::editor::GraphMarkerId>
+                    previousHoveredMarker = hoveredMarker;
                 hoveredChannel.reset();
+                hoveredMarker.reset();
                 double hoverDistance = 0.0;
                 std::optional<std::size_t> hoveredHandleIndex;
 
@@ -2485,8 +2553,14 @@ namespace
                 {
                     std::array<quantum::editor::CurveHitCandidate,
                         quantum::editor::rateChannelCount> curveCandidates{};
-                    std::array<quantum::editor::CurveHitCandidate,
-                        quantum::editor::rateChannelCount> handleCandidates{};
+                    std::vector<quantum::editor::MarkerHitCandidate>
+                        markerCandidates;
+                    markerCandidates.reserve(
+                        profileRows[0].profile->segments.size()
+                            + profileRows[1].profile->segments.size()
+                            + profileRows[2].profile->segments.size()
+                            + quantum::editor::rateChannelCount
+                    );
 
                     for (std::size_t channelIndex = 0;
                         channelIndex < quantum::editor::rateChannelCount;
@@ -2501,34 +2575,34 @@ namespace
                             )
                         };
 
-                        double nearestHandle =
-                            std::numeric_limits<double>::infinity();
                         for (const RowHandlePoint& handle :
                             plotGeometries[channelIndex].handles)
                         {
-                            nearestHandle = std::min(
-                                nearestHandle,
+                            markerCandidates.push_back({
+                                {
+                                    static_cast<quantum::editor::
+                                        RateChannel>(channelIndex),
+                                    handle.segmentId,
+                                    handle.endpoint
+                                },
                                 static_cast<double>(squaredDistance(
                                     mousePosition,
                                     handle.position
                                 ))
-                            );
+                            });
                         }
-                        handleCandidates[channelIndex] = {
-                            static_cast<quantum::editor::RateChannel>(
-                                channelIndex),
-                            nearestHandle
-                        };
                     }
 
-                    const auto handleHit = quantum::editor::chooseCurveHit(
-                        handleCandidates,
+                    const auto markerHit = quantum::editor::chooseMarkerHit(
+                        markerCandidates,
                         endpointHoverRadius,
                         activeChannel,
-                        previousHovered
+                        previousHoveredMarker
                     );
-                    hoveredChannel = handleHit.has_value()
-                        ? handleHit
+                    hoveredMarker = markerHit;
+                    hoveredChannel = markerHit.has_value()
+                        ? std::optional<quantum::editor::RateChannel>{
+                            markerHit->channel}
                         : quantum::editor::chooseCurveHit(
                             curveCandidates,
                             curveHoverRadius,
@@ -2536,35 +2610,35 @@ namespace
                             previousHovered
                         );
 
-                    const double progress = static_cast<double>(
+                    const double normalizedDistance = static_cast<double>(
                         (mousePosition.x - plotBeginX)
                             / (plotEndX - plotBeginX)
                     );
-                    hoverDistance = domainView.domainBegin
-                        + progress
-                            * (domainView.domainEnd
-                                - domainView.domainBegin);
+                    hoverDistance = quantum::editor::
+                        normalizedToGraphDistance(
+                            normalizedDistance,
+                            domainView.domainBegin,
+                            domainView.domainEnd
+                        );
 
-                    if (handleHit.has_value())
+                    if (markerHit.has_value())
                     {
                         const std::size_t channelIndex =
-                            static_cast<std::size_t>(*handleHit);
+                            static_cast<std::size_t>(markerHit->channel);
                         const auto& handles =
                             plotGeometries[channelIndex].handles;
-                        double nearest =
-                            std::numeric_limits<double>::infinity();
                         for (std::size_t handleIndex = 0;
                             handleIndex < handles.size();
                             ++handleIndex)
                         {
-                            const double distance = squaredDistance(
-                                mousePosition,
-                                handles[handleIndex].position
-                            );
-                            if (distance < nearest)
+                            const RowHandlePoint& handle =
+                                handles[handleIndex];
+                            if (handle.segmentId == markerHit->segmentId
+                                && handle.endpoint == markerHit->endpoint)
                             {
-                                nearest = distance;
                                 hoveredHandleIndex = handleIndex;
+                                hoverDistance = handle.domainValue;
+                                break;
                             }
                         }
                     }
@@ -2595,15 +2669,63 @@ namespace
                             channel == activeChannel ? 3.25F : 2.75F
                         );
                     }
-                    drawProfileHandles(
-                        drawList,
-                        plotGeometries[channelIndex].handles,
-                        profileCurveColors[channelIndex],
-                        selectedSegmentIds[channelIndex],
-                        endpointSelections[channelIndex],
-                        channelHovered ? hoveredHandleIndex : std::nullopt,
-                        channel == activeChannel || channelHovered
-                    );
+                }
+
+                if (hoveredMarker.has_value()
+                    && hoveredHandleIndex.has_value())
+                {
+                    const std::size_t channelIndex =
+                        static_cast<std::size_t>(hoveredMarker->channel);
+                    const RowHandlePoint& handle =
+                        plotGeometries[channelIndex].handles[
+                            *hoveredHandleIndex];
+                    if (!handle.outer)
+                    {
+                        drawList->AddLine(
+                            ImVec2(handle.position.x, plotBeginY),
+                            ImVec2(handle.position.x, plotEndY),
+                            profileCurveColors[channelIndex],
+                            2.0F
+                        );
+                        drawList->AddTriangleFilled(
+                            ImVec2(handle.position.x - 5.0F, plotBeginY),
+                            ImVec2(handle.position.x + 5.0F, plotBeginY),
+                            ImVec2(handle.position.x, plotBeginY + 7.0F),
+                            profileCurveColors[channelIndex]
+                        );
+                    }
+                }
+
+                // Draw inactive open markers first and the active channel
+                // last. Hit-testing remains semantic and independent of this
+                // visual order, while coincident active points stay legible.
+                for (int foregroundPass = 0; foregroundPass < 2;
+                    ++foregroundPass)
+                {
+                    for (std::size_t channelIndex = 0;
+                        channelIndex < quantum::editor::rateChannelCount;
+                        ++channelIndex)
+                    {
+                        const auto channel = static_cast<quantum::editor::
+                            RateChannel>(channelIndex);
+                        const bool foreground = channel == activeChannel
+                            || (hoveredChannel.has_value()
+                                && *hoveredChannel == channel);
+                        if (foreground != (foregroundPass != 0))
+                        {
+                            continue;
+                        }
+                        drawProfileHandles(
+                            drawList,
+                            plotGeometries[channelIndex].handles,
+                            profileCurveColors[channelIndex],
+                            channel,
+                            selectedSegmentIds[channelIndex],
+                            endpointSelections[channelIndex],
+                            hoveredMarker,
+                            channel == activeChannel
+                        );
+                    }
                 }
                 drawList->PopClipRect();
 
@@ -2613,13 +2735,31 @@ namespace
                         static_cast<std::size_t>(*hoveredChannel);
                     const ProfileRowView& hoveredRow =
                         profileRows[channelIndex];
-                    const double value = quantum::coaster::
-                        evaluateChannelProfile(
+                    const RowHandlePoint* hoveredHandle =
+                        hoveredHandleIndex.has_value()
+                        ? &plotGeometries[channelIndex].handles[
+                            *hoveredHandleIndex]
+                        : nullptr;
+                    const double value = hoveredHandle != nullptr
+                        ? hoveredHandle->value
+                        : quantum::coaster::evaluateChannelProfile(
                             *hoveredRow.profile,
                             hoverDistance
                         );
+                    const std::uint32_t hoveredSegmentId =
+                        hoveredHandle != nullptr
+                        ? hoveredHandle->segmentId
+                        : quantum::coaster::findChannelSegmentAtDistance(
+                            *hoveredRow.profile,
+                            hoverDistance
+                        );
+                    const quantum::coaster::ProfileSegment* const
+                        hoveredSegment = findProfileSegment(
+                            *hoveredRow.profile,
+                            hoveredSegmentId
+                        );
                     ImGui::BeginTooltip();
-                    ImGui::Text("%s", hoveredRow.label);
+                    ImGui::Text("%s Rate", hoveredRow.label);
                     ImGui::Text("Distance: %.6g m", hoverDistance);
                     ImGui::Text(
                         "Rate: %+.6f deg/m",
@@ -2651,27 +2791,38 @@ namespace
                             ? "Active channel"
                             : "Click to make this the active channel"
                     );
-                    if (hoveredHandleIndex.has_value())
+                    if (hoveredSegment != nullptr)
                     {
-                        const RowHandlePoint& handle =
-                            plotGeometries[channelIndex].handles[
-                                *hoveredHandleIndex];
-                        ImGui::Text("Segment: %u", handle.segmentId);
+                        const auto* const preset = quantum::editor::
+                            findTransitionTypePreset(
+                                hoveredSegment->transition.transitionType
+                            );
+                        ImGui::Text(
+                            "Segment: %u (%s)",
+                            hoveredSegment->id,
+                            preset != nullptr ? preset->displayName.data()
+                                : "Unsupported"
+                        );
+                    }
+                    if (hoveredHandle != nullptr)
+                    {
+                        ImGui::TextDisabled(
+                            hoveredHandle->outer
+                                ? "Drag vertically: value (distance pinned)"
+                                : "Drag vertically: value | horizontally: boundary"
+                        );
                     }
                     ImGui::EndTooltip();
 
                     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                     {
                         activeChannel = *hoveredChannel;
-                        if (hoveredHandleIndex.has_value())
+                        if (hoveredHandle != nullptr)
                         {
-                            const RowHandlePoint& handle =
-                                plotGeometries[channelIndex].handles[
-                                    *hoveredHandleIndex];
                             edit.click = TransitionEditorEdit::Click{
                                 *hoveredChannel,
-                                handle.endpoint,
-                                handle.segmentId
+                                hoveredHandle->endpoint,
+                                hoveredHandle->segmentId
                             };
                         }
                         else
@@ -2793,17 +2944,14 @@ namespace
                                     > dragAxisTravelY[channelIndex];
                             const ProfileRowView& draggedRow =
                                 profileRows[channelIndex];
-                            double lowerBound = 0.0;
-                            double upperBound = 0.0;
                             const bool boundaryMovable = horizontalIntent
                                 && draggedRow.profile != nullptr
-                                && boundaryMoveBounds(
+                                && quantum::editor::
+                                    profileBoundaryMoveBounds(
                                     *draggedRow.profile,
                                     dragSegmentIds[channelIndex],
-                                    endpointDrags[channelIndex],
-                                    lowerBound,
-                                    upperBound
-                                );
+                                    endpointDrags[channelIndex]
+                                ).has_value();
                             axisLock = boundaryMovable
                                 ? quantum::editor::DragAxisLock::Horizontal
                                 : quantum::editor::DragAxisLock::Vertical;
@@ -2813,51 +2961,34 @@ namespace
                     if (axisLock
                         == quantum::editor::DragAxisLock::Horizontal)
                     {
-                        // Screen X and authored distance grow together.
-                        double distance = anchor.distance
-                            + deltaX
-                                * geometry.distanceUnitsPerPixel
-                                * static_cast<double>(gainMultiplier);
-
                         const ProfileRowView& draggedRow =
                             profileRows[channelIndex];
-                        double lowerBound = 0.0;
-                        double upperBound = 0.0;
-                        if (draggedRow.profile != nullptr
-                            && boundaryMoveBounds(
+                        const auto bounds = draggedRow.profile != nullptr
+                            ? quantum::editor::profileBoundaryMoveBounds(
                                 *draggedRow.profile,
                                 dragSegmentIds[channelIndex],
-                                endpointDrags[channelIndex],
-                                lowerBound,
-                                upperBound
-                            ))
+                                endpointDrags[channelIndex]
+                            )
+                            : std::nullopt;
+                        if (bounds.has_value())
                         {
-                            // Keep the proposal strictly interior so the
-                            // Core move never rejects mid-drag.
-                            const double margin = std::max(
-                                (upperBound - lowerBound) * 1e-9,
-                                1e-9
-                            );
-                            distance = std::clamp(
-                                distance,
-                                lowerBound + margin,
-                                upperBound - margin
-                            );
-
-                            if (inputSettings.distanceSnapEnabled
-                                && inputSettings.distanceSnapIncrement
-                                    > 0.0)
-                            {
-                                distance = snapToIncrement(
-                                    distance,
-                                    inputSettings.distanceSnapIncrement
+                            // Screen X and authored distance grow together.
+                            const std::optional<double> snapIncrement =
+                                inputSettings.distanceSnapEnabled
+                                    && inputSettings.distanceSnapIncrement
+                                        > 0.0
+                                ? std::optional<double>{
+                                    inputSettings.distanceSnapIncrement}
+                                : std::nullopt;
+                            const double distance = quantum::editor::
+                                proposeBoundaryDistanceDrag(
+                                    anchor.distance,
+                                    deltaX,
+                                    geometry.distanceUnitsPerPixel,
+                                    static_cast<double>(gainMultiplier),
+                                    *bounds,
+                                    snapIncrement
                                 );
-                                distance = std::clamp(
-                                    distance,
-                                    lowerBound + margin,
-                                    upperBound - margin
-                                );
-                            }
 
                             if (distance != anchor.distance)
                             {
@@ -2876,20 +3007,20 @@ namespace
                     else if (axisLock
                         == quantum::editor::DragAxisLock::Vertical)
                     {
-                        // Screen Y grows downward while authored values grow
-                        // upward, hence the subtraction.
-                        double value = anchor.value
-                            - deltaY
-                                * geometry.unitsPerPixel
-                                * static_cast<double>(gainMultiplier);
-                        if (inputSettings.snapEnabled
-                            && inputSettings.snapIncrement > 0.0)
-                        {
-                            value = snapToIncrement(
-                                value,
-                                inputSettings.snapIncrement
+                        const std::optional<double> snapIncrement =
+                            inputSettings.snapEnabled
+                                && inputSettings.snapIncrement > 0.0
+                            ? std::optional<double>{
+                                inputSettings.snapIncrement}
+                            : std::nullopt;
+                        const double value = quantum::editor::
+                            proposeMarkerValueDrag(
+                                anchor.value,
+                                deltaY,
+                                geometry.unitsPerPixel,
+                                static_cast<double>(gainMultiplier),
+                                snapIncrement
                             );
-                        }
 
                         anchor.value = value;
                         graphRanges[channelIndex] = quantum::editor::
@@ -4319,6 +4450,7 @@ namespace quantum::editor
             graphValueRanges_,
             activeRateChannel_,
             hoveredRateChannel_,
+            hoveredGraphMarker_,
             transitionEditorInputSettings_
         );
 
@@ -4330,15 +4462,18 @@ namespace quantum::editor
                 editedSection,
                 valueEdit.channel
             );
-            // The numeric buffer semantics track the addressed segment's
-            // End value, so that is what accepted edits compare against.
+            // Compare against the exact semantic endpoint addressed by the
+            // graph marker or active numeric control.
             double acceptedValue = 0.0;
             for (const coaster::ProfileSegment& segment :
                 channelProfile.segments)
             {
                 if (segment.id == valueEdit.segmentId)
                 {
-                    acceptedValue = segment.transition.valueEnd;
+                    acceptedValue = valueEdit.endpoint
+                            == ScalarProfileEndpoint::Begin
+                        ? segment.transition.valueBegin
+                        : segment.transition.valueEnd;
                     break;
                 }
             }
@@ -4523,6 +4658,8 @@ namespace quantum::editor
                     committedValue,
                     committedDistance
                 };
+                valueEndEditBuffers_[clickChannel] = committedValue
+                    * degreesPerRadian;
             }
             else
             {
@@ -4690,6 +4827,7 @@ namespace quantum::editor
         graphValueRanges_.fill({});
         activeRateChannel_ = RateChannel::Pitch;
         hoveredRateChannel_.reset();
+        hoveredGraphMarker_.reset();
         dragAxisLocks_.fill(DragAxisLock::None);
         dragAxisTravelX_.fill(0.0);
         dragAxisTravelY_.fill(0.0);
@@ -4773,25 +4911,30 @@ namespace quantum::editor
             coaster::sectionLength(selected);
     }
 
-    void EditorUi::synchronizeSegmentValueEnd(
+    void EditorUi::synchronizeSegmentEndpointValue(
         const RateChannel channel,
         const std::uint32_t segmentId,
-        const double acceptedValueEnd)
+        const ScalarProfileEndpoint endpoint,
+        const double acceptedValue)
     {
-        if (!std::isfinite(acceptedValueEnd))
+        if (!std::isfinite(acceptedValue))
         {
             throw std::invalid_argument(
-                "EditorUi requires a finite accepted profile end value."
+                "EditorUi requires a finite accepted profile endpoint value."
             );
         }
 
-        // The numeric buffer addresses the row's focused segment; edits
-        // committed to any other segment must not overwrite the display.
-        if (selectedSegmentIds_[static_cast<std::size_t>(channel)]
-            == segmentId)
+        const std::size_t channelIndex = static_cast<std::size_t>(channel);
+        const ScalarProfileEndpoint displayedEndpoint =
+            endpointSelections_[channelIndex]
+                == ScalarProfileEndpoint::Begin
+            ? ScalarProfileEndpoint::Begin
+            : ScalarProfileEndpoint::End;
+        if (selectedSegmentIds_[channelIndex] == segmentId
+            && displayedEndpoint == endpoint)
         {
-            valueEndEditBuffers_[static_cast<std::size_t>(channel)] =
-                acceptedValueEnd * degreesPerRadian;
+            valueEndEditBuffers_[channelIndex] =
+                acceptedValue * degreesPerRadian;
         }
     }
 
@@ -4902,6 +5045,7 @@ namespace quantum::editor
         graphValueRanges_.fill({});
         activeRateChannel_ = RateChannel::Pitch;
         hoveredRateChannel_.reset();
+        hoveredGraphMarker_.reset();
         dragAxisLocks_.fill(DragAxisLock::None);
         dragAxisTravelX_.fill(0.0);
         dragAxisTravelY_.fill(0.0);
@@ -4963,6 +5107,7 @@ namespace quantum::editor
         graphValueRanges_.fill({});
         activeRateChannel_ = RateChannel::Pitch;
         hoveredRateChannel_.reset();
+        hoveredGraphMarker_.reset();
         dragAxisLocks_.fill(DragAxisLock::None);
         dragAxisTravelX_.fill(0.0);
         dragAxisTravelY_.fill(0.0);

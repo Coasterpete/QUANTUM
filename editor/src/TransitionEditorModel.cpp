@@ -41,6 +41,79 @@ namespace quantum::editor
             }
             return best;
         }
+
+        [[nodiscard]] bool markerIdLess(
+            const GraphMarkerId& first,
+            const GraphMarkerId& second) noexcept
+        {
+            if (first.channel != second.channel)
+            {
+                return static_cast<std::size_t>(first.channel)
+                    < static_cast<std::size_t>(second.channel);
+            }
+            if (first.segmentId != second.segmentId)
+            {
+                return first.segmentId < second.segmentId;
+            }
+            return static_cast<int>(first.endpoint)
+                < static_cast<int>(second.endpoint);
+        }
+
+        [[nodiscard]] bool eligibleMarker(
+            const MarkerHitCandidate& candidate,
+            const double maximumDistanceSquared) noexcept
+        {
+            return std::isfinite(candidate.distanceSquared)
+                && candidate.distanceSquared <= maximumDistanceSquared
+                && candidate.marker.segmentId != coaster::invalidSegmentId
+                && candidate.marker.endpoint
+                    != ScalarProfileEndpoint::None;
+        }
+
+        [[nodiscard]] std::optional<MarkerHitCandidate> nearestMarker(
+            const std::span<const MarkerHitCandidate> candidates,
+            const double maximumDistanceSquared,
+            const std::optional<RateChannel> channel)
+        {
+            std::optional<MarkerHitCandidate> best;
+            for (const MarkerHitCandidate& candidate : candidates)
+            {
+                if (!eligibleMarker(candidate, maximumDistanceSquared)
+                    || (channel.has_value()
+                        && candidate.marker.channel != *channel))
+                {
+                    continue;
+                }
+
+                if (!best.has_value()
+                    || candidate.distanceSquared < best->distanceSquared
+                    || (candidate.distanceSquared == best->distanceSquared
+                        && markerIdLess(
+                            candidate.marker,
+                            best->marker)))
+                {
+                    best = candidate;
+                }
+            }
+            return best;
+        }
+
+        [[nodiscard]] double snapToIncrement(
+            const double value,
+            const std::optional<double> increment)
+        {
+            if (!increment.has_value())
+            {
+                return value;
+            }
+            if (!std::isfinite(*increment) || *increment <= 0.0)
+            {
+                throw std::invalid_argument(
+                    "Snap increment must be positive and finite."
+                );
+            }
+            return std::round(value / *increment) * *increment;
+        }
     }
 
     coaster::ChannelProfile& sectionRateChannel(
@@ -356,6 +429,202 @@ namespace quantum::editor
         return (range.maximum - range.minimum) / pixelHeight;
     }
 
+    double graphDistanceToNormalized(
+        const double distance,
+        const double domainBegin,
+        const double domainEnd)
+    {
+        requireFinite(distance, "Graph distance must be finite.");
+        requireFinite(domainBegin, "Graph domain must be finite.");
+        requireFinite(domainEnd, "Graph domain must be finite.");
+        if (domainBegin >= domainEnd)
+        {
+            throw std::invalid_argument(
+                "Graph domain must have positive length."
+            );
+        }
+        return (distance - domainBegin) / (domainEnd - domainBegin);
+    }
+
+    double normalizedToGraphDistance(
+        const double normalizedDistance,
+        const double domainBegin,
+        const double domainEnd)
+    {
+        requireFinite(
+            normalizedDistance,
+            "Normalized graph distance must be finite."
+        );
+        requireFinite(domainBegin, "Graph domain must be finite.");
+        requireFinite(domainEnd, "Graph domain must be finite.");
+        if (domainBegin >= domainEnd)
+        {
+            throw std::invalid_argument(
+                "Graph domain must have positive length."
+            );
+        }
+        return domainBegin
+            + normalizedDistance * (domainEnd - domainBegin);
+    }
+
+    std::vector<SemanticProfileMarker> extractSemanticProfileMarkers(
+        const coaster::ChannelProfile& profile)
+    {
+        std::vector<SemanticProfileMarker> markers;
+        if (profile.segments.empty())
+        {
+            return markers;
+        }
+
+        markers.reserve(profile.segments.size() + 1);
+        const coaster::ProfileSegment& first = profile.segments.front();
+        markers.push_back({
+            first.transition.domainBegin,
+            first.transition.valueBegin,
+            first.id,
+            ScalarProfileEndpoint::Begin,
+            true
+        });
+
+        for (std::size_t index = 0;
+            index < profile.segments.size();
+            ++index)
+        {
+            const coaster::ProfileSegment& segment = profile.segments[index];
+            markers.push_back({
+                segment.transition.domainEnd,
+                segment.transition.valueEnd,
+                segment.id,
+                ScalarProfileEndpoint::End,
+                index + 1 == profile.segments.size()
+            });
+        }
+        return markers;
+    }
+
+    std::optional<ProfileBoundaryMoveBounds> profileBoundaryMoveBounds(
+        const coaster::ChannelProfile& profile,
+        const coaster::SegmentId segmentId,
+        const ScalarProfileEndpoint endpoint) noexcept
+    {
+        if (endpoint == ScalarProfileEndpoint::None)
+        {
+            return std::nullopt;
+        }
+
+        for (std::size_t index = 0;
+            index < profile.segments.size();
+            ++index)
+        {
+            if (profile.segments[index].id != segmentId)
+            {
+                continue;
+            }
+
+            if (endpoint == ScalarProfileEndpoint::Begin)
+            {
+                if (index == 0)
+                {
+                    return std::nullopt;
+                }
+                return ProfileBoundaryMoveBounds{
+                    index >= 2
+                        ? profile.segments[index - 2].transition.domainEnd
+                        : profile.segments.front().transition.domainBegin,
+                    profile.segments[index].transition.domainEnd
+                };
+            }
+
+            if (index + 1 >= profile.segments.size())
+            {
+                return std::nullopt;
+            }
+            return ProfileBoundaryMoveBounds{
+                profile.segments[index].transition.domainBegin,
+                index + 2 < profile.segments.size()
+                    ? profile.segments[index + 2].transition.domainBegin
+                    : profile.segments.back().transition.domainEnd
+            };
+        }
+
+        return std::nullopt;
+    }
+
+    double proposeMarkerValueDrag(
+        const double currentValue,
+        const double pixelDeltaY,
+        const double valueUnitsPerPixel,
+        const double gain,
+        const std::optional<double> snapIncrement)
+    {
+        requireFinite(currentValue, "Marker value must be finite.");
+        requireFinite(pixelDeltaY, "Marker pixel delta must be finite.");
+        if (!std::isfinite(valueUnitsPerPixel)
+            || valueUnitsPerPixel <= 0.0
+            || !std::isfinite(gain)
+            || gain <= 0.0)
+        {
+            throw std::invalid_argument(
+                "Marker drag scale and gain must be positive and finite."
+            );
+        }
+
+        const double proposed = snapToIncrement(
+            currentValue - pixelDeltaY * valueUnitsPerPixel * gain,
+            snapIncrement
+        );
+        requireFinite(proposed, "Proposed marker value must be finite.");
+        return proposed;
+    }
+
+    double proposeBoundaryDistanceDrag(
+        const double currentDistance,
+        const double pixelDeltaX,
+        const double distanceUnitsPerPixel,
+        const double gain,
+        const ProfileBoundaryMoveBounds bounds,
+        const std::optional<double> snapIncrement)
+    {
+        requireFinite(currentDistance, "Boundary distance must be finite.");
+        requireFinite(pixelDeltaX, "Boundary pixel delta must be finite.");
+        if (!std::isfinite(distanceUnitsPerPixel)
+            || distanceUnitsPerPixel <= 0.0
+            || !std::isfinite(gain)
+            || gain <= 0.0
+            || !std::isfinite(bounds.minimum)
+            || !std::isfinite(bounds.maximum)
+            || bounds.minimum >= bounds.maximum)
+        {
+            throw std::invalid_argument(
+                "Boundary drag scale, gain, and bounds must be valid."
+            );
+        }
+
+        const double width = bounds.maximum - bounds.minimum;
+        const double margin = std::min(
+            width * 0.25,
+            std::max(width * 1e-9, 1e-9)
+        );
+        const double interiorMinimum = bounds.minimum + margin;
+        const double interiorMaximum = bounds.maximum - margin;
+        double proposed = std::clamp(
+            currentDistance + pixelDeltaX * distanceUnitsPerPixel * gain,
+            interiorMinimum,
+            interiorMaximum
+        );
+        proposed = snapToIncrement(proposed, snapIncrement);
+        proposed = std::clamp(
+            proposed,
+            interiorMinimum,
+            interiorMaximum
+        );
+        requireFinite(
+            proposed,
+            "Proposed boundary distance must be finite."
+        );
+        return proposed;
+    }
+
     std::optional<RateChannel> chooseCurveHit(
         const std::span<const CurveHitCandidate> candidates,
         const double hitRadius,
@@ -405,6 +674,54 @@ namespace quantum::editor
         }
         return best.has_value()
             ? std::optional<RateChannel>{best->channel}
+            : std::nullopt;
+    }
+
+    std::optional<GraphMarkerId> chooseMarkerHit(
+        const std::span<const MarkerHitCandidate> candidates,
+        const double hitRadius,
+        const RateChannel activeChannel,
+        const std::optional<GraphMarkerId> previouslyHovered)
+    {
+        if (!std::isfinite(hitRadius) || hitRadius < 0.0)
+        {
+            throw std::invalid_argument(
+                "Marker hit radius must be finite and nonnegative."
+            );
+        }
+        const double maximumDistanceSquared = hitRadius * hitRadius;
+
+        const std::optional<MarkerHitCandidate> active = nearestMarker(
+            candidates,
+            maximumDistanceSquared,
+            activeChannel
+        );
+        if (active.has_value())
+        {
+            return active->marker;
+        }
+
+        if (previouslyHovered.has_value())
+        {
+            for (const MarkerHitCandidate& candidate : candidates)
+            {
+                if (candidate.marker == *previouslyHovered
+                    && eligibleMarker(
+                        candidate,
+                        maximumDistanceSquared))
+                {
+                    return candidate.marker;
+                }
+            }
+        }
+
+        const std::optional<MarkerHitCandidate> nearest = nearestMarker(
+            candidates,
+            maximumDistanceSquared,
+            std::nullopt
+        );
+        return nearest.has_value()
+            ? std::optional<GraphMarkerId>{nearest->marker}
             : std::nullopt;
     }
 
