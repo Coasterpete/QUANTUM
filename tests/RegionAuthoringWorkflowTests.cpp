@@ -1,4 +1,5 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/math/ScalarTransition.hpp>
 
 #include <glm/geometric.hpp>
@@ -577,6 +578,75 @@ namespace
         require(std::fabs(states.back().distance - expectedTotal) <= 1e-9,
             "total distance equals the sum of authored region lengths");
     }
+
+    void testEarlierCurvatureEditPropagatesDownstream()
+    {
+        AuthoredTrack track;
+        track.appendSection();
+        track.appendSection();
+        track.appendSection();
+        track.appendSection();
+
+        const auto before = integrateAuthoredTrack(track, 1.0);
+        auto stateAtDistance = [](const auto& states, const double distance)
+            -> const quantum::coaster::RiderLocalGeometryState&
+        {
+            for (const auto& state : states)
+            {
+                if (std::abs(state.distance - distance) <= 1e-9)
+                {
+                    return state;
+                }
+            }
+            throw TestFailure("expected exact region-boundary sample");
+        };
+
+        const double length = defaultNewSectionLength;
+        const glm::dvec3 firstBoundaryBefore =
+            stateAtDistance(before, length).position;
+        const glm::dvec3 editedBoundaryBefore =
+            stateAtDistance(before, 2.0 * length).position;
+        const glm::dvec3 thirdBoundaryBefore =
+            stateAtDistance(before, 3.0 * length).position;
+        const glm::dvec3 fourthBoundaryBefore =
+            stateAtDistance(before, 4.0 * length).position;
+
+        ChannelProfile& yaw = track.section(1)
+            .rateProfileRegion().rateProfiles.yaw;
+        quantum::coaster::setChannelSegmentValue(
+            yaw,
+            yaw.segments.front().id,
+            quantum::coaster::ProfileBoundary::Begin,
+            0.03
+        );
+        quantum::coaster::setChannelSegmentValue(
+            yaw,
+            yaw.segments.front().id,
+            quantum::coaster::ProfileBoundary::End,
+            0.03
+        );
+
+        const auto after = integrateAuthoredTrack(track, 1.0);
+        require(glm::length(
+                stateAtDistance(after, length).position
+                    - firstBoundaryBefore) <= 1e-12,
+            "a region before the curvature edit is unchanged");
+        require(glm::length(
+                stateAtDistance(after, 2.0 * length).position
+                    - editedBoundaryBefore) > 1.0,
+            "the edited region regenerates to a new endpoint");
+        require(glm::length(
+                stateAtDistance(after, 3.0 * length).position
+                    - thirdBoundaryBefore) > 1.0,
+            "the next region starts from the edited final state");
+        require(glm::length(
+                stateAtDistance(after, 4.0 * length).position
+                    - fourthBoundaryBefore) > 1.0,
+            "propagation continues through every downstream region");
+
+        require(after.back().distance == before.back().distance,
+            "curvature editing preserves the authored distance domain");
+    }
 }
 
 int main()
@@ -599,7 +669,9 @@ int main()
         {"malformed parameter edits are rejected",
             testMalformedParameterEditsAreRejected},
         {"authoring workflow preserves rate profile content",
-            testAuthoringWorkflowPreservesRateProfileContent}
+            testAuthoringWorkflowPreservesRateProfileContent},
+        {"earlier curvature edit propagates downstream",
+            testEarlierCurvatureEditPropagatesDownstream}
     };
 
     for (const auto& [name, test] : tests)

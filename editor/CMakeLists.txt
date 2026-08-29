@@ -7,6 +7,7 @@ add_executable(
     src/EditorUi.cpp
     src/PlatformDialogs.cpp
     src/RegionSummary.cpp
+    src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
     src/ViewportPicking.cpp
     include/quantum/editor/CenterlineVisualization.hpp
@@ -16,6 +17,7 @@ add_executable(
     include/quantum/editor/PlatformDialogs.hpp
     include/quantum/editor/RegionSummary.hpp
     include/quantum/editor/RegionSelection.hpp
+    include/quantum/editor/TransitionEditorModel.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp
     include/quantum/editor/ViewportPicking.hpp

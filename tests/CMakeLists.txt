@@ -907,6 +907,89 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorTransitionEditorModelTests
+    TransitionEditorModelTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TransitionEditorModel.cpp
+)
+
+target_include_directories(
+    QuantumEditorTransitionEditorModelTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorTransitionEditorModelTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorTransitionEditorModelTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorTransitionEditorModelTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.TransitionEditorModel
+    COMMAND QuantumEditorTransitionEditorModelTests
+)
+
+set_tests_properties(
+    QuantumEditor.TransitionEditorModel
+    PROPERTIES
+        LABELS "editor;coaster;transition"
+)
+
+add_executable(
+    QuantumEditorRollProfileAuthoringTests
+    RollProfileAuthoringTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/RegionSummary.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TransitionEditorModel.cpp
+)
+
+target_include_directories(
+    QuantumEditorRollProfileAuthoringTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorRollProfileAuthoringTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorRollProfileAuthoringTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorRollProfileAuthoringTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.RollProfileAuthoring
+    COMMAND QuantumEditorRollProfileAuthoringTests
+)
+
+set_tests_properties(
+    QuantumEditor.RollProfileAuthoring
+    PROPERTIES
+        LABELS "editor;coaster;transition;roll"
+)
+
+add_executable(
     QuantumEditorCenterlineVisualizationTests
     CenterlineVisualizationTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp

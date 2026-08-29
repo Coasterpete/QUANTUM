@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 
 #include <SDL3/SDL_events.h>
@@ -35,49 +36,6 @@ namespace quantum::editor
         Begin,
         End
     };
-
-    // One authored rate-profile channel of a section. The order matches the
-    // Transition Editor row layout and every channel-indexed state array.
-    enum class RateChannel
-    {
-        Roll,
-        Pitch,
-        Yaw
-    };
-
-    // Number of authored rate channels; also the row count of the
-    // Transition Editor.
-    inline constexpr std::size_t rateChannelCount = 3;
-
-    // Resolves one authored rate channel of a section. Channels may hold
-    // any number of profile segments; segment-level edits address stable
-    // SegmentIds through the ChannelProfileEditing core operations.
-    [[nodiscard]] inline quantum::coaster::ChannelProfile& sectionRateChannel(
-        quantum::coaster::AuthoredTrackSection& section,
-        const RateChannel channel)
-    {
-        switch (channel)
-        {
-        case RateChannel::Roll:
-            return section.rateProfileRegion().rateProfiles.roll;
-        case RateChannel::Pitch:
-            return section.rateProfileRegion().rateProfiles.pitch;
-        case RateChannel::Yaw:
-        default:
-            return section.rateProfileRegion().rateProfiles.yaw;
-        }
-    }
-
-    [[nodiscard]] inline const quantum::coaster::ChannelProfile&
-    sectionRateChannel(
-        const quantum::coaster::AuthoredTrackSection& section,
-        const RateChannel channel)
-    {
-        return sectionRateChannel(
-            const_cast<quantum::coaster::AuthoredTrackSection&>(section),
-            channel
-        );
-    }
 
     // Authoring interaction configuration for the Transition Editor,
     // shared by every section and every rate channel. Defaults preserve
@@ -406,9 +364,10 @@ namespace quantum::editor
         const coaster::AuthoredTrack* authoredTrack_ = nullptr;
         std::size_t selectedSection_ = 0;
 
-        // Per-channel editing state, indexed by RateChannel. Buffers hold
-        // each channel's focused segment End value; interaction slots
-        // track which endpoint (per channel) is selected or being dragged.
+        // Per-channel editing state, indexed by RateChannel. Numeric buffers
+        // present each focused segment End value in degrees per meter; drag
+        // anchors and authoritative profiles remain radians per meter.
+        // Interaction slots track the selected/dragged endpoint.
         std::array<double, rateChannelCount> valueEndEditBuffers_{};
         std::array<ScalarProfileEndpoint, rateChannelCount>
             endpointSelections_{};
@@ -418,6 +377,9 @@ namespace quantum::editor
         // zero only ever appears before the first resolution.
         std::array<std::uint32_t, rateChannelCount> selectedSegmentIds_{};
         std::array<std::uint32_t, rateChannelCount> dragSegmentIds_{};
+        std::array<GraphValueRange, rateChannelCount> graphValueRanges_{};
+        RateChannel activeRateChannel_ = RateChannel::Pitch;
+        std::optional<RateChannel> hoveredRateChannel_;
         std::array<DragAxisLock, rateChannelCount> dragAxisLocks_{};
         // Cumulative cursor travel per active drag; picks the drag axis
         // once motion becomes unambiguous.
