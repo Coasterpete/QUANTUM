@@ -131,13 +131,17 @@ namespace quantum::editor
         RemoveSection,
         MoveSectionUp,
         MoveSectionDown,
-        SetSectionLength,
         DuplicateSection
     };
 
     struct TrackCommand
     {
         TrackCommandType type = TrackCommandType::AppendSection;
+        std::size_t sectionIndex = 0;
+    };
+
+    struct SectionLengthEdit
+    {
         std::size_t sectionIndex = 0;
         double length = 0.0;
     };
@@ -245,7 +249,7 @@ namespace quantum::editor
         takeProfileSegmentDistanceEdit() noexcept;
         [[nodiscard]] std::optional<TrackCommand>
         takeTrackCommand() noexcept;
-        [[nodiscard]] std::optional<TrackCommand>
+        [[nodiscard]] std::optional<SectionLengthEdit>
         takeSectionLengthEdit() noexcept;
         [[nodiscard]] std::optional<RegionCommand>
         takeRegionCommand() noexcept;
@@ -254,7 +258,12 @@ namespace quantum::editor
         // working selection on the intended region. Requests naming an
         // index outside the live document are ignored; the same interaction
         // resets and [SEL] logging apply as for list-click selection.
-        void selectSection(std::size_t index);
+        // refreshIfSelected handles structural replacement at the same index
+        // without changing ordinary repeated-click behavior.
+        void selectSection(
+            std::size_t index,
+            bool refreshIfSelected = false
+        );
         // Refreshes the numeric edit buffer for a channel, but only when
         // the committed semantic endpoint is the one the controls address.
         void synchronizeSegmentEndpointValue(
@@ -416,7 +425,7 @@ namespace quantum::editor
         std::optional<ProfileSegmentCommand> profileSegmentCommand_;
         std::optional<ProfileSegmentDistanceEdit> profileSegmentDistanceEdit_;
         std::optional<TrackCommand> trackCommand_;
-        std::optional<TrackCommand> sectionLengthEdit_;
+        std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;

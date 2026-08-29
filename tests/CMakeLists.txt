@@ -662,6 +662,46 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    AuthoredTrackEditTransactionTests.cpp
+)
+
+target_include_directories(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.AuthoredTrackEditTransaction
+    COMMAND QuantumEditorAuthoredTrackEditTransactionTests
+)
+
+set_tests_properties(
+    QuantumEditor.AuthoredTrackEditTransaction
+    PROPERTIES
+        LABELS "editor;coaster;transaction;selection"
+)
+
+add_executable(
     QuantumCoreAuthoredTrackTests
     AuthoredTrackTests.cpp
 )

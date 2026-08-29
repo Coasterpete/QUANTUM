@@ -4201,28 +4201,27 @@ namespace quantum::editor
         else if (workspaceEdit.duplicateRequested)
         {
             trackCommand_ = {TrackCommandType::DuplicateSection,
-                             selectedSection_, 0.0};
+                             selectedSection_};
         }
         else if (workspaceEdit.removeRequested)
         {
             trackCommand_ = {TrackCommandType::RemoveSection,
-                             selectedSection_, 0.0};
+                             selectedSection_};
         }
         else if (workspaceEdit.moveUpRequested)
         {
             trackCommand_ = {TrackCommandType::MoveSectionUp,
-                             selectedSection_, 0.0};
+                             selectedSection_};
         }
         else if (workspaceEdit.moveDownRequested)
         {
             trackCommand_ = {TrackCommandType::MoveSectionDown,
-                             selectedSection_, 0.0};
+                             selectedSection_};
         }
 
         if (workspaceEdit.lengthEdited)
         {
-            sectionLengthEdit_ = {TrackCommandType::SetSectionLength,
-                                  selectedSection_,
+            sectionLengthEdit_ = {selectedSection_,
                                   sectionLengthEditBuffer_};
         }
 
@@ -4793,9 +4792,9 @@ namespace quantum::editor
         return command;
     }
 
-    std::optional<TrackCommand> EditorUi::takeSectionLengthEdit() noexcept
+    std::optional<SectionLengthEdit> EditorUi::takeSectionLengthEdit() noexcept
     {
-        const std::optional<TrackCommand> edit = sectionLengthEdit_;
+        const std::optional<SectionLengthEdit> edit = sectionLengthEdit_;
         sectionLengthEdit_.reset();
         return edit;
     }
@@ -4807,13 +4806,15 @@ namespace quantum::editor
         return command;
     }
 
-    void EditorUi::selectSection(const std::size_t index)
+    void EditorUi::selectSection(
+        const std::size_t index,
+        const bool refreshIfSelected)
     {
         const std::size_t sectionCount = authoredTrack_ != nullptr
             ? authoredTrack_->sectionCount()
             : 0;
         if (sectionCount == 0 || index >= sectionCount
-            || index == selectedSection_)
+            || (index == selectedSection_ && !refreshIfSelected))
         {
             return;
         }
