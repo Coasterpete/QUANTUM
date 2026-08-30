@@ -1,4 +1,38 @@
 add_executable(
+    QuantumEngineLoggingTests
+    LoggingTests.cpp
+)
+
+target_link_libraries(
+    QuantumEngineLoggingTests
+    PRIVATE
+        Quantum::Engine
+)
+
+target_compile_features(
+    QuantumEngineLoggingTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineLoggingTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEngine.Logging
+    COMMAND QuantumEngineLoggingTests
+)
+
+set_tests_properties(
+    QuantumEngine.Logging
+    PROPERTIES
+        LABELS "engine;logging"
+)
+
+add_executable(
     QuantumCoreTests
     BSplineCurveTests.cpp
 )
@@ -903,6 +937,47 @@ set_tests_properties(
     QuantumCore.RiderLoads
     PROPERTIES
         LABELS "core;coaster;physics"
+)
+
+add_executable(
+    QuantumEditorRiderLoadDiagnosticsTests
+    RiderLoadDiagnosticsTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
+)
+
+target_include_directories(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.RiderLoadDiagnostics
+    COMMAND QuantumEditorRiderLoadDiagnosticsTests
+)
+
+set_tests_properties(
+    QuantumEditor.RiderLoadDiagnostics
+    PROPERTIES
+        LABELS "editor;coaster;physics;diagnostics"
 )
 
 add_executable(

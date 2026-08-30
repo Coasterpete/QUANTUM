@@ -1,5 +1,6 @@
 // VMA requires its implementation macro in exactly one translation unit.
 #define VMA_IMPLEMENTATION
+#include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_vulkan.h>
@@ -310,8 +311,9 @@ namespace
 
         if (result != VK_SUCCESS)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "VK",
                 "Unable to query Vulkan instance layers (VkResult %d); "
                 "validation will be disabled.",
                 static_cast<int>(result)
@@ -327,8 +329,9 @@ namespace
 
         if (result != VK_SUCCESS)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "VK",
                 "Unable to enumerate Vulkan instance layers (VkResult %d); "
                 "validation will be disabled.",
                 static_cast<int>(result)
@@ -357,8 +360,9 @@ namespace
 
         if (result != VK_SUCCESS)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "VK",
                 "Unable to query Vulkan instance extensions (VkResult %d); "
                 "validation will be disabled.",
                 static_cast<int>(result)
@@ -375,8 +379,9 @@ namespace
 
         if (result != VK_SUCCESS)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "VK",
                 "Unable to enumerate Vulkan instance extensions "
                 "(VkResult %d); validation will be disabled.",
                 static_cast<int>(result)
@@ -402,42 +407,43 @@ namespace
         const VkDebugUtilsMessengerCallbackDataEXT* const callbackData,
         void*) noexcept
     {
-        SDL_LogPriority priority = SDL_LOG_PRIORITY_INFO;
+        quantum::logging::LogLevel level =
+            quantum::logging::LogLevel::Debug;
 
         if ((messageSeverity
             & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
         {
-            priority = SDL_LOG_PRIORITY_ERROR;
+            level = quantum::logging::LogLevel::Error;
         }
         else if ((messageSeverity
             & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0)
         {
-            priority = SDL_LOG_PRIORITY_WARN;
+            level = quantum::logging::LogLevel::Warning;
         }
         else if ((messageSeverity
             & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) != 0)
         {
-            // General/loader info messages are chatter during normal use;
-            // they remain available at VERBOSE verbosity.
-            priority = SDL_LOG_PRIORITY_VERBOSE;
+            // General/loader info messages remain available when development
+            // diagnostics are enabled without cluttering normal output.
+            level = quantum::logging::LogLevel::Debug;
         }
         else if ((messageSeverity
             & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) != 0)
         {
-            priority = SDL_LOG_PRIORITY_VERBOSE;
+            level = quantum::logging::LogLevel::Trace;
         }
 
-        const char* messageType = "general";
+        const char* category = "VK:general";
 
         if ((messageTypes & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
             != 0)
         {
-            messageType = "validation";
+            category = "VK:validation";
         }
         else if ((messageTypes
             & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) != 0)
         {
-            messageType = "performance";
+            category = "VK:performance";
         }
 
         const char* const message = callbackData != nullptr
@@ -445,11 +451,16 @@ namespace
             ? callbackData->pMessage
             : "No message was provided.";
 
-        SDL_LogMessage(
-            SDL_LOG_CATEGORY_RENDER,
-            priority,
-            "Vulkan %s: %s",
-            messageType,
+        const char* const source = callbackData != nullptr
+            && callbackData->pMessageIdName != nullptr
+            ? callbackData->pMessageIdName
+            : "unspecified";
+
+        quantum::logging::logMessagef(
+            level,
+            category,
+            "source=%s: %s",
+            source,
             message
         );
 
@@ -991,8 +1002,9 @@ namespace quantum::renderer
 
         if (!validationLayerAvailable)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "VK",
                 "Vulkan validation layer %s is unavailable; continuing "
                 "without validation.",
                 validationLayerName
@@ -1001,8 +1013,9 @@ namespace quantum::renderer
 
         if (!debugUtilsAvailable)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "VK",
                 "Vulkan instance extension %s is unavailable; continuing "
                 "without validation.",
                 VK_EXT_DEBUG_UTILS_EXTENSION_NAME
@@ -1080,8 +1093,9 @@ namespace quantum::renderer
 
             if (messengerResult != VK_SUCCESS)
             {
-                SDL_LogWarn(
-                    SDL_LOG_CATEGORY_RENDER,
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Warning,
+                    "VK",
                     "Failed to create the Vulkan debug messenger "
                     "(VkResult %d); continuing without validation output.",
                     static_cast<int>(messengerResult)
@@ -2920,8 +2934,9 @@ namespace quantum::renderer
 
             if (result != VK_SUCCESS)
             {
-                SDL_LogError(
-                    SDL_LOG_CATEGORY_RENDER,
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Error,
+                    "VK",
                     "vkDeviceWaitIdle failed during shutdown with VkResult %d.",
                     static_cast<int>(result)
                 );

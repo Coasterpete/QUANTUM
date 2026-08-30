@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 
@@ -291,6 +292,10 @@ namespace quantum::editor
         void setCenterlineVisualization(
             const CenterlineVisualization& visualization
         ) noexcept;
+        // Replaces the authoritative whole-track Core load history and
+        // remaps it to the current selected section. Accepted edits call
+        // this only after commit; rejected transactions leave it untouched.
+        void setRiderLoadHistory(coaster::RiderLoadHistory history);
         [[nodiscard]] std::size_t selectedSection() const noexcept;
         void render(VkCommandBuffer commandBuffer);
         void shutdown() noexcept;
@@ -412,6 +417,7 @@ namespace quantum::editor
         bool viewportSettingsWindowOpen_ = false;
         std::vector<CenterlineSectionSlice> centerlineSlices_;
         const CenterlineVisualization* centerlineVisualization_ = nullptr;
+        RiderLoadDiagnosticsModel riderLoadDiagnostics_;
         double sectionLengthEditBuffer_ = 0.0;
         // Planar-arc numeric edit buffers, indexed by
         // planarArcParamIndex: radius, swept angle, plane tilt, bank.

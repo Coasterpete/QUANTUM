@@ -9,7 +9,9 @@
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/PlatformDialogs.hpp>
 #include <quantum/editor/RegionSelection.hpp>
+#include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
+#include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <SDL3/SDL.h>
@@ -186,8 +188,9 @@ namespace quantum::engine
                 const quantum::editor::CenterlineVisualization& centerline =
                     centerlineCache.visualization();
 
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Info,
+                    "APP",
                     "Core reference curves: %zu line vertices across %zu "
                     "authored section(s), bounds "
                     "[(%.6f, %.6f, %.6f), (%.6f, %.6f, %.6f)].",
@@ -218,6 +221,10 @@ namespace quantum::engine
                 );
                 editorUi.setCenterlineSections(centerline.sectionSlices);
                 editorUi.setCenterlineVisualization(centerline);
+                editorUi.setRiderLoadHistory(
+                    quantum::editor::evaluateRiderLoadDiagnostics(
+                        authoredTrack)
+                );
                 editorUi.updateWindowTitle(documentState.windowTitle());
 
                 bool running = true;
@@ -512,6 +519,11 @@ namespace quantum::engine
                                     editorUi.setCenterlineSections(
                                         centerline.sectionSlices
                                     );
+                                    editorUi.setRiderLoadHistory(
+                                        quantum::editor::
+                                            evaluateRiderLoadDiagnostics(
+                                                authoredTrack)
+                                    );
                                     vulkan.updateTrackCurveVertices(
                                         centerline.vertices,
                                         centerline.verticesPerCurve
@@ -520,9 +532,10 @@ namespace quantum::engine
                                         documentState.windowTitle()
                                     );
 
-                                    SDL_LogInfo(
-                                        SDL_LOG_CATEGORY_APPLICATION,
-                                        "[FILE] New document created"
+                                    quantum::logging::logMessage(
+                                        quantum::logging::LogLevel::Info,
+                                        "FILE",
+                                        "New document created"
                                     );
                                 }
                             }
@@ -578,6 +591,11 @@ namespace quantum::engine
                                             editorUi.setCenterlineSections(
                                                 centerline.sectionSlices
                                             );
+                                            editorUi.setRiderLoadHistory(
+                                                quantum::editor::
+                                                    evaluateRiderLoadDiagnostics(
+                                                        authoredTrack)
+                                            );
                                             vulkan.updateTrackCurveVertices(
                                                 centerline.vertices,
                                                 centerline.verticesPerCurve
@@ -586,9 +604,10 @@ namespace quantum::engine
                                                 documentState.windowTitle()
                                             );
 
-                                            SDL_LogInfo(
-                                                SDL_LOG_CATEGORY_APPLICATION,
-                                                "[FILE] Opened %s "
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "FILE",
+                                                "Opened %s "
                                                 "(%zu section(s))",
                                                 openPath->string()
                                                     .c_str(),
@@ -644,9 +663,10 @@ namespace quantum::engine
                                                 documentState.windowTitle()
                                             );
 
-                                            SDL_LogInfo(
-                                                SDL_LOG_CATEGORY_APPLICATION,
-                                                "[FILE] Saved %s",
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "FILE",
+                                                "Saved %s",
                                                 savePath->string()
                                                     .c_str()
                                             );
@@ -685,9 +705,10 @@ namespace quantum::engine
                                             documentState.windowTitle()
                                         );
 
-                                        SDL_LogInfo(
-                                            SDL_LOG_CATEGORY_APPLICATION,
-                                            "[FILE] Saved %s",
+                                        quantum::logging::logMessagef(
+                                            quantum::logging::LogLevel::Info,
+                                            "FILE",
+                                            "Saved %s",
                                             path.string().c_str()
                                         );
                                     }
@@ -737,9 +758,10 @@ namespace quantum::engine
                                             documentState.windowTitle()
                                         );
 
-                                        SDL_LogInfo(
-                                            SDL_LOG_CATEGORY_APPLICATION,
-                                            "[FILE] Saved As %s",
+                                        quantum::logging::logMessagef(
+                                            quantum::logging::LogLevel::Info,
+                                            "FILE",
+                                            "Saved As %s",
                                             savePath->string().c_str()
                                         );
                                     }
@@ -1246,8 +1268,9 @@ namespace quantum::engine
                                 || requestedDistanceEdit.has_value()
                                 || requestedSegmentCommand.has_value())
                             {
-                                SDL_LogInfo(
-                                    SDL_LOG_CATEGORY_APPLICATION,
+                                quantum::logging::logMessage(
+                                    quantum::logging::LogLevel::Debug,
+                                    "EDIT",
                                     "Dropped same-frame profile edits that "
                                     "referred to pre-command section "
                                     "indices."
@@ -1260,6 +1283,12 @@ namespace quantum::engine
                                     candidateCenterline =
                                         quantum::editor::
                                             createCenterlineVisualization(
+                                                candidateTrack
+                                            );
+                                quantum::coaster::RiderLoadHistory
+                                    candidateRiderLoads =
+                                        quantum::editor::
+                                            evaluateRiderLoadDiagnostics(
                                                 candidateTrack
                                             );
 
@@ -1280,6 +1309,9 @@ namespace quantum::engine
                                 centerlineCache.replace(
                                     std::move(candidateCenterline));
                                 editTransaction.commit(authoredTrack);
+                                editorUi.setRiderLoadHistory(
+                                    std::move(candidateRiderLoads)
+                                );
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
                                     documentState.windowTitle()
@@ -1287,8 +1319,9 @@ namespace quantum::engine
 
                                 if (!continuousDrag)
                                 {
-                                    SDL_LogInfo(
-                                        SDL_LOG_CATEGORY_APPLICATION,
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
                                         "Authored edit accepted; track now "
                                         "has %zu section(s), %zu centerline "
                                         "samples.",
@@ -1301,9 +1334,10 @@ namespace quantum::engine
                                     && requestedValueEdit
                                     && !continuousDrag)
                                 {
-                                    SDL_LogInfo(
-                                        SDL_LOG_CATEGORY_APPLICATION,
-                                        "[EDIT] section=%zu channel=%d "
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        "section=%zu channel=%d "
                                         "endpoint=%d value=%.6f segment=%u",
                                         requestedValueEdit->sectionIndex,
                                         static_cast<int>(
@@ -1325,9 +1359,10 @@ namespace quantum::engine
                                     {
                                     case quantum::editor::
                                         ProfileSegmentOperation::Split:
-                                        SDL_LogInfo(
-                                            SDL_LOG_CATEGORY_APPLICATION,
-                                            "[EDIT] section=%zu channel=%d "
+                                        quantum::logging::logMessagef(
+                                            quantum::logging::LogLevel::Info,
+                                            "EDIT",
+                                            "section=%zu channel=%d "
                                             "segment=%u split distance=%.6f "
                                             "newSegment=%u",
                                             command.sectionIndex,
@@ -1339,9 +1374,10 @@ namespace quantum::engine
                                         break;
                                     case quantum::editor::
                                         ProfileSegmentOperation::Remove:
-                                        SDL_LogInfo(
-                                            SDL_LOG_CATEGORY_APPLICATION,
-                                            "[EDIT] section=%zu channel=%d "
+                                        quantum::logging::logMessagef(
+                                            quantum::logging::LogLevel::Info,
+                                            "EDIT",
+                                            "section=%zu channel=%d "
                                             "segment=%u removed "
                                             "mergedInto=%u",
                                             command.sectionIndex,
@@ -1424,9 +1460,10 @@ namespace quantum::engine
                                             RegionCommandType::
                                                 InsertAfterRateProfiles)
                                         {
-                                            SDL_LogInfo(
-                                                SDL_LOG_CATEGORY_APPLICATION,
-                                                "[EDIT] %s region=%zu "
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "EDIT",
+                                                "%s region=%zu "
                                                 "kind=rateProfiles",
                                                 verb,
                                                 createdIndex
@@ -1445,9 +1482,10 @@ namespace quantum::engine
                                                                 createdIndex)
                                                             .region)
                                                     .construction);
-                                            SDL_LogInfo(
-                                                SDL_LOG_CATEGORY_APPLICATION,
-                                                "[EDIT] %s region=%zu "
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "EDIT",
+                                                "%s region=%zu "
                                                 "kind=planarArc "
                                                 "radius=%.6f "
                                                 "sweptAngle=%.6f "
@@ -1466,9 +1504,10 @@ namespace quantum::engine
                                         RegionCommandType::
                                             ConvertToRateProfiles)
                                     {
-                                        SDL_LogInfo(
-                                            SDL_LOG_CATEGORY_APPLICATION,
-                                            "[EDIT] section=%zu "
+                                        quantum::logging::logMessagef(
+                                            quantum::logging::LogLevel::Info,
+                                            "EDIT",
+                                            "section=%zu "
                                             "kind=rateProfiles",
                                             command.sectionIndex
                                         );
@@ -1490,9 +1529,10 @@ namespace quantum::engine
                                             RegionCommandType::
                                                 ConvertToPlanarArc)
                                         {
-                                            SDL_LogInfo(
-                                                SDL_LOG_CATEGORY_APPLICATION,
-                                                "[EDIT] section=%zu "
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "EDIT",
+                                                "section=%zu "
                                                 "kind=planarArc "
                                                 "radius=%.6f "
                                                 "sweptAngle=%.6f "
@@ -1507,9 +1547,10 @@ namespace quantum::engine
                                         }
                                         else
                                         {
-                                            SDL_LogInfo(
-                                                SDL_LOG_CATEGORY_APPLICATION,
-                                                "[EDIT] section=%zu "
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "EDIT",
+                                                "section=%zu "
                                                 "planarArc radius=%.6f "
                                                 "sweptAngle=%.6f "
                                                 "planeTilt=%.6f "
@@ -1538,8 +1579,9 @@ namespace quantum::engine
                                 );
                             }
 
-                            SDL_LogError(
-                                SDL_LOG_CATEGORY_APPLICATION,
+                            quantum::logging::logMessagef(
+                                quantum::logging::LogLevel::Warning,
+                                "EDIT",
                                 "Authored edit was rejected: %s",
                                 exception.what()
                             );
@@ -1648,8 +1690,9 @@ namespace quantum::engine
                             editorUi.updateWindowTitle(
                                 documentState.windowTitle());
 
-                            SDL_LogInfo(
-                                SDL_LOG_CATEGORY_APPLICATION,
+                            quantum::logging::logMessagef(
+                                quantum::logging::LogLevel::Info,
+                                "CFG",
                                 "Layout mode set to %s",
                                 quantum::coaster::layoutModeToString(
                                     authoredTrack.layoutMode()));
@@ -1707,6 +1750,11 @@ namespace quantum::engine
                                 centerlineCache.markDirty();
                                 centerlineCache.replace(
                                     std::move(newCenterline));
+                                editorUi.setRiderLoadHistory(
+                                    quantum::editor::
+                                        evaluateRiderLoadDiagnostics(
+                                            authoredTrack)
+                                );
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
                                     documentState.windowTitle());
@@ -1715,8 +1763,9 @@ namespace quantum::engine
                                 editorUi.selectSection(
                                     authoredTrack.sectionCount() - 1);
 
-                                SDL_LogInfo(
-                                    SDL_LOG_CATEGORY_APPLICATION,
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "EDIT",
                                     "Circuit completed: gap=%.4f m "
                                     "tang=%.2f deg frame=%.2f deg "
                                     "iter=%u",
