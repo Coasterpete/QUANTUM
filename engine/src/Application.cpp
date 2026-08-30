@@ -569,37 +569,39 @@ namespace quantum::engine
                                                 deserializeCoasterDocument(
                                                     json);
 
+                                        // Force documents can be structurally valid yet fail
+                                        // generation or load acceptance. Prepare everything
+                                        // before replacing the open document or its buffers.
+                                        std::optional<quantum::editor::CenterlineVisualization> loadedCenterline;
+                                        std::optional<quantum::coaster::RiderLoadHistory> loadedRiderLoads;
                                         if (result.has_value())
                                         {
-                                            authoredTrack =
-                                                std::move(*result);
-                                            documentState.setOpenDocument(
-                                                *openPath
-                                            );
+                                            try
+                                            {
+                                                loadedCenterline = quantum::editor::createCenterlineVisualization(*result);
+                                                loadedRiderLoads = quantum::editor::evaluateRiderLoadDiagnostics(*result);
+                                                quantum::editor::AuthoredTrackEditTransaction loadedTransaction{*result};
+                                                loadedTransaction.requireAcceptableRiderLoads(*loadedRiderLoads);
+                                                vulkan.updateTrackCurveVertices(loadedCenterline->vertices,
+                                                    loadedCenterline->verticesPerCurve);
+                                            }
+                                            catch (const std::exception& error)
+                                            {
+                                                result = std::unexpected(std::string{error.what()});
+                                            }
+                                        }
+
+                                        if (result.has_value())
+                                        {
+                                            authoredTrack = std::move(*result);
+                                            centerlineCache.replace(std::move(*loadedCenterline));
+                                            documentState.setOpenDocument(*openPath);
                                             editorUi.resetTransientState();
                                             editorUi.selectSection(0);
-
-                                            centerlineCache.markDirty();
-                                            static_cast<void>(
-                                                centerlineCache
-                                                    .rebuildIfDirty(
-                                                        authoredTrack));
-                                            editorUi.setCenterlineBounds(
-                                                centerline.minimumPosition,
-                                                centerline.maximumPosition
-                                            );
-                                            editorUi.setCenterlineSections(
-                                                centerline.sectionSlices
-                                            );
-                                            editorUi.setRiderLoadHistory(
-                                                quantum::editor::
-                                                    evaluateRiderLoadDiagnostics(
-                                                        authoredTrack)
-                                            );
-                                            vulkan.updateTrackCurveVertices(
-                                                centerline.vertices,
-                                                centerline.verticesPerCurve
-                                            );
+                                            editorUi.setCenterlineBounds(centerline.minimumPosition,
+                                                centerline.maximumPosition);
+                                            editorUi.setCenterlineSections(centerline.sectionSlices);
+                                            editorUi.setRiderLoadHistory(std::move(*loadedRiderLoads));
                                             editorUi.updateWindowTitle(
                                                 documentState.windowTitle()
                                             );
@@ -1304,6 +1306,8 @@ namespace quantum::engine
                                                 candidateTrack
                                             );
 
+                                editTransaction.requireAcceptableRiderLoads(candidateRiderLoads);
+
                                 editorUi.setCenterlineBounds(
                                     candidateCenterline.minimumPosition,
                                     candidateCenterline.maximumPosition
@@ -1686,7 +1690,8 @@ namespace quantum::engine
                                 authoredTrack.section(selectedSection);
 
                             if (committedSection.kind ==
-                                quantum::coaster::RegionKind::Geometry)
+                                quantum::coaster::RegionKind::Geometry
+                                && !quantum::coaster::isForceDrivenSection(committedSection))
                             {
                                 editorUi.synchronizePlanarArcParams(
                                     std::get<quantum::coaster::

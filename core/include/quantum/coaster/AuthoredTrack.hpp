@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/GeometricSection.hpp>
+#include <quantum/coaster/ForceDrivenRegion.hpp>
 #include <quantum/coaster/PlanarArcRegion.hpp>
 #include <quantum/coaster/RiderLocalGeometry.hpp>
 
@@ -15,6 +16,7 @@
 
 namespace quantum::coaster
 {
+    class AuthoredTrack;
     // Length used by appendSection/prependSection for new sections.
     inline constexpr double defaultNewSectionLength = 60.0;
 
@@ -51,14 +53,11 @@ namespace quantum::coaster
         GeometricSection rateProfiles;
     };
 
-    // Geometry-driven authoring payload. Constructions are expressed in
-    // designer-facing geometry terms: geometry parameters own the
-    // centerline, and orientation-only parameters such as bank never move
-    // it. Constructions compile to rider-local rates; the compiled
-    // representation is deliberately not part of this API.
+    // Construction-specific authored intent. Planar arcs own their geometry;
+    // force-driven regions generate it from targets and document physics.
     struct GeometryRegion
     {
-        std::variant<PlanarArcRegion> construction;
+        std::variant<PlanarArcRegion, ForceDrivenRegion> construction;
     };
 
     // One authored interval along the track's distance domain. The section's
@@ -126,15 +125,20 @@ namespace quantum::coaster
         double length
     );
 
+    [[nodiscard]] AuthoredTrackSection createForceDrivenSection(double length);
+    [[nodiscard]] bool isForceDrivenSection(const AuthoredTrackSection& section) noexcept;
+    [[nodiscard]] bool hasForceDrivenRegions(const AuthoredTrack& track) noexcept;
+
     // Region-kind mutations used by the authoring workflow. All of them
     // leave the section valid over its stored length and throw
     // std::invalid_argument for malformed input.
     //
     // Conversions preserve the section's current authored length; they are
-    // no-ops when the section already has the target kind. Converting an
+    // no-ops when the section already has the target construction. Converting an
     // unbanked planar arc compiles its geometry-driving pitch/yaw rates.
     // Banked planar arcs cannot be represented exactly by the current
-    // coupled rate profiles and are rejected rather than changed.
+    // coupled rate profiles and are rejected rather than changed. Force-driven
+    // regions also reject conversion to state-independent rate profiles.
     void convertSectionToRateProfiles(AuthoredTrackSection& section);
     void convertSectionToPlanarArc(AuthoredTrackSection& section);
 
@@ -195,6 +199,10 @@ namespace quantum::coaster
         // without changing the existing pose when the candidate is invalid.
         void setStartPose(const AuthoredStartPose& pose);
 
+        [[nodiscard]] const TrackPhysicalSettings& physicalSettings() const noexcept;
+        // Validates before replacing the document's canonical physical inputs.
+        void setPhysicalSettings(const TrackPhysicalSettings& settings);
+
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
         // Throws std::out_of_range for an invalid index.
@@ -236,6 +244,7 @@ namespace quantum::coaster
     private:
         LayoutMode layoutMode_ = LayoutMode::Circuit;
         AuthoredStartPose startPose_;
+        TrackPhysicalSettings physicalSettings_;
         std::vector<AuthoredTrackSection> sections_;
     };
 
@@ -269,6 +278,14 @@ namespace quantum::coaster
     [[nodiscard]] std::vector<TrackKinematicState>
     integrateAuthoredTrackKinematics(
         const AuthoredTrack& track,
-        double integrationSpacing
+        double integrationSpacing,
+        const ForceDrivenIntegrationSettings& forceSettings = {}
     );
+
+    // Result-based generation for acceptance/solving clients. Failure never
+    // returns a partial track. Legacy throwing entry points remain available.
+    [[nodiscard]] TrackGenerationResult generateAuthoredTrackKinematics(
+        const AuthoredTrack& track,
+        double integrationSpacing,
+        const ForceDrivenIntegrationSettings& forceSettings = {});
 }

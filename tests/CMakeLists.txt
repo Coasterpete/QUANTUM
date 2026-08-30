@@ -3,6 +3,27 @@ add_executable(
     LoggingTests.cpp
 )
 
+add_executable(QuantumCoreForceDrivenRegionTests ForceDrivenRegionTests.cpp)
+target_link_libraries(QuantumCoreForceDrivenRegionTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreForceDrivenRegionTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreForceDrivenRegionTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.ForceDrivenRegion COMMAND QuantumCoreForceDrivenRegionTests)
+set_tests_properties(QuantumCore.ForceDrivenRegion PROPERTIES LABELS "core;coaster;physics;force")
+
+add_executable(QuantumEditorForceDrivenAcceptanceTests
+    ForceDrivenAcceptanceTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+)
+target_include_directories(QuantumEditorForceDrivenAcceptanceTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorForceDrivenAcceptanceTests PRIVATE Quantum::Core Quantum::Engine)
+target_compile_features(QuantumEditorForceDrivenAcceptanceTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorForceDrivenAcceptanceTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEditor.ForceDrivenAcceptance COMMAND QuantumEditorForceDrivenAcceptanceTests)
+set_tests_properties(QuantumEditor.ForceDrivenAcceptance PROPERTIES LABELS "editor;force;transaction;physics")
+
 target_link_libraries(
     QuantumEngineLoggingTests
     PRIVATE

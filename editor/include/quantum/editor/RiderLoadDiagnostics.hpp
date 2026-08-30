@@ -9,17 +9,10 @@
 
 namespace quantum::editor
 {
-    // Temporary editor-owned development settings. These remain separate
-    // from authored document state until QUANTUM has a simulation-settings
-    // model. Physics and units are still interpreted by QuantumCore.
+    // Output density is editor-owned; physical inputs come from the document.
     struct RiderLoadDiagnosticSettings
     {
         double integrationSpacing = 0.75;
-        coaster::RiderLoadEvaluationSettings evaluation{
-            .initialSpeed = 20.0,
-            .metersPerCoordinateUnit = 1.0,
-            .gravityAcceleration = coaster::standardGravityAcceleration
-        };
     };
 
     inline constexpr RiderLoadDiagnosticSettings
