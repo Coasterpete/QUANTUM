@@ -5,6 +5,7 @@
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
+#include <quantum/editor/ViewportTrackAnchors.hpp>
 
 #include <SDL3/SDL_events.h>
 #include <vulkan/vulkan.h>
@@ -147,6 +148,12 @@ namespace quantum::editor
         double length = 0.0;
     };
 
+    struct StartPoseEdit
+    {
+        coaster::AuthoredStartPose pose;
+        bool continuous = true;
+    };
+
     // Which ordering position a typed region creation targets. The
     // choice strip is shared by all three triggers.
     enum class RegionCreateAnchor
@@ -255,6 +262,11 @@ namespace quantum::editor
         takeSectionLengthEdit() noexcept;
         [[nodiscard]] std::optional<RegionCommand>
         takeRegionCommand() noexcept;
+        [[nodiscard]] std::optional<StartPoseEdit>
+        takeStartPoseEdit() noexcept;
+        // Called when Core generation or renderer upload rejects a queued
+        // gizmo candidate. The next frame draws only the committed pose.
+        void rejectStartPoseManipulation() noexcept;
         // Selects a region programmatically after an accepted structural
         // edit so newly created, duplicated, and reordered regions keep the
         // working selection on the intended region. Requests naming an
@@ -331,6 +343,21 @@ namespace quantum::editor
             Pan
         };
 
+        struct StartPoseManipulation
+        {
+            StartPoseTransformMode mode = StartPoseTransformMode::Move;
+            StartPoseTransformAxis axis = StartPoseTransformAxis::X;
+            coaster::AuthoredStartPose initialPose;
+            coaster::AuthoredStartPose candidatePose;
+            MousePos mouseStart;
+            double screenDirectionX = 1.0;
+            double screenDirectionY = 0.0;
+            double worldUnitsPerPixel = 0.0;
+            double initialMouseAngle = 0.0;
+            bool changed = false;
+            bool released = false;
+        };
+
         void initializeVulkanBackend(
             const renderer::VulkanContext& vulkan
         );
@@ -348,6 +375,11 @@ namespace quantum::editor
             float logicalHeight
         );
         void drawViewportTrackAnchors();
+        [[nodiscard]] bool updateStartPoseManipulation(
+            bool viewportHovered,
+            float imageWidth,
+            float imageHeight
+        );
         void selectTrackAnchor(std::size_t anchorIndex);
         static void retireViewportTexture(void* userData) noexcept;
         void removeViewportTexture() noexcept;
@@ -375,6 +407,9 @@ namespace quantum::editor
         const coaster::AuthoredTrack* authoredTrack_ = nullptr;
         std::size_t selectedSection_ = 0;
         std::optional<std::size_t> selectedTrackAnchor_ = 0;
+        StartPoseTransformMode startPoseTransformMode_ =
+            StartPoseTransformMode::Move;
+        std::optional<StartPoseManipulation> startPoseManipulation_;
 
         // Per-channel editing state, indexed by RateChannel. Numeric buffers
         // present the selected marker value (or a selected segment's End
@@ -437,6 +472,7 @@ namespace quantum::editor
         std::optional<TrackCommand> trackCommand_;
         std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
+        std::optional<StartPoseEdit> startPoseEdit_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
         std::optional<FileOperationType> pendingFileOperation_;

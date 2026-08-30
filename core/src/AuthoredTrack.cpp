@@ -94,6 +94,76 @@ namespace quantum::coaster
             return createRateProfileSection(defaultNewSectionLength);
         }
 
+        [[nodiscard]] bool finite(const glm::dvec3& value) noexcept
+        {
+            return std::isfinite(value.x)
+                && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        }
+
+        [[nodiscard]] AuthoredStartPose normalizedStartPose(
+            const AuthoredStartPose& pose)
+        {
+            if (!finite(pose.position))
+            {
+                throw std::invalid_argument(
+                    "An authored start position must be finite."
+                );
+            }
+
+            const glm::dquat& orientation = pose.orientation;
+            if (!std::isfinite(orientation.w)
+                || !std::isfinite(orientation.x)
+                || !std::isfinite(orientation.y)
+                || !std::isfinite(orientation.z))
+            {
+                throw std::invalid_argument(
+                    "An authored start orientation must be finite."
+                );
+            }
+
+            const double scale = std::max({
+                std::abs(orientation.w),
+                std::abs(orientation.x),
+                std::abs(orientation.y),
+                std::abs(orientation.z)
+            });
+            if (scale == 0.0)
+            {
+                throw std::invalid_argument(
+                    "An authored start orientation must be nonzero."
+                );
+            }
+
+            glm::dquat normalized = orientation / scale;
+            const double magnitude = std::hypot(
+                std::hypot(normalized.w, normalized.x),
+                std::hypot(normalized.y, normalized.z)
+            );
+            if (!std::isfinite(magnitude) || magnitude == 0.0)
+            {
+                throw std::invalid_argument(
+                    "An authored start orientation could not be normalized."
+                );
+            }
+            normalized /= magnitude;
+
+            // q and -q encode the same rotation. Keeping one canonical sign
+            // makes document serialization deterministic across edit paths.
+            const bool negativeCanonicalSign = normalized.w < 0.0
+                || (normalized.w == 0.0 && normalized.x < 0.0)
+                || (normalized.w == 0.0 && normalized.x == 0.0
+                    && normalized.y < 0.0)
+                || (normalized.w == 0.0 && normalized.x == 0.0
+                    && normalized.y == 0.0 && normalized.z < 0.0);
+            if (negativeCanonicalSign)
+            {
+                normalized = -normalized;
+            }
+
+            return {pose.position, normalized};
+        }
+
         // Builds one single-segment channel covering [0, length]. Used for
         // documents whose channels are authored wholesale.
         [[nodiscard]] ChannelProfile createSingleSegmentChannel(
@@ -438,6 +508,31 @@ namespace quantum::coaster
         layoutMode_ = mode;
     }
 
+    geometry::CurveFrame startPoseRiderFrame(
+        const AuthoredStartPose& pose)
+    {
+        const AuthoredStartPose normalized = normalizedStartPose(pose);
+        return {
+            normalized.orientation * glm::dvec3{1.0, 0.0, 0.0},
+            normalized.orientation * glm::dvec3{0.0, 1.0, 0.0},
+            normalized.orientation * glm::dvec3{0.0, 0.0, 1.0}
+        };
+    }
+
+    const AuthoredStartPose& AuthoredTrack::startPose() const noexcept
+    {
+        return startPose_;
+    }
+
+    void AuthoredTrack::setStartPose(const AuthoredStartPose& pose)
+    {
+        // Normalize into a temporary so invalid input has the strong
+        // guarantee required by candidate/commit authoring.
+        AuthoredStartPose normalized = normalizedStartPose(pose);
+        static_cast<void>(startPoseRiderFrame(normalized));
+        startPose_ = std::move(normalized);
+    }
+
     std::size_t AuthoredTrack::sectionCount() const noexcept
     {
         return sections_.size();
@@ -620,14 +715,8 @@ namespace quantum::coaster
             validateSectionLocalDomain(track.section(index));
         }
 
-        constexpr geometry::CurveFrame startingFrame{
-            {1.0, 0.0, 0.0},
-            {0.0, 1.0, 0.0},
-            {0.0, 0.0, 1.0}
-        };
-
-        glm::dvec3 position{0.0, 0.0, 0.0};
-        geometry::CurveFrame frame = startingFrame;
+        glm::dvec3 position = track.startPose().position;
+        geometry::CurveFrame frame = startPoseRiderFrame(track.startPose());
         double distanceOffset = 0.0;
 
         std::vector<RiderLocalGeometryState> states;
@@ -718,14 +807,8 @@ namespace quantum::coaster
             validateSectionLocalDomain(track.section(index));
         }
 
-        constexpr geometry::CurveFrame startingFrame{
-            {1.0, 0.0, 0.0},
-            {0.0, 1.0, 0.0},
-            {0.0, 0.0, 1.0}
-        };
-
-        glm::dvec3 position{0.0, 0.0, 0.0};
-        geometry::CurveFrame frame = startingFrame;
+        glm::dvec3 position = track.startPose().position;
+        geometry::CurveFrame frame = startPoseRiderFrame(track.startPose());
         double distanceOffset = 0.0;
 
         std::vector<TrackKinematicState> states;

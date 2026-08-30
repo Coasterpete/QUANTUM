@@ -798,6 +798,8 @@ namespace quantum::engine
                             editorUi.takeProfileSegmentCommand();
                         const auto requestedDistanceEdit =
                             editorUi.takeProfileSegmentDistanceEdit();
+                        const auto requestedStartPoseEdit =
+                            editorUi.takeStartPoseEdit();
 
                         // Continuous handle drags queue a changed-value or
                         // changed-boundary edit every motion frame; both
@@ -807,7 +809,9 @@ namespace quantum::engine
                         const bool continuousDrag =
                             (requestedValueEdit.has_value()
                                 && requestedValueEdit->continuous)
-                            || requestedDistanceEdit.has_value();
+                            || requestedDistanceEdit.has_value()
+                            || (requestedStartPoseEdit.has_value()
+                                && requestedStartPoseEdit->continuous);
 
                         quantum::editor::AuthoredTrackEditTransaction
                             editTransaction{authoredTrack};
@@ -841,6 +845,14 @@ namespace quantum::engine
                         bool regionCommandApplied = false;
                         try
                         {
+                            if (requestedStartPoseEdit.has_value())
+                            {
+                                candidateTrack.setStartPose(
+                                    requestedStartPoseEdit->pose
+                                );
+                                candidateChanged = true;
+                            }
+
                             if (requestedCommand.has_value())
                             {
                                 const quantum::editor::TrackCommand&
@@ -1576,6 +1588,17 @@ namespace quantum::engine
                                 );
                                 editorUi.setCenterlineSections(
                                     centerline.sectionSlices
+                                );
+                            }
+
+                            if (requestedStartPoseEdit.has_value())
+                            {
+                                editorUi.rejectStartPoseManipulation();
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Debug,
+                                    "EDIT",
+                                    "start-pose candidate rejected: %s",
+                                    exception.what()
                                 );
                             }
 
