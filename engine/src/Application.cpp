@@ -3,6 +3,7 @@
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/coaster/CircuitCompletion.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
+#include <quantum/editor/AuthoredTrackEditTransaction.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/DocumentState.hpp>
 #include <quantum/editor/EditorUi.hpp>
@@ -786,11 +787,26 @@ namespace quantum::engine
                                 && requestedValueEdit->continuous)
                             || requestedDistanceEdit.has_value();
 
-                        quantum::coaster::AuthoredTrack candidateTrack =
-                            authoredTrack;
+                        quantum::editor::AuthoredTrackEditTransaction
+                            editTransaction{authoredTrack};
+                        quantum::coaster::AuthoredTrack& candidateTrack =
+                            editTransaction.candidate();
+                        if (requestedLengthEdit.has_value())
+                        {
+                            editTransaction
+                                .requestSectionLengthBufferSync();
+                        }
+                        if (requestedValueEdit.has_value())
+                        {
+                            editTransaction.requestProfileValueBufferSync();
+                        }
+                        if (requestedRegionCommand.has_value())
+                        {
+                            editTransaction.requestRegionBufferSync();
+                        }
+
                         bool candidateChanged = false;
                         bool trackStructureChanged = false;
-                        bool lengthEditApplied = false;
                         bool valueEditApplied = false;
                         bool boundsApplied = false;
                         // Structural segment commands log after acceptance;
@@ -801,11 +817,6 @@ namespace quantum::engine
                         quantum::coaster::SegmentId removeSurvivorId =
                             quantum::coaster::invalidSegmentId;
                         bool regionCommandApplied = false;
-                        // Selection the editor should follow after an
-                        // accepted structural edit; empty when indices
-                        // stay stable.
-                        std::optional<std::size_t> selectionAfterCommand;
-
                         try
                         {
                             if (requestedCommand.has_value())
@@ -818,13 +829,15 @@ namespace quantum::engine
                                 case quantum::editor::TrackCommandType::
                                     AppendSection:
                                     candidateTrack.appendSection();
-                                    selectionAfterCommand =
-                                        candidateTrack.sectionCount() - 1;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        candidateTrack.sectionCount() - 1
+                                    );
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     PrependSection:
                                     candidateTrack.prependSection();
-                                    selectionAfterCommand = 0;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        0);
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     RemoveSection:
@@ -835,13 +848,13 @@ namespace quantum::engine
                                     // the removed index; fall back to the
                                     // previous final region when the tail
                                     // region was removed.
-                                    selectionAfterCommand =
+                                    editTransaction.stageSelectionAfterCommit(
                                         quantum::editor::
                                             selectionAfterRemoval(
                                                 editorUi.selectedSection(),
                                                 command.sectionIndex,
                                                 candidateTrack.sectionCount()
-                                    );
+                                    ));
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     MoveSectionUp:
@@ -851,12 +864,12 @@ namespace quantum::engine
                                     );
                                     // Follow the moved region to its new
                                     // slot so selection keeps its identity.
-                                    selectionAfterCommand =
+                                    editTransaction.stageSelectionAfterCommit(
                                         quantum::editor::selectionAfterMove(
                                             editorUi.selectedSection(),
                                             command.sectionIndex,
                                             command.sectionIndex - 1
-                                        );
+                                        ));
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     MoveSectionDown:
@@ -864,12 +877,12 @@ namespace quantum::engine
                                         command.sectionIndex,
                                         command.sectionIndex + 1
                                     );
-                                    selectionAfterCommand =
+                                    editTransaction.stageSelectionAfterCommit(
                                         quantum::editor::selectionAfterMove(
                                             editorUi.selectedSection(),
                                             command.sectionIndex,
                                             command.sectionIndex + 1
-                                        );
+                                        ));
                                     break;
                                 case quantum::editor::TrackCommandType::
                                     DuplicateSection:
@@ -878,11 +891,8 @@ namespace quantum::engine
                                     );
                                     // The duplicate occupies the slot right
                                     // after its origin.
-                                    selectionAfterCommand =
-                                        command.sectionIndex + 1;
-                                    break;
-                                case quantum::editor::TrackCommandType::
-                                    SetSectionLength:
+                                    editTransaction.stageSelectionAfterCommit(
+                                        command.sectionIndex + 1);
                                     break;
                                 }
 
@@ -909,13 +919,15 @@ namespace quantum::engine
                                 case RegionCommandType::
                                     AppendRateProfiles:
                                     candidateTrack.appendSection();
-                                    selectionAfterCommand =
-                                        candidateTrack.sectionCount() - 1;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        candidateTrack.sectionCount() - 1
+                                    );
                                     break;
                                 case RegionCommandType::
                                     PrependRateProfiles:
                                     candidateTrack.prependSection();
-                                    selectionAfterCommand = 0;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        0);
                                     break;
                                 case RegionCommandType::AppendPlanarArc:
                                     candidateTrack.appendSection();
@@ -926,8 +938,9 @@ namespace quantum::engine
                                                     .sectionCount()
                                                 - 1)
                                         );
-                                    selectionAfterCommand =
-                                        candidateTrack.sectionCount() - 1;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        candidateTrack.sectionCount() - 1
+                                    );
                                     break;
                                 case RegionCommandType::PrependPlanarArc:
                                     candidateTrack.prependSection();
@@ -935,7 +948,8 @@ namespace quantum::engine
                                         convertSectionToPlanarArc(
                                             candidateTrack.section(0)
                                         );
-                                    selectionAfterCommand = 0;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        0);
                                     break;
                                 case RegionCommandType::
                                     InsertAfterRateProfiles:
@@ -947,8 +961,8 @@ namespace quantum::engine
                                                     defaultNewSectionLength
                                             )
                                     );
-                                    selectionAfterCommand =
-                                        command.sectionIndex + 1;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        command.sectionIndex + 1);
                                     break;
                                 case RegionCommandType::
                                     InsertAfterPlanarArc:
@@ -972,8 +986,8 @@ namespace quantum::engine
                                             insertedArc
                                         );
                                     }
-                                    selectionAfterCommand =
-                                        command.sectionIndex + 1;
+                                    editTransaction.stageSelectionAfterCommit(
+                                        command.sectionIndex + 1);
                                     break;
                                 case RegionCommandType::
                                     ConvertToRateProfiles:
@@ -1052,7 +1066,6 @@ namespace quantum::engine
                                         requestedLengthEdit->length
                                     );
                                     candidateChanged = true;
-                                    lengthEditApplied = true;
                                 }
 
                                 if (requestedValueEdit.has_value())
@@ -1266,7 +1279,7 @@ namespace quantum::engine
                                 centerlineCache.markDirty();
                                 centerlineCache.replace(
                                     std::move(candidateCenterline));
-                                authoredTrack = std::move(candidateTrack);
+                                editTransaction.commit(authoredTrack);
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
                                     documentState.windowTitle()
@@ -1532,19 +1545,43 @@ namespace quantum::engine
                             );
                         }
 
-                        // Resynchronize the edit buffers with the committed
-                        // document so rejected edits revert instead of
-                        // lingering in the UI.
-                        if (lengthEditApplied && requestedLengthEdit)
+                        // A staged structural selection becomes visible only
+                        // after the candidate document has committed. On
+                        // rejection selectionAfterCommit() stays empty.
+                        if (const auto committedSelection =
+                                editTransaction.selectionAfterCommit())
+                        {
+                            // Removing the selected region can keep the same
+                            // numeric index while changing its identity.
+                            editorUi.selectSection(
+                                *committedSelection,
+                                true);
+                        }
+
+                        // Numeric fields are editor-side buffers. Refresh
+                        // every buffer for which the user submitted an intent
+                        // from the final committed document, regardless of
+                        // whether mutation, solve, or upload rejected it.
+                        const std::size_t selectedSection =
+                            editorUi.selectedSection();
+                        if (selectedSection < authoredTrack.sectionCount()
+                            && (editTransaction
+                                    .sectionLengthBufferSyncRequested()
+                                || editTransaction
+                                    .regionBufferSyncRequested()))
                         {
                             editorUi.synchronizeSectionLength(
                                 quantum::coaster::sectionLength(
-                                    authoredTrack.section(
-                                        requestedLengthEdit->sectionIndex))
+                                    authoredTrack.section(selectedSection))
                             );
                         }
 
-                        if (valueEditApplied && requestedValueEdit)
+                        if (editTransaction.profileValueBufferSyncRequested()
+                            && requestedValueEdit
+                            && (!editTransaction.committed()
+                                || !trackStructureChanged)
+                            && requestedValueEdit->sectionIndex
+                                < authoredTrack.sectionCount())
                         {
                             auto& committedChannel =
                                 quantum::editor::sectionRateChannel(
@@ -1577,11 +1614,11 @@ namespace quantum::engine
                             );
                         }
 
-                        if (regionCommandApplied && requestedRegionCommand)
+                        if (editTransaction.regionBufferSyncRequested()
+                            && selectedSection < authoredTrack.sectionCount())
                         {
                             const auto& committedSection =
-                                authoredTrack.section(
-                                    requestedRegionCommand->sectionIndex);
+                                authoredTrack.section(selectedSection);
 
                             if (committedSection.kind ==
                                 quantum::coaster::RegionKind::Geometry)
@@ -1594,11 +1631,6 @@ namespace quantum::engine
                                             committedSection.region)
                                         .construction));
                             }
-
-                            editorUi.synchronizeSectionLength(
-                                quantum::coaster::sectionLength(
-                                    committedSection)
-                            );
                         }
 
                         // Layout mode is metadata-only; no geometry
@@ -1621,16 +1653,6 @@ namespace quantum::engine
                                 "Layout mode set to %s",
                                 quantum::coaster::layoutModeToString(
                                     authoredTrack.layoutMode()));
-                        }
-
-                        // Structural edits that move or create regions
-                        // re-target the selection here, after the buffers
-                        // above have been resynchronized: selectSection
-                        // then refreshes every editor surface from the
-                        // region the user should now be working on.
-                        if (selectionAfterCommand.has_value())
-                        {
-                            editorUi.selectSection(*selectionAfterCommand);
                         }
 
                         // Circuit completion: run solver and show

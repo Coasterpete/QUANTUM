@@ -2188,4 +2188,47 @@ namespace quantum::coaster
 
         return states;
     }
+
+    std::vector<TrackKinematicState>
+    integrateLocalRollPitchYawRateKinematics(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const ChannelProfile& rollRateProfile,
+        const ChannelProfile& pitchRateProfile,
+        const ChannelProfile& yawRateProfile,
+        const double profileLength,
+        const double integrationSpacing)
+    {
+        const std::vector<RiderLocalGeometryState> geometryStates =
+            integrateLocalRollPitchYawRateProfiles(
+                startingPosition,
+                startingFrame,
+                rollRateProfile,
+                pitchRateProfile,
+                yawRateProfile,
+                profileLength,
+                integrationSpacing
+            );
+
+        std::vector<TrackKinematicState> kinematics;
+        kinematics.reserve(geometryStates.size());
+
+        for (const RiderLocalGeometryState& state : geometryStates)
+        {
+            const double pitchRate =
+                evaluateChannelProfile(pitchRateProfile, state.distance);
+            const double yawRate =
+                evaluateChannelProfile(yawRateProfile, state.distance);
+
+            kinematics.push_back(TrackKinematicState{
+                state.distance,
+                state.position,
+                state.frame,
+                yawRate * state.frame.lateral
+                    - pitchRate * state.frame.up
+            });
+        }
+
+        return kinematics;
+    }
 }

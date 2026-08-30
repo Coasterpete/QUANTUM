@@ -10,6 +10,7 @@ add_executable(
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
     src/ViewportPicking.cpp
+    include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/DocumentState.hpp
     include/quantum/editor/EditorStyle.hpp

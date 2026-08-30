@@ -662,6 +662,46 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    AuthoredTrackEditTransactionTests.cpp
+)
+
+target_include_directories(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorAuthoredTrackEditTransactionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.AuthoredTrackEditTransaction
+    COMMAND QuantumEditorAuthoredTrackEditTransactionTests
+)
+
+set_tests_properties(
+    QuantumEditor.AuthoredTrackEditTransaction
+    PROPERTIES
+        LABELS "editor;coaster;transaction;selection"
+)
+
+add_executable(
     QuantumCoreAuthoredTrackTests
     AuthoredTrackTests.cpp
 )
@@ -829,6 +869,40 @@ set_tests_properties(
     QuantumCore.PlanarArcRegion
     PROPERTIES
         LABELS "core;coaster"
+)
+
+add_executable(
+    QuantumCoreRiderLoadTests
+    RiderLoadTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreRiderLoadTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreRiderLoadTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreRiderLoadTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.RiderLoads
+    COMMAND QuantumCoreRiderLoadTests
+)
+
+set_tests_properties(
+    QuantumCore.RiderLoads
+    PROPERTIES
+        LABELS "core;coaster;physics"
 )
 
 add_executable(

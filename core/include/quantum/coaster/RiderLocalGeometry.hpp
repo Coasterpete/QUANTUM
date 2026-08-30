@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/GeometricSection.hpp>
+#include <quantum/coaster/TrackKinematics.hpp>
 #include <quantum/geometry/RotationMinimizingFrames.hpp>
 #include <quantum/math/ScalarTransition.hpp>
 
@@ -195,6 +196,21 @@ namespace quantum::coaster
     // frames chain continuously even across curvature-step breakpoints.
     [[nodiscard]] std::vector<RiderLocalGeometryState>
     integrateLocalRollPitchYawRateProfiles(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const ChannelProfile& rollRateProfile,
+        const ChannelProfile& pitchRateProfile,
+        const ChannelProfile& yawRateProfile,
+        double profileLength,
+        double integrationSpacing
+    );
+
+    // Rate/Profile construction output carrying its authoritative
+    // centerline curvature. At every generated state,
+    // dT/ds = yawRate * L - pitchRate * U; roll affects the rider frame used
+    // by that expression but is not itself a curvature term.
+    [[nodiscard]] std::vector<TrackKinematicState>
+    integrateLocalRollPitchYawRateKinematics(
         const glm::dvec3& startingPosition,
         const geometry::CurveFrame& startingFrame,
         const ChannelProfile& rollRateProfile,

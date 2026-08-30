@@ -230,4 +230,15 @@ namespace quantum::coaster
         const AuthoredTrack& track,
         double integrationSpacing
     );
+
+    // Chains construction-specific exact kinematics across the complete
+    // authored track. Internal section boundaries are right-continuous for
+    // curvature: a shared boundary uses the following section's dT/ds, while
+    // the final endpoint uses the final section. Pose remains continuous and
+    // each joint appears once.
+    [[nodiscard]] std::vector<TrackKinematicState>
+    integrateAuthoredTrackKinematics(
+        const AuthoredTrack& track,
+        double integrationSpacing
+    );
 }

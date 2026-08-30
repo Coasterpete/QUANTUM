@@ -91,4 +91,13 @@ namespace quantum::coaster
         const geometry::CurveFrame& startingFrame,
         const PlanarArcRegion& region,
         double integrationSpacing);
+
+    // Construction output with exact analytic centerline curvature. Banking
+    // rotates only the returned rider frame and never the curvature vector.
+    [[nodiscard]] std::vector<TrackKinematicState>
+    integratePlanarArcRegionKinematics(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const PlanarArcRegion& region,
+        double integrationSpacing);
 }

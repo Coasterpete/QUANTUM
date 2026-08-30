@@ -1,4 +1,3 @@
-#include <quantum/coaster/ForceSection.hpp>
 #include <quantum/coaster/GeometricSection.hpp>
 
 #include <bit>
@@ -19,11 +18,9 @@ namespace
     using quantum::coaster::ChannelProfile;
     using quantum::coaster::evaluateChannelProfile;
     using quantum::coaster::evaluateGeometricSection;
-    using quantum::coaster::ForceSection;
     using quantum::coaster::GeometricSection;
     using quantum::coaster::GeometricSectionState;
     using quantum::coaster::ProfileSegment;
-    using quantum::coaster::validateForceSection;
     using quantum::coaster::validateGeometricSection;
     using quantum::math::evaluateScalarTransition;
     using quantum::math::ScalarTransition;
@@ -112,15 +109,6 @@ namespace
         return profile;
     }
 
-    [[nodiscard]] constexpr ForceSection validForceSection()
-    {
-        return {
-            transition(-1.0, 4.0, TransitionType::Linear),
-            transition(3.0, -2.0, TransitionType::Smoothstep),
-            transition(0.25, 0.25, TransitionType::Smootherstep)
-        };
-    }
-
     [[nodiscard]] GeometricSection validGeometricSection()
     {
         return {
@@ -178,29 +166,6 @@ namespace
         );
     }
 
-    void testForceSectionRepresentation()
-    {
-        constexpr ForceSection section = validForceSection();
-
-        validateForceSection(section);
-
-        requireTransitionRetained(
-            section.verticalForce,
-            transition(-1.0, 4.0, TransitionType::Linear),
-            "vertical force"
-        );
-        requireTransitionRetained(
-            section.lateralForce,
-            transition(3.0, -2.0, TransitionType::Smoothstep),
-            "lateral force"
-        );
-        requireTransitionRetained(
-            section.roll,
-            transition(0.25, 0.25, TransitionType::Smootherstep),
-            "force-section roll"
-        );
-    }
-
     void testGeometricSectionRepresentation()
     {
         const GeometricSection section = validGeometricSection();
@@ -253,37 +218,6 @@ namespace
         );
     }
 
-    void testForceSectionSharedDomain()
-    {
-        validateForceSection(validForceSection());
-
-        ForceSection mismatchedBeginning = validForceSection();
-        mismatchedBeginning.lateralForce.domainBegin = std::nextafter(
-            mismatchedBeginning.verticalForce.domainBegin,
-            mismatchedBeginning.verticalForce.domainEnd
-        );
-        requireThrows<std::invalid_argument>(
-            [&mismatchedBeginning]
-            {
-                validateForceSection(mismatchedBeginning);
-            },
-            "force-section smallest-representable beginning mismatch"
-        );
-
-        ForceSection mismatchedEnd = validForceSection();
-        mismatchedEnd.roll.domainEnd = std::nextafter(
-            mismatchedEnd.verticalForce.domainEnd,
-            std::numeric_limits<double>::infinity()
-        );
-        requireThrows<std::invalid_argument>(
-            [&mismatchedEnd]
-            {
-                validateForceSection(mismatchedEnd);
-            },
-            "force-section smallest-representable end mismatch"
-        );
-    }
-
     void testGeometricSectionSharedLength()
     {
         validateGeometricSection(validGeometricSection(), referenceSectionLength);
@@ -313,42 +247,6 @@ namespace
                 validateGeometricSection(latePitch, referenceSectionLength);
             },
             "geometric-section channel not starting at zero"
-        );
-    }
-
-    void testForceSectionInvalidChannels()
-    {
-        ForceSection zeroWidth = validForceSection();
-        zeroWidth.verticalForce.domainEnd =
-            zeroWidth.verticalForce.domainBegin;
-        requireThrows<std::invalid_argument>(
-            [&zeroWidth]
-            {
-                validateForceSection(zeroWidth);
-            },
-            "force-section zero-width scalar transition"
-        );
-
-        ForceSection reversed = validForceSection();
-        reversed.lateralForce.domainBegin =
-            reversed.lateralForce.domainEnd + 1.0;
-        requireThrows<std::invalid_argument>(
-            [&reversed]
-            {
-                validateForceSection(reversed);
-            },
-            "force-section reversed scalar transition"
-        );
-
-        ForceSection unsupportedType = validForceSection();
-        unsupportedType.roll.transitionType =
-            static_cast<TransitionType>(999);
-        requireThrows<std::invalid_argument>(
-            [&unsupportedType]
-            {
-                validateForceSection(unsupportedType);
-            },
-            "force-section unsupported scalar transition type"
         );
     }
 
@@ -426,36 +324,6 @@ namespace
 
         for (const double nonFinite : nonFiniteValues)
         {
-            ForceSection force = validForceSection();
-            force.verticalForce.valueBegin = nonFinite;
-            requireThrows<std::invalid_argument>(
-                [&force]
-                {
-                    validateForceSection(force);
-                },
-                "non-finite vertical-force value"
-            );
-
-            force = validForceSection();
-            force.lateralForce.valueEnd = nonFinite;
-            requireThrows<std::invalid_argument>(
-                [&force]
-                {
-                    validateForceSection(force);
-                },
-                "non-finite lateral-force value"
-            );
-
-            force = validForceSection();
-            force.roll.domainBegin = nonFinite;
-            requireThrows<std::invalid_argument>(
-                [&force]
-                {
-                    validateForceSection(force);
-                },
-                "non-finite force-section roll domain"
-            );
-
             GeometricSection geometric = validGeometricSection();
             geometric.pitch.segments.front().transition.valueBegin = nonFinite;
             requireThrows<std::invalid_argument>(
@@ -750,12 +618,8 @@ namespace
 
     void testDeterministicValidationAndEvaluation()
     {
-        const ForceSection force = validForceSection();
         const GeometricSection geometric = validGeometricSection();
         constexpr double independentValue = 2.375;
-        const std::uint64_t expectedForceBits = std::bit_cast<std::uint64_t>(
-            evaluateScalarTransition(force.verticalForce, independentValue)
-        );
         const std::uint64_t expectedGeometricBits =
             std::bit_cast<std::uint64_t>(
                 evaluateScalarTransition(
@@ -766,16 +630,7 @@ namespace
 
         for (int repetition = 0; repetition < 100; ++repetition)
         {
-            validateForceSection(force);
             validateGeometricSection(geometric, referenceSectionLength);
-
-            require(
-                std::bit_cast<std::uint64_t>(evaluateScalarTransition(
-                    force.verticalForce,
-                    independentValue
-                )) == expectedForceBits,
-                "force-section scalar evaluation changed bits"
-            );
             require(
                 std::bit_cast<std::uint64_t>(evaluateScalarTransition(
                     geometric.yaw.segments.front().transition,
@@ -786,9 +641,7 @@ namespace
         }
 
         require(
-            force.verticalForce.domainBegin == -7.25
-                && force.verticalForce.domainEnd == 13.5
-                && geometric.pitch.segments.front().transition.domainBegin
+            geometric.pitch.segments.front().transition.domainBegin
                 == 0.0
                 && geometric.pitch.segments.front().transition.domainEnd
                 == referenceSectionLength,
@@ -802,14 +655,11 @@ int main()
     using Test = std::pair<std::string_view, std::function<void()>>;
 
     const std::vector<Test> tests{
-        {"force-section representation", testForceSectionRepresentation},
         {
             "geometric-section representation",
             testGeometricSectionRepresentation
         },
-        {"force-section shared domain", testForceSectionSharedDomain},
         {"geometric-section shared length", testGeometricSectionSharedLength},
-        {"force-section invalid channels", testForceSectionInvalidChannels},
         {
             "geometric-section invalid channels",
             testGeometricSectionInvalidChannels

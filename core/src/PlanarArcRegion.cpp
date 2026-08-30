@@ -163,4 +163,43 @@ namespace quantum::coaster
 
         return states;
     }
+
+    std::vector<TrackKinematicState> integratePlanarArcRegionKinematics(
+        const glm::dvec3& startingPosition,
+        const geometry::CurveFrame& startingFrame,
+        const PlanarArcRegion& region,
+        const double integrationSpacing)
+    {
+        const std::vector<RiderLocalGeometryState> geometryStates =
+            integratePlanarArcRegion(
+                startingPosition,
+                startingFrame,
+                region,
+                integrationSpacing
+            );
+
+        // The arc's plane normal and signed curvature are fixed by the
+        // construction's entry frame. This remains authoritative even when
+        // bankChange rotates each returned lateral/up pair about its tangent.
+        const glm::dvec3 planeNormal =
+            std::cos(region.planeTilt) * startingFrame.up
+            - std::sin(region.planeTilt) * startingFrame.lateral;
+        const double signedCurvature =
+            (region.sweptAngle < 0.0 ? -1.0 : 1.0) / region.radius;
+
+        std::vector<TrackKinematicState> kinematics;
+        kinematics.reserve(geometryStates.size());
+        for (const RiderLocalGeometryState& state : geometryStates)
+        {
+            kinematics.push_back(TrackKinematicState{
+                state.distance,
+                state.position,
+                state.frame,
+                signedCurvature
+                    * glm::cross(planeNormal, state.frame.tangent)
+            });
+        }
+
+        return kinematics;
+    }
 }

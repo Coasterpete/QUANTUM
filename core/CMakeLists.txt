@@ -14,18 +14,20 @@ target_sources(
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
+        src/RiderLoads.cpp
         src/RiderLocalGeometry.cpp
         src/ScalarTransition.cpp
         src/TrackTopology.cpp
         src/TransitionFunctions.cpp
-        include/quantum/coaster/ForceSection.hpp
         include/quantum/coaster/AuthoredTrack.hpp
         include/quantum/coaster/ChannelProfileEditing.hpp
         include/quantum/coaster/CircuitCompletion.hpp
         include/quantum/coaster/CoasterDocument.hpp
         include/quantum/coaster/GeometricSection.hpp
         include/quantum/coaster/PlanarArcRegion.hpp
+        include/quantum/coaster/RiderLoads.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
+        include/quantum/coaster/TrackKinematics.hpp
         include/quantum/coaster/TrackTopology.hpp
         include/quantum/coaster/detail/CircuitCompletionDetail.hpp
         include/quantum/coaster/detail/RiderLocalGeometryDetail.hpp
