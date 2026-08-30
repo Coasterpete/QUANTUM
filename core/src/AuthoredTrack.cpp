@@ -693,4 +693,102 @@ namespace quantum::coaster
 
         return states;
     }
+
+    std::vector<TrackKinematicState> integrateAuthoredTrackKinematics(
+        const AuthoredTrack& track,
+        const double integrationSpacing)
+    {
+        if (!std::isfinite(integrationSpacing) || integrationSpacing <= 0.0)
+        {
+            throw std::invalid_argument(
+                "Kinematic integration spacing must be positive and finite."
+            );
+        }
+
+        if (track.sectionCount() == 0)
+        {
+            throw std::invalid_argument(
+                "An authored track requires at least one section to "
+                "generate kinematics."
+            );
+        }
+
+        for (std::size_t index = 0; index < track.sectionCount(); ++index)
+        {
+            validateSectionLocalDomain(track.section(index));
+        }
+
+        constexpr geometry::CurveFrame startingFrame{
+            {1.0, 0.0, 0.0},
+            {0.0, 1.0, 0.0},
+            {0.0, 0.0, 1.0}
+        };
+
+        glm::dvec3 position{0.0, 0.0, 0.0};
+        geometry::CurveFrame frame = startingFrame;
+        double distanceOffset = 0.0;
+
+        std::vector<TrackKinematicState> states;
+
+        for (std::size_t index = 0; index < track.sectionCount(); ++index)
+        {
+            const AuthoredTrackSection& section = track.section(index);
+
+            const std::vector<TrackKinematicState> localStates =
+                std::visit(
+                    [&](const auto& authored)
+                        -> std::vector<TrackKinematicState>
+                    {
+                        using AuthoredRegion =
+                            std::decay_t<decltype(authored)>;
+
+                        if constexpr (std::is_same_v<
+                            AuthoredRegion, RateProfileRegion>)
+                        {
+                            return integrateLocalRollPitchYawRateKinematics(
+                                position,
+                                frame,
+                                authored.rateProfiles.roll,
+                                authored.rateProfiles.pitch,
+                                authored.rateProfiles.yaw,
+                                section.length,
+                                integrationSpacing
+                            );
+                        }
+                        else
+                        {
+                            return integratePlanarArcRegionKinematics(
+                                position,
+                                frame,
+                                planarArcConstruction(authored),
+                                integrationSpacing
+                            );
+                        }
+                    },
+                    section.region
+                );
+
+            // Replace the preceding section's endpoint with the following
+            // section's identical entry pose. This retains one joint sample
+            // while making its exact curvature explicitly right-continuous.
+            if (!states.empty())
+            {
+                states.pop_back();
+            }
+
+            for (const TrackKinematicState& localState : localStates)
+            {
+                TrackKinematicState state = localState;
+                state.distance += distanceOffset;
+                states.push_back(std::move(state));
+            }
+
+            const TrackKinematicState& finalState = localStates.back();
+            position = finalState.position;
+            frame = finalState.frame;
+            distanceOffset += sectionLength(section);
+        }
+
+        return states;
+    }
 }

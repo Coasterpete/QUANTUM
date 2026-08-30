@@ -212,9 +212,9 @@ adjoining values. The outer boundaries stay pinned to `0` and `length`.
 Resizing a Rate/Profile region proportionally rescales every segment boundary
 while preserving endpoint values, transition types, and ids.
 
-`ForceSection` still groups three `ScalarTransition` channels and validates
-that their domains match. It is not part of the current authored-region variant,
-and force-section solving is not implemented.
+The obsolete standalone `ForceSection` placeholder has been removed. Rider
+loads are universal diagnostics over canonical track kinematics rather than an
+authored region kind; force-target authoring is not implemented yet.
 
 ## Rider-local geometry
 
@@ -282,6 +282,29 @@ Here `p`, `y`, and `r` are local pitch, yaw, and roll rates with respect to
 distance. This convention is implemented by the coupled roll/pitch/yaw
 solver and exercised by the authored-track centerline generation, which
 chains every section's authored channels through that solver.
+
+## Universal track kinematics and rider loads
+
+`TrackKinematicState` is the construction-independent generated state used by
+physics and diagnostics. It adds world-space centerline curvature `dT/ds` to
+the cumulative coordinate-unit distance, position, and rider frame. Rate/Profile
+regions produce curvature from `yL - pU`; Planar Arc regions use their analytic
+fixed-plane circular curvature. Authored bank rotates the rider frame without
+changing the Planar Arc curvature vector.
+
+`integrateAuthoredTrackKinematics` chains these states over the whole authored
+track. An internal shared section boundary is represented once and belongs to
+the following section for curvature; the final endpoint belongs to the final
+section. Position and frame stay continuous even when curvature jumps.
+
+`evaluateRiderLoads` consumes only canonical kinematics. Core coordinates stay
+unit-neutral, while `RiderLoadEvaluationSettings::metersPerCoordinateUnit`
+provides the explicit conversion to SI. The first speed model is point-mass,
+gravity-only energy propagation from one initial speed at track distance zero.
+Loads are mass-independent specific force projected onto `(U, L, T)` and
+reported in standard G. Materially negative speed squared terminates the
+history with an explicit unreachable state; launches, losses, brakes, lifts,
+and train-length effects are not part of this milestone.
 
 ## Editor authored-track workflow
 

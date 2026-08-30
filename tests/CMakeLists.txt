@@ -872,6 +872,40 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumCoreRiderLoadTests
+    RiderLoadTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreRiderLoadTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreRiderLoadTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreRiderLoadTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.RiderLoads
+    COMMAND QuantumCoreRiderLoadTests
+)
+
+set_tests_properties(
+    QuantumCore.RiderLoads
+    PROPERTIES
+        LABELS "core;coaster;physics"
+)
+
+add_executable(
     QuantumCoreRegionAuthoringWorkflowTests
     RegionAuthoringWorkflowTests.cpp
 )
