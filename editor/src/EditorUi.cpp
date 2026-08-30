@@ -52,6 +52,7 @@ namespace
     // the Transition Editor for those selections instead of idling beside
     // it, so each region kind owns exactly one primary editor surface.
     constexpr char geometryEditorWindowName[] = "Geometry Editor";
+    constexpr char riderLoadDiagnosticsWindowName[] = "Force Diagnostics";
 
     [[nodiscard]] std::uint32_t visibleTrackCurveMask(
         const quantum::editor::ViewportSettings& settings) noexcept
@@ -710,6 +711,372 @@ namespace
                 tickLabel
             );
         }
+    }
+
+    struct RiderLoadPlotRange
+    {
+        double minimum = -1.0;
+        double maximum = 1.0;
+    };
+
+    using RiderLoadSampleMember = double quantum::editor::
+        RiderLoadDiagnosticSample::*;
+
+    struct RiderLoadChannelView
+    {
+        const char* label;
+        const char* unit;
+        RiderLoadSampleMember value;
+        double minimumSpan;
+        bool nonNegative;
+        ImU32 color;
+    };
+
+    [[nodiscard]] RiderLoadPlotRange fitRiderLoadPlotRange(
+        const std::span<const quantum::editor::RiderLoadDiagnosticSample>
+            samples,
+        const RiderLoadChannelView& channel)
+    {
+        if (samples.empty())
+        {
+            return channel.nonNegative
+                ? RiderLoadPlotRange{0.0, channel.minimumSpan}
+                : RiderLoadPlotRange{
+                    -0.5 * channel.minimumSpan,
+                    0.5 * channel.minimumSpan};
+        }
+
+        double minimum = samples.front().*channel.value;
+        double maximum = minimum;
+        for (const quantum::editor::RiderLoadDiagnosticSample& sample
+            : samples)
+        {
+            const double value = sample.*channel.value;
+            minimum = std::min(minimum, value);
+            maximum = std::max(maximum, value);
+        }
+
+        // A zero reference keeps signed G channels legible and gives speed
+        // an honest physical baseline without altering the sampled data.
+        minimum = std::min(minimum, 0.0);
+        maximum = std::max(maximum, 0.0);
+
+        const double span = maximum - minimum;
+        if (span < channel.minimumSpan)
+        {
+            const double padding = 0.5 * (channel.minimumSpan - span);
+            minimum -= padding;
+            maximum += padding;
+        }
+        else
+        {
+            const double padding = span * 0.08;
+            minimum -= padding;
+            maximum += padding;
+        }
+
+        if (channel.nonNegative)
+        {
+            minimum = 0.0;
+        }
+        return {minimum, maximum};
+    }
+
+    void showRiderLoadDiagnostics(
+        const quantum::editor::SectionRiderLoadDiagnostics& diagnostics,
+        const quantum::editor::RiderLoadDiagnosticSettings& settings)
+    {
+        using quantum::editor::RiderLoadUnreachableLocation;
+
+        pushWorkspaceAccent(transitionEditorAccent);
+        ImGui::PushStyleColor(
+            ImGuiCol_Border,
+            quantum::editor::palette::transitionEditorBlue
+        );
+        ImGui::SetNextWindowSize(ImVec2(760.0F, 380.0F),
+            ImGuiCond_FirstUseEver);
+        ImGui::Begin(riderLoadDiagnosticsWindowName);
+
+        ImGui::Text(
+            "Evaluated rider loads - Region %zu - read-only",
+            diagnostics.sectionIndex + 1
+        );
+        ImGui::TextDisabled(
+            "Development settings: Initial Speed %.2f m/s | "
+            "Scale %.3f m/coordinate unit | gravity-only point mass",
+            settings.evaluation.initialSpeed,
+            settings.evaluation.metersPerCoordinateUnit
+        );
+
+        if (diagnostics.unreachable.has_value())
+        {
+            const double stopDistance = diagnostics.unreachable->distance;
+            switch (diagnostics.unreachableLocation)
+            {
+            case RiderLoadUnreachableLocation::BeforeSelectedSection:
+                ImGui::TextColored(
+                    quantum::editor::palette::supportWorkspaceRed,
+                    "Evaluation stopped: energetically unreachable at "
+                    "track distance %.4g before this region. No later "
+                    "values are fabricated.",
+                    stopDistance
+                );
+                break;
+            case RiderLoadUnreachableLocation::WithinSelectedSection:
+                ImGui::TextColored(
+                    quantum::editor::palette::supportWorkspaceRed,
+                    "Evaluation stopped: energetically unreachable at "
+                    "region-local distance %.4g (track %.4g). Valid "
+                    "earlier samples remain visible.",
+                    diagnostics.unreachableLocalDistance.value_or(0.0),
+                    stopDistance
+                );
+                break;
+            case RiderLoadUnreachableLocation::AfterSelectedSection:
+                ImGui::TextColored(
+                    quantum::editor::palette::supportWorkspaceRed,
+                    "Whole-track evaluation stopped at track distance "
+                    "%.4g, at or after this region's exit; this region's "
+                    "valid samples remain visible.",
+                    stopDistance
+                );
+                break;
+            case RiderLoadUnreachableLocation::None:
+            default:
+                break;
+            }
+        }
+        else if (diagnostics.samples.empty())
+        {
+            ImGui::TextDisabled(
+                "No valid rider-load history is available for this region."
+            );
+        }
+        else
+        {
+            ImGui::TextDisabled(
+                "Whole-track evaluation completed; displaying this "
+                "region's section-local samples."
+            );
+        }
+
+        constexpr ImGuiWindowFlags plotWindowFlags =
+            ImGuiWindowFlags_NoScrollbar
+            | ImGuiWindowFlags_NoScrollWithMouse;
+        if (ImGui::BeginChild(
+            "##RiderLoadDiagnosticPlots",
+            ImVec2(0.0F, 0.0F),
+            ImGuiChildFlags_Borders,
+            plotWindowFlags))
+        {
+            const ImVec2 canvasBegin = ImGui::GetCursorScreenPos();
+            const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+            const ImVec2 canvasEnd{
+                canvasBegin.x + canvasSize.x,
+                canvasBegin.y + canvasSize.y
+            };
+            constexpr float labelWidth = 128.0F;
+            constexpr float rulerHeight = 50.0F;
+            constexpr float rowGap = 5.0F;
+            constexpr std::size_t diagnosticChannelCount = 4;
+            const float plotBeginX = canvasBegin.x + labelWidth;
+            const float plotEndX = canvasEnd.x - 8.0F;
+            const float plotsBeginY = canvasBegin.y + rulerHeight;
+            const float availablePlotHeight = canvasEnd.y - plotsBeginY;
+            const float rowHeight = (
+                availablePlotHeight
+                    - rowGap * static_cast<float>(
+                        diagnosticChannelCount - 1))
+                / static_cast<float>(diagnosticChannelCount);
+
+            if (diagnostics.sectionLength <= 0.0
+                || plotEndX - plotBeginX < 80.0F
+                || rowHeight < 30.0F)
+            {
+                ImGui::TextDisabled(
+                    "Resize Force Diagnostics to view the shared "
+                    "region-distance plots."
+                );
+            }
+            else
+            {
+                static const std::array<ImU32, diagnosticChannelCount>
+                    channelColors{
+                        ImGui::ColorConvertFloat4ToU32(
+                            quantum::editor::palette::fromSrgb(
+                                0, 230, 130)),
+                        ImGui::ColorConvertFloat4ToU32(
+                            quantum::editor::palette::yawChannelGold),
+                        ImGui::ColorConvertFloat4ToU32(
+                            quantum::editor::palette::rollChannelRed),
+                        ImGui::ColorConvertFloat4ToU32(
+                            quantum::editor::palette::fromSrgb(
+                                0, 210, 255))
+                    };
+                const std::array<RiderLoadChannelView,
+                    diagnosticChannelCount> channels{{
+                    {"Normal G", "G",
+                        &quantum::editor::RiderLoadDiagnosticSample::normalG,
+                        2.0, false, channelColors[0]},
+                    {"Lateral G", "G",
+                        &quantum::editor::RiderLoadDiagnosticSample::lateralG,
+                        2.0, false, channelColors[1]},
+                    {"Longitudinal G", "G",
+                        &quantum::editor::RiderLoadDiagnosticSample::
+                            longitudinalG,
+                        2.0, false, channelColors[2]},
+                    {"Vehicle Speed", "m/s",
+                        &quantum::editor::RiderLoadDiagnosticSample::
+                            vehicleSpeed,
+                        10.0, true, channelColors[3]}
+                }};
+
+                const AuthoredDomainView domainView{
+                    .domainBegin = 0.0,
+                    .domainEnd = diagnostics.sectionLength,
+                    .pixelBegin = plotBeginX,
+                    .pixelEnd = plotEndX
+                };
+                ImDrawList* const drawList = ImGui::GetWindowDrawList();
+                drawList->PushClipRect(canvasBegin, canvasEnd, true);
+                drawAuthoredDomainRuler(
+                    drawList,
+                    domainView,
+                    canvasBegin,
+                    canvasBegin.y + ImGui::GetTextLineHeight() + 8.0F,
+                    plotsBeginY,
+                    canvasEnd.y
+                );
+
+                std::vector<ImVec2> points;
+                points.reserve(diagnostics.samples.size());
+                for (std::size_t channelIndex = 0;
+                    channelIndex < channels.size();
+                    ++channelIndex)
+                {
+                    const RiderLoadChannelView& channel =
+                        channels[channelIndex];
+                    const float rowBeginY = plotsBeginY
+                        + static_cast<float>(channelIndex)
+                            * (rowHeight + rowGap);
+                    const float rowEndY = rowBeginY + rowHeight;
+                    const RiderLoadPlotRange valueRange =
+                        fitRiderLoadPlotRange(
+                            diagnostics.samples,
+                            channel);
+                    const double valueSpan =
+                        valueRange.maximum - valueRange.minimum;
+
+                    drawList->AddRectFilled(
+                        ImVec2(plotBeginX, rowBeginY),
+                        ImVec2(plotEndX, rowEndY),
+                        transitionCanvasColor
+                    );
+                    drawList->AddRect(
+                        ImVec2(plotBeginX, rowBeginY),
+                        ImVec2(plotEndX, rowEndY),
+                        ImGui::GetColorU32(ImGuiCol_Border)
+                    );
+
+                    char rangeLabel[64]{};
+                    std::snprintf(
+                        rangeLabel,
+                        sizeof(rangeLabel),
+                        "%+.3g to %+.3g %s",
+                        valueRange.minimum,
+                        valueRange.maximum,
+                        channel.unit
+                    );
+                    drawList->AddText(
+                        ImVec2(canvasBegin.x + 4.0F, rowBeginY + 4.0F),
+                        channel.color,
+                        channel.label
+                    );
+                    drawList->AddText(
+                        ImVec2(
+                            canvasBegin.x + 4.0F,
+                            rowBeginY + 5.0F + ImGui::GetTextLineHeight()),
+                        ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                        rangeLabel
+                    );
+
+                    if (valueRange.minimum < 0.0
+                        && valueRange.maximum > 0.0)
+                    {
+                        const float zeroY = rowEndY
+                            - static_cast<float>(
+                                (0.0 - valueRange.minimum) / valueSpan)
+                                * rowHeight;
+                        drawList->AddLine(
+                            ImVec2(plotBeginX, zeroY),
+                            ImVec2(plotEndX, zeroY),
+                            ImGui::GetColorU32(ImGuiCol_Separator)
+                        );
+                    }
+
+                    points.clear();
+                    for (const quantum::editor::RiderLoadDiagnosticSample&
+                        sample : diagnostics.samples)
+                    {
+                        const double value = sample.*channel.value;
+                        const float x = domainView.toPixel(std::clamp(
+                            sample.localDistance,
+                            0.0,
+                            diagnostics.sectionLength));
+                        const float y = rowEndY
+                            - static_cast<float>(
+                                (value - valueRange.minimum) / valueSpan)
+                                * rowHeight;
+                        points.push_back({x, y});
+                    }
+
+                    drawList->PushClipRect(
+                        ImVec2(plotBeginX, rowBeginY),
+                        ImVec2(plotEndX, rowEndY),
+                        true
+                    );
+                    if (points.size() >= 2)
+                    {
+                        drawList->AddPolyline(
+                            points.data(),
+                            static_cast<int>(points.size()),
+                            channel.color,
+                            ImDrawFlags_None,
+                            2.0F
+                        );
+                    }
+                    else if (points.size() == 1)
+                    {
+                        drawList->AddCircleFilled(
+                            points.front(),
+                            2.5F,
+                            channel.color
+                        );
+                    }
+                    drawList->PopClipRect();
+                }
+
+                if (diagnostics.unreachableLocation
+                        == RiderLoadUnreachableLocation::
+                            WithinSelectedSection
+                    && diagnostics.unreachableLocalDistance.has_value())
+                {
+                    const float stopX = domainView.toPixel(
+                        *diagnostics.unreachableLocalDistance);
+                    drawList->AddLine(
+                        ImVec2(stopX, plotsBeginY),
+                        ImVec2(stopX, canvasEnd.y),
+                        ImGui::ColorConvertFloat4ToU32(
+                            quantum::editor::palette::supportWorkspaceRed),
+                        2.0F
+                    );
+                }
+                drawList->PopClipRect();
+            }
+        }
+        ImGui::EndChild();
+        ImGui::End();
+        ImGui::PopStyleColor(workspaceAccentColorCount + 1);
     }
 
     [[nodiscard]] const quantum::coaster::ProfileSegment*
@@ -3097,6 +3464,10 @@ namespace
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
+        ImGui::DockBuilderDockWindow(
+            riderLoadDiagnosticsWindowName,
+            bottomId
+        );
         ImGui::DockBuilderFinish(dockspaceId);
     }
 }
@@ -4116,6 +4487,10 @@ namespace quantum::editor
         if (selectedSection_ >= sectionCount)
         {
             selectedSection_ = sectionCount - 1;
+            if (riderLoadDiagnostics_.sectionCount() == sectionCount)
+            {
+                riderLoadDiagnostics_.selectSection(selectedSection_);
+            }
             endpointSelections_.fill(ScalarProfileEndpoint::None);
             endpointDrags_.fill(ScalarProfileEndpoint::None);
             selectedSegmentIds_.fill(coaster::invalidSegmentId);
@@ -4699,6 +5074,14 @@ namespace quantum::editor
         }
         }
 
+        if (riderLoadDiagnostics_.sectionCount() == sectionCount)
+        {
+            showRiderLoadDiagnostics(
+                riderLoadDiagnostics_.selectedSection(),
+                developmentRiderLoadDiagnosticSettings
+            );
+        }
+
         if (anyEndpointDragReleased)
         {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -4820,6 +5203,10 @@ namespace quantum::editor
         }
 
         selectedSection_ = index;
+        if (riderLoadDiagnostics_.sectionCount() == sectionCount)
+        {
+            riderLoadDiagnostics_.selectSection(selectedSection_);
+        }
         regionCreateFlow_.choicePending = false;
         endpointSelections_.fill(ScalarProfileEndpoint::None);
         endpointDrags_.fill(ScalarProfileEndpoint::None);
@@ -4995,6 +5382,28 @@ namespace quantum::editor
         centerlineVisualization_ = &visualization;
     }
 
+    void EditorUi::setRiderLoadHistory(coaster::RiderLoadHistory history)
+    {
+        if (authoredTrack_ == nullptr)
+        {
+            throw std::logic_error(
+                "EditorUi cannot map rider loads before initialization."
+            );
+        }
+
+        riderLoadDiagnostics_.update(
+            *authoredTrack_,
+            std::move(history)
+        );
+        if (riderLoadDiagnostics_.sectionCount() > 0)
+        {
+            riderLoadDiagnostics_.selectSection(std::min(
+                selectedSection_,
+                riderLoadDiagnostics_.sectionCount() - 1
+            ));
+        }
+    }
+
     std::size_t EditorUi::selectedSection() const noexcept
     {
         return selectedSection_;
@@ -5037,6 +5446,7 @@ namespace quantum::editor
         initialViewportFramePending_ = true;
         authoredTrack_ = nullptr;
         centerlineVisualization_ = nullptr;
+        riderLoadDiagnostics_.clear();
         selectedSection_ = 0;
         valueEndEditBuffers_.fill(0.0);
         endpointSelections_.fill(ScalarProfileEndpoint::None);
@@ -5100,6 +5510,10 @@ namespace quantum::editor
     void EditorUi::resetTransientState()
     {
         selectedSection_ = 0;
+        if (riderLoadDiagnostics_.sectionCount() > 0)
+        {
+            riderLoadDiagnostics_.selectSection(0);
+        }
         valueEndEditBuffers_.fill(0.0);
         endpointSelections_.fill(ScalarProfileEndpoint::None);
         endpointDrags_.fill(ScalarProfileEndpoint::None);

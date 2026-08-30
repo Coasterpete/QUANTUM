@@ -906,6 +906,47 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorRiderLoadDiagnosticsTests
+    RiderLoadDiagnosticsTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
+)
+
+target_include_directories(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorRiderLoadDiagnosticsTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.RiderLoadDiagnostics
+    COMMAND QuantumEditorRiderLoadDiagnosticsTests
+)
+
+set_tests_properties(
+    QuantumEditor.RiderLoadDiagnostics
+    PROPERTIES
+        LABELS "editor;coaster;physics;diagnostics"
+)
+
+add_executable(
     QuantumCoreRegionAuthoringWorkflowTests
     RegionAuthoringWorkflowTests.cpp
 )

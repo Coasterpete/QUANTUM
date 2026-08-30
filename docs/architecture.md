@@ -306,6 +306,23 @@ reported in standard G. Materially negative speed squared terminates the
 history with an explicit unreachable state; launches, losses, brakes, lifts,
 and train-length effects are not part of this milestone.
 
+The Editor evaluates that Core pipeline once for the committed whole authored
+track, then `RiderLoadDiagnosticsModel` maps the returned cumulative distances
+onto the selected section by subtracting its authored prefix length. The exact
+Core sample at a shared boundary is retained in both adjacent section views,
+so its right-continuous load value is never averaged or recomputed. The
+read-only Force Diagnostics window presents Normal G, Lateral G,
+Longitudinal G, and Vehicle Speed over the same section-local distance domain
+for Rate/Profile and Geometry regions. If evaluation becomes energetically
+unreachable, only valid earlier samples are retained and the stop location is
+reported explicitly.
+
+Until document-level simulation settings exist, the diagnostic path uses one
+visible editor-owned development configuration: 20 m/s initial speed,
+1 metre per Core coordinate unit, 0.75-unit kinematic sample spacing, and
+standard gravity. These values are diagnostic configuration, not authored
+force targets.
+
 ## Editor authored-track workflow
 
 The current Editor opens a resizable SDL3 Vulkan window with an intentional,

@@ -9,6 +9,7 @@
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/PlatformDialogs.hpp>
 #include <quantum/editor/RegionSelection.hpp>
+#include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -218,6 +219,10 @@ namespace quantum::engine
                 );
                 editorUi.setCenterlineSections(centerline.sectionSlices);
                 editorUi.setCenterlineVisualization(centerline);
+                editorUi.setRiderLoadHistory(
+                    quantum::editor::evaluateRiderLoadDiagnostics(
+                        authoredTrack)
+                );
                 editorUi.updateWindowTitle(documentState.windowTitle());
 
                 bool running = true;
@@ -512,6 +517,11 @@ namespace quantum::engine
                                     editorUi.setCenterlineSections(
                                         centerline.sectionSlices
                                     );
+                                    editorUi.setRiderLoadHistory(
+                                        quantum::editor::
+                                            evaluateRiderLoadDiagnostics(
+                                                authoredTrack)
+                                    );
                                     vulkan.updateTrackCurveVertices(
                                         centerline.vertices,
                                         centerline.verticesPerCurve
@@ -577,6 +587,11 @@ namespace quantum::engine
                                             );
                                             editorUi.setCenterlineSections(
                                                 centerline.sectionSlices
+                                            );
+                                            editorUi.setRiderLoadHistory(
+                                                quantum::editor::
+                                                    evaluateRiderLoadDiagnostics(
+                                                        authoredTrack)
                                             );
                                             vulkan.updateTrackCurveVertices(
                                                 centerline.vertices,
@@ -1262,6 +1277,12 @@ namespace quantum::engine
                                             createCenterlineVisualization(
                                                 candidateTrack
                                             );
+                                quantum::coaster::RiderLoadHistory
+                                    candidateRiderLoads =
+                                        quantum::editor::
+                                            evaluateRiderLoadDiagnostics(
+                                                candidateTrack
+                                            );
 
                                 editorUi.setCenterlineBounds(
                                     candidateCenterline.minimumPosition,
@@ -1280,6 +1301,9 @@ namespace quantum::engine
                                 centerlineCache.replace(
                                     std::move(candidateCenterline));
                                 editTransaction.commit(authoredTrack);
+                                editorUi.setRiderLoadHistory(
+                                    std::move(candidateRiderLoads)
+                                );
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
                                     documentState.windowTitle()
@@ -1707,6 +1731,11 @@ namespace quantum::engine
                                 centerlineCache.markDirty();
                                 centerlineCache.replace(
                                     std::move(newCenterline));
+                                editorUi.setRiderLoadHistory(
+                                    quantum::editor::
+                                        evaluateRiderLoadDiagnostics(
+                                            authoredTrack)
+                                );
                                 documentState.markDirty();
                                 editorUi.updateWindowTitle(
                                     documentState.windowTitle());
