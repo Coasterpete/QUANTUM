@@ -392,6 +392,20 @@ namespace
         );
     }
 
+    void semanticAnchorsDoNotExpandCameraBounds()
+    {
+        const AuthoredTrack track = quantum::coaster::createNewDocument();
+        const CenterlineVisualization visualization =
+            createCenterlineVisualization(track);
+
+        require(visualization.anchors.size() == 2,
+            "one authored region exposes two semantic anchors");
+        requireNearVec(visualization.minimumPosition, {0.0, 0.0, 0.0},
+            positionTolerance, "camera bounds start at the centerline");
+        requireNearVec(visualization.maximumPosition, {60.0, 0.0, 0.0},
+            positionTolerance, "camera bounds end at the centerline");
+    }
+
     void multiRegionVisualizationMatchesCoreAndBoundaries()
     {
         const AuthoredTrack track = createMultiRegionFixture();
@@ -690,6 +704,8 @@ int main()
 
     run("emptyAuthoredTrackIsSafe", emptyAuthoredTrackIsSafe);
     run("oneRegionTrackStillWorks", oneRegionTrackStillWorks);
+    run("semanticAnchorsDoNotExpandCameraBounds",
+        semanticAnchorsDoNotExpandCameraBounds);
     run("multiRegionVisualizationMatchesCoreAndBoundaries",
         multiRegionVisualizationMatchesCoreAndBoundaries);
     run("visualizationCacheInvalidatesOnlyForGeometry",

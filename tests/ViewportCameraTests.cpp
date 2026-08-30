@@ -180,7 +180,10 @@ namespace
 
     void testFrameRecoversTransformedState()
     {
-        ViewportCamera expected = makeFramedCamera(0.75);
+        ViewportCamera expected = makeFramedCamera();
+        expected.orbit(1.2, -0.8);
+        expected.frame(0.75);
+
         ViewportCamera camera = makeFramedCamera();
         camera.orbit(1.2, -0.8);
         camera.pan(20'000.0, -15'000.0, 800.0, 600.0);
@@ -286,6 +289,55 @@ namespace
             result[row] = sum;
         }
         return result;
+    }
+
+    void testElongatedTrackBoundsUseProjectedExtent()
+    {
+        constexpr double viewportAspectRatio = 5.0;
+        constexpr glm::dvec3 trackMinimum{0.0, 0.0, 0.0};
+        constexpr glm::dvec3 trackMaximum{60.0, 0.0, 0.0};
+
+        ViewportCamera camera;
+        camera.setBounds(trackMinimum, trackMaximum);
+        camera.frame(viewportAspectRatio);
+
+        requireVectorNear(camera.focus(), {30.0, 0.0, 0.0},
+            "elongated bounds focus");
+
+        const double legacySphereDistance = 1.1 * 30.0
+            / std::sin(0.5 * camera.verticalFieldOfView());
+        require(
+            camera.distance() < 0.75 * legacySphereDistance,
+            "elongated bounds must use their projected extent instead of "
+            "the AABB bounding sphere"
+        );
+
+        const auto matrix = camera.viewProjection(viewportAspectRatio);
+        const auto start = transformPoint(matrix, trackMinimum);
+        const auto end = transformPoint(matrix, trackMaximum);
+        require(start[3] > 0.0 && end[3] > 0.0,
+            "framed track endpoints must remain in front of the camera");
+
+        const double normalizedSpan = 0.5 * std::hypot(
+            start[0] / start[3] - end[0] / end[3],
+            start[1] / start[3] - end[1] / end[3]
+        );
+        require(
+            normalizedSpan > 0.5,
+            "a 60-unit straight track must substantially fill a wide "
+            "Perspective viewport"
+        );
+
+        const double wholeTrackDistance = camera.distance();
+        require(camera.frameBounds(
+            {0.0, 0.0, 0.0},
+            {20.0, 0.0, 0.0},
+            viewportAspectRatio),
+            "valid selected-section bounds must frame successfully");
+        requireVectorNear(camera.focus(), {10.0, 0.0, 0.0},
+            "selected-section bounds focus");
+        require(camera.distance() < wholeTrackDistance,
+            "selected-section bounds must frame closer than the whole track");
     }
 
     void testDeterministicPresets()
@@ -694,6 +746,7 @@ int main()
         testFrameRecoversTransformedState();
         testUpdatedBoundsPreserveCameraUntilExplicitFrame();
         testMatrixGenerationIsDeterministic();
+        testElongatedTrackBoundsUseProjectedExtent();
         testDeterministicPresets();
         testPoleSafeMatrices();
         testProjectionSwitching();

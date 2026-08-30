@@ -4490,18 +4490,24 @@ namespace quantum::editor
 
         const glm::dvec3 center =
             (slice->minimumPosition + slice->maximumPosition) / 2.0;
-        double radius = 0.5 * glm::length(
-            slice->maximumPosition - slice->minimumPosition
+        bool framed = viewportCamera_.frameBounds(
+            slice->minimumPosition,
+            slice->maximumPosition,
+            viewportAspectRatio_
         );
 
-        // Degenerate (straight short) slices still need a sensible framing
-        // sphere so the camera never lands inside the geometry.
-        radius = std::max(radius, 1.0e-3);
+        // A point-like slice has no box extent to fit, but still needs a
+        // sensible framing sphere so the camera never lands on the geometry.
+        if (!framed)
+        {
+            framed = viewportCamera_.frameSphere(
+                center,
+                1.0e-3,
+                viewportAspectRatio_
+            );
+        }
 
-        if (!viewportCamera_.frameSphere(
-            center,
-            radius,
-            viewportAspectRatio_))
+        if (!framed)
         {
             quantum::logging::logMessage(
                 quantum::logging::LogLevel::Debug,
