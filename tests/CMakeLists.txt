@@ -696,6 +696,49 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorViewportTrackAnchorTests
+    ViewportTrackAnchorTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+)
+
+target_include_directories(
+    QuantumEditorViewportTrackAnchorTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorViewportTrackAnchorTests
+    PRIVATE
+        Quantum::Core
+        glm::glm
+)
+
+target_compile_features(
+    QuantumEditorViewportTrackAnchorTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorViewportTrackAnchorTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.ViewportTrackAnchors
+    COMMAND QuantumEditorViewportTrackAnchorTests
+)
+
+set_tests_properties(
+    QuantumEditor.ViewportTrackAnchors
+    PROPERTIES
+        LABELS "editor;camera;selection;coaster"
+)
+
+add_executable(
     QuantumEditorAuthoredTrackEditTransactionTests
     AuthoredTrackEditTransactionTests.cpp
 )
@@ -1142,6 +1185,8 @@ add_executable(
     QuantumEditorCenterlineVisualizationTests
     CenterlineVisualizationTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
 )
 
 target_include_directories(

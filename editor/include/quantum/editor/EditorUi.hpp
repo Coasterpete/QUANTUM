@@ -216,6 +216,7 @@ namespace quantum::editor
         float zoomSensitivity = 1.0F;
 
         bool gridVisible = true;
+        bool anchorsVisible = true;
         bool centerlineVisible = true;
         bool leftRailVisible = true;
         bool rightRailVisible = true;
@@ -346,6 +347,8 @@ namespace quantum::editor
             float logicalWidth,
             float logicalHeight
         );
+        void drawViewportTrackAnchors();
+        void selectTrackAnchor(std::size_t anchorIndex);
         static void retireViewportTexture(void* userData) noexcept;
         void removeViewportTexture() noexcept;
         void shutdownVulkanBackend() noexcept;
@@ -371,6 +374,7 @@ namespace quantum::editor
         double viewportAspectRatio_ = 16.0 / 9.0;
         const coaster::AuthoredTrack* authoredTrack_ = nullptr;
         std::size_t selectedSection_ = 0;
+        std::optional<std::size_t> selectedTrackAnchor_ = 0;
 
         // Per-channel editing state, indexed by RateChannel. Numeric buffers
         // present the selected marker value (or a selected segment's End

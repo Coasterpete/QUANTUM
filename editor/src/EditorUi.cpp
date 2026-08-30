@@ -6,6 +6,7 @@
 #include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/editor/ViewportPicking.hpp>
+#include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -16,6 +17,8 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 #include <imgui_internal.h>
+
+#include <glm/geometric.hpp>
 
 #include <algorithm>
 #include <array>
@@ -3518,6 +3521,7 @@ namespace quantum::editor
         window_ = window;
         authoredTrack_ = &authoredTrack;
         selectedSection_ = 0;
+        selectedTrackAnchor_ = 0;
         for (std::size_t channelIndex = 0;
             channelIndex < rateChannelCount;
             ++channelIndex)
@@ -3899,19 +3903,39 @@ namespace quantum::editor
                     normalizedY,
                     aspectRatio
                 );
-                const auto hit = pickViewportSection(
-                    *centerlineVisualization_,
-                    viewportCamera_,
-                    ray,
-                    pixelHeight,
-                    visibleTrackCurveMask(viewportSettings_)
-                );
+                const auto anchorHit = viewportSettings_.anchorsVisible
+                    ? pickViewportTrackAnchor(
+                        centerlineVisualization_->anchors,
+                        viewportCamera_,
+                        {normalizedX, normalizedY},
+                        pixelWidth,
+                        pixelHeight
+                    )
+                    : std::nullopt;
 
-                // Empty viewport space deliberately preserves selection,
-                // matching the Section List's always-selected behavior.
-                if (hit.has_value())
+                // Semantic anchors have priority inside their marker radius.
+                // Only an anchor miss falls through to reference-curve
+                // picking, so a shared boundary cannot be hidden by its line.
+                if (anchorHit.has_value())
                 {
-                    selectSection(hit->sectionIndex);
+                    selectTrackAnchor(anchorHit->anchorIndex);
+                }
+                else
+                {
+                    const auto trackHit = pickViewportSection(
+                        *centerlineVisualization_,
+                        viewportCamera_,
+                        ray,
+                        pixelHeight,
+                        visibleTrackCurveMask(viewportSettings_)
+                    );
+
+                    // Empty viewport space deliberately preserves selection,
+                    // matching the Section List's always-selected behavior.
+                    if (trackHit.has_value())
+                    {
+                        selectSection(trackHit->sectionIndex);
+                    }
                 }
             }
         }
@@ -4022,6 +4046,219 @@ namespace quantum::editor
 
         vulkan.setViewportViewProjection(
             viewportCamera_.viewProjection(aspectRatio)
+        );
+        drawViewportTrackAnchors();
+    }
+
+    void EditorUi::drawViewportTrackAnchors()
+    {
+        if (!viewportSettings_.anchorsVisible
+            || centerlineVisualization_ == nullptr
+            || centerlineVisualization_->anchors.empty())
+        {
+            return;
+        }
+
+        const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+        const ImVec2 imageMaximum = ImGui::GetItemRectMax();
+        const float imageWidth = imageMaximum.x - imageMinimum.x;
+        const float imageHeight = imageMaximum.y - imageMinimum.y;
+        if (imageWidth <= 0.0F || imageHeight <= 0.0F)
+        {
+            return;
+        }
+
+        ImDrawList* const drawList = ImGui::GetWindowDrawList();
+        const auto screenPosition = [imageMinimum, imageWidth, imageHeight](
+            const ViewportProjectedPoint& point)
+        {
+            return ImVec2{
+                imageMinimum.x + static_cast<float>(
+                    point.normalizedPosition.x) * imageWidth,
+                imageMinimum.y + static_cast<float>(
+                    point.normalizedPosition.y) * imageHeight
+            };
+        };
+        const auto visibleProjection = [](const ViewportProjectedPoint& point)
+        {
+            return point.normalizedPosition.x >= 0.0
+                && point.normalizedPosition.x <= 1.0
+                && point.normalizedPosition.y >= 0.0
+                && point.normalizedPosition.y <= 1.0;
+        };
+
+        constexpr ImU32 markerOutline = IM_COL32(8, 10, 14, 245);
+        constexpr ImU32 markerFill = IM_COL32(68, 205, 230, 235);
+        constexpr ImU32 selectedFill = IM_COL32(255, 190, 48, 255);
+
+        const auto drawMarker = [&](const ViewportTrackAnchor& anchor,
+            const bool selected)
+        {
+            const auto projected = projectViewportPoint(
+                viewportCamera_,
+                anchor.position,
+                viewportAspectRatio_
+            );
+            if (!projected.has_value() || !visibleProjection(*projected))
+            {
+                return;
+            }
+
+            const ImVec2 center = screenPosition(*projected);
+            const float radius = selected ? 7.0F : 5.0F;
+            drawList->AddCircleFilled(center, radius + 2.0F, markerOutline, 20);
+            drawList->AddCircleFilled(
+                center,
+                radius,
+                selected ? selectedFill : markerFill,
+                20
+            );
+            if (selected)
+            {
+                drawList->AddCircle(
+                    center,
+                    radius + 3.5F,
+                    IM_COL32(255, 255, 255, 235),
+                    24,
+                    1.5F
+                );
+            }
+        };
+
+        for (const ViewportTrackAnchor& anchor :
+            centerlineVisualization_->anchors)
+        {
+            if (!selectedTrackAnchor_.has_value()
+                || anchor.anchorIndex != *selectedTrackAnchor_)
+            {
+                drawMarker(anchor, false);
+            }
+        }
+
+        const ViewportTrackAnchor* selectedAnchor = nullptr;
+        if (selectedTrackAnchor_.has_value())
+        {
+            for (const ViewportTrackAnchor& anchor :
+                centerlineVisualization_->anchors)
+            {
+                if (anchor.anchorIndex == *selectedTrackAnchor_)
+                {
+                    selectedAnchor = &anchor;
+                    break;
+                }
+            }
+        }
+
+        if (selectedAnchor == nullptr)
+        {
+            return;
+        }
+
+        const auto projectedOrigin = projectViewportPoint(
+            viewportCamera_,
+            selectedAnchor->position,
+            viewportAspectRatio_
+        );
+        if (!projectedOrigin.has_value()
+            || !visibleProjection(*projectedOrigin))
+        {
+            return;
+        }
+
+        // A fixed apparent axis size makes the exact rider frame readable at
+        // both track-wide and close inspection distances. This is an
+        // orientation indicator, not an interactive gizmo.
+        const double scaleDistance = viewportCamera_.projection()
+                == ViewportProjection::Perspective
+            ? glm::length(
+                selectedAnchor->position - viewportCamera_.position())
+            : viewportCamera_.distance();
+        const double worldUnitsPerPixel = 2.0 * scaleDistance
+            * std::tan(0.5 * viewportCamera_.verticalFieldOfView())
+            / static_cast<double>(imageHeight);
+        const double axisLength = 34.0 * worldUnitsPerPixel;
+        const ImVec2 origin = screenPosition(*projectedOrigin);
+
+        const auto drawAxis = [&](const glm::dvec3& axis,
+            const ImU32 color,
+            const char* const label)
+        {
+            const auto projectedEnd = projectViewportPoint(
+                viewportCamera_,
+                selectedAnchor->position + axisLength * axis,
+                viewportAspectRatio_
+            );
+            if (!projectedEnd.has_value()
+                || !visibleProjection(*projectedEnd))
+            {
+                return;
+            }
+
+            const ImVec2 end = screenPosition(*projectedEnd);
+            drawList->AddLine(origin, end, markerOutline, 4.0F);
+            drawList->AddLine(origin, end, color, 2.25F);
+            drawList->AddCircleFilled(end, 3.0F, color, 12);
+            drawList->AddText(
+                ImVec2{end.x + 4.0F, end.y - 7.0F},
+                color,
+                label
+            );
+        };
+
+        drawAxis(selectedAnchor->forward,
+            IM_COL32(255, 92, 76, 255), "T");
+        drawAxis(selectedAnchor->lateral,
+            IM_COL32(90, 224, 138, 255), "L");
+        drawAxis(selectedAnchor->up,
+            IM_COL32(102, 154, 255, 255), "U");
+        drawMarker(*selectedAnchor, true);
+
+        char anchorLabel[32]{};
+        std::snprintf(
+            anchorLabel,
+            sizeof(anchorLabel),
+            "Anchor %zu",
+            selectedAnchor->anchorIndex
+        );
+        drawList->AddText(
+            ImVec2{origin.x + 12.0F, origin.y + 8.0F},
+            IM_COL32(255, 232, 162, 255),
+            anchorLabel
+        );
+
+        const char* status = nullptr;
+        switch (selectedAnchor->kind)
+        {
+        case ViewportTrackAnchorKind::Start:
+            status = "Track start - no authored start pose; read-only";
+            break;
+        case ViewportTrackAnchorKind::Interior:
+            status = "Shared region boundary - constrained editing not implemented yet";
+            break;
+        case ViewportTrackAnchorKind::End:
+            status = "Final boundary - no terminal pose constraint; read-only";
+            break;
+        }
+
+        const ImVec2 textSize = ImGui::CalcTextSize(status);
+        const ImVec2 statusMinimum{
+            imageMinimum.x + 9.0F,
+            imageMaximum.y - textSize.y - 17.0F
+        };
+        const ImVec2 statusMaximum{
+            statusMinimum.x + textSize.x + 16.0F,
+            statusMinimum.y + textSize.y + 8.0F
+        };
+        drawList->AddRectFilled(
+            statusMinimum,
+            statusMaximum,
+            IM_COL32(9, 12, 17, 220),
+            4.0F
+        );
+        drawList->AddText(
+            ImVec2{statusMinimum.x + 8.0F, statusMinimum.y + 4.0F},
+            IM_COL32(220, 225, 232, 255),
+            status
         );
     }
 
@@ -4461,6 +4698,21 @@ namespace quantum::editor
                 frameWholeTrack();
             }
             ImGui::SameLine();
+            if (ImGui::SmallButton(
+                viewportSettings_.anchorsVisible
+                    ? "Anchors: On"
+                    : "Anchors: Off"))
+            {
+                viewportSettings_.anchorsVisible =
+                    !viewportSettings_.anchorsVisible;
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Debug,
+                    "CFG",
+                    "viewport semantic anchors %s",
+                    viewportSettings_.anchorsVisible ? "visible" : "hidden"
+                );
+            }
+            ImGui::SameLine();
             if (ImGui::SmallButton("Settings"))
             {
                 viewportSettingsWindowOpen_
@@ -4530,6 +4782,7 @@ namespace quantum::editor
         if (selectedSection_ >= sectionCount)
         {
             selectedSection_ = sectionCount - 1;
+            selectedTrackAnchor_ = selectedSection_;
             if (riderLoadDiagnostics_.sectionCount() == sectionCount)
             {
                 riderLoadDiagnostics_.selectSection(selectedSection_);
@@ -5253,8 +5506,16 @@ namespace quantum::editor
         const std::size_t sectionCount = authoredTrack_ != nullptr
             ? authoredTrack_->sectionCount()
             : 0;
-        if (sectionCount == 0 || index >= sectionCount
-            || (index == selectedSection_ && !refreshIfSelected))
+        if (sectionCount == 0 || index >= sectionCount)
+        {
+            return;
+        }
+
+        selectedTrackAnchor_ = selectionForViewportTrackRegion(
+            index,
+            sectionCount
+        ).anchorIndex;
+        if (index == selectedSection_ && !refreshIfSelected)
         {
             return;
         }
@@ -5358,6 +5619,48 @@ namespace quantum::editor
             coaster::sectionLength(selected);
     }
 
+    void EditorUi::selectTrackAnchor(const std::size_t anchorIndex)
+    {
+        if (authoredTrack_ == nullptr
+            || centerlineVisualization_ == nullptr)
+        {
+            return;
+        }
+
+        const std::size_t regionCount = authoredTrack_->sectionCount();
+        if (regionCount == 0 || anchorIndex > regionCount
+            || anchorIndex >= centerlineVisualization_->anchors.size())
+        {
+            return;
+        }
+
+        const ViewportTrackSelection selection =
+            selectionForViewportTrackAnchor(anchorIndex, regionCount);
+        selectSection(selection.regionIndex);
+        selectedTrackAnchor_ = selection.anchorIndex;
+
+        const ViewportTrackAnchor& anchor =
+            centerlineVisualization_->anchors[anchorIndex];
+        const char* kind = "interior";
+        if (anchor.kind == ViewportTrackAnchorKind::Start)
+        {
+            kind = "start";
+        }
+        else if (anchor.kind == ViewportTrackAnchorKind::End)
+        {
+            kind = "end";
+        }
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Debug,
+            "SEL",
+            "anchor=%zu kind=%s region=%zu distance=%.6f readOnly=1",
+            anchorIndex,
+            kind,
+            selection.regionIndex,
+            anchor.distance
+        );
+    }
+
     void EditorUi::synchronizeSegmentEndpointValue(
         const RateChannel channel,
         const std::uint32_t segmentId,
@@ -5439,6 +5742,17 @@ namespace quantum::editor
         const CenterlineVisualization& visualization) noexcept
     {
         centerlineVisualization_ = &visualization;
+        if (visualization.anchors.empty())
+        {
+            selectedTrackAnchor_.reset();
+        }
+        else
+        {
+            selectedTrackAnchor_ = std::min(
+                selectedSection_,
+                visualization.anchors.size() - 1
+            );
+        }
     }
 
     void EditorUi::setRiderLoadHistory(coaster::RiderLoadHistory history)
@@ -5569,6 +5883,7 @@ namespace quantum::editor
     void EditorUi::resetTransientState()
     {
         selectedSection_ = 0;
+        selectedTrackAnchor_ = 0;
         if (riderLoadDiagnostics_.sectionCount() > 0)
         {
             riderLoadDiagnostics_.selectSection(0);

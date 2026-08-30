@@ -416,6 +416,34 @@ Vulkan track-curve buffer. An Editor-owned orbit camera supplies the
 view-projection matrix and supports navigation and region/whole-track framing.
 Viewport resize only recreates the offscreen color/depth target.
 
+### Semantic viewport region anchors
+
+The Editor also derives one semantic boundary anchor for every authored-track
+boundary, so an N-region track exposes N+1 anchors. Anchor zero is the exact
+initial authored-track pose, every interior anchor is the single shared pose
+between the regions on both sides, and the final anchor is the exact terminal
+pose. These anchors come from Core's chained kinematic integration endpoints;
+they are independent of the 0.75-unit visualization sample grid and are not
+spline control points or generated centerline samples.
+
+Anchor selection is projected through the existing authoritative region
+selection. Anchor zero selects region zero, an interior anchor selects the
+following region, and the final anchor selects the final region. This is the
+same right-continuous convention used at kinematic section boundaries. Section
+List and reference-curve selections highlight the entry anchor of the selected
+region, replacing any stale anchor-specific highlight. Screen-space picking
+uses a fixed marker radius, gives an anchor hit priority over a track-curve hit,
+and resolves overlaps by pointer distance, depth, then semantic anchor index.
+
+The selected anchor displays its complete right-handed rider frame as a
+non-interactive viewport orientation indicator. All anchors are read-only in
+this milestone: the document has no authored world/start pose or terminal pose
+constraint, and shared interior boundaries require a future constrained or
+inverse solve across neighboring regions. No generated vertices are moved and
+no no-op transform gizmo is exposed. A later manipulation path must propose
+authored-state changes through `AuthoredTrackEditTransaction` before publishing
+updated anchors or selection.
+
 ### Authored edit transactions
 
 Authored document edits use the following acceptance and publication invariant:
