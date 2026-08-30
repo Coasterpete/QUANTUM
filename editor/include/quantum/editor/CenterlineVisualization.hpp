@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <glm/vec3.hpp>
@@ -44,6 +45,10 @@ namespace quantum::editor
 
         // One slice per authored section index.
         std::vector<CenterlineSectionSlice> sectionSlices;
+
+        // Exact semantic region-boundary poses. These are extracted from the
+        // authored kinematic path independently of the sampled curve runs.
+        std::vector<ViewportTrackAnchor> anchors;
 
         // Camera-fit bounds of the solved centerline only; the other curves
         // offset from it by small track-style distances.

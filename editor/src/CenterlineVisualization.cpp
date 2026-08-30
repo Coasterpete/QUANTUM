@@ -106,6 +106,8 @@ namespace quantum::editor
             return visualization;
         }
 
+        visualization.anchors = createViewportTrackAnchors(track);
+
         visualization.samples = coaster::integrateAuthoredTrack(
             track,
             centerlineVisualizationSampleSpacing

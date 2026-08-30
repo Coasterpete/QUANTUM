@@ -11,6 +11,7 @@ add_executable(
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
     src/ViewportPicking.cpp
+    src/ViewportTrackAnchors.cpp
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/DocumentState.hpp
@@ -24,6 +25,7 @@ add_executable(
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp
     include/quantum/editor/ViewportPicking.hpp
+    include/quantum/editor/ViewportTrackAnchors.hpp
     ${PROJECT_SOURCE_DIR}/engine/src/Application.cpp
     ${PROJECT_SOURCE_DIR}/engine/include/quantum/engine/Application.hpp
 )
