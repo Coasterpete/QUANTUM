@@ -6,10 +6,10 @@
 #include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/editor/ViewportPicking.hpp>
+#include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <SDL3/SDL_filesystem.h>
-#include <SDL3/SDL_log.h>
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_stdinc.h>
 #include <imgui.h>
@@ -1601,9 +1601,10 @@ namespace
     void logTransitionEditorInputSettings(
         const quantum::editor::TransitionEditorInputSettings& settings)
     {
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
-            "[CFG] transition editor input: normalGain=%.2f fineGain=%.2f "
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Info,
+            "CFG",
+            "transition editor input: normalGain=%.2f fineGain=%.2f "
             "snapping=%s increment=%.4f distSnapping=%s distIncrement=%.2f",
             settings.normalDragGain,
             settings.fineDragGain,
@@ -1619,8 +1620,9 @@ namespace
 
         if (preferencePath == nullptr)
         {
-            SDL_LogWarn(
-                SDL_LOG_CATEGORY_APPLICATION,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Warning,
+                "CFG",
                 "SDL_GetPrefPath failed while locating editor settings: %s. "
                 "Dear ImGui layout persistence will be disabled.",
                 SDL_GetError()
@@ -1683,8 +1685,9 @@ namespace
         }
 
         io.FontDefault = font;
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Info,
+            "APP",
             "Loaded bundled Red Hat Mono SemiBold UI font: %s",
             fontPath.string().c_str()
         );
@@ -1694,8 +1697,9 @@ namespace
     {
         if (result != VK_SUCCESS)
         {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Error,
+                "VK:ImGui",
                 "Dear ImGui Vulkan backend reported VkResult %d.",
                 static_cast<int>(result)
             );
@@ -1742,9 +1746,10 @@ namespace
     {
         // One-line audit per committed change so tooling can track the
         // live viewport configuration without screen capture.
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
-            "[CFG] viewport settings orthographic=%d fov=%.1f "
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Info,
+            "CFG",
+            "viewport settings orthographic=%d fov=%.1f "
             "orbit=%.2f zoom=%.2f grid=%d centerline=%d leftRail=%d "
             "rightRail=%d heartline=%d",
             settings.orthographic ? 1 : 0,
@@ -3597,8 +3602,9 @@ namespace quantum::editor
             throw;
         }
 
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
+        quantum::logging::logMessage(
+            quantum::logging::LogLevel::Info,
+            "APP",
             "Dear ImGui initialized with SDL3, Vulkan, and docking support."
         );
     }
@@ -3688,8 +3694,9 @@ namespace quantum::editor
 
         if (result != VK_SUCCESS)
         {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_RENDER,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Error,
+                "VK:ImGui",
                 "vkDeviceWaitIdle failed before Dear ImGui shutdown with "
                 "VkResult %d.",
                 static_cast<int>(result)
@@ -3710,9 +3717,10 @@ namespace quantum::editor
         {
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] %s btn=%d pos=(%.0f,%.0f)",
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "%s btn=%d pos=(%.0f,%.0f)",
                     event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                         ? "MOUSE_DOWN"
                         : "MOUSE_UP",
@@ -3722,29 +3730,33 @@ namespace quantum::editor
                 );
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] RESIZED %dx%d",
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Debug,
+                    "INP",
+                    "RESIZED %dx%d",
                     event.window.data1,
                     event.window.data2
                 );
                 break;
             case SDL_EVENT_WINDOW_MAXIMIZED:
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] MAXIMIZED"
+                quantum::logging::logMessage(
+                    quantum::logging::LogLevel::Debug,
+                    "INP",
+                    "MAXIMIZED"
                 );
                 break;
             case SDL_EVENT_WINDOW_MINIMIZED:
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] MINIMIZED"
+                quantum::logging::logMessage(
+                    quantum::logging::LogLevel::Debug,
+                    "INP",
+                    "MINIMIZED"
                 );
                 break;
             case SDL_EVENT_WINDOW_RESTORED:
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] RESTORED"
+                quantum::logging::logMessage(
+                    quantum::logging::LogLevel::Debug,
+                    "INP",
+                    "RESTORED"
                 );
                 break;
             default:
@@ -3911,14 +3923,24 @@ namespace quantum::editor
         {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] CAMERA_GESTURE_START Orbit MousePos=(%.0f,%.0f)", io.MousePos.x, io.MousePos.y);
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "CAMERA_GESTURE_START Orbit MousePos=(%.0f,%.0f)",
+                    io.MousePos.x,
+                    io.MousePos.y
+                );
                 cameraGesture_ = CameraGesture::Orbit;
             }
             else if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] CAMERA_GESTURE_START Pan MousePos=(%.0f,%.0f)", io.MousePos.x, io.MousePos.y);
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "CAMERA_GESTURE_START Pan MousePos=(%.0f,%.0f)",
+                    io.MousePos.x,
+                    io.MousePos.y
+                );
                 cameraGesture_ = CameraGesture::Pan;
             }
         }
@@ -3927,8 +3949,11 @@ namespace quantum::editor
         {
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] CAMERA_GESTURE_END Orbit");
+                quantum::logging::logMessage(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "CAMERA_GESTURE_END Orbit"
+                );
                 cameraGesture_ = CameraGesture::None;
             }
             else
@@ -3947,8 +3972,11 @@ namespace quantum::editor
         {
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle))
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] CAMERA_GESTURE_END Pan");
+                quantum::logging::logMessage(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "CAMERA_GESTURE_END Pan"
+                );
                 cameraGesture_ = CameraGesture::None;
             }
             else
@@ -4094,9 +4122,10 @@ namespace quantum::editor
                 &viewportSettingsWindowOpen_
             ))
             {
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[CFG] viewport settings window %s",
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Debug,
+                    "CFG",
+                    "viewport settings window %s",
                     viewportSettingsWindowOpen_ ? "open" : "closed"
                 );
             }
@@ -4111,9 +4140,10 @@ namespace quantum::editor
                 &inputSettingsWindowOpen_
             ))
             {
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[CFG] transition editor input window %s",
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Debug,
+                    "CFG",
+                    "transition editor input window %s",
                     inputSettingsWindowOpen_ ? "open" : "closed"
                 );
             }
@@ -4133,9 +4163,10 @@ namespace quantum::editor
 
         viewportCamera_.applyPreset(preset);
         initialViewportFramePending_ = false;
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
-            "[INP] VIEW_PRESET %s",
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Debug,
+            "INP",
+            "VIEW_PRESET %s",
             presetNames[static_cast<std::size_t>(preset)]
         );
     }
@@ -4146,9 +4177,10 @@ namespace quantum::editor
 
         if (slice == nullptr)
         {
-            SDL_LogInfo(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "[INP] VIEW_TRACK rejected reason=no-valid-section"
+            quantum::logging::logMessage(
+                quantum::logging::LogLevel::Debug,
+                "INP",
+                "VIEW_TRACK rejected reason=no-valid-section"
             );
             return;
         }
@@ -4196,9 +4228,10 @@ namespace quantum::editor
         }
 
         initialViewportFramePending_ = false;
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
-            "[INP] VIEW_%s applied section=%zu",
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Debug,
+            "INP",
+            "VIEW_%s applied section=%zu",
             walkingView ? "WALKING" : "TRACK",
             selectedSection_
         );
@@ -4210,9 +4243,10 @@ namespace quantum::editor
 
         if (slice == nullptr)
         {
-            SDL_LogInfo(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "[INP] VIEW_FOCUS rejected reason=no-valid-section"
+            quantum::logging::logMessage(
+                quantum::logging::LogLevel::Debug,
+                "INP",
+                "VIEW_FOCUS rejected reason=no-valid-section"
             );
             return;
         }
@@ -4232,17 +4266,19 @@ namespace quantum::editor
             radius,
             viewportAspectRatio_))
         {
-            SDL_LogInfo(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "[INP] VIEW_FOCUS rejected reason=invalid-geometry"
+            quantum::logging::logMessage(
+                quantum::logging::LogLevel::Debug,
+                "INP",
+                "VIEW_FOCUS rejected reason=invalid-geometry"
             );
             return;
         }
 
         initialViewportFramePending_ = false;
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
-            "[INP] VIEW_FOCUS applied section=%zu",
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Debug,
+            "INP",
+            "VIEW_FOCUS applied section=%zu",
             selectedSection_
         );
     }
@@ -4251,9 +4287,10 @@ namespace quantum::editor
     {
         viewportCamera_.frame(viewportAspectRatio_);
         initialViewportFramePending_ = false;
-        SDL_LogInfo(
-            SDL_LOG_CATEGORY_APPLICATION,
-            "[INP] VIEW_FRAME_ALL"
+        quantum::logging::logMessage(
+            quantum::logging::LogLevel::Debug,
+            "INP",
+            "VIEW_FRAME_ALL"
         );
     }
 
@@ -4310,9 +4347,14 @@ namespace quantum::editor
 
         if (swapchainGeneration_ != vulkan.swapchainGeneration())
         {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "[BEG] swapchain gen changed %llu->%llu reinit",
-                swapchainGeneration_, vulkan.swapchainGeneration());
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Debug,
+                "VK",
+                "swapchain generation changed %llu->%llu; reinitializing "
+                "Dear ImGui",
+                swapchainGeneration_,
+                vulkan.swapchainGeneration()
+            );
             shutdownVulkanBackend();
             initializeVulkanBackend(vulkan);
         }
@@ -4423,9 +4465,10 @@ namespace quantum::editor
             {
                 viewportSettingsWindowOpen_
                     = !viewportSettingsWindowOpen_;
-                SDL_LogInfo(
-                    SDL_LOG_CATEGORY_APPLICATION,
-                    "[CFG] viewport settings window %s",
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Debug,
+                    "CFG",
+                    "viewport settings window %s",
                     viewportSettingsWindowOpen_ ? "open" : "closed"
                 );
             }
@@ -4924,8 +4967,10 @@ namespace quantum::editor
                 );
             }
 
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "[INP] TRANSITION_SPLIT channel=%d segment=%u "
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Debug,
+                "INP",
+                "TRANSITION_SPLIT channel=%d segment=%u "
                 "distance=%.6f",
                 static_cast<int>(request.channel),
                 request.segmentId,
@@ -4944,8 +4989,10 @@ namespace quantum::editor
         {
             const TransitionEditorEdit::RemoveRequest& request =
                 *transitionEdit.removeRequest;
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "[INP] TRANSITION_REMOVE channel=%d segment=%u",
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Debug,
+                "INP",
+                "TRANSITION_REMOVE channel=%d segment=%u",
                 static_cast<int>(request.channel),
                 request.segmentId
             );
@@ -4981,8 +5028,10 @@ namespace quantum::editor
             if (transitionEdit.click->endpoint
                 != ScalarProfileEndpoint::None)
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] TRANSITION_CLICK channel=%zu endpoint=%d "
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "TRANSITION_CLICK channel=%zu endpoint=%d "
                     "segment=%u",
                     clickChannel,
                     static_cast<int>(transitionEdit.click->endpoint),
@@ -5048,8 +5097,10 @@ namespace quantum::editor
                     clickedSegmentId = plotProfile.segments.back().id;
                 }
 
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[INP] TRANSITION_PLOT_CLICK channel=%zu segment=%u",
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Trace,
+                    "INP",
+                    "TRANSITION_PLOT_CLICK channel=%zu segment=%u",
                     clickChannel,
                     clickedSegmentId);
                 selectedSegmentIds_[clickChannel] = clickedSegmentId;
@@ -5084,15 +5135,19 @@ namespace quantum::editor
 
         if (anyEndpointDragReleased)
         {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "[INP] DRAG_RELEASED drag was=%d",
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Trace,
+                "INP",
+                "DRAG_RELEASED drag was=%d",
                 static_cast<int>(firstActiveEndpoint(endpointDrags_)));
             // One summary line per completed drag gesture: continuous
             // edits regenerate the track silently every frame.
             if (pendingDragSummary_)
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[EDIT] section=%zu channel=%d endpoint=%d value=%.6f "
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Info,
+                    "EDIT",
+                    "section=%zu channel=%d endpoint=%d value=%.6f "
                     "segment=%u",
                     dragSummaryEdit_.sectionIndex,
                     static_cast<int>(dragSummaryEdit_.channel),
@@ -5103,8 +5158,10 @@ namespace quantum::editor
             }
             if (pendingDistanceSummary_)
             {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "[EDIT] section=%zu channel=%d endpoint=%d "
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Info,
+                    "EDIT",
+                    "section=%zu channel=%d endpoint=%d "
                     "segment=%u distance=%.6f",
                     distanceSummaryEdit_.sectionIndex,
                     static_cast<int>(distanceSummaryEdit_.channel),
@@ -5243,9 +5300,10 @@ namespace quantum::editor
                 sectionRateChannel(selected, RateChannel::Pitch);
             const auto& yawProfile =
                 sectionRateChannel(selected, RateChannel::Yaw);
-            SDL_LogInfo(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "[SEL] selected=%zu rollEnd=%.6f pitchEnd=%.6f "
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Debug,
+                "SEL",
+                "selected=%zu rollEnd=%.6f pitchEnd=%.6f "
                 "yawEnd=%.6f",
                 selectedSection_,
                 rollProfile.segments.back().transition.valueEnd,
@@ -5269,9 +5327,10 @@ namespace quantum::editor
             const auto& arc = std::get<coaster::PlanarArcRegion>(
                 std::get<coaster::GeometryRegion>(
                     selected.region).construction);
-            SDL_LogInfo(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "[SEL] selected=%zu kind=planarArc length=%.6f "
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Debug,
+                "SEL",
+                "selected=%zu kind=planarArc length=%.6f "
                 "radius=%.6f sweptAngle=%.6f planeTilt=%.6f "
                 "bankChange=%.6f",
                 selectedSection_,

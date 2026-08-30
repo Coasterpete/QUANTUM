@@ -1,4 +1,5 @@
 #include <quantum/editor/PlatformDialogs.hpp>
+#include <quantum/engine/Logging.hpp>
 
 #ifdef _WIN32
 
@@ -20,8 +21,9 @@ namespace
 
         if (FAILED(hr))
         {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Error,
+                "FILE",
                 "COM initialization failed for file dialog: 0x%08lx",
                 static_cast<unsigned long>(hr)
             );
@@ -39,8 +41,9 @@ namespace
 
         if (FAILED(hr) || dialog == nullptr)
         {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Error,
+                "FILE",
                 "Failed to create file dialog: 0x%08lx",
                 static_cast<unsigned long>(hr)
             );
@@ -73,8 +76,9 @@ namespace
 
         if (FAILED(hr))
         {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Error,
+                "FILE",
                 "File dialog failed: 0x%08lx",
                 static_cast<unsigned long>(hr)
             );

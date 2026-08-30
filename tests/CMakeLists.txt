@@ -1,4 +1,38 @@
 add_executable(
+    QuantumEngineLoggingTests
+    LoggingTests.cpp
+)
+
+target_link_libraries(
+    QuantumEngineLoggingTests
+    PRIVATE
+        Quantum::Engine
+)
+
+target_compile_features(
+    QuantumEngineLoggingTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineLoggingTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEngine.Logging
+    COMMAND QuantumEngineLoggingTests
+)
+
+set_tests_properties(
+    QuantumEngine.Logging
+    PROPERTIES
+        LABELS "engine;logging"
+)
+
+add_executable(
     QuantumCoreTests
     BSplineCurveTests.cpp
 )

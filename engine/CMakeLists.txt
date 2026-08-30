@@ -47,7 +47,9 @@ add_custom_target(
 target_sources(
     QuantumEngine
     PRIVATE
+        src/Logging.cpp
         src/VulkanContext.cpp
+        include/quantum/engine/Logging.hpp
         include/quantum/renderer/VulkanContext.hpp
 )
 
