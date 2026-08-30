@@ -70,10 +70,21 @@ namespace quantum::editor
         );
         void frame(double aspectRatio);
 
+        // Frames axis-aligned world bounds in the current view orientation.
+        // Unlike frameSphere(), this uses their projected width and height so
+        // elongated track bounds are not reduced to an excessively large
+        // sphere. Returns false without moving the camera for invalid or
+        // zero-extent bounds.
+        bool frameBounds(
+            const glm::dvec3& minimumPosition,
+            const glm::dvec3& maximumPosition,
+            double aspectRatio
+        );
+
         // Frames an arbitrary sphere with the same margin formula as
-        // frame(); returns false (leaving the camera unchanged) for a
-        // non-finite center or a non-positive radius, which is how an
-        // invalid selection is reported to callers.
+        // other framing operations; returns false (leaving the camera
+        // unchanged) for a non-finite center or a non-positive radius, which
+        // is how an invalid selection is reported to callers.
         bool frameSphere(
             const glm::dvec3& center,
             double radius,
@@ -141,6 +152,8 @@ namespace quantum::editor
         [[nodiscard]] glm::dvec3 up() const noexcept;
 
         glm::dvec3 focus_{0.0};
+        glm::dvec3 minimumBounds_{0.0};
+        glm::dvec3 maximumBounds_{0.0};
         glm::dvec3 boundsCenter_{0.0};
         double boundsRadius_ = 0.0;
         double yaw_ = 0.0;
