@@ -11,6 +11,8 @@ target_sources(
         src/ChannelProfileEditing.cpp
         src/CircuitCompletion.cpp
         src/CoasterDocument.cpp
+        src/ForceDrivenRegion.cpp
+        src/TrackPhysicalSettings.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
@@ -24,6 +26,9 @@ target_sources(
         include/quantum/coaster/CircuitCompletion.hpp
         include/quantum/coaster/CoasterDocument.hpp
         include/quantum/coaster/GeometricSection.hpp
+        include/quantum/coaster/ForceDrivenRegion.hpp
+        include/quantum/coaster/TrackGeneration.hpp
+        include/quantum/coaster/TrackPhysicalSettings.hpp
         include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLoads.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp

@@ -11,8 +11,6 @@ namespace quantum::coaster
 {
     namespace
     {
-        // Single-construction access into GeometryRegion until more
-        // constructions exist; keeps dispatch sites uniform.
         [[nodiscard]] const PlanarArcRegion& planarArcConstruction(
             const GeometryRegion& region)
         {
@@ -21,8 +19,8 @@ namespace quantum::coaster
 
             if (construction == nullptr)
             {
-                throw std::logic_error(
-                    "Unsupported geometry construction kind."
+                throw std::invalid_argument(
+                    "This operation requires a Planar Arc construction."
                 );
             }
 
@@ -40,6 +38,14 @@ namespace quantum::coaster
         void validateSectionLocalDomain(
             const AuthoredTrackSection& section)
         {
+            if ((section.kind == RegionKind::RateProfiles
+                    && !std::holds_alternative<RateProfileRegion>(section.region))
+                || (section.kind == RegionKind::Geometry
+                    && !std::holds_alternative<GeometryRegion>(section.region))
+                || (section.kind != RegionKind::RateProfiles && section.kind != RegionKind::Geometry))
+            {
+                throw std::invalid_argument("Authored section kind and payload disagree.");
+            }
             // Track sections must author their content over the canonical
             // section-local domain [0, section.length] so that chaining and
             // rescaling stay unambiguous. Per-kind validation remains
@@ -60,10 +66,13 @@ namespace quantum::coaster
                     }
                     else
                     {
-                        validatePlanarArcRegion(
-                            planarArcConstruction(authored),
-                            section.length
-                        );
+                        std::visit([&](const auto& construction)
+                        {
+                            if constexpr (std::is_same_v<std::decay_t<decltype(construction)>, PlanarArcRegion>)
+                                validatePlanarArcRegion(construction, section.length);
+                            else
+                                validateForceDrivenRegion(construction, section.length);
+                        }, authored.construction);
                     }
                 },
                 section.region
@@ -237,7 +246,7 @@ namespace quantum::coaster
         const double scale = newLength / oldLength;
 
         std::visit(
-            [&scale, newLength](auto& authored)
+            [&scale, oldLength, newLength](auto& authored)
             {
                 using AuthoredRegion = std::decay_t<decltype(authored)>;
 
@@ -266,7 +275,7 @@ namespace quantum::coaster
                 else
                 {
                     std::visit(
-                        [&scale, newLength](auto& construction)
+                        [oldLength, newLength](auto& construction)
                         {
                             using Construction =
                                 std::decay_t<decltype(construction)>;
@@ -286,9 +295,24 @@ namespace quantum::coaster
                             }
                             else
                             {
-                                static_assert(
-                                    sizeof(Construction) == 0,
-                                    "Unhandled geometry construction.");
+                                ForceDrivenRegion resized = construction;
+                                for (ChannelProfile* channel : {&resized.targetNormalG,
+                                    &resized.targetLateralG, &resized.rollRate})
+                                {
+                                    for (ProfileSegment& segment : channel->segments)
+                                    {
+                                        // Normalize before multiplying so a finite
+                                        // length change need not form an overflowing ratio.
+                                        segment.transition.domainBegin =
+                                            (segment.transition.domainBegin / oldLength) * newLength;
+                                        segment.transition.domainEnd =
+                                            (segment.transition.domainEnd / oldLength) * newLength;
+                                    }
+                                    channel->segments.front().transition.domainBegin = 0.0;
+                                    channel->segments.back().transition.domainEnd = newLength;
+                                }
+                                validateForceDrivenRegion(resized, newLength);
+                                construction = std::move(resized);
                             }
                         },
                         authored.construction
@@ -309,6 +333,11 @@ namespace quantum::coaster
         }
 
         const double length = sectionLength(section);
+        if (isForceDrivenSection(section))
+        {
+            throw std::invalid_argument(
+                "Force-driven geometry cannot be converted to state-independent rate profiles.");
+        }
         const PlanarArcRegion arc = planarArcConstruction(
             std::get<GeometryRegion>(section.region));
 
@@ -348,7 +377,7 @@ namespace quantum::coaster
 
     void convertSectionToPlanarArc(AuthoredTrackSection& section)
     {
-        if (section.kind == RegionKind::Geometry)
+        if (section.kind == RegionKind::Geometry && !isForceDrivenSection(section))
         {
             return;
         }
@@ -690,10 +719,57 @@ namespace quantum::coaster
         return track;
     }
 
+    const TrackPhysicalSettings& AuthoredTrack::physicalSettings() const noexcept
+    {
+        return physicalSettings_;
+    }
+
+    void AuthoredTrack::setPhysicalSettings(const TrackPhysicalSettings& settings)
+    {
+        validateTrackPhysicalSettings(settings);
+        physicalSettings_ = settings;
+    }
+
+    AuthoredTrackSection createForceDrivenSection(const double length)
+    {
+        AuthoredTrackSection section = createRateProfileSection(length);
+        ForceDrivenRegion force{
+            createSingleSegmentChannel(length, 1.0, 1.0, math::TransitionType::Linear),
+            createZeroRateChannel(length), createZeroRateChannel(length)};
+        section.kind = RegionKind::Geometry;
+        section.region = GeometryRegion{std::move(force)};
+        return section;
+    }
+
+    bool isForceDrivenSection(const AuthoredTrackSection& section) noexcept
+    {
+        const auto* geometry = std::get_if<GeometryRegion>(&section.region);
+        return section.kind == RegionKind::Geometry && geometry
+            && std::holds_alternative<ForceDrivenRegion>(geometry->construction);
+    }
+
+    bool hasForceDrivenRegions(const AuthoredTrack& track) noexcept
+    {
+        for (std::size_t i = 0; i < track.sectionCount(); ++i)
+        {
+            if (isForceDrivenSection(track.section(i))) return true;
+        }
+        return false;
+    }
+
     std::vector<RiderLocalGeometryState> integrateAuthoredTrack(
         const AuthoredTrack& track,
         const double integrationSpacing)
     {
+        if (hasForceDrivenRegions(track))
+        {
+            const auto kinematics = integrateAuthoredTrackKinematics(track, integrationSpacing);
+            std::vector<RiderLocalGeometryState> states;
+            states.reserve(kinematics.size());
+            for (const auto& state : kinematics)
+                states.push_back({state.distance, state.position, state.frame});
+            return states;
+        }
         if (!std::isfinite(integrationSpacing) || integrationSpacing <= 0.0)
         {
             throw std::invalid_argument(
@@ -785,7 +861,8 @@ namespace quantum::coaster
 
     std::vector<TrackKinematicState> integrateAuthoredTrackKinematics(
         const AuthoredTrack& track,
-        const double integrationSpacing)
+        const double integrationSpacing,
+        const ForceDrivenIntegrationSettings& forceSettings)
     {
         if (!std::isfinite(integrationSpacing) || integrationSpacing <= 0.0)
         {
@@ -840,6 +917,23 @@ namespace quantum::coaster
                         }
                         else
                         {
+                            if (const auto* force = std::get_if<ForceDrivenRegion>(&authored.construction))
+                            {
+                                try
+                                {
+                                    return integrateForceDrivenRegion(position, frame, *force,
+                                        section.length, track.physicalSettings(), track.startPose().position,
+                                        integrationSpacing, forceSettings);
+                                }
+                                catch (const TrackGenerationError& error)
+                                {
+                                    auto failure = error.failure();
+                                    failure.sectionIndex = index;
+                                    if (failure.localDistance)
+                                        failure.cumulativeDistance = distanceOffset + *failure.localDistance;
+                                    throw TrackGenerationError(std::move(failure));
+                                }
+                            }
                             return integratePlanarArcRegionKinematics(
                                 position,
                                 frame,
@@ -863,6 +957,13 @@ namespace quantum::coaster
             {
                 TrackKinematicState state = localState;
                 state.distance += distanceOffset;
+                if (!std::isfinite(state.distance)
+                    || (!states.empty() && state.distance <= states.back().distance))
+                {
+                    throw TrackGenerationError({TrackGenerationFailureReason::IntegrationFailure,
+                        index, localState.distance, std::nullopt, std::nullopt,
+                        "Cumulative kinematic distances are not representable as a strictly increasing sequence."});
+                }
                 states.push_back(std::move(state));
             }
 
@@ -873,5 +974,42 @@ namespace quantum::coaster
         }
 
         return states;
+    }
+
+    TrackGenerationResult generateAuthoredTrackKinematics(
+        const AuthoredTrack& track, const double integrationSpacing,
+        const ForceDrivenIntegrationSettings& forceSettings)
+    {
+        std::optional<std::size_t> sectionIndex;
+        try
+        {
+            validateTrackPhysicalSettings(track.physicalSettings());
+            if (!std::isfinite(forceSettings.tolerance) || forceSettings.tolerance <= 0.0
+                || forceSettings.maximumRefinements > 50)
+                throw std::invalid_argument("Invalid force integration controls.");
+            for (std::size_t i = 0; i < track.sectionCount(); ++i)
+            {
+                sectionIndex = i;
+                validateSectionLocalDomain(track.section(i));
+            }
+            sectionIndex.reset();
+            return integrateAuthoredTrackKinematics(track, integrationSpacing, forceSettings);
+        }
+        catch (const TrackGenerationError& error)
+        {
+            return std::unexpected(error.failure());
+        }
+        catch (const std::invalid_argument& error)
+        {
+            return std::unexpected(TrackGenerationFailure{
+                TrackGenerationFailureReason::InvalidInput, sectionIndex,
+                std::nullopt, std::nullopt, std::nullopt, error.what()});
+        }
+        catch (const std::exception& error)
+        {
+            return std::unexpected(TrackGenerationFailure{
+                TrackGenerationFailureReason::IntegrationFailure, sectionIndex,
+                std::nullopt, std::nullopt, std::nullopt, error.what()});
+        }
     }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/RiderLoads.hpp>
 
 #include <cstddef>
 #include <optional>
@@ -69,6 +70,18 @@ namespace quantum::editor
         {
             committedTrack = std::move(candidateTrack_);
             committed_ = true;
+        }
+
+        // Called after candidate generation/evaluation and before any GPU or
+        // editor publication. Legacy unreachable-track acceptance is unchanged.
+        void requireAcceptableRiderLoads(const coaster::RiderLoadHistory& history) const
+        {
+            if (coaster::hasForceDrivenRegions(candidateTrack_)
+                && (!history.completed() || history.states.empty()))
+            {
+                throw std::invalid_argument(
+                    "Force-driven candidates require a completed rider-load evaluation.");
+            }
         }
 
         [[nodiscard]] bool committed() const noexcept

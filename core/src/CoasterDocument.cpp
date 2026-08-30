@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -173,6 +174,17 @@ namespace quantum::coaster
             }
         }
 
+        SegmentId deserializeSegmentId(const json& object, const std::string& key,
+            const std::string& path)
+        {
+            requireInteger(object, key, path);
+            if (object[key] < 0 || object[key] > std::numeric_limits<SegmentId>::max())
+            {
+                throw std::runtime_error(path + "." + key + ": segment ID is out of range");
+            }
+            return object[key].get<SegmentId>();
+        }
+
         // ----------------------------------------------------------------
         // Serialization
         // ----------------------------------------------------------------
@@ -264,12 +276,19 @@ namespace quantum::coaster
             {
                 result["kind"] = "Geometry";
 
-                const PlanarArcRegion& arc =
-                    std::get<PlanarArcRegion>(
-                        std::get<GeometryRegion>(section.region)
-                            .construction);
-
-                result["planarArc"] = serializePlanarArcRegion(arc);
+                const auto& construction = std::get<GeometryRegion>(section.region).construction;
+                if (const auto* arc = std::get_if<PlanarArcRegion>(&construction))
+                {
+                    result["planarArc"] = serializePlanarArcRegion(*arc);
+                }
+                else
+                {
+                    const auto& force = std::get<ForceDrivenRegion>(construction);
+                    result["forceDriven"] = {
+                        {"targetNormalG", serializeChannelProfile(force.targetNormalG)},
+                        {"targetLateralG", serializeChannelProfile(force.targetLateralG)},
+                        {"rollRate", serializeChannelProfile(force.rollRate)}};
+                }
             }
 
             return result;
@@ -320,7 +339,7 @@ namespace quantum::coaster
             requireInteger(object, "id", path);
             requireObject(object, "transition", path);
 
-            const auto id = object["id"].get<std::uint32_t>();
+            const auto id = deserializeSegmentId(object, "id", path);
 
             if (id == invalidSegmentId)
             {
@@ -349,8 +368,7 @@ namespace quantum::coaster
             requireArray(object, "segments", path);
 
             ChannelProfile channel;
-            channel.nextSegmentId =
-                object["nextSegmentId"].get<SegmentId>();
+            channel.nextSegmentId = deserializeSegmentId(object, "nextSegmentId", path);
 
             const auto& segmentsJson = object["segments"];
             channel.segments.reserve(segmentsJson.size());
@@ -436,7 +454,7 @@ namespace quantum::coaster
             }
             else if (kindStr == "Geometry")
             {
-                allowed = {"kind", "length", "planarArc"};
+                allowed = {"kind", "length", "planarArc", "forceDriven"};
             }
             else
             {
@@ -464,14 +482,31 @@ namespace quantum::coaster
             }
             else
             {
-                requireObject(object, "planarArc", path);
-
                 section.kind = RegionKind::Geometry;
-                section.region = GeometryRegion{
-                    deserializePlanarArcRegion(
-                        object["planarArc"],
-                        path + ".planarArc")
-                };
+                if (object.contains("planarArc") == object.contains("forceDriven"))
+                {
+                    throw std::runtime_error(path + ": Geometry requires exactly one construction payload");
+                }
+                if (object.contains("planarArc"))
+                {
+                    requireObject(object, "planarArc", path);
+                    section.region = GeometryRegion{deserializePlanarArcRegion(
+                        object["planarArc"], path + ".planarArc")};
+                }
+                else
+                {
+                    requireObject(object, "forceDriven", path);
+                    const auto& force = object["forceDriven"];
+                    const std::string forcePath = path + ".forceDriven";
+                    requireNoUnknownFields(force,
+                        {"targetNormalG", "targetLateralG", "rollRate"}, forcePath);
+                    for (const char* key : {"targetNormalG", "targetLateralG", "rollRate"})
+                        requireObject(force, key, forcePath);
+                    section.region = GeometryRegion{ForceDrivenRegion{
+                        deserializeChannelProfile(force["targetNormalG"], forcePath + ".targetNormalG"),
+                        deserializeChannelProfile(force["targetLateralG"], forcePath + ".targetLateralG"),
+                        deserializeChannelProfile(force["rollRate"], forcePath + ".rollRate")}};
+                }
             }
 
             return section;
@@ -581,6 +616,11 @@ namespace quantum::coaster
         root["formatVersion"] = currentFormatVersion;
         root["layoutMode"] = layoutModeToString(track.layoutMode());
         root["startPose"] = serializeStartPose(track.startPose());
+        const auto& physical = track.physicalSettings();
+        root["physicalSettings"] = {
+            {"initialSpeed", physical.initialSpeed},
+            {"metersPerCoordinateUnit", physical.metersPerCoordinateUnit},
+            {"gravityAcceleration", physical.gravityAcceleration}};
 
         json sectionsJson = json::array();
 
@@ -611,7 +651,7 @@ namespace quantum::coaster
 
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
-                "formatVersion", "sections", "layoutMode", "startPose"
+                "formatVersion", "sections", "layoutMode", "startPose", "physicalSettings"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -684,11 +724,7 @@ namespace quantum::coaster
                 }
                 else
                 {
-                    validatePlanarArcRegion(
-                        std::get<PlanarArcRegion>(
-                            std::get<GeometryRegion>(section.region)
-                                .construction),
-                        section.length);
+                    static_cast<void>(sectionLength(section));
                 }
 
                 // nextSegmentId consistency for rate-profile regions.
@@ -767,6 +803,18 @@ namespace quantum::coaster
 
             track.setLayoutMode(layoutMode);
             track.setStartPose(startPose);
+            if (root.contains("physicalSettings"))
+            {
+                requireObject(root, "physicalSettings", "root");
+                const auto& physical = root["physicalSettings"];
+                requireNoUnknownFields(physical,
+                    {"initialSpeed", "metersPerCoordinateUnit", "gravityAcceleration"}, "physicalSettings");
+                for (const char* key : {"initialSpeed", "metersPerCoordinateUnit", "gravityAcceleration"})
+                    requireNumber(physical, key, "physicalSettings");
+                track.setPhysicalSettings({physical["initialSpeed"].get<double>(),
+                    physical["metersPerCoordinateUnit"].get<double>(),
+                    physical["gravityAcceleration"].get<double>()});
+            }
 
             return track;
         }

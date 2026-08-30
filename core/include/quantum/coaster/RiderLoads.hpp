@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/TrackKinematics.hpp>
+#include <quantum/coaster/TrackPhysicalSettings.hpp>
 
 #include <optional>
 #include <span>
@@ -8,9 +9,6 @@
 
 namespace quantum::coaster
 {
-    // Standard gravity used as the definition of one G, in m/s^2.
-    inline constexpr double standardGravityAcceleration = 9.80665;
-
     struct RiderLoadEvaluationSettings
     {
         // Vehicle speed is SI even though authored Core geometry remains
@@ -19,6 +17,13 @@ namespace quantum::coaster
         double metersPerCoordinateUnit = 1.0;
         double gravityAcceleration = standardGravityAcceleration;
     };
+
+    [[nodiscard]] inline RiderLoadEvaluationSettings riderLoadEvaluationSettings(
+        const TrackPhysicalSettings& settings)
+    {
+        return {settings.initialSpeed, settings.metersPerCoordinateUnit,
+            settings.gravityAcceleration};
+    }
 
     // Mass-independent rider specific force expressed in the rider frame.
     // Distance remains in Core coordinate units and speed is metres/second.

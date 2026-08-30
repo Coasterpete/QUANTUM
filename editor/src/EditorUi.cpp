@@ -842,7 +842,7 @@ namespace
 
     void showRiderLoadDiagnostics(
         const quantum::editor::SectionRiderLoadDiagnostics& diagnostics,
-        const quantum::editor::RiderLoadDiagnosticSettings& settings)
+        const quantum::coaster::TrackPhysicalSettings& settings)
     {
         using quantum::editor::RiderLoadUnreachableLocation;
 
@@ -860,10 +860,10 @@ namespace
             diagnostics.sectionIndex + 1
         );
         ImGui::TextDisabled(
-            "Development settings: Initial Speed %.2f m/s | "
+            "Document settings: Initial Speed %.2f m/s | "
             "Scale %.3f m/coordinate unit | gravity-only point mass",
-            settings.evaluation.initialSpeed,
-            settings.evaluation.metersPerCoordinateUnit
+            settings.initialSpeed,
+            settings.metersPerCoordinateUnit
         );
 
         if (diagnostics.unreachable.has_value())
@@ -2096,7 +2096,8 @@ namespace
                 const char* kindName =
                     track.section(index).kind
                             == quantum::coaster::RegionKind::Geometry
-                        ? "Geometry / Planar Arc"
+                        ? (quantum::coaster::isForceDrivenSection(track.section(index))
+                            ? "Geometry / Force Driven" : "Geometry / Planar Arc")
                         : "Rate/Profile";
                 char label[80]{};
                 std::snprintf(
@@ -2199,7 +2200,8 @@ namespace
                 // authoring is discovered through the typed create flow and
                 // edited in the dedicated Geometry Editor.
                 const bool isGeometry =
-                    selected.kind == quantum::coaster::RegionKind::Geometry;
+                    selected.kind == quantum::coaster::RegionKind::Geometry
+                    && !quantum::coaster::isForceDrivenSection(selected);
                 if (ImGui::Button(
                     isGeometry ? "Convert to Rate Profiles"
                                : "Convert to Planar Arc",
@@ -5468,6 +5470,13 @@ namespace quantum::editor
             );
             ImGui::Begin(geometryEditorWindowName);
 
+            if (coaster::isForceDrivenSection(editedSection))
+            {
+                ImGui::TextDisabled("Geometry / Force Driven - read-only");
+                ImGui::TextWrapped("Target profile editing is not available yet. Actual loads appear in Force Diagnostics.");
+            }
+            else
+            {
             const auto& committedArc =
                 std::get<coaster::PlanarArcRegion>(
                     std::get<coaster::GeometryRegion>(
@@ -5546,6 +5555,7 @@ namespace quantum::editor
             {
                 regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
                                   selectedSection_, 0.0};
+            }
             }
 
             ImGui::End();
@@ -5903,7 +5913,7 @@ namespace quantum::editor
         {
             showRiderLoadDiagnostics(
                 riderLoadDiagnostics_.selectedSection(),
-                developmentRiderLoadDiagnosticSettings
+                authoredTrack_->physicalSettings()
             );
         }
 
@@ -6117,7 +6127,7 @@ namespace quantum::editor
                         * degreesPerRadian;
             }
         }
-        else
+        else if (!coaster::isForceDrivenSection(selected))
         {
             const auto& arc = std::get<coaster::PlanarArcRegion>(
                 std::get<coaster::GeometryRegion>(
@@ -6137,7 +6147,8 @@ namespace quantum::editor
             );
         }
 
-        if (selected.kind == coaster::RegionKind::Geometry)
+        if (selected.kind == coaster::RegionKind::Geometry
+            && !coaster::isForceDrivenSection(selected))
         {
             const auto& arc = std::get<coaster::PlanarArcRegion>(
                 std::get<coaster::GeometryRegion>(

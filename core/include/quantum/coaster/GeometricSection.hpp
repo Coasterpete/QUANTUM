@@ -15,7 +15,7 @@ namespace quantum::coaster
 
     inline constexpr SegmentId invalidSegmentId = 0;
 
-    // One constant-transition piece of an authored channel rate profile. The
+    // One constant-transition piece of an authored scalar channel profile. The
     // embedded transition's domain is an absolute position along the
     // section-local distance axis [0, sectionLength].
     struct ProfileSegment
@@ -24,7 +24,7 @@ namespace quantum::coaster
         math::ScalarTransition transition{};
     };
 
-    // One authored channel (pitch, yaw, or roll) as an ordered chain of
+    // One authored scalar channel (a rate or force target) as an ordered chain of
     // ProfileSegments covering [0, sectionLength] without gaps. Adjacent
     // segments must join with identical endpoint values (C0 continuity);
     // slope discontinuities at segment boundaries are authored content and

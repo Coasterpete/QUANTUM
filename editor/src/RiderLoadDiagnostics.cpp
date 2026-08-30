@@ -177,6 +177,6 @@ namespace quantum::editor
                 settings.integrationSpacing);
         return coaster::evaluateRiderLoads(
             kinematics,
-            settings.evaluation);
+            coaster::riderLoadEvaluationSettings(track.physicalSettings()));
     }
 }

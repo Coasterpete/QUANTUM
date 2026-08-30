@@ -57,9 +57,11 @@ The current authored-to-rendered data flow is:
 ```text
 AuthoredTrack
   |-- AuthoredStartPose -- world position + rider orientation
+  |-- TrackPhysicalSettings -- speed, physical scale, gravity
   |-- RateProfileRegion -- analytic ChannelProfiles --+
   |                                                   |
   +-- GeometryRegion ---- PlanarArc compilation ------+
+                     +-- ForceDriven coupled solve --+
                                                       v
                                   continuous QuantumCore solve
                                                       |
@@ -127,7 +129,8 @@ conventions implemented by `applyRoll`, `applyLocalPitch`, and `applyLocalYaw`.
 
 `quantum::coaster::AuthoredTrack` is the ordered authored coaster document used
 by the Editor. It owns the layout intent (`Circuit` or `Shuttle`), one global
-`AuthoredStartPose`, and an ordered sequence of `AuthoredTrackSection` values.
+`AuthoredStartPose`, `TrackPhysicalSettings`, and an ordered sequence of
+`AuthoredTrackSection` values.
 The start pose stores a world position and normalized quaternion that rotates
 the canonical local `(T, L, U)` axes into the initial rider frame. The UI calls
 the ordered section values regions; the Core type retains the established
@@ -145,7 +148,7 @@ can produce an empty `AuthoredTrack` for assembly and tests, but whole-track
 generation rejects an empty track.
 
 The current JSON document format serializes the layout mode, authored start
-pose, and every authored region. Documents that predate the `startPose` field
+pose, physical settings, and every authored region. Documents that predate the `startPose` field
 load with the original origin/identity pose. Deserialization constructs a new
 document and accepts it only after Core validation; it does not partially
 mutate an existing document on failure.
@@ -156,9 +159,9 @@ The authored region variant currently has two kinds:
 
 - `RateProfileRegion` owns the Roll, Pitch, and Yaw angular-rate profiles used
   directly by the coupled rider-local solver.
-- `GeometryRegion` currently contains one designer-facing construction,
-  `PlanarArcRegion`, authored by radius, swept angle, plane tilt, and bank
-  change.
+- `GeometryRegion::construction` is a variant of `PlanarArcRegion` (radius,
+  swept angle, plane tilt, and bank change) and `ForceDrivenRegion` (Normal G,
+  Lateral G, and roll-rate profiles). There is no separate Force region kind.
 
 For a Planar Arc, `|sweptAngle| * radius` must equal the stored section length.
 A radius edit preserves stored length and turn direction by changing the sweep;
@@ -177,10 +180,93 @@ track may contain both kinds in any order.
 document-owned start pose is the single canonical initial world position and
 frame; each region thereafter starts from the previous region's final position
 and frame. Cumulative distance increases across the whole track, and a shared
-boundary sample appears once. Consequently, changing the start pose transforms
-the complete generated track without rewriting any region-local construction,
-and an edit to an earlier region can change every downstream region's
-world-space pose without changing their authored local data.
+boundary sample appears once. Changing the start pose regenerates the complete
+track without rewriting region-local construction data. Translation preserves
+relative-height energy. Rotation relative to world gravity can change the
+shape of force-driven geometry itself; it is not necessarily a rigid rotation.
+An earlier region edit can change every downstream region's world-space pose.
+
+### Force-driven region foundation
+
+`TrackPhysicalSettings` is the document's canonical physical input: initial
+speed in m/s, positive metres per Core coordinate unit (`mu`), and positive
+gravity magnitude in m/s². All must be finite; speed is nonnegative and its
+square must be representable. Defaults are 20 m/s, unit scale, and standard
+gravity (9.80665 m/s²), preserving previous editor diagnostics for legacy files.
+`RiderLoadEvaluationSettings` is constructed from these inputs for evaluation;
+it is not a second authored settings object. Sampling/refinement controls are
+numerical caller settings and are not persisted.
+
+`ForceDrivenRegion` owns three `ChannelProfile`s: dimensionless `targetNormalG`
+and `targetLateralG`, plus `rollRate` in radians per Core coordinate unit.
+Each covers `[0, section.length]`. Length edits rescale every segment boundary
+while preserving values, transitions, IDs, allocator state, and ordering.
+`createForceDrivenSection` provides the model construction path (+1 normal G,
+zero lateral G and roll). Conversion to Planar Arc replaces the construction
+while preserving length; conversion to state-independent rate profiles is
+rejected because it cannot preserve the state-dependent solve.
+
+At every integration stage, using the provisional world position `P` and
+right-handed rider frame `(T,L,U)`, Core evaluates:
+
+```text
+g = (0, 0, -gravityAcceleration), g0 = standardGravityAcceleration
+w = initialSpeed² + 2 dot(g, mu * (P - wholeTrackStartPosition))
+yawRate   =  mu * (g0 * targetLateralG(s) + dot(g,L)) / w
+pitchRate = -mu * (g0 * targetNormalG(s)  + dot(g,U)) / w
+rollRate  = authored rollRate(s)
+P' = T; T' = yawRate L - pitchRate U
+L' = -yawRate T + rollRate U; U' = pitchRate T - rollRate L
+```
+
+The focused forward integrator advances position and a normalized quaternion
+together with fourth-order Runge–Kutta and step-doubling error control. It
+compares normalized position and orientation errors, limits stage angular
+steps, and fails if refinement or work limits are exhausted. The default error
+tolerance is `1e-10` with at most 24 bisections per output/breakpoint interval.
+Profiles are evaluated at their original local coordinates at all stages;
+staggered breakpoints never reconstruct or re-ease another channel's nonlinear
+transition. Existing Rate/Profile clipping behavior is unchanged.
+
+Energy always references the whole-track start, including after Rate/Profile
+or Planar Arc lead-ins. No region resets speed, freezes entry speed, or
+integrates a separate drifting energy state. Generation and rider-load
+evaluation share physical validation and the scale-aware energy tolerance
+`64 * epsilon * max(1, initialSpeed², abs(gravityWork))`. Energy below the
+negative tolerance is unreachable; force generation rejects zero and positive
+energy unresolved within that tolerance without a minimum-speed clamp.
+Internal stages and accepted endpoints are checked. Near a singular barrier,
+refinement can fail before energy becomes negative; no continuation is emitted.
+
+`generateAuthoredTrackKinematics` returns either a complete canonical track or
+`TrackGenerationFailure`: invalid input, energetically unreachable,
+insufficient speed, nonfinite derived rates, or integration/refinement failure.
+Failures carry section index, local/cumulative distance, and speed squared
+where available. Existing throwing entry points propagate `TrackGenerationError`
+for force solve failures. This is separate from `RiderLoadUnreachableState`.
+
+Targets are authored intent; `RiderLoadHistory` is evaluated truth. Generated
+rates, geometry, speed samples, and loads are never stored in the construction
+or document. Force output uses the same `TrackKinematicState` and right-owned
+boundary curvature as other constructions. The unchanged universal evaluator
+then computes actual speed and Normal/Lateral/Longitudinal G. Longitudinal
+targets are deferred until propulsion, braking, and losses are modeled; the
+current gravity-only point mass has zero longitudinal specific force apart
+from numerical error.
+
+Format version 1 is extended additively with root `physicalSettings`. A
+`kind: "Geometry"` section requires exactly one `planarArc` or `forceDriven`
+payload. Force channels reuse the existing ordered segments, IDs,
+`nextSegmentId`, and transition JSON shape. Missing physical settings retain
+the legacy defaults; malformed settings or ambiguous construction payloads
+are rejected. Older application builds with strict parsers cannot read the
+new fields; existing documents remain readable by this build.
+
+Editable force-target UI and endpoint/anchor inverse solving remain deferred.
+The Geometry Editor safely identifies force regions as read-only. A future
+endpoint-constrained solver can vary authored targets/length/settings and call
+the result-based forward generator to measure endpoint residuals; no inverse
+solver or constraints are introduced here.
 
 ## Transition profiles
 
@@ -222,7 +308,7 @@ while preserving endpoint values, transition types, and ids.
 
 The obsolete standalone `ForceSection` placeholder has been removed. Rider
 loads are universal diagnostics over canonical track kinematics rather than an
-authored region kind; force-target authoring is not implemented yet.
+authored region kind; force targets are a Geometry construction's authored intent.
 
 ## Rider-local geometry
 
@@ -325,11 +411,8 @@ for Rate/Profile and Geometry regions. If evaluation becomes energetically
 unreachable, only valid earlier samples are retained and the stop location is
 reported explicitly.
 
-Until document-level simulation settings exist, the diagnostic path uses one
-visible editor-owned development configuration: 20 m/s initial speed,
-1 metre per Core coordinate unit, 0.75-unit kinematic sample spacing, and
-standard gravity. These values are diagnostic configuration, not authored
-force targets.
+Diagnostics use the document's physical settings and display them read-only.
+The editor retains its 0.75-unit kinematic sample spacing as output configuration.
 
 ## Editor authored-track workflow
 
@@ -344,8 +427,8 @@ appropriate to the selected region.
 `EditorUi` owns one selected region index shared by the authored-track views.
 The Section List and viewport picking both update it through the same selection
 path. A Rate/Profile selection makes the Transition Editor operate on that
-region; a Geometry selection presents the Geometry Editor for its Planar Arc
-parameters. The same selection chooses the section slice highlighted across
+region; a Geometry selection presents Planar Arc parameters or read-only Force
+Driven identification. The same selection chooses the section slice highlighted across
 all visible viewport reference curves.
 
 Structural commits explicitly transform or replace the selected index so the
@@ -465,6 +548,7 @@ editor intent
     -> candidate AuthoredTrack
     -> Core mutation / validation
     -> solved/generated geometry
+    -> universal rider-load evaluation and acceptance
     -> GPU update
     -> committed document
     -> synchronized editor-visible state
@@ -475,6 +559,13 @@ committed document. The application applies editor commands only to that
 candidate, then asks Core to validate it as part of generating the continuous
 visualization. The candidate document does not become authoritative merely
 because a local mutation succeeded.
+
+Candidates containing force-driven regions must also complete universal load
+evaluation before GPU upload. Failed generation or incomplete evaluation rejects
+them without changing committed diagnostics, geometry, selection, or buffers.
+Rate/Profile and Planar Arc-only candidates retain legacy unreachable-load
+acceptance. Opening documents also prepares generation and load acceptance
+before replacing the current document or uploading its candidate vertices.
 
 The transaction also stages editor-visible effects that are consequences of
 the edit, including the selection computed for a structural change and requests
@@ -507,8 +598,7 @@ document whose visible GPU representation failed to update.
 The following are current roadmap areas, not implemented capabilities or fixed
 architectural commitments:
 
-- force-based section solving;
-- velocity, acceleration, and G-force evaluation;
+- editable force-target profiles and endpoint-constrained force solving;
 - launches, brakes, and lift systems;
 - authored track-style, rail, heartline-offset, and final rail meshing systems;
 - direct deformation or control-point editing in the 3D viewport;
