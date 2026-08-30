@@ -232,6 +232,23 @@ namespace quantum::coaster
             return result;
         }
 
+        json serializeStartPose(const AuthoredStartPose& pose)
+        {
+            json result;
+            result["position"] = {
+                {"x", pose.position.x},
+                {"y", pose.position.y},
+                {"z", pose.position.z}
+            };
+            result["orientation"] = {
+                {"w", pose.orientation.w},
+                {"x", pose.orientation.x},
+                {"y", pose.orientation.y},
+                {"z", pose.orientation.z}
+            };
+            return result;
+        }
+
         json serializeSection(const AuthoredTrackSection& section)
         {
             json result;
@@ -460,6 +477,59 @@ namespace quantum::coaster
             return section;
         }
 
+        AuthoredStartPose deserializeStartPose(
+            const json& object,
+            const std::string& path)
+        {
+            static const std::vector<std::string> allowed = {
+                "position", "orientation"
+            };
+            requireNoUnknownFields(object, allowed, path);
+            requireObject(object, "position", path);
+            requireObject(object, "orientation", path);
+
+            const json& position = object["position"];
+            const json& orientation = object["orientation"];
+            static const std::vector<std::string> positionAllowed = {
+                "x", "y", "z"
+            };
+            static const std::vector<std::string> orientationAllowed = {
+                "w", "x", "y", "z"
+            };
+            requireNoUnknownFields(
+                position,
+                positionAllowed,
+                path + ".position"
+            );
+            requireNoUnknownFields(
+                orientation,
+                orientationAllowed,
+                path + ".orientation"
+            );
+            for (const char* const axis : {"x", "y", "z"})
+            {
+                requireNumber(position, axis, path + ".position");
+            }
+            for (const char* const component : {"w", "x", "y", "z"})
+            {
+                requireNumber(
+                    orientation,
+                    component,
+                    path + ".orientation"
+                );
+            }
+
+            return {
+                {position["x"].get<double>(),
+                 position["y"].get<double>(),
+                 position["z"].get<double>()},
+                {orientation["w"].get<double>(),
+                 orientation["x"].get<double>(),
+                 orientation["y"].get<double>(),
+                 orientation["z"].get<double>()}
+            };
+        }
+
         // ----------------------------------------------------------------
         // nextSegmentId consistency
         // ----------------------------------------------------------------
@@ -510,6 +580,7 @@ namespace quantum::coaster
         json root;
         root["formatVersion"] = currentFormatVersion;
         root["layoutMode"] = layoutModeToString(track.layoutMode());
+        root["startPose"] = serializeStartPose(track.startPose());
 
         json sectionsJson = json::array();
 
@@ -540,7 +611,7 @@ namespace quantum::coaster
 
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
-                "formatVersion", "sections", "layoutMode"
+                "formatVersion", "sections", "layoutMode", "startPose"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -660,6 +731,22 @@ namespace quantum::coaster
                 }
             }
 
+            // Documents written before authored start poses were introduced
+            // keep the canonical origin/identity initial condition.
+            AuthoredStartPose startPose;
+            if (root.contains("startPose"))
+            {
+                if (!root["startPose"].is_object())
+                {
+                    return std::unexpected(
+                        std::string("'startPose' must be an object"));
+                }
+                startPose = deserializeStartPose(
+                    root["startPose"],
+                    "startPose"
+                );
+            }
+
             // 8. Build the AuthoredTrack.
             AuthoredTrack track;
 
@@ -679,6 +766,7 @@ namespace quantum::coaster
             }
 
             track.setLayoutMode(layoutMode);
+            track.setStartPose(startPose);
 
             return track;
         }

@@ -56,6 +56,7 @@ The current authored-to-rendered data flow is:
 
 ```text
 AuthoredTrack
+  |-- AuthoredStartPose -- world position + rider orientation
   |-- RateProfileRegion -- analytic ChannelProfiles --+
   |                                                   |
   +-- GeometryRegion ---- PlanarArc compilation ------+
@@ -125,11 +126,13 @@ conventions implemented by `applyRoll`, `applyLocalPitch`, and `applyLocalYaw`.
 ### Ordered model and local domains
 
 `quantum::coaster::AuthoredTrack` is the ordered authored coaster document used
-by the Editor. It owns the layout intent (`Circuit` or `Shuttle`) and an ordered
-sequence of `AuthoredTrackSection` values. The UI calls these ordered values
-regions; the Core type retains the established section name. A region's place
-in the track is its vector position, and its length contributes to cumulative
-whole-track stationing.
+by the Editor. It owns the layout intent (`Circuit` or `Shuttle`), one global
+`AuthoredStartPose`, and an ordered sequence of `AuthoredTrackSection` values.
+The start pose stores a world position and normalized quaternion that rotates
+the canonical local `(T, L, U)` axes into the initial rider frame. The UI calls
+the ordered section values regions; the Core type retains the established
+section name. A region's place in the track is its vector position, and its
+length contributes to cumulative whole-track stationing.
 
 Each `AuthoredTrackSection` owns one positive finite length and one authored
 region payload. That stored length defines the canonical section-local distance
@@ -141,9 +144,11 @@ contains one neutral 60-unit Rate/Profile region. Direct default construction
 can produce an empty `AuthoredTrack` for assembly and tests, but whole-track
 generation rejects an empty track.
 
-The current JSON document format serializes the layout mode and every authored
-region. Deserialization constructs a new document and accepts it only after
-Core validation; it does not partially mutate an existing document on failure.
+The current JSON document format serializes the layout mode, authored start
+pose, and every authored region. Documents that predate the `startPose` field
+load with the original origin/identity pose. Deserialization constructs a new
+document and accepts it only after Core validation; it does not partially
+mutate an existing document on failure.
 
 ### Implemented region kinds
 
@@ -168,11 +173,14 @@ Converting a Planar Arc to Rate/Profile is exact for an unbanked arc and is
 rejected for a banked arc rather than silently changing its geometry. A mixed
 track may contain both kinds in any order.
 
-`integrateAuthoredTrack` validates every region and chains their solves. Each
-region starts from the previous region's final position and frame, cumulative
-distance increases across the whole track, and a shared boundary sample appears
-once. Consequently, an edit to an earlier region can change every downstream
-region's world-space pose without changing their authored local data.
+`integrateAuthoredTrack` validates every region and chains their solves. The
+document-owned start pose is the single canonical initial world position and
+frame; each region thereafter starts from the previous region's final position
+and frame. Cumulative distance increases across the whole track, and a shared
+boundary sample appears once. Consequently, changing the start pose transforms
+the complete generated track without rewriting any region-local construction,
+and an edit to an earlier region can change every downstream region's
+world-space pose without changing their authored local data.
 
 ## Transition profiles
 
@@ -435,14 +443,18 @@ region, replacing any stale anchor-specific highlight. Screen-space picking
 uses a fixed marker radius, gives an anchor hit priority over a track-curve hit,
 and resolves overlaps by pointer distance, depth, then semantic anchor index.
 
-The selected anchor displays its complete right-handed rider frame as a
-non-interactive viewport orientation indicator. All anchors are read-only in
-this milestone: the document has no authored world/start pose or terminal pose
-constraint, and shared interior boundaries require a future constrained or
-inverse solve across neighboring regions. No generated vertices are moved and
-no no-op transform gizmo is exposed. A later manipulation path must propose
-authored-state changes through `AuthoredTrackEditTransaction` before publishing
-updated anchors or selection.
+The selected anchor displays its complete right-handed rider frame. Anchor zero
+is editable through the compact viewport Move/Rotate gizmo: Move applies world
+X/Y/Z translation and Rotate pre-multiplies a world-axis quaternion rotation.
+The quaternion is normalized and sign-canonicalized before it enters the
+document, so the rider frame remains orthonormal and satisfies `T x L = U`.
+Dragging proposes a new global start pose; it never moves generated vertices or
+rewrites region-local construction values.
+
+Shared interior anchors remain read-only because moving one requires a future
+constrained inverse solve across its neighboring regions. The final anchor also
+remains read-only until a terminal pose constraint exists. Neither kind exposes
+active manipulation handles.
 
 ### Authored edit transactions
 
@@ -472,6 +484,13 @@ rejection during mutation, Core solve, visualization generation, or GPU upload,
 the committed document and selection remain unchanged; provisional viewport
 bounds/slices are restored, and affected section-length, profile-value, and
 Planar Arc buffers are refreshed from committed document state.
+
+Start-pose dragging uses the same transaction on every changed drag frame for
+live preview. Each accepted candidate regenerates semantic anchors, reference
+curves, centerline camera bounds, and Force Diagnostics through the canonical
+Core path before commit. A rejected candidate cancels the gizmo and returns it
+to the committed Anchor 0 pose; continuous frames remain Trace-level and one
+Info summary is emitted when a successful drag finishes.
 
 Editor-visible effects derived from an authored edit become authoritative only
 after successful commit. This keeps the document, generated geometry, GPU

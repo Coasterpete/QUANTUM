@@ -14,12 +14,48 @@
 
 namespace quantum::editor
 {
+    enum class StartPoseTransformMode
+    {
+        Move,
+        Rotate
+    };
+
+    enum class StartPoseTransformAxis
+    {
+        X,
+        Y,
+        Z
+    };
+
+    [[nodiscard]] glm::dvec3 startPoseWorldAxis(
+        StartPoseTransformAxis axis
+    ) noexcept;
+
+    // Pure candidate helpers used by the viewport gizmo and model tests.
+    // Rotation is pre-multiplied, so V1 rotates about world X/Y/Z while the
+    // stored quaternion remains the robust authored representation.
+    [[nodiscard]] coaster::AuthoredStartPose translateStartPose(
+        const coaster::AuthoredStartPose& pose,
+        StartPoseTransformAxis axis,
+        double distance
+    );
+
+    [[nodiscard]] coaster::AuthoredStartPose rotateStartPose(
+        const coaster::AuthoredStartPose& pose,
+        StartPoseTransformAxis axis,
+        double angleRadians
+    );
+
     enum class ViewportTrackAnchorKind
     {
         Start,
         Interior,
         End
     };
+
+    [[nodiscard]] bool isViewportTrackAnchorEditable(
+        ViewportTrackAnchorKind kind
+    ) noexcept;
 
     // One semantic authored-track boundary. Interior anchors are shared by
     // the regions on both sides; they are not duplicated endpoint objects.

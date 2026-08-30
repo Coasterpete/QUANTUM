@@ -1,5 +1,7 @@
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 
+#include <glm/gtc/quaternion.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -25,6 +27,61 @@ namespace
 
 namespace quantum::editor
 {
+    bool isViewportTrackAnchorEditable(
+        const ViewportTrackAnchorKind kind) noexcept
+    {
+        return kind == ViewportTrackAnchorKind::Start;
+    }
+
+    glm::dvec3 startPoseWorldAxis(
+        const StartPoseTransformAxis axis) noexcept
+    {
+        switch (axis)
+        {
+        case StartPoseTransformAxis::X: return {1.0, 0.0, 0.0};
+        case StartPoseTransformAxis::Y: return {0.0, 1.0, 0.0};
+        case StartPoseTransformAxis::Z: return {0.0, 0.0, 1.0};
+        }
+        return {1.0, 0.0, 0.0};
+    }
+
+    coaster::AuthoredStartPose translateStartPose(
+        const coaster::AuthoredStartPose& pose,
+        const StartPoseTransformAxis axis,
+        const double distance)
+    {
+        if (!std::isfinite(distance))
+        {
+            throw std::invalid_argument(
+                "A start-pose translation distance must be finite."
+            );
+        }
+
+        coaster::AuthoredStartPose candidate = pose;
+        candidate.position += distance * startPoseWorldAxis(axis);
+        return candidate;
+    }
+
+    coaster::AuthoredStartPose rotateStartPose(
+        const coaster::AuthoredStartPose& pose,
+        const StartPoseTransformAxis axis,
+        const double angleRadians)
+    {
+        if (!std::isfinite(angleRadians))
+        {
+            throw std::invalid_argument(
+                "A start-pose rotation angle must be finite."
+            );
+        }
+
+        coaster::AuthoredStartPose candidate = pose;
+        candidate.orientation = glm::angleAxis(
+            angleRadians,
+            startPoseWorldAxis(axis)
+        ) * pose.orientation;
+        return candidate;
+    }
+
     ViewportTrackSelection selectionForViewportTrackRegion(
         const std::size_t regionIndex,
         const std::size_t regionCount)

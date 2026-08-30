@@ -783,6 +783,52 @@ add_executable(
     AuthoredTrackTests.cpp
 )
 
+add_executable(
+    QuantumEditorAuthoredStartPoseTests
+    AuthoredStartPoseTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+)
+
+target_include_directories(
+    QuantumEditorAuthoredStartPoseTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorAuthoredStartPoseTests
+    PRIVATE
+        Quantum::Core
+        Quantum::Engine
+        glm::glm
+)
+
+target_compile_features(
+    QuantumEditorAuthoredStartPoseTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorAuthoredStartPoseTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.AuthoredStartPose
+    COMMAND QuantumEditorAuthoredStartPoseTests
+)
+
+set_tests_properties(
+    QuantumEditor.AuthoredStartPose
+    PROPERTIES
+        LABELS "editor;core;coaster;transaction;camera;physics;serialization"
+)
+
 target_link_libraries(
     QuantumCoreAuthoredTrackTests
     PRIVATE

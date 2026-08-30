@@ -4,6 +4,8 @@
 #include <quantum/coaster/PlanarArcRegion.hpp>
 #include <quantum/coaster/RiderLocalGeometry.hpp>
 
+#include <glm/gtc/quaternion.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -155,6 +157,26 @@ namespace quantum::coaster
         double bankChange
     );
 
+    // Document-owned initial world pose for authored-track generation. The
+    // normalized quaternion rotates the canonical local rider axes
+    // T=(1,0,0), L=(0,1,0), U=(0,0,1) into the world-space rider frame.
+    struct AuthoredStartPose
+    {
+        glm::dvec3 position{0.0, 0.0, 0.0};
+        glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
+
+        [[nodiscard]] friend bool operator==(
+            const AuthoredStartPose&,
+            const AuthoredStartPose&
+        ) = default;
+    };
+
+    // Converts a validated authored orientation into QUANTUM's right-handed
+    // rider frame, preserving tangent x lateral = up.
+    [[nodiscard]] geometry::CurveFrame startPoseRiderFrame(
+        const AuthoredStartPose& pose
+    );
+
     // An ordered document of authored track sections. The track always keeps
     // at least one section so that a generated centerline is well-defined;
     // removeSection refuses to delete the final remaining section.
@@ -165,6 +187,13 @@ namespace quantum::coaster
 
         [[nodiscard]] LayoutMode layoutMode() const noexcept;
         void setLayoutMode(LayoutMode mode) noexcept;
+
+        [[nodiscard]] const AuthoredStartPose& startPose() const noexcept;
+
+        // Validates finite position/orientation values and stores a
+        // normalized, sign-canonical quaternion. Throws std::invalid_argument
+        // without changing the existing pose when the candidate is invalid.
+        void setStartPose(const AuthoredStartPose& pose);
 
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
@@ -206,6 +235,7 @@ namespace quantum::coaster
 
     private:
         LayoutMode layoutMode_ = LayoutMode::Circuit;
+        AuthoredStartPose startPose_;
         std::vector<AuthoredTrackSection> sections_;
     };
 

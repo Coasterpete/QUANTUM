@@ -56,6 +56,61 @@ namespace
     // it, so each region kind owns exactly one primary editor surface.
     constexpr char geometryEditorWindowName[] = "Geometry Editor";
     constexpr char riderLoadDiagnosticsWindowName[] = "Force Diagnostics";
+    constexpr float startPoseMoveHandlePixels = 56.0F;
+    constexpr float startPoseMoveHitRadiusPixels = 8.0F;
+    constexpr std::array<float, 3> startPoseRotateRadiiPixels{
+        30.0F, 39.0F, 48.0F};
+    constexpr float startPoseRotateHitRadiusPixels = 5.0F;
+
+    [[nodiscard]] const char* startPoseAxisName(
+        const quantum::editor::StartPoseTransformAxis axis) noexcept
+    {
+        using quantum::editor::StartPoseTransformAxis;
+        switch (axis)
+        {
+        case StartPoseTransformAxis::X: return "X";
+        case StartPoseTransformAxis::Y: return "Y";
+        case StartPoseTransformAxis::Z: return "Z";
+        }
+        return "X";
+    }
+
+    [[nodiscard]] const char* startPoseModeName(
+        const quantum::editor::StartPoseTransformMode mode) noexcept
+    {
+        return mode == quantum::editor::StartPoseTransformMode::Move
+            ? "move"
+            : "rotate";
+    }
+
+    [[nodiscard]] double pointSegmentDistanceSquared(
+        const ImVec2 point,
+        const ImVec2 begin,
+        const ImVec2 end) noexcept
+    {
+        const double dx = static_cast<double>(end.x - begin.x);
+        const double dy = static_cast<double>(end.y - begin.y);
+        const double lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared == 0.0)
+        {
+            const double offsetX = static_cast<double>(point.x - begin.x);
+            const double offsetY = static_cast<double>(point.y - begin.y);
+            return offsetX * offsetX + offsetY * offsetY;
+        }
+
+        const double offsetX = static_cast<double>(point.x - begin.x);
+        const double offsetY = static_cast<double>(point.y - begin.y);
+        const double parameter = std::clamp(
+            (offsetX * dx + offsetY * dy) / lengthSquared,
+            0.0,
+            1.0
+        );
+        const double closestX = static_cast<double>(begin.x) + parameter * dx;
+        const double closestY = static_cast<double>(begin.y) + parameter * dy;
+        const double distanceX = static_cast<double>(point.x) - closestX;
+        const double distanceY = static_cast<double>(point.y) - closestY;
+        return distanceX * distanceX + distanceY * distanceY;
+    }
 
     [[nodiscard]] std::uint32_t visibleTrackCurveMask(
         const quantum::editor::ViewportSettings& settings) noexcept
@@ -3836,6 +3891,297 @@ namespace quantum::editor
         }
     }
 
+    bool EditorUi::updateStartPoseManipulation(
+        const bool viewportHovered,
+        const float imageWidth,
+        const float imageHeight)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+
+        if (startPoseManipulation_.has_value())
+        {
+            StartPoseManipulation& manipulation =
+                *startPoseManipulation_;
+            if (io.AppFocusLost)
+            {
+                startPoseManipulation_.reset();
+                return true;
+            }
+
+            // Finish on the frame after release so the final mouse position
+            // has gone through candidate/commit. Rejection cancels this state
+            // before a success summary can be emitted.
+            if (manipulation.released)
+            {
+                if (manipulation.changed)
+                {
+                    const coaster::AuthoredStartPose& pose =
+                        authoredTrack_->startPose();
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Info,
+                        "EDIT",
+                        "completed start-pose manipulation mode=%s axis=%s "
+                        "position=(%.6f,%.6f,%.6f) "
+                        "orientation=(%.9f,%.9f,%.9f,%.9f)",
+                        startPoseModeName(manipulation.mode),
+                        startPoseAxisName(manipulation.axis),
+                        pose.position.x,
+                        pose.position.y,
+                        pose.position.z,
+                        pose.orientation.w,
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z
+                    );
+                }
+                startPoseManipulation_.reset();
+                return true;
+            }
+
+            // Motion and button-up may arrive in the same SDL/ImGui frame.
+            // Consume that final position even though the button is now up.
+            manipulation.released =
+                !ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            coaster::AuthoredStartPose candidate;
+            if (manipulation.mode == StartPoseTransformMode::Move)
+            {
+                const double mouseDeltaX = static_cast<double>(
+                    io.MousePos.x - manipulation.mouseStart.x);
+                const double mouseDeltaY = static_cast<double>(
+                    io.MousePos.y - manipulation.mouseStart.y);
+                const double projectedPixels =
+                    mouseDeltaX * manipulation.screenDirectionX
+                    + mouseDeltaY * manipulation.screenDirectionY;
+                candidate = translateStartPose(
+                    manipulation.initialPose,
+                    manipulation.axis,
+                    projectedPixels * manipulation.worldUnitsPerPixel
+                );
+            }
+            else
+            {
+                const auto projectedOrigin = projectViewportPoint(
+                    viewportCamera_,
+                    manipulation.initialPose.position,
+                    viewportAspectRatio_
+                );
+                if (!projectedOrigin.has_value())
+                {
+                    return true;
+                }
+                const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+                const ImVec2 origin{
+                    imageMinimum.x + static_cast<float>(
+                        projectedOrigin->normalizedPosition.x) * imageWidth,
+                    imageMinimum.y + static_cast<float>(
+                        projectedOrigin->normalizedPosition.y) * imageHeight
+                };
+                const double mouseAngle = std::atan2(
+                    static_cast<double>(io.MousePos.y - origin.y),
+                    static_cast<double>(io.MousePos.x - origin.x)
+                );
+                const double angleDelta = std::remainder(
+                    mouseAngle - manipulation.initialMouseAngle,
+                    2.0 * piRadians
+                );
+                candidate = rotateStartPose(
+                    manipulation.initialPose,
+                    manipulation.axis,
+                    angleDelta
+                );
+            }
+
+            if (candidate != manipulation.candidatePose)
+            {
+                manipulation.candidatePose = candidate;
+                manipulation.changed = true;
+                startPoseEdit_ = StartPoseEdit{candidate, true};
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Trace,
+                    "EDIT",
+                    "start-pose candidate mode=%s axis=%s "
+                    "position=(%.6f,%.6f,%.6f)",
+                    startPoseModeName(manipulation.mode),
+                    startPoseAxisName(manipulation.axis),
+                    candidate.position.x,
+                    candidate.position.y,
+                    candidate.position.z
+                );
+            }
+            return true;
+        }
+
+        if (!viewportHovered
+            || !viewportSettings_.anchorsVisible
+            || io.AppFocusLost
+            || cameraGesture_ != CameraGesture::None
+            || firstActiveEndpoint(endpointDrags_)
+                != ScalarProfileEndpoint::None
+            || !ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+            || authoredTrack_ == nullptr
+            || centerlineVisualization_ == nullptr
+            || centerlineVisualization_->anchors.empty()
+            || !isViewportTrackAnchorEditable(
+                centerlineVisualization_->anchors.front().kind)
+            || !selectedTrackAnchor_.has_value()
+            || *selectedTrackAnchor_ != 0
+            || imageWidth <= 0.0F
+            || imageHeight <= 0.0F)
+        {
+            return false;
+        }
+
+        const coaster::AuthoredStartPose& pose = authoredTrack_->startPose();
+        const auto projectedOrigin = projectViewportPoint(
+            viewportCamera_,
+            pose.position,
+            viewportAspectRatio_
+        );
+        if (!projectedOrigin.has_value())
+        {
+            return false;
+        }
+
+        const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+        const ImVec2 origin{
+            imageMinimum.x + static_cast<float>(
+                projectedOrigin->normalizedPosition.x) * imageWidth,
+            imageMinimum.y + static_cast<float>(
+                projectedOrigin->normalizedPosition.y) * imageHeight
+        };
+        const ImVec2 mouse = io.MousePos;
+        std::optional<StartPoseTransformAxis> pickedAxis;
+        double pickedMetric = std::numeric_limits<double>::max();
+        double pickedDirectionX = 1.0;
+        double pickedDirectionY = 0.0;
+        double pickedWorldUnitsPerPixel = 0.0;
+
+        if (startPoseTransformMode_ == StartPoseTransformMode::Move)
+        {
+            const double scaleDistance = viewportCamera_.projection()
+                    == ViewportProjection::Perspective
+                ? glm::length(pose.position - viewportCamera_.position())
+                : viewportCamera_.distance();
+            const double baseWorldUnitsPerPixel = 2.0 * scaleDistance
+                * std::tan(0.5 * viewportCamera_.verticalFieldOfView())
+                / static_cast<double>(imageHeight);
+            const double axisLength = startPoseMoveHandlePixels
+                * baseWorldUnitsPerPixel;
+            constexpr std::array<ImVec2, 3> fallbackDirections{
+                ImVec2{1.0F, 0.0F},
+                ImVec2{-0.7071F, 0.7071F},
+                ImVec2{0.0F, -1.0F}
+            };
+
+            for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
+            {
+                const auto axis = static_cast<StartPoseTransformAxis>(
+                    axisIndex);
+                const auto projectedEnd = projectViewportPoint(
+                    viewportCamera_,
+                    pose.position + axisLength * startPoseWorldAxis(axis),
+                    viewportAspectRatio_
+                );
+                double directionX = fallbackDirections[axisIndex].x;
+                double directionY = fallbackDirections[axisIndex].y;
+                double screenLength = startPoseMoveHandlePixels;
+                double worldUnitsPerPixel = baseWorldUnitsPerPixel;
+                if (projectedEnd.has_value())
+                {
+                    const ImVec2 projectedScreenEnd{
+                        imageMinimum.x + static_cast<float>(
+                            projectedEnd->normalizedPosition.x) * imageWidth,
+                        imageMinimum.y + static_cast<float>(
+                            projectedEnd->normalizedPosition.y) * imageHeight
+                    };
+                    const double dx = projectedScreenEnd.x - origin.x;
+                    const double dy = projectedScreenEnd.y - origin.y;
+                    const double projectedLength = std::hypot(dx, dy);
+                    if (projectedLength >= 10.0)
+                    {
+                        directionX = dx / projectedLength;
+                        directionY = dy / projectedLength;
+                        screenLength = projectedLength;
+                        worldUnitsPerPixel = axisLength / projectedLength;
+                    }
+                }
+
+                const ImVec2 begin{
+                    origin.x + static_cast<float>(8.0 * directionX),
+                    origin.y + static_cast<float>(8.0 * directionY)
+                };
+                const ImVec2 end{
+                    origin.x + static_cast<float>(screenLength * directionX),
+                    origin.y + static_cast<float>(screenLength * directionY)
+                };
+                const double metric = pointSegmentDistanceSquared(
+                    mouse,
+                    begin,
+                    end
+                );
+                if (metric <= startPoseMoveHitRadiusPixels
+                        * startPoseMoveHitRadiusPixels
+                    && metric < pickedMetric)
+                {
+                    pickedAxis = axis;
+                    pickedMetric = metric;
+                    pickedDirectionX = directionX;
+                    pickedDirectionY = directionY;
+                    pickedWorldUnitsPerPixel = worldUnitsPerPixel;
+                }
+            }
+        }
+        else
+        {
+            const double radius = std::hypot(
+                static_cast<double>(mouse.x - origin.x),
+                static_cast<double>(mouse.y - origin.y)
+            );
+            for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
+            {
+                const double metric = std::abs(
+                    radius - startPoseRotateRadiiPixels[axisIndex]
+                );
+                if (metric <= startPoseRotateHitRadiusPixels
+                    && metric < pickedMetric)
+                {
+                    pickedAxis = static_cast<StartPoseTransformAxis>(
+                        axisIndex);
+                    pickedMetric = metric;
+                }
+            }
+        }
+
+        if (!pickedAxis.has_value())
+        {
+            return false;
+        }
+
+        StartPoseManipulation manipulation;
+        manipulation.mode = startPoseTransformMode_;
+        manipulation.axis = *pickedAxis;
+        manipulation.initialPose = pose;
+        manipulation.candidatePose = pose;
+        manipulation.mouseStart = {mouse.x, mouse.y};
+        manipulation.screenDirectionX = pickedDirectionX;
+        manipulation.screenDirectionY = pickedDirectionY;
+        manipulation.worldUnitsPerPixel = pickedWorldUnitsPerPixel;
+        manipulation.initialMouseAngle = std::atan2(
+            static_cast<double>(mouse.y - origin.y),
+            static_cast<double>(mouse.x - origin.x)
+        );
+        startPoseManipulation_ = manipulation;
+
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Trace,
+            "EDIT",
+            "start-pose manipulation begin mode=%s axis=%s",
+            startPoseModeName(manipulation.mode),
+            startPoseAxisName(manipulation.axis)
+        );
+        return true;
+    }
+
     void EditorUi::updateViewportCamera(
         renderer::VulkanContext& vulkan,
         const bool viewportHovered,
@@ -3858,6 +4204,13 @@ namespace quantum::editor
 
         ImGuiIO& io = ImGui::GetIO();
 
+        const bool startPoseManipulationCaptured =
+            updateStartPoseManipulation(
+                viewportHovered,
+                logicalWidth,
+                logicalHeight
+            );
+
         if (io.AppFocusLost)
         {
             cameraGesture_ = CameraGesture::None;
@@ -3875,6 +4228,7 @@ namespace quantum::editor
         // remain UI input even while WantCaptureMouse is true for the editor.
         if (viewportHovered
             && !io.AppFocusLost
+            && !startPoseManipulationCaptured
             && cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
@@ -3943,7 +4297,8 @@ namespace quantum::editor
         if (cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
-            && viewportHovered)
+            && viewportHovered
+            && !startPoseManipulationCaptured)
         {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
@@ -4014,7 +4369,7 @@ namespace quantum::editor
             }
         }
 
-        if (viewportHovered)
+        if (viewportHovered && !startPoseManipulationCaptured)
         {
             if (io.MouseWheel != 0.0F)
             {
@@ -4154,9 +4509,23 @@ namespace quantum::editor
             return;
         }
 
+        ViewportTrackAnchor displayedAnchor = *selectedAnchor;
+        if (displayedAnchor.kind == ViewportTrackAnchorKind::Start
+            && startPoseManipulation_.has_value())
+        {
+            const coaster::AuthoredStartPose& candidate =
+                startPoseManipulation_->candidatePose;
+            const geometry::CurveFrame frame =
+                coaster::startPoseRiderFrame(candidate);
+            displayedAnchor.position = candidate.position;
+            displayedAnchor.forward = frame.tangent;
+            displayedAnchor.lateral = frame.lateral;
+            displayedAnchor.up = frame.up;
+        }
+
         const auto projectedOrigin = projectViewportPoint(
             viewportCamera_,
-            selectedAnchor->position,
+            displayedAnchor.position,
             viewportAspectRatio_
         );
         if (!projectedOrigin.has_value()
@@ -4171,7 +4540,7 @@ namespace quantum::editor
         const double scaleDistance = viewportCamera_.projection()
                 == ViewportProjection::Perspective
             ? glm::length(
-                selectedAnchor->position - viewportCamera_.position())
+                displayedAnchor.position - viewportCamera_.position())
             : viewportCamera_.distance();
         const double worldUnitsPerPixel = 2.0 * scaleDistance
             * std::tan(0.5 * viewportCamera_.verticalFieldOfView())
@@ -4185,7 +4554,7 @@ namespace quantum::editor
         {
             const auto projectedEnd = projectViewportPoint(
                 viewportCamera_,
-                selectedAnchor->position + axisLength * axis,
+                displayedAnchor.position + axisLength * axis,
                 viewportAspectRatio_
             );
             if (!projectedEnd.has_value()
@@ -4205,20 +4574,133 @@ namespace quantum::editor
             );
         };
 
-        drawAxis(selectedAnchor->forward,
+        drawAxis(displayedAnchor.forward,
             IM_COL32(255, 92, 76, 255), "T");
-        drawAxis(selectedAnchor->lateral,
+        drawAxis(displayedAnchor.lateral,
             IM_COL32(90, 224, 138, 255), "L");
-        drawAxis(selectedAnchor->up,
+        drawAxis(displayedAnchor.up,
             IM_COL32(102, 154, 255, 255), "U");
-        drawMarker(*selectedAnchor, true);
+
+        if (isViewportTrackAnchorEditable(displayedAnchor.kind))
+        {
+            constexpr std::array<ImU32, 3> axisColors{
+                IM_COL32(255, 82, 72, 255),
+                IM_COL32(76, 220, 116, 255),
+                IM_COL32(76, 138, 255, 255)
+            };
+            constexpr std::array<ImVec2, 3> fallbackDirections{
+                ImVec2{1.0F, 0.0F},
+                ImVec2{-0.7071F, 0.7071F},
+                ImVec2{0.0F, -1.0F}
+            };
+
+            if (startPoseTransformMode_ == StartPoseTransformMode::Move)
+            {
+                const double handleAxisLength = startPoseMoveHandlePixels
+                    * worldUnitsPerPixel;
+                for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
+                {
+                    const auto axis = static_cast<StartPoseTransformAxis>(
+                        axisIndex);
+                    double directionX = fallbackDirections[axisIndex].x;
+                    double directionY = fallbackDirections[axisIndex].y;
+                    double screenLength = startPoseMoveHandlePixels;
+                    const auto projectedEnd = projectViewportPoint(
+                        viewportCamera_,
+                        displayedAnchor.position + handleAxisLength
+                            * startPoseWorldAxis(axis),
+                        viewportAspectRatio_
+                    );
+                    if (projectedEnd.has_value())
+                    {
+                        const ImVec2 projectedScreenEnd =
+                            screenPosition(*projectedEnd);
+                        const double dx = projectedScreenEnd.x - origin.x;
+                        const double dy = projectedScreenEnd.y - origin.y;
+                        const double projectedLength = std::hypot(dx, dy);
+                        if (projectedLength >= 10.0)
+                        {
+                            directionX = dx / projectedLength;
+                            directionY = dy / projectedLength;
+                            screenLength = projectedLength;
+                        }
+                    }
+
+                    const ImVec2 begin{
+                        origin.x + static_cast<float>(8.0 * directionX),
+                        origin.y + static_cast<float>(8.0 * directionY)
+                    };
+                    const ImVec2 end{
+                        origin.x + static_cast<float>(
+                            screenLength * directionX),
+                        origin.y + static_cast<float>(
+                            screenLength * directionY)
+                    };
+                    const bool active = startPoseManipulation_.has_value()
+                        && startPoseManipulation_->axis == axis;
+                    const ImU32 color = active
+                        ? IM_COL32(255, 220, 96, 255)
+                        : axisColors[axisIndex];
+                    drawList->AddLine(origin, end, markerOutline, 6.0F);
+                    drawList->AddLine(
+                        begin,
+                        end,
+                        color,
+                        active ? 4.0F : 3.0F
+                    );
+                    drawList->AddCircleFilled(end, 5.0F, color, 16);
+                    drawList->AddText(
+                        ImVec2{end.x + 5.0F, end.y - 8.0F},
+                        color,
+                        startPoseAxisName(axis)
+                    );
+                }
+            }
+            else
+            {
+                for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
+                {
+                    const auto axis = static_cast<StartPoseTransformAxis>(
+                        axisIndex);
+                    const bool active = startPoseManipulation_.has_value()
+                        && startPoseManipulation_->axis == axis;
+                    const ImU32 color = active
+                        ? IM_COL32(255, 220, 96, 255)
+                        : axisColors[axisIndex];
+                    const float radius =
+                        startPoseRotateRadiiPixels[axisIndex];
+                    drawList->AddCircle(
+                        origin,
+                        radius,
+                        markerOutline,
+                        48,
+                        5.0F
+                    );
+                    drawList->AddCircle(
+                        origin,
+                        radius,
+                        color,
+                        48,
+                        active ? 4.0F : 2.5F
+                    );
+                    drawList->AddText(
+                        ImVec2{origin.x + radius + 4.0F,
+                               origin.y - 7.0F},
+                        color,
+                        startPoseAxisName(axis)
+                    );
+                }
+            }
+        }
+
+        drawMarker(displayedAnchor, true);
 
         char anchorLabel[32]{};
         std::snprintf(
             anchorLabel,
             sizeof(anchorLabel),
             "Anchor %zu",
-            selectedAnchor->anchorIndex
+            displayedAnchor.anchorIndex
         );
         drawList->AddText(
             ImVec2{origin.x + 12.0F, origin.y + 8.0F},
@@ -4227,10 +4709,10 @@ namespace quantum::editor
         );
 
         const char* status = nullptr;
-        switch (selectedAnchor->kind)
+        switch (displayedAnchor.kind)
         {
         case ViewportTrackAnchorKind::Start:
-            status = "Track start - no authored start pose; read-only";
+            status = "Track start - editable authored start pose";
             break;
         case ViewportTrackAnchorKind::Interior:
             status = "Shared region boundary - constrained editing not implemented yet";
@@ -4718,6 +5200,39 @@ namespace quantum::editor
                     viewportSettings_.anchorsVisible ? "visible" : "hidden"
                 );
             }
+            ImGui::SameLine();
+            const auto startPoseModeButton = [this](
+                const char* const label,
+                const StartPoseTransformMode mode)
+            {
+                const bool selected = startPoseTransformMode_ == mode;
+                if (selected)
+                {
+                    ImGui::PushStyleColor(
+                        ImGuiCol_Button,
+                        quantum::editor::palette::trackWorkspaceBlue
+                    );
+                }
+                const bool clicked = ImGui::SmallButton(label);
+                if (selected)
+                {
+                    ImGui::PopStyleColor();
+                }
+                if (clicked && !selected)
+                {
+                    startPoseTransformMode_ = mode;
+                    startPoseManipulation_.reset();
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Debug,
+                        "CFG",
+                        "start-pose transform mode=%s",
+                        startPoseModeName(mode)
+                    );
+                }
+            };
+            startPoseModeButton("Move", StartPoseTransformMode::Move);
+            ImGui::SameLine();
+            startPoseModeButton("Rotate", StartPoseTransformMode::Rotate);
             ImGui::SameLine();
             if (ImGui::SmallButton("Settings"))
             {
@@ -5505,6 +6020,19 @@ namespace quantum::editor
         return command;
     }
 
+    std::optional<StartPoseEdit> EditorUi::takeStartPoseEdit() noexcept
+    {
+        const std::optional<StartPoseEdit> edit = startPoseEdit_;
+        startPoseEdit_.reset();
+        return edit;
+    }
+
+    void EditorUi::rejectStartPoseManipulation() noexcept
+    {
+        startPoseEdit_.reset();
+        startPoseManipulation_.reset();
+    }
+
     void EditorUi::selectSection(
         const std::size_t index,
         const bool refreshIfSelected)
@@ -5659,11 +6187,12 @@ namespace quantum::editor
         quantum::logging::logMessagef(
             quantum::logging::LogLevel::Debug,
             "SEL",
-            "anchor=%zu kind=%s region=%zu distance=%.6f readOnly=1",
+            "anchor=%zu kind=%s region=%zu distance=%.6f readOnly=%d",
             anchorIndex,
             kind,
             selection.regionIndex,
-            anchor.distance
+            anchor.distance,
+            isViewportTrackAnchorEditable(anchor.kind) ? 0 : 1
         );
     }
 
@@ -5827,6 +6356,8 @@ namespace quantum::editor
         centerlineVisualization_ = nullptr;
         riderLoadDiagnostics_.clear();
         selectedSection_ = 0;
+        startPoseManipulation_.reset();
+        startPoseEdit_.reset();
         valueEndEditBuffers_.fill(0.0);
         endpointSelections_.fill(ScalarProfileEndpoint::None);
         endpointDrags_.fill(ScalarProfileEndpoint::None);
@@ -5890,6 +6421,9 @@ namespace quantum::editor
     {
         selectedSection_ = 0;
         selectedTrackAnchor_ = 0;
+        startPoseTransformMode_ = StartPoseTransformMode::Move;
+        startPoseManipulation_.reset();
+        startPoseEdit_.reset();
         if (riderLoadDiagnostics_.sectionCount() > 0)
         {
             riderLoadDiagnostics_.selectSection(0);
