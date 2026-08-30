@@ -1,5 +1,6 @@
 #include <quantum/editor/ViewportCamera.hpp>
 
+#include <glm/common.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/geometric.hpp>
 #include <glm/mat4x4.hpp>
@@ -76,20 +77,25 @@ namespace quantum::editor
             );
         }
 
-        boundsCenter_ = 0.5 * (minimumPosition + maximumPosition);
-        boundsRadius_ = radius;
-        minimumDistance_ = boundsRadius_ * minimumDistanceScale;
-        maximumDistance_ = boundsRadius_ * maximumDistanceScale;
+        const double minimumDistance = radius * minimumDistanceScale;
+        const double maximumDistance = radius * maximumDistanceScale;
 
-        if (!std::isfinite(minimumDistance_)
-            || !std::isfinite(maximumDistance_)
-            || minimumDistance_ <= 0.0
-            || maximumDistance_ <= minimumDistance_)
+        if (!std::isfinite(minimumDistance)
+            || !std::isfinite(maximumDistance)
+            || minimumDistance <= 0.0
+            || maximumDistance <= minimumDistance)
         {
             throw std::invalid_argument(
                 "ViewportCamera bounds are outside its usable distance range."
             );
         }
+
+        minimumBounds_ = minimumPosition;
+        maximumBounds_ = maximumPosition;
+        boundsCenter_ = 0.5 * (minimumPosition + maximumPosition);
+        boundsRadius_ = radius;
+        minimumDistance_ = minimumDistance;
+        maximumDistance_ = maximumDistance;
 
         if (!hasBounds_)
         {
@@ -113,11 +119,75 @@ namespace quantum::editor
             );
         }
 
-        // Bounds guarantee a finite positive radius, so the failure path
-        // of frameSphere is unreachable here.
+        // Assigned camera bounds guarantee finite ordered nonzero bounds, so
+        // the failure path of frameBounds is unreachable here.
         static_cast<void>(
-            frameSphere(boundsCenter_, boundsRadius_, aspectRatio)
+            frameBounds(minimumBounds_, maximumBounds_, aspectRatio)
         );
+    }
+
+    bool ViewportCamera::frameBounds(
+        const glm::dvec3& minimumPosition,
+        const glm::dvec3& maximumPosition,
+        const double aspectRatio)
+    {
+        requireValidAspectRatio(aspectRatio);
+
+        if (!hasBounds_)
+        {
+            throw std::logic_error(
+                "ViewportCamera cannot frame before bounds are assigned."
+            );
+        }
+
+        if (!isFinite(minimumPosition) || !isFinite(maximumPosition)
+            || minimumPosition.x > maximumPosition.x
+            || minimumPosition.y > maximumPosition.y
+            || minimumPosition.z > maximumPosition.z)
+        {
+            return false;
+        }
+
+        const glm::dvec3 halfExtents =
+            0.5 * (maximumPosition - minimumPosition);
+        if (glm::length(halfExtents) <= 0.0)
+        {
+            return false;
+        }
+
+        const double verticalTangent =
+            std::tan(0.5 * verticalFieldOfView_);
+        const double horizontalTangent = verticalTangent * aspectRatio;
+        const glm::dvec3 forward = -directionFromFocus();
+
+        // An axis-aligned box's extent along an arbitrary unit axis is the
+        // dot product of its half-extents with that axis's absolute value.
+        // Keeping the camera beyond the nearest depth extent also prevents
+        // very thin bounds viewed end-on from placing geometry at the eye.
+        const double halfWidth = glm::dot(halfExtents, glm::abs(right()));
+        const double halfHeight = glm::dot(halfExtents, glm::abs(up()));
+        const double halfDepth = glm::dot(halfExtents, glm::abs(forward));
+        const double projectedDistance = std::max(
+            halfWidth / horizontalTangent,
+            halfHeight / verticalTangent
+        );
+        const double framedDistance = projection_
+                == ViewportProjection::Perspective
+            ? framingMargin * (halfDepth + projectedDistance)
+            : framingMargin * std::max(halfDepth, projectedDistance);
+
+        if (!std::isfinite(framedDistance) || framedDistance <= 0.0)
+        {
+            return false;
+        }
+
+        focus_ = 0.5 * (minimumPosition + maximumPosition);
+        distance_ = std::clamp(
+            framedDistance,
+            minimumDistance_,
+            maximumDistance_
+        );
+        return true;
     }
 
     bool ViewportCamera::frameSphere(
