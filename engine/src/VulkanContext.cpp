@@ -128,10 +128,19 @@ namespace
         const float centerY,
         const float spacing)
     {
-        constexpr std::array gridColor{0.085F, 0.09F, 0.095F, 1.0F};
-        constexpr std::array xAxisColor{0.92F, 0.22F, 0.18F, 1.0F};
-        constexpr std::array yAxisColor{0.22F, 0.78F, 0.30F, 1.0F};
-        constexpr std::array zAxisColor{0.25F, 0.48F, 1.0F, 1.0F};
+        // Linear colors for the sRGB target: references stay below track
+        // curves in contrast. Only color changes; the lattice is unchanged.
+        constexpr std::array minorGridColor{0.012F, 0.012F, 0.012F, 1.0F};
+        constexpr std::array majorGridColor{0.026F, 0.026F, 0.026F, 1.0F};
+        constexpr std::array xAxisColor{0.22F, 0.055F, 0.045F, 1.0F};
+        constexpr std::array yAxisColor{0.055F, 0.19F, 0.075F, 1.0F};
+        constexpr std::array zAxisColor{0.06F, 0.12F, 0.25F, 1.0F};
+        const auto gridColor = [&](const float coordinate)
+            -> const std::array<float, 4>&
+        {
+            return std::fmod(std::round(coordinate / spacing), 5.0F) == 0.0F
+                ? majorGridColor : minorGridColor;
+        };
 
         const float halfExtent = static_cast<float>(gridHalfLineCount)
             * spacing;
@@ -153,7 +162,7 @@ namespace
                 vertices,
                 {snappedCenterX - halfExtent, coordinate, 0.0F},
                 {snappedCenterX + halfExtent, coordinate, 0.0F},
-                gridColor
+                gridColor(coordinate)
             );
             const float verticalCoordinate =
                 snappedCenterY + static_cast<float>(line) * spacing;
@@ -161,7 +170,7 @@ namespace
                 vertices,
                 {verticalCoordinate, snappedCenterY - halfExtent, 0.0F},
                 {verticalCoordinate, snappedCenterY + halfExtent, 0.0F},
-                gridColor
+                gridColor(verticalCoordinate)
             );
         }
 
