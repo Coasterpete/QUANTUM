@@ -1,0 +1,14 @@
+{
+  "width": 1600,
+  "height": 900,
+  "settle_frames": 16,
+  "output_directory": "../build/readme-captures",
+  "overwrite": true,
+  "scenarios": [
+    { "name": "editor-overview", "document": "USER-AUTHORED.quantum", "region": 0 },
+    { "name": "transition-editor", "document": "USER-AUTHORED.quantum", "region": 2 },
+    { "name": "geometry-regions", "document": "USER-AUTHORED.quantum", "region": 1 },
+    { "name": "track-start-gizmo", "document": "USER-AUTHORED.quantum", "region": 0, "framing": "selected", "tool": "move" },
+    { "name": "force-diagnostics", "document": "USER-AUTHORED.quantum", "region": 1 }
+  ]
+}

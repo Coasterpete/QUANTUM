@@ -27,6 +27,8 @@ namespace quantum::renderer
 
 namespace quantum::editor
 {
+    struct ReadmeCaptureScenario;
+
     struct MousePos
     {
         float x = 0.0f;
@@ -264,7 +266,8 @@ namespace quantum::editor
             const renderer::VulkanContext& vulkan,
             const coaster::AuthoredTrack& authoredTrack,
             const glm::dvec3& centerlineMinimum,
-            const glm::dvec3& centerlineMaximum
+            const glm::dvec3& centerlineMaximum,
+            const ReadmeCaptureScenario* captureScenario = nullptr
         );
         void processEvent(const SDL_Event& event);
         void beginFrame(renderer::VulkanContext& vulkan);
@@ -417,6 +420,9 @@ namespace quantum::editor
         void applyViewportSettings(renderer::VulkanContext& vulkan);
 
         bool contextCreated_ = false;
+        // Non-owning, fixed for this UI lifetime. Capture never loads/saves user settings.
+        const ReadmeCaptureScenario* captureScenario_ = nullptr;
+        bool captureSetupPending_ = false;
         bool sdlBackendInitialized_ = false;
         bool vulkanBackendInitialized_ = false;
         VkDevice device_ = VK_NULL_HANDLE;

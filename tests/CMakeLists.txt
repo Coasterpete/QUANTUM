@@ -3,6 +3,17 @@ add_executable(
     LoggingTests.cpp
 )
 
+add_executable(QuantumEditorReadmeCaptureTests
+    ReadmeCaptureTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ReadmeCapture.cpp
+)
+target_include_directories(QuantumEditorReadmeCaptureTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorReadmeCaptureTests PRIVATE Quantum::Core)
+target_compile_features(QuantumEditorReadmeCaptureTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorReadmeCaptureTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEditor.ReadmeCapture COMMAND QuantumEditorReadmeCaptureTests)
+set_tests_properties(QuantumEditor.ReadmeCapture PROPERTIES LABELS "editor;capture")
+
 add_executable(QuantumEditorViewportPresentationTests
     ViewportPresentationTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
