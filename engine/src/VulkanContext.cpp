@@ -2417,7 +2417,7 @@ namespace quantum::renderer
             viewportColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             viewportColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             viewportColorAttachment.clearValue.color = {
-                {0.006F, 0.008F, 0.012F, 1.0F}
+                {0.001F, 0.001F, 0.001F, 1.0F}
             };
 
             VkRenderingAttachmentInfo viewportDepthAttachment{};
