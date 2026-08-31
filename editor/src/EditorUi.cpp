@@ -36,8 +36,6 @@
 
 namespace
 {
-    constexpr char bundledFontRelativePath[] =
-        "assets/fonts/RedHatMono-SemiBold.ttf";
     // The v2 file migrates the authored shell from the generic Properties
     // layout while preserving normal Dear ImGui persistence thereafter.
     constexpr char editorLayoutIniFileName[] = "imgui-layout-v2.ini";
@@ -58,12 +56,6 @@ namespace
     // it, so each region kind owns exactly one primary editor surface.
     constexpr char geometryEditorWindowName[] = "Geometry Editor";
     constexpr char riderLoadDiagnosticsWindowName[] = "Force Diagnostics";
-    constexpr float startPoseMoveHandlePixels = 56.0F;
-    constexpr float startPoseMoveHitRadiusPixels = 8.0F;
-    constexpr std::array<float, 3> startPoseRotateRadiiPixels{
-        30.0F, 39.0F, 48.0F};
-    constexpr float startPoseRotateHitRadiusPixels = 5.0F;
-
     [[nodiscard]] const char* startPoseAxisName(
         const quantum::editor::StartPoseTransformAxis axis) noexcept
     {
@@ -796,7 +788,8 @@ namespace
     void showRiderLoadDiagnostics(
         const quantum::editor::SectionRiderLoadDiagnostics& diagnostics,
         const quantum::coaster::TrackPhysicalSettings& settings,
-        bool* const open)
+        bool* const open,
+        const quantum::editor::EditorFonts& fonts)
     {
         using quantum::editor::RiderLoadUnreachableLocation;
 
@@ -889,6 +882,7 @@ namespace
         }
         ImGui::PopTextWrapPos();
 
+        ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
         if (ImGui::BeginChild(
             "##RiderLoadDiagnosticPlots",
             ImVec2(0.0F, 0.0F),
@@ -1105,6 +1099,7 @@ namespace
             ImGui::Dummy(canvasSize);
         }
         ImGui::EndChild();
+        ImGui::PopFont();
         ImGui::End();
     }
 
@@ -1130,7 +1125,8 @@ namespace
         double* const selectedValueBuffer,
         const std::uint32_t selectedSegmentId,
         const quantum::editor::ScalarProfileEndpoint selectedEndpoint,
-        const float groupWidth)
+        const float groupWidth,
+        const quantum::editor::EditorFonts& fonts)
     {
         ScalarProfileRowEdit edit;
         const quantum::coaster::ProfileSegment* focused =
@@ -1159,6 +1155,7 @@ namespace
                 : "End rate"
         );
         ImGui::SetNextItemWidth(valueWidth);
+        ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
         edit.valueEndEdited = ImGui::InputDouble(
             "##SelectedValue",
             selectedValueBuffer,
@@ -1166,6 +1163,7 @@ namespace
             1.0,
             "%.5f deg/m"
         );
+        ImGui::PopFont();
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip(
@@ -1741,62 +1739,6 @@ namespace
         ImGui::GetIO().IniFilename = pathStorage.c_str();
     }
 
-    void loadBundledFont()
-    {
-        ImGuiIO& io = ImGui::GetIO();
-        const char* const basePath = SDL_GetBasePath();
-
-        if (basePath == nullptr)
-        {
-            throw std::runtime_error(
-                std::string(
-                    "SDL_GetBasePath failed while locating the bundled "
-                    "Red Hat Mono SemiBold UI font: "
-                ) + SDL_GetError()
-            );
-        }
-
-        const std::filesystem::path fontPath =
-            std::filesystem::path(basePath) / bundledFontRelativePath;
-        std::error_code error;
-        const bool fontExists = std::filesystem::is_regular_file(
-            fontPath,
-            error
-        );
-
-        if (!fontExists || error)
-        {
-            throw std::runtime_error(
-                std::string(
-                    "Bundled Red Hat Mono SemiBold UI font not found at "
-                ) + fontPath.string()
-            );
-        }
-
-        ImFont* const font = io.Fonts->AddFontFromFileTTF(
-            fontPath.string().c_str(),
-            quantum::editor::editorFontSize
-        );
-
-        if (font == nullptr)
-        {
-            throw std::runtime_error(
-                std::string(
-                    "Dear ImGui could not load the bundled Red Hat Mono "
-                    "SemiBold UI font at "
-                ) + fontPath.string()
-            );
-        }
-
-        io.FontDefault = font;
-        quantum::logging::logMessagef(
-            quantum::logging::LogLevel::Info,
-            "APP",
-            "Loaded bundled Red Hat Mono SemiBold UI font: %s",
-            fontPath.string().c_str()
-        );
-    }
-
     void checkVulkanResult(const VkResult result)
     {
         if (result != VK_SUCCESS)
@@ -2039,7 +1981,8 @@ namespace
         double* const sectionLengthEdit,
         quantum::editor::RegionCreateFlow& regionCreateFlow,
         const std::optional<double>& selectedHeightDelta,
-        const quantum::coaster::TrackTopology& topology)
+        const quantum::coaster::TrackTopology& topology,
+        const quantum::editor::EditorFonts& fonts)
     {
         TrackWorkspaceEdit edit;
         ImGui::Begin(trackWorkspaceWindowName);
@@ -2049,7 +1992,7 @@ namespace
             ImVec2(0.0F, 0.0F),
             ImGuiChildFlags_Borders))
         {
-            ImGui::SeparatorText("Regions");
+            quantum::editor::editorHeading("Regions", fonts);
             const std::size_t sectionCount = track.sectionCount();
             for (std::size_t index = 0; index < sectionCount; ++index)
             {
@@ -2096,10 +2039,11 @@ namespace
             if (selectedIndex < sectionCount && sectionLengthEdit != nullptr)
             {
                 ImGui::Spacing();
-                ImGui::SeparatorText("Selected region");
+                quantum::editor::editorHeading("Selected region", fonts);
 
                 ImGui::TextDisabled("Length");
                 ImGui::SetNextItemWidth(-1.0F);
+                ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
                 if (ImGui::InputDouble(
                     "###Length",
                     sectionLengthEdit,
@@ -2110,6 +2054,7 @@ namespace
                 {
                     edit.lengthEdited = true;
                 }
+                ImGui::PopFont();
 
                 if (ImGui::IsItemHovered())
                 {
@@ -2184,7 +2129,7 @@ namespace
             }
 
             ImGui::Spacing();
-            ImGui::SeparatorText("Region actions");
+            quantum::editor::editorHeading("Region actions", fonts);
             const bool hasSelection = selectedIndex < sectionCount;
             if (ImGui::Button("Append Region..."))
             {
@@ -2286,7 +2231,7 @@ namespace
             itemTooltip("Remove the selected region; the final region cannot be removed");
 
             ImGui::Spacing();
-            ImGui::SeparatorText("Layout & connectivity");
+            quantum::editor::editorHeading("Layout & connectivity", fonts);
             const auto currentMode = track.layoutMode();
             const auto status = quantum::coaster::computeLayoutStatus(
                 currentMode, topology.kind);
@@ -2505,7 +2450,8 @@ namespace
         std::optional<quantum::editor::RateChannel>& hoveredChannel,
         std::optional<quantum::editor::GraphMarkerId>& hoveredMarker,
         const quantum::editor::TransitionEditorInputSettings&
-            inputSettings)
+            inputSettings,
+        const quantum::editor::EditorFonts& fonts)
     {
         TransitionEditorEdit edit;
         ImGui::Begin("Transition Editor");
@@ -2629,7 +2575,8 @@ namespace
                 &valueEndBuffers[activeIndex],
                 selectedSegmentIds[activeIndex],
                 selectedEndpoint,
-                controlsAvailableWidth
+                controlsAvailableWidth,
+                fonts
             );
         const quantum::editor::ScalarProfileEndpoint numericEndpoint =
             selectedEndpoint
@@ -2717,7 +2664,7 @@ namespace
         if (ImGui::BeginPopup("ProfileDiagnostics"))
         {
             ImGui::PushTextWrapPos();
-            ImGui::SeparatorText("Selected endpoint");
+            quantum::editor::editorHeading("Selected endpoint", fonts);
             const auto [diagnosticDistance, diagnosticRate] =
                 focusedEndpoint(activeIndex);
             if (activeChannel == quantum::editor::RateChannel::Roll)
@@ -2770,7 +2717,7 @@ namespace
                 resultant.curvaturePerMeter
             );
             showRadiusLine("Resultant radius", resultant);
-            ImGui::SeparatorText("Total rotation");
+            quantum::editor::editorHeading("Total rotation", fonts);
             for (const ProfileRowView& row : profileRows)
             {
                 ImGui::TextDisabled("%s %+.3f deg", row.label,
@@ -3577,7 +3524,15 @@ namespace quantum::editor
             configureIniPath(iniPath_);
 
             applyQuantumStyle();
-            loadBundledFont();
+            const char* const basePath = SDL_GetBasePath();
+            if (basePath == nullptr)
+            {
+                throw std::runtime_error(std::string(
+                    "SDL_GetBasePath failed while locating bundled UI fonts: ")
+                    + SDL_GetError());
+            }
+            fonts_ = loadEditorFonts(basePath);
+            io.ConfigDpiScaleFonts = true;
 
             if (!ImGui_ImplSDL3_InitForVulkan(window))
             {
@@ -3831,6 +3786,7 @@ namespace quantum::editor
         const float imageHeight)
     {
         ImGuiIO& io = ImGui::GetIO();
+        const float presentationScale = editorPresentationScale();
 
         if (startPoseManipulation_.has_value())
         {
@@ -3999,7 +3955,7 @@ namespace quantum::editor
             const double baseWorldUnitsPerPixel = 2.0 * scaleDistance
                 * std::tan(0.5 * viewportCamera_.verticalFieldOfView())
                 / static_cast<double>(imageHeight);
-            const double axisLength = startPoseMoveHandlePixels
+            const double axisLength = (viewportStyle::moveHandleLength * presentationScale)
                 * baseWorldUnitsPerPixel;
             constexpr std::array<ImVec2, 3> fallbackDirections{
                 ImVec2{1.0F, 0.0F},
@@ -4018,7 +3974,7 @@ namespace quantum::editor
                 );
                 double directionX = fallbackDirections[axisIndex].x;
                 double directionY = fallbackDirections[axisIndex].y;
-                double screenLength = startPoseMoveHandlePixels;
+                double screenLength = (viewportStyle::moveHandleLength * presentationScale);
                 double worldUnitsPerPixel = baseWorldUnitsPerPixel;
                 if (projectedEnd.has_value())
                 {
@@ -4031,7 +3987,7 @@ namespace quantum::editor
                     const double dx = projectedScreenEnd.x - origin.x;
                     const double dy = projectedScreenEnd.y - origin.y;
                     const double projectedLength = std::hypot(dx, dy);
-                    if (projectedLength >= 10.0)
+                    if (projectedLength >= 10.0 * presentationScale)
                     {
                         directionX = dx / projectedLength;
                         directionY = dy / projectedLength;
@@ -4041,8 +3997,8 @@ namespace quantum::editor
                 }
 
                 const ImVec2 begin{
-                    origin.x + static_cast<float>(8.0 * directionX),
-                    origin.y + static_cast<float>(8.0 * directionY)
+                    origin.x + static_cast<float>(8.0 * presentationScale * directionX),
+                    origin.y + static_cast<float>(8.0 * presentationScale * directionY)
                 };
                 const ImVec2 end{
                     origin.x + static_cast<float>(screenLength * directionX),
@@ -4053,8 +4009,8 @@ namespace quantum::editor
                     begin,
                     end
                 );
-                if (metric <= startPoseMoveHitRadiusPixels
-                        * startPoseMoveHitRadiusPixels
+                if (metric <= (viewportStyle::moveHitRadius * presentationScale)
+                        * (viewportStyle::moveHitRadius * presentationScale)
                     && metric < pickedMetric)
                 {
                     pickedAxis = axis;
@@ -4074,9 +4030,9 @@ namespace quantum::editor
             for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
             {
                 const double metric = std::abs(
-                    radius - startPoseRotateRadiiPixels[axisIndex]
+                    radius - (viewportStyle::rotateRadii[axisIndex] * presentationScale)
                 );
-                if (metric <= startPoseRotateHitRadiusPixels
+                if (metric <= (viewportStyle::rotateHitRadius * presentationScale)
                     && metric < pickedMetric)
                 {
                     pickedAxis = static_cast<StartPoseTransformAxis>(
@@ -4128,6 +4084,8 @@ namespace quantum::editor
             / static_cast<double>(pixelHeight);
         viewportAspectRatio_ = aspectRatio;
 
+        refreshViewportDisplayBounds();
+
         if (initialViewportFramePending_)
         {
             viewportCamera_.frame(aspectRatio);
@@ -4137,6 +4095,7 @@ namespace quantum::editor
         applyViewportSettings(vulkan);
 
         ImGuiIO& io = ImGui::GetIO();
+        const float presentationScale = editorPresentationScale();
 
         const bool startPoseManipulationCaptured =
             updateStartPoseManipulation(
@@ -4156,6 +4115,8 @@ namespace quantum::editor
             cameraGesture_ = CameraGesture::None;
         }
 
+        hoveredTrackAnchor_.reset();
+        std::optional<std::size_t> hoveredSection;
         // ImGui owns the raw SDL event stream. Treat a left click as a
         // viewport action only when the submitted viewport Image itself is
         // hovered; popup/modal blocking and clicks on the toolbar therefore
@@ -4166,7 +4127,6 @@ namespace quantum::editor
             && cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
-            && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
             && centerlineVisualization_ != nullptr)
         {
             const ImVec2 imageMinimum = ImGui::GetItemRectMin();
@@ -4196,8 +4156,9 @@ namespace quantum::editor
                         centerlineVisualization_->anchors,
                         viewportCamera_,
                         {normalizedX, normalizedY},
-                        pixelWidth,
-                        pixelHeight
+                        contentPixelDimension(logicalWidth, 1.0F),
+                        contentPixelDimension(logicalHeight, 1.0F),
+                        viewportTrackAnchorHitRadiusPixels * presentationScale
                     )
                     : std::nullopt;
 
@@ -4206,7 +4167,11 @@ namespace quantum::editor
                 // picking, so a shared boundary cannot be hidden by its line.
                 if (anchorHit.has_value())
                 {
-                    selectTrackAnchor(anchorHit->anchorIndex);
+                    hoveredTrackAnchor_ = anchorHit->anchorIndex;
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    {
+                        selectTrackAnchor(anchorHit->anchorIndex);
+                    }
                 }
                 else
                 {
@@ -4214,15 +4179,20 @@ namespace quantum::editor
                         *centerlineVisualization_,
                         viewportCamera_,
                         ray,
-                        pixelHeight,
-                        visibleTrackCurveMask(viewportSettings_)
+                        contentPixelDimension(logicalHeight, 1.0F),
+                        visibleTrackCurveMask(viewportSettings_),
+                        viewportSelectionTolerancePixels * presentationScale
                     );
 
                     // Empty viewport space deliberately preserves selection,
                     // matching the Section List's always-selected behavior.
                     if (trackHit.has_value())
                     {
-                        selectSection(trackHit->sectionIndex);
+                        hoveredSection = trackHit->sectionIndex;
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            selectSection(trackHit->sectionIndex);
+                        }
                     }
                 }
             }
@@ -4320,23 +4290,87 @@ namespace quantum::editor
             }
         }
 
-        if (const CenterlineSectionSlice* const selectedSlice =
-            selectedSectionSlice())
-        {
-            vulkan.setTrackCurveHighlight(
-                selectedSlice->firstVertex,
-                selectedSlice->vertexCount
-            );
-        }
-        else
-        {
-            vulkan.setTrackCurveHighlight(0, 0);
-        }
+        // Selection/hover are editor overlays. The renderer's line buffer and
+        // depth-tested reference curves remain unchanged.
+        vulkan.setTrackCurveHighlight(0, 0);
+        const auto matrix = viewportCamera_.viewProjection(aspectRatio);
+        vulkan.setViewportViewProjection(matrix);
+        ImDrawList* const drawList = ImGui::GetWindowDrawList();
+        const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+        const ImVec2 imageMaximum = ImGui::GetItemRectMax();
+        drawList->PushClipRect(imageMinimum, imageMaximum, true);
 
-        vulkan.setViewportViewProjection(
-            viewportCamera_.viewProjection(aspectRatio)
-        );
+        if (centerlineVisualization_ != nullptr)
+        {
+            const auto project = [&](const renderer::LineVertex& vertex) -> std::optional<ImVec2>
+            {
+                const double w = matrix[3] * vertex.x + matrix[7] * vertex.y
+                    + matrix[11] * vertex.z + matrix[15];
+                const double z = matrix[2] * vertex.x + matrix[6] * vertex.y
+                    + matrix[10] * vertex.z + matrix[14];
+                if (w <= 0.0 || z < 0.0 || z > w)
+                {
+                    return std::nullopt;
+                }
+                const double x = matrix[0] * vertex.x + matrix[4] * vertex.y
+                    + matrix[8] * vertex.z + matrix[12];
+                const double y = matrix[1] * vertex.x + matrix[5] * vertex.y
+                    + matrix[9] * vertex.z + matrix[13];
+                return ImVec2{imageMinimum.x + static_cast<float>(0.5 * (x / w + 1.0)) * logicalWidth,
+                    imageMinimum.y + static_cast<float>(0.5 * (y / w + 1.0)) * logicalHeight};
+            };
+            const auto emphasize = [&](const std::size_t section, const bool selected)
+            {
+                if (section >= centerlineSlices_.size()) return;
+                const auto& slice = centerlineSlices_[section];
+                // Prefer authored rails; reference-only views still have a
+                // visible selection without promoting all four curves.
+                const std::uint32_t visible = visibleTrackCurveMask(viewportSettings_);
+                const std::uint32_t rails = (1u << renderer::viewportLeftRailCurve)
+                    | (1u << renderer::viewportRightRailCurve);
+                const std::uint32_t mask = (visible & rails) != 0 ? visible & rails
+                    : (visible & (1u << renderer::viewportCenterlineCurve)) != 0
+                        ? 1u << renderer::viewportCenterlineCurve : visible;
+                const ImU32 color = ImGui::ColorConvertFloat4ToU32(selected
+                    ? palette::viewportSelected : palette::viewportHovered);
+                const ImU32 outline = ImGui::ColorConvertFloat4ToU32(palette::black);
+                const float width = (selected ? viewportStyle::selectedLineWidth
+                    : viewportStyle::hoveredLineWidth) * presentationScale;
+                for (std::uint32_t curve = 0; curve < renderer::viewportCurveCount; ++curve)
+                {
+                    if ((mask & (1u << curve)) == 0) continue;
+                    const std::size_t begin = curve * centerlineVisualization_->verticesPerCurve
+                        + slice.firstVertex;
+                    const std::size_t end = begin + slice.vertexCount;
+                    for (std::size_t index = begin; index + 1 < end; index += 2)
+                    {
+                        const auto first = project(centerlineVisualization_->vertices[index]);
+                        const auto second = project(centerlineVisualization_->vertices[index + 1]);
+                        if (!first || !second) continue;
+                        drawList->AddLine(*first, *second, outline, width + 2.0F * presentationScale);
+                        drawList->AddLine(*first, *second, color, width);
+                    }
+                    if (selected && slice.vertexCount >= 2)
+                    {
+                        // Square end caps make selection recognizable without color.
+                        for (const std::size_t index : {begin, end - 1})
+                        {
+                            if (const auto point = project(centerlineVisualization_->vertices[index]))
+                            {
+                                const float radius = viewportStyle::selectionCapRadius * presentationScale;
+                                drawList->AddRectFilled({point->x - radius, point->y - radius},
+                                    {point->x + radius, point->y + radius}, color);
+                            }
+                        }
+                    }
+                }
+            };
+            if (hoveredSection && *hoveredSection != selectedSection_)
+                emphasize(*hoveredSection, false);
+            emphasize(selectedSection_, true);
+        }
         drawViewportTrackAnchors();
+        drawList->PopClipRect();
     }
 
     void EditorUi::drawViewportTrackAnchors()
@@ -4376,9 +4410,26 @@ namespace quantum::editor
                 && point.normalizedPosition.y <= 1.0;
         };
 
-        constexpr ImU32 markerOutline = IM_COL32(8, 10, 14, 245);
-        constexpr ImU32 markerFill = IM_COL32(68, 205, 230, 235);
-        constexpr ImU32 selectedFill = IM_COL32(255, 190, 48, 255);
+        const float presentationScale = editorPresentationScale();
+        const ImU32 markerOutline = ImGui::ColorConvertFloat4ToU32(palette::black);
+        const ImU32 markerFill = ImGui::ColorConvertFloat4ToU32(palette::viewportAnchor);
+        const ImU32 selectedFill = ImGui::ColorConvertFloat4ToU32(palette::viewportSelected);
+        const ImU32 hoverFill = ImGui::ColorConvertFloat4ToU32(palette::viewportHovered);
+        const ImU32 ringColor = ImGui::ColorConvertFloat4ToU32(palette::viewportRing);
+        const auto label = [&](ImVec2 position, const ImU32 color, const char* text)
+        {
+            const float padding = viewportStyle::overlayPadding * presentationScale;
+            const float wrapWidth = std::max(1.0F, imageWidth - 4.0F * padding);
+            const ImVec2 size = ImGui::CalcTextSize(text, nullptr, false, wrapWidth);
+            position = clampViewportLabel(position, size,
+                {imageMinimum.x + padding, imageMinimum.y + padding},
+                {imageMaximum.x - padding, imageMaximum.y - padding});
+            drawList->AddRectFilled({position.x - padding, position.y - padding},
+                {position.x + size.x + padding, position.y + size.y + padding},
+                markerOutline, 2.0F * presentationScale);
+            drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), position,
+                color, text, nullptr, wrapWidth);
+        };
 
         const auto drawMarker = [&](const ViewportTrackAnchor& anchor,
             const bool selected)
@@ -4394,22 +4445,24 @@ namespace quantum::editor
             }
 
             const ImVec2 center = screenPosition(*projected);
-            const float radius = selected ? 7.0F : 5.0F;
-            drawList->AddCircleFilled(center, radius + 2.0F, markerOutline, 20);
+            const bool hovered = hoveredTrackAnchor_ == anchor.anchorIndex;
+            const float radius = (selected ? viewportStyle::selectedAnchorRadius
+                : viewportStyle::anchorRadius) * presentationScale;
+            drawList->AddCircleFilled(center, radius + 2.0F * presentationScale, markerOutline, 20);
             drawList->AddCircleFilled(
                 center,
                 radius,
-                selected ? selectedFill : markerFill,
+                selected ? selectedFill : hovered ? hoverFill : markerFill,
                 20
             );
             if (selected)
             {
                 drawList->AddCircle(
                     center,
-                    radius + 3.5F,
-                    IM_COL32(255, 255, 255, 235),
+                    viewportStyle::anchorRingRadius * presentationScale,
+                    ringColor,
                     24,
-                    1.5F
+                    1.5F * presentationScale
                 );
             }
         };
@@ -4479,12 +4532,13 @@ namespace quantum::editor
         const double worldUnitsPerPixel = 2.0 * scaleDistance
             * std::tan(0.5 * viewportCamera_.verticalFieldOfView())
             / static_cast<double>(imageHeight);
-        const double axisLength = 34.0 * worldUnitsPerPixel;
+        const double axisLength = viewportStyle::orientationAxisLength
+            * presentationScale * worldUnitsPerPixel;
         const ImVec2 origin = screenPosition(*projectedOrigin);
 
         const auto drawAxis = [&](const glm::dvec3& axis,
             const ImU32 color,
-            const char* const label)
+            const char* const axisLabel)
         {
             const auto projectedEnd = projectViewportPoint(
                 viewportCamera_,
@@ -4498,29 +4552,29 @@ namespace quantum::editor
             }
 
             const ImVec2 end = screenPosition(*projectedEnd);
-            drawList->AddLine(origin, end, markerOutline, 4.0F);
-            drawList->AddLine(origin, end, color, 2.25F);
-            drawList->AddCircleFilled(end, 3.0F, color, 12);
-            drawList->AddText(
-                ImVec2{end.x + 4.0F, end.y - 7.0F},
+            drawList->AddLine(origin, end, markerOutline, 4.0F * presentationScale);
+            drawList->AddLine(origin, end, color, 2.25F * presentationScale);
+            drawList->AddCircleFilled(end, 3.0F * presentationScale, color, 12);
+            label(
+                ImVec2{end.x + 4.0F * presentationScale, end.y - ImGui::GetFontSize() * 0.5F},
                 color,
-                label
+                axisLabel
             );
         };
 
         drawAxis(displayedAnchor.forward,
-            IM_COL32(255, 92, 76, 255), "T");
+            ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[0]), "T");
         drawAxis(displayedAnchor.lateral,
-            IM_COL32(90, 224, 138, 255), "L");
+            ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[1]), "L");
         drawAxis(displayedAnchor.up,
-            IM_COL32(102, 154, 255, 255), "U");
+            ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[2]), "U");
 
         if (isViewportTrackAnchorEditable(displayedAnchor.kind))
         {
-            constexpr std::array<ImU32, 3> axisColors{
-                IM_COL32(255, 82, 72, 255),
-                IM_COL32(76, 220, 116, 255),
-                IM_COL32(76, 138, 255, 255)
+            const std::array<ImU32, 3> axisColors{
+                ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[0]),
+                ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[1]),
+                ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[2])
             };
             constexpr std::array<ImVec2, 3> fallbackDirections{
                 ImVec2{1.0F, 0.0F},
@@ -4530,7 +4584,7 @@ namespace quantum::editor
 
             if (startPoseTransformMode_ == StartPoseTransformMode::Move)
             {
-                const double handleAxisLength = startPoseMoveHandlePixels
+                const double handleAxisLength = (viewportStyle::moveHandleLength * presentationScale)
                     * worldUnitsPerPixel;
                 for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
                 {
@@ -4538,7 +4592,7 @@ namespace quantum::editor
                         axisIndex);
                     double directionX = fallbackDirections[axisIndex].x;
                     double directionY = fallbackDirections[axisIndex].y;
-                    double screenLength = startPoseMoveHandlePixels;
+                    double screenLength = (viewportStyle::moveHandleLength * presentationScale);
                     const auto projectedEnd = projectViewportPoint(
                         viewportCamera_,
                         displayedAnchor.position + handleAxisLength
@@ -4552,7 +4606,7 @@ namespace quantum::editor
                         const double dx = projectedScreenEnd.x - origin.x;
                         const double dy = projectedScreenEnd.y - origin.y;
                         const double projectedLength = std::hypot(dx, dy);
-                        if (projectedLength >= 10.0)
+                        if (projectedLength >= 10.0 * presentationScale)
                         {
                             directionX = dx / projectedLength;
                             directionY = dy / projectedLength;
@@ -4561,8 +4615,8 @@ namespace quantum::editor
                     }
 
                     const ImVec2 begin{
-                        origin.x + static_cast<float>(8.0 * directionX),
-                        origin.y + static_cast<float>(8.0 * directionY)
+                        origin.x + static_cast<float>(8.0 * presentationScale * directionX),
+                        origin.y + static_cast<float>(8.0 * presentationScale * directionY)
                     };
                     const ImVec2 end{
                         origin.x + static_cast<float>(
@@ -4573,18 +4627,18 @@ namespace quantum::editor
                     const bool active = startPoseManipulation_.has_value()
                         && startPoseManipulation_->axis == axis;
                     const ImU32 color = active
-                        ? IM_COL32(255, 220, 96, 255)
+                        ? ringColor
                         : axisColors[axisIndex];
-                    drawList->AddLine(origin, end, markerOutline, 6.0F);
+                    drawList->AddLine(origin, end, markerOutline, 6.0F * presentationScale);
                     drawList->AddLine(
                         begin,
                         end,
                         color,
-                        active ? 4.0F : 3.0F
+                        (active ? 4.0F : 3.0F) * presentationScale
                     );
-                    drawList->AddCircleFilled(end, 5.0F, color, 16);
-                    drawList->AddText(
-                        ImVec2{end.x + 5.0F, end.y - 8.0F},
+                    drawList->AddCircleFilled(end, 5.0F * presentationScale, color, 16);
+                    label(
+                        ImVec2{end.x + 5.0F * presentationScale, end.y - ImGui::GetFontSize() * 0.5F},
                         color,
                         startPoseAxisName(axis)
                     );
@@ -4599,27 +4653,27 @@ namespace quantum::editor
                     const bool active = startPoseManipulation_.has_value()
                         && startPoseManipulation_->axis == axis;
                     const ImU32 color = active
-                        ? IM_COL32(255, 220, 96, 255)
+                        ? ringColor
                         : axisColors[axisIndex];
                     const float radius =
-                        startPoseRotateRadiiPixels[axisIndex];
+                        (viewportStyle::rotateRadii[axisIndex] * presentationScale);
                     drawList->AddCircle(
                         origin,
                         radius,
                         markerOutline,
                         48,
-                        5.0F
+                        5.0F * presentationScale
                     );
                     drawList->AddCircle(
                         origin,
                         radius,
                         color,
                         48,
-                        active ? 4.0F : 2.5F
+                        (active ? 4.0F : 2.5F) * presentationScale
                     );
-                    drawList->AddText(
-                        ImVec2{origin.x + radius + 4.0F,
-                               origin.y - 7.0F},
+                    label(
+                        ImVec2{origin.x + radius + 4.0F * presentationScale,
+                               origin.y - ImGui::GetFontSize() * 0.5F},
                         color,
                         startPoseAxisName(axis)
                     );
@@ -4636,9 +4690,25 @@ namespace quantum::editor
             "Anchor %zu",
             displayedAnchor.anchorIndex
         );
-        drawList->AddText(
-            ImVec2{origin.x + 12.0F, origin.y + 8.0F},
-            IM_COL32(255, 232, 162, 255),
+        const ImVec2 anchorLabelSize = ImGui::CalcTextSize(anchorLabel);
+        float labelClearance = viewportStyle::orientationAxisLength;
+        if (isViewportTrackAnchorEditable(displayedAnchor.kind))
+        {
+            labelClearance = std::max(labelClearance,
+                startPoseTransformMode_ == StartPoseTransformMode::Move
+                    ? viewportStyle::moveHandleLength : viewportStyle::rotateRadii.back());
+        }
+        // Keep the selected anchor's name outside the handles, including when
+        // a narrow image forces its horizontal position to be clamped.
+        labelClearance = (labelClearance + viewportStyle::anchorLabelGap) * presentationScale;
+        float labelY = origin.y - labelClearance - anchorLabelSize.y;
+        if (labelY < imageMinimum.y + viewportStyle::overlayPadding * presentationScale)
+        {
+            labelY = origin.y + labelClearance;
+        }
+        label(
+            ImVec2{origin.x - anchorLabelSize.x * 0.5F, labelY},
+            selectedFill,
             anchorLabel
         );
 
@@ -4656,30 +4726,22 @@ namespace quantum::editor
             break;
         }
 
-        const float statusWrapWidth = std::max(1.0F,
-            imageMaximum.x - imageMinimum.x - 34.0F);
-        const ImVec2 textSize = ImGui::CalcTextSize(
-            status, nullptr, false, statusWrapWidth);
-        const ImVec2 statusMinimum{
-            imageMinimum.x + 9.0F,
-            imageMaximum.y - textSize.y - 17.0F
-        };
-        const ImVec2 statusMaximum{
-            statusMinimum.x + textSize.x + 16.0F,
-            statusMinimum.y + textSize.y + 8.0F
-        };
-        drawList->AddRectFilled(
-            statusMinimum,
-            statusMaximum,
-            ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
-            4.0F
-        );
-        drawList->AddText(
-            ImGui::GetFont(), ImGui::GetFontSize(),
-            ImVec2{statusMinimum.x + 8.0F, statusMinimum.y + 4.0F},
+        const float margin = viewportStyle::overlayMargin * presentationScale;
+        const float padding = viewportStyle::overlayPadding * presentationScale;
+        const float statusWrapWidth = std::max(1.0F, imageWidth - 2.0F * (margin + padding));
+        const ImVec2 textSize = ImGui::CalcTextSize(status, nullptr, false, statusWrapWidth);
+        const ImVec2 statusMinimum = clampViewportLabel(
+            {imageMinimum.x + margin, imageMaximum.y - textSize.y - margin - 2.0F * padding},
+            {textSize.x + 2.0F * padding, textSize.y + 2.0F * padding},
+            imageMinimum, imageMaximum);
+        drawList->AddRectFilled(statusMinimum,
+            {statusMinimum.x + textSize.x + 2.0F * padding,
+             statusMinimum.y + textSize.y + 2.0F * padding},
+            ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised), padding);
+        drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+            {statusMinimum.x + padding, statusMinimum.y + padding},
             ImGui::ColorConvertFloat4ToU32(palette::text),
-            status, nullptr, statusWrapWidth
-        );
+            status, nullptr, statusWrapWidth);
     }
 
     void EditorUi::showViewportViewMenuItems()
@@ -4815,7 +4877,7 @@ namespace quantum::editor
             "perspective", "isometric", "top", "bottom", "left", "right"
         };
 
-        viewportCamera_.applyPreset(preset);
+        viewportSettings_.applyCameraPreset(viewportCamera_, preset);
         initialViewportFramePending_ = false;
         quantum::logging::logMessagef(
             quantum::logging::LogLevel::Debug,
@@ -4905,11 +4967,14 @@ namespace quantum::editor
             return;
         }
 
-        const glm::dvec3 center =
-            (slice->minimumPosition + slice->maximumPosition) / 2.0;
+        refreshViewportDisplayBounds();
+        const auto [minimum, maximum] = centerlineVisualization_ != nullptr
+            ? referenceCurveBounds(*centerlineVisualization_, slice)
+            : std::pair{slice->minimumPosition, slice->maximumPosition};
+        const glm::dvec3 center = (minimum + maximum) / 2.0;
         bool framed = viewportCamera_.frameBounds(
-            slice->minimumPosition,
-            slice->maximumPosition,
+            minimum,
+            maximum,
             viewportAspectRatio_
         );
 
@@ -4945,6 +5010,7 @@ namespace quantum::editor
 
     void EditorUi::frameWholeTrack()
     {
+        refreshViewportDisplayBounds();
         viewportCamera_.frame(viewportAspectRatio_);
         initialViewportFramePending_ = false;
         quantum::logging::logMessage(
@@ -4971,15 +5037,7 @@ namespace quantum::editor
 
     void EditorUi::applyViewportSettings(renderer::VulkanContext& vulkan)
     {
-        viewportCamera_.setProjection(
-            viewportSettings_.orthographic
-                ? ViewportProjection::Orthographic
-                : ViewportProjection::Perspective
-        );
-        viewportCamera_.setVerticalFieldOfView(
-            static_cast<double>(viewportSettings_.fieldOfViewDegrees)
-                * piRadians / 180.0
-        );
+        viewportSettings_.applyCameraSettings(viewportCamera_);
 
         vulkan.setViewportElementVisibility(
             viewportSettings_.gridVisible,
@@ -5292,7 +5350,8 @@ namespace quantum::editor
             &sectionLengthEditBuffer_,
             regionCreateFlow_,
             selectedRegionHeightDelta,
-            quantum::coaster::computeTrackTopology(*authoredTrack_)
+            quantum::coaster::computeTrackTopology(*authoredTrack_),
+            fonts_
         );
 
         if (workspaceEdit.selectRequest.has_value())
@@ -5425,12 +5484,12 @@ namespace quantum::editor
                     std::get<coaster::GeometryRegion>(
                         editedSection.region).construction);
 
-            ImGui::SeparatorText("Circular arc geometry");
+            editorHeading("Circular arc geometry", fonts_);
 
             // Angle fields present degrees; commands carry Core radians.
             // Every edit flows through the same candidate/commit pipeline
             // as rate-profile edits.
-            const auto inputProperty = [](const char* const label,
+            const auto inputProperty = [this](const char* const label,
                 const char* const id, double* const value,
                 const double step, const double fastStep)
             {
@@ -5447,7 +5506,10 @@ namespace quantum::editor
                 }
                 ImGui::SetNextItemWidth(std::min(320.0F,
                     ImGui::GetContentRegionAvail().x));
-                return ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+                ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
+                const bool changed = ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+                ImGui::PopFont();
+                return changed;
             };
             if (inputProperty(
                 "Radius", "###Radius",
@@ -5488,7 +5550,7 @@ namespace quantum::editor
             }
 
             ImGui::Spacing();
-            ImGui::SeparatorText("Banking");
+            editorHeading("Banking", fonts_);
             if (inputProperty(
                 "Bank change (deg)", "###Bank Change (deg)",
                 &planarArcEditBuffers_[3],
@@ -5610,7 +5672,8 @@ namespace quantum::editor
             activeRateChannel_,
             hoveredRateChannel_,
             hoveredGraphMarker_,
-            transitionEditorInputSettings_
+            transitionEditorInputSettings_,
+            fonts_
         );
 
         if (transitionEdit.endpointValueEdit.has_value())
@@ -5872,7 +5935,8 @@ namespace quantum::editor
             showRiderLoadDiagnostics(
                 riderLoadDiagnostics_.selectedSection(),
                 authoredTrack_->physicalSettings(),
-                &riderLoadDiagnosticsWindowOpen_
+                &riderLoadDiagnosticsWindowOpen_,
+                fonts_
             );
         }
 
@@ -6227,6 +6291,19 @@ namespace quantum::editor
             committedParams.bankChange * degreesPerRadian};
     }
 
+    void EditorUi::refreshViewportDisplayBounds()
+    {
+        if (viewportDisplayBoundsDirty_ && centerlineVisualization_ != nullptr
+            && !centerlineVisualization_->vertices.empty())
+        {
+            const auto [minimum, maximum] = referenceCurveBounds(*centerlineVisualization_);
+            // setBounds updates clipping/framing limits without changing user
+            // pose. Refresh after transactions publish the new visualization.
+            viewportCamera_.setBounds(minimum, maximum);
+            viewportDisplayBoundsDirty_ = false;
+        }
+    }
+
     void EditorUi::setCenterlineBounds(
         const glm::dvec3& centerlineMinimum,
         const glm::dvec3& centerlineMaximum)
@@ -6235,6 +6312,7 @@ namespace quantum::editor
             centerlineMinimum,
             centerlineMaximum
         );
+        viewportDisplayBoundsDirty_ = true;
     }
 
     void EditorUi::setCenterlineSections(
@@ -6247,6 +6325,7 @@ namespace quantum::editor
         const CenterlineVisualization& visualization) noexcept
     {
         centerlineVisualization_ = &visualization;
+        viewportDisplayBoundsDirty_ = true;
         if (visualization.anchors.empty())
         {
             selectedTrackAnchor_.reset();
@@ -6315,6 +6394,7 @@ namespace quantum::editor
 
         if (contextCreated_)
         {
+            fonts_ = {};
             ImGui::DestroyContext();
             contextCreated_ = false;
         }

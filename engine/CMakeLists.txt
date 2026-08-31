@@ -49,6 +49,8 @@ target_sources(
     PRIVATE
         src/Logging.cpp
         src/VulkanContext.cpp
+        src/ViewportAids.cpp
+        include/quantum/renderer/ViewportAids.hpp
         include/quantum/engine/Logging.hpp
         include/quantum/renderer/VulkanContext.hpp
 )

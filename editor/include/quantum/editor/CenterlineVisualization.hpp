@@ -7,6 +7,7 @@
 #include <glm/vec3.hpp>
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace quantum::editor
@@ -65,6 +66,12 @@ namespace quantum::editor
     [[nodiscard]] CenterlineVisualization createCenterlineVisualization(
         const coaster::AuthoredTrack& track
     );
+
+    // Display-only bounds for Frame All/Focus. Keep the solved centerline
+    // bounds above unchanged; rails/heartline matter when framing short tracks.
+    [[nodiscard]] std::pair<glm::dvec3, glm::dvec3> referenceCurveBounds(
+        const CenterlineVisualization& visualization,
+        const CenterlineSectionSlice* slice = nullptr);
 
     // Tiny editor-side dirty/version wrapper for the generated visualization.
     // The caller remains responsible for marking geometry edits dirty; pure

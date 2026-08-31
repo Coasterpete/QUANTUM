@@ -1,9 +1,67 @@
 #include <quantum/editor/EditorStyle.hpp>
 
 #include <imgui.h>
+#include <quantum/engine/Logging.hpp>
+
+#include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace quantum::editor
 {
+    EditorFonts loadEditorFonts(const std::filesystem::path& basePath)
+    {
+        const auto load = [&](const char* name, const float size)
+        {
+            const auto path = basePath / "assets/fonts/Overpass" / name;
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(path, error) || error)
+            {
+                throw std::runtime_error("Bundled UI font not found at " + path.string());
+            }
+            ImFont* const font = ImGui::GetIO().Fonts->AddFontFromFileTTF(
+                path.string().c_str(), size);
+            if (font == nullptr)
+            {
+                throw std::runtime_error("Dear ImGui could not load the bundled UI font at "
+                    + path.string());
+            }
+            quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                "APP", "Loaded bundled UI font: %s (%.0f px)",
+                path.string().c_str(), static_cast<double>(size));
+            return font;
+        };
+
+        EditorFonts fonts;
+        fonts.normal = load("overpass-regular.otf", editorFontSize);
+        fonts.header = load("overpass-semibold.otf", editorHeaderFontSize);
+        fonts.technical = load("overpass-mono-regular.otf", editorTechnicalFontSize);
+        ImGui::GetIO().FontDefault = fonts.normal;
+        return fonts;
+    }
+
+    void editorHeading(const char* const label, const EditorFonts& fonts)
+    {
+        ImGui::PushFont(fonts.header, editorHeaderFontSize);
+        ImGui::SeparatorText(label);
+        ImGui::PopFont();
+    }
+
+    float editorPresentationScale()
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        return style.FontScaleMain * style.FontScaleDpi;
+    }
+
+    ImVec2 clampViewportLabel(const ImVec2 position, const ImVec2 size,
+        const ImVec2 minimum, const ImVec2 maximum)
+    {
+        return {
+            std::clamp(position.x, minimum.x, std::max(minimum.x, maximum.x - size.x)),
+            std::clamp(position.y, minimum.y, std::max(minimum.y, maximum.y - size.y))
+        };
+    }
+
     void applyQuantumStyle()
     {
         ImGuiStyle& style = ImGui::GetStyle();

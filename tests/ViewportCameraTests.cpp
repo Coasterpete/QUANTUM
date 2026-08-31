@@ -356,8 +356,7 @@ namespace
 
         const double isoPitch = std::atan(1.0 / std::sqrt(2.0));
         const double defaultYaw = std::atan2(-1.5, 1.2);
-        const double defaultPitch = std::atan2(
-            1.0, std::hypot(1.2, -1.5));
+        const double defaultPitch = 38.0 * 3.14159265358979323846 / 180.0;
 
         const PresetExpectation expectations[] = {
             {ViewportCameraPreset::Perspective, "perspective",

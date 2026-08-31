@@ -18,6 +18,7 @@ namespace
     // flip through them; the Top/Bottom presets set the exact poles and
     // rely on the pole-safe basis below.
     constexpr double maximumPitch = 89.0 * pi / 180.0;
+    constexpr double perspectiveElevation = 38.0 * pi / 180.0;
     constexpr double framingMargin = 1.1;
     constexpr double minimumDistanceScale = 1.0e-3;
     constexpr double maximumDistanceScale = 1.0e4;
@@ -48,7 +49,7 @@ namespace quantum::editor
 {
     ViewportCamera::ViewportCamera()
         : yaw_(std::atan2(-1.5, 1.2)),
-          pitch_(std::atan2(1.0, std::hypot(1.2, -1.5))),
+          pitch_(perspectiveElevation),
           verticalFieldOfView_(45.0 * pi / 180.0)
     {
     }
@@ -241,7 +242,7 @@ namespace quantum::editor
         case ViewportCameraPreset::Perspective:
             projection_ = ViewportProjection::Perspective;
             yaw_ = std::atan2(-1.5, 1.2);
-            pitch_ = std::atan2(1.0, std::hypot(1.2, -1.5));
+            pitch_ = perspectiveElevation;
             break;
         case ViewportCameraPreset::Isometric:
             // Classic isometric: orthographic with equal 120-degree axis
