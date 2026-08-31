@@ -42,10 +42,12 @@ namespace
     // layout while preserving normal Dear ImGui persistence thereafter.
     constexpr char editorLayoutIniFileName[] = "imgui-layout-v2.ini";
     constexpr char editorDockspaceName[] = "QuantumEditorDockSpace";
-    // Preserve the existing ImGui window ID so the capitalization correction
-    // does not discard the user's persisted docking placement.
+    // Display names can change; these suffixes retain the existing window
+    // IDs and their persisted docking placements.
+    constexpr char trackWorkspaceWindowName[] =
+        "Track Workspace###TRACK WORKSPACE";
     constexpr char supportWorkspaceWindowName[] =
-        "SUPPORT WORKSPACE###Support Workspace";
+        "Supports###Support Workspace";
     constexpr double orbitRadiansPerPixel = 0.005;
     constexpr double piRadians = 3.14159265358979323846;
     // The Geometry Editor presents angles in degrees; Core keeps radians.
@@ -139,38 +141,6 @@ namespace
         return curveMask;
     }
 
-    struct WorkspaceAccent
-    {
-        ImVec4 quiet;
-        ImVec4 normal;
-        ImVec4 hovered;
-        ImVec4 active;
-    };
-
-    const WorkspaceAccent trackWorkspaceAccent{
-        .quiet = quantum::editor::palette::fromSrgb(0, 0, 128),
-        .normal = quantum::editor::palette::trackWorkspaceBlue,
-        .hovered = quantum::editor::palette::fromSrgb(51, 51, 255),
-        .active = quantum::editor::palette::fromSrgb(0, 0, 204)
-    };
-    const WorkspaceAccent supportWorkspaceAccent{
-        .quiet = quantum::editor::palette::fromSrgb(128, 0, 0),
-        .normal = quantum::editor::palette::supportWorkspaceRed,
-        .hovered = quantum::editor::palette::fromSrgb(255, 51, 51),
-        .active = quantum::editor::palette::fromSrgb(204, 0, 0)
-    };
-    const WorkspaceAccent transitionEditorAccent{
-        .quiet = quantum::editor::palette::fromSrgb(0, 0, 95),
-        .normal = quantum::editor::palette::transitionEditorBlue,
-        .hovered = quantum::editor::palette::fromSrgb(51, 51, 203),
-        .active = quantum::editor::palette::fromSrgb(0, 0, 152)
-    };
-    const ImVec4 topRegionHovered =
-        quantum::editor::palette::fromSrgb(176, 176, 176);
-    const ImVec4 topRegionActive =
-        quantum::editor::palette::fromSrgb(156, 156, 156);
-    constexpr int workspaceAccentColorCount = 16;
-    constexpr int topRegionColorCount = 12;
     const ImU32 transitionCanvasColor = ImGui::ColorConvertFloat4ToU32(
         quantum::editor::palette::black
     );
@@ -185,47 +155,6 @@ namespace
             quantum::editor::palette::yawChannelGold
         )
     };
-
-    void pushWorkspaceAccent(const WorkspaceAccent& accent)
-    {
-        ImGui::PushStyleColor(ImGuiCol_Button, accent.normal);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, accent.hovered);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, accent.active);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, accent.normal);
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, accent.hovered);
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, accent.active);
-        ImGui::PushStyleColor(ImGuiCol_Header, accent.normal);
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, accent.hovered);
-        ImGui::PushStyleColor(ImGuiCol_HeaderActive, accent.active);
-        ImGui::PushStyleColor(ImGuiCol_Tab, accent.quiet);
-        ImGui::PushStyleColor(ImGuiCol_TabHovered, accent.hovered);
-        ImGui::PushStyleColor(ImGuiCol_TabSelected, accent.normal);
-        ImGui::PushStyleColor(ImGuiCol_TabSelectedOverline, accent.active);
-        ImGui::PushStyleColor(ImGuiCol_TabDimmed, accent.quiet);
-        ImGui::PushStyleColor(ImGuiCol_TabDimmedSelected, accent.normal);
-        ImGui::PushStyleColor(
-            ImGuiCol_TabDimmedSelectedOverline,
-            accent.active
-        );
-    }
-
-    void pushTopRegionStyle()
-    {
-        using namespace quantum::editor;
-
-        ImGui::PushStyleColor(ImGuiCol_Text, palette::black);
-        ImGui::PushStyleColor(ImGuiCol_TextDisabled, palette::black);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, palette::brightestGray);
-        ImGui::PushStyleColor(ImGuiCol_MenuBarBg, palette::brightestGray);
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, palette::brightestGray);
-        ImGui::PushStyleColor(ImGuiCol_Border, palette::darkestGray);
-        ImGui::PushStyleColor(ImGuiCol_Button, palette::brightestGray);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, topRegionHovered);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, topRegionActive);
-        ImGui::PushStyleColor(ImGuiCol_Header, palette::brightestGray);
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, topRegionHovered);
-        ImGui::PushStyleColor(ImGuiCol_HeaderActive, topRegionActive);
-    }
 
     struct AuthoredDomainView
     {
@@ -706,7 +635,7 @@ namespace
             ImGuiCol_TextDisabled
         );
 
-        drawList->AddText(canvasBegin, textColor, "REGION DISTANCE");
+        drawList->AddText(canvasBegin, textColor, "Distance in region");
 
         char domainLabel[64]{};
         std::snprintf(
@@ -846,11 +775,6 @@ namespace
     {
         using quantum::editor::RiderLoadUnreachableLocation;
 
-        pushWorkspaceAccent(transitionEditorAccent);
-        ImGui::PushStyleColor(
-            ImGuiCol_Border,
-            quantum::editor::palette::transitionEditorBlue
-        );
         ImGui::SetNextWindowSize(ImVec2(760.0F, 380.0F),
             ImGuiCond_FirstUseEver);
         ImGui::Begin(riderLoadDiagnosticsWindowName);
@@ -868,12 +792,13 @@ namespace
 
         if (diagnostics.unreachable.has_value())
         {
+            ImGui::PushTextWrapPos();
             const double stopDistance = diagnostics.unreachable->distance;
             switch (diagnostics.unreachableLocation)
             {
             case RiderLoadUnreachableLocation::BeforeSelectedSection:
                 ImGui::TextColored(
-                    quantum::editor::palette::supportWorkspaceRed,
+                    quantum::editor::palette::error,
                     "Evaluation stopped: energetically unreachable at "
                     "track distance %.4g before this region. No later "
                     "values are fabricated.",
@@ -882,7 +807,7 @@ namespace
                 break;
             case RiderLoadUnreachableLocation::WithinSelectedSection:
                 ImGui::TextColored(
-                    quantum::editor::palette::supportWorkspaceRed,
+                    quantum::editor::palette::error,
                     "Evaluation stopped: energetically unreachable at "
                     "region-local distance %.4g (track %.4g). Valid "
                     "earlier samples remain visible.",
@@ -892,7 +817,7 @@ namespace
                 break;
             case RiderLoadUnreachableLocation::AfterSelectedSection:
                 ImGui::TextColored(
-                    quantum::editor::palette::supportWorkspaceRed,
+                    quantum::editor::palette::error,
                     "Whole-track evaluation stopped at track distance "
                     "%.4g, at or after this region's exit; this region's "
                     "valid samples remain visible.",
@@ -903,6 +828,7 @@ namespace
             default:
                 break;
             }
+            ImGui::PopTextWrapPos();
         }
         else if (diagnostics.samples.empty())
         {
@@ -961,15 +887,13 @@ namespace
                 static const std::array<ImU32, diagnosticChannelCount>
                     channelColors{
                         ImGui::ColorConvertFloat4ToU32(
-                            quantum::editor::palette::fromSrgb(
-                                0, 230, 130)),
+                            quantum::editor::palette::normalGChannel),
                         ImGui::ColorConvertFloat4ToU32(
                             quantum::editor::palette::yawChannelGold),
                         ImGui::ColorConvertFloat4ToU32(
                             quantum::editor::palette::rollChannelRed),
                         ImGui::ColorConvertFloat4ToU32(
-                            quantum::editor::palette::fromSrgb(
-                                0, 210, 255))
+                            quantum::editor::palette::speedChannel)
                     };
                 const std::array<RiderLoadChannelView,
                     diagnosticChannelCount> channels{{
@@ -1125,7 +1049,7 @@ namespace
                         ImVec2(stopX, plotsBeginY),
                         ImVec2(stopX, canvasEnd.y),
                         ImGui::ColorConvertFloat4ToU32(
-                            quantum::editor::palette::supportWorkspaceRed),
+                            quantum::editor::palette::error),
                         2.0F
                     );
                 }
@@ -1134,7 +1058,6 @@ namespace
         }
         ImGui::EndChild();
         ImGui::End();
-        ImGui::PopStyleColor(workspaceAccentColorCount + 1);
     }
 
     [[nodiscard]] const quantum::coaster::ProfileSegment*
@@ -1195,8 +1118,8 @@ namespace
             : quantum::editor::ScalarProfileEndpoint::End;
         ImGui::TextDisabled(
             numericEndpoint == quantum::editor::ScalarProfileEndpoint::Begin
-                ? "Begin Value"
-                : "End Value"
+                ? "Start rate"
+                : "End rate"
         );
         ImGui::SameLine();
         ImGui::SetNextItemWidth(valueWidth);
@@ -1638,6 +1561,7 @@ namespace
                 edit.splitDistance = targetDistance;
             }
 
+            quantum::editor::pushDestructiveStyle();
             if (ImGui::Selectable(
                 "Remove Segment",
                 false,
@@ -1647,6 +1571,7 @@ namespace
             {
                 edit.removeRequested = true;
             }
+            quantum::editor::popDestructiveStyle();
             ImGui::EndPopup();
         }
         ImGui::PopID();
@@ -1729,7 +1654,8 @@ namespace
         }
 
         ImFont* const font = io.Fonts->AddFontFromFileTTF(
-            fontPath.string().c_str()
+            fontPath.string().c_str(),
+            quantum::editor::editorFontSize
         );
 
         if (font == nullptr)
@@ -1936,8 +1862,6 @@ namespace
             | ImGuiWindowFlags_NoScrollbar
             | ImGuiWindowFlags_NoSavedSettings;
 
-        pushTopRegionStyle();
-        ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, 1.0F);
         const bool visible = ImGui::BeginViewportSideBar(
             "##QuantumCommandArea",
             mainViewport,
@@ -1948,12 +1872,7 @@ namespace
 
         if (visible)
         {
-            ImGui::PushStyleColor(
-                ImGuiCol_Text,
-                quantum::editor::palette::commandHeadingGreen
-            );
-            ImGui::TextUnformatted("COMMAND");
-            ImGui::PopStyleColor();
+            ImGui::TextUnformatted("Commands");
 
             if (ImGui::Button("New"))
             {
@@ -1991,8 +1910,6 @@ namespace
         }
 
         ImGui::End();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(topRegionColorCount);
         return height;
     }
 
@@ -2005,8 +1922,7 @@ namespace
         const quantum::coaster::TrackTopology& topology)
     {
         TrackWorkspaceEdit edit;
-        pushWorkspaceAccent(trackWorkspaceAccent);
-        ImGui::Begin("TRACK WORKSPACE");
+        ImGui::Begin(trackWorkspaceWindowName);
 
         ImGui::BeginDisabled();
         ImGui::Button("Track Style Properties...");
@@ -2023,14 +1939,14 @@ namespace
             ImVec2(0.0F, 0.0F),
             ImGuiChildFlags_Borders))
         {
-            ImGui::TextUnformatted("Section List");
+            ImGui::TextUnformatted("Regions");
 
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
 
             // Layout Mode selector
-            ImGui::TextUnformatted("LAYOUT MODE");
+            ImGui::TextUnformatted("Layout");
             const quantum::coaster::LayoutMode currentMode =
                 track.layoutMode();
             const bool isCircuit =
@@ -2065,8 +1981,11 @@ namespace
                 quantum::coaster::computeLayoutStatus(
                     currentMode, topology.kind);
 
-            ImGui::TextUnformatted("TRACK TOPOLOGY");
-            ImGui::Text(
+            ImGui::TextUnformatted("Track connectivity");
+            ImGui::TextColored(
+                status == quantum::coaster::LayoutStatus::CircuitIncomplete
+                    ? quantum::editor::palette::warning
+                    : quantum::editor::palette::text,
                 "%s",
                 quantum::coaster::layoutStatusLabel(status));
 
@@ -2093,19 +2012,29 @@ namespace
             {
                 // Region terminology is the user-facing prototype wording;
                 // the internal Section naming is unchanged.
-                const char* kindName =
-                    track.section(index).kind
-                            == quantum::coaster::RegionKind::Geometry
-                        ? (quantum::coaster::isForceDrivenSection(track.section(index))
-                            ? "Geometry / Force Driven" : "Geometry / Planar Arc")
-                        : "Rate/Profile";
-                char label[80]{};
+                const bool isGeometry = track.section(index).kind
+                    == quantum::coaster::RegionKind::Geometry;
+                const bool isForceDriven =
+                    quantum::coaster::isForceDrivenSection(track.section(index));
+                const char* kindName = isGeometry
+                    ? (isForceDriven ? "Force-Based" : "Circular Arc")
+                    : "Profile";
+                // Keep the legacy selectable ID, including its region/length
+                // components, while changing only the visible kind name.
+                const char* stableKindName = isGeometry
+                    ? (isForceDriven
+                        ? "Geometry / Force Driven" : "Geometry / Planar Arc")
+                    : "Rate/Profile";
+                char label[160]{};
                 std::snprintf(
                     label,
                     sizeof(label),
-                    "Region %llu - %s (%.3g)",
+                    "Region %llu - %s (%.3g)###Region %llu - %s (%.3g)",
                     static_cast<unsigned long long>(index + 1),
                     kindName,
+                    quantum::coaster::sectionLength(track.section(index)),
+                    static_cast<unsigned long long>(index + 1),
+                    stableKindName,
                     quantum::coaster::sectionLength(track.section(index))
                 );
 
@@ -2183,7 +2112,7 @@ namespace
                             selected.rateProfileRegion().rateProfiles
                         );
                     ImGui::Spacing();
-                    ImGui::TextUnformatted("Net Rotation (integrated)");
+                    ImGui::TextUnformatted("Total rotation");
                     ImGui::Text("Roll %+.2f deg", netRotation.rollDegrees);
                     ImGui::Text("Pitch %+.2f deg", netRotation.pitchDegrees);
                     ImGui::Text("Yaw %+.2f deg", netRotation.yawDegrees);
@@ -2203,8 +2132,8 @@ namespace
                     selected.kind == quantum::coaster::RegionKind::Geometry
                     && !quantum::coaster::isForceDrivenSection(selected);
                 if (ImGui::Button(
-                    isGeometry ? "Convert to Rate Profiles"
-                               : "Convert to Planar Arc",
+                    isGeometry ? "Convert to Profile###Convert to Rate Profiles"
+                               : "Convert to Circular Arc###Convert to Planar Arc",
                     ImVec2(-1.0F, 0.0F)))
                 {
                     if (isGeometry)
@@ -2266,7 +2195,7 @@ namespace
                 const float thirdWidth = (ImGui::GetContentRegionAvail().x
                     - 2.0F * style.ItemSpacing.x) / 3.0F;
                 if (ImGui::Button(
-                    "Rate/Profile",
+                    "Profile###Rate/Profile",
                     ImVec2(thirdWidth, 0.0F)))
                 {
                     edit.createdRegionKind =
@@ -2275,7 +2204,7 @@ namespace
 
                 ImGui::SameLine();
                 if (ImGui::Button(
-                    "Geometry / Planar Arc",
+                    "Circular Arc###Geometry / Planar Arc",
                     ImVec2(thirdWidth, 0.0F)))
                 {
                     edit.createdRegionKind =
@@ -2320,10 +2249,12 @@ namespace
 
             ImGui::SameLine();
             ImGui::BeginDisabled(sectionCount <= 1);
+            quantum::editor::pushDestructiveStyle();
             if (ImGui::Button("Remove Selected", ImVec2(-1.0F, 0.0F)))
             {
                 edit.removeRequested = true;
             }
+            quantum::editor::popDestructiveStyle();
             ImGui::EndDisabled();
 
             ImGui::BeginDisabled(!hasSelection || selectedIndex == 0);
@@ -2358,24 +2289,17 @@ namespace
         ImGui::EndChild();
 
         ImGui::End();
-        ImGui::PopStyleColor(workspaceAccentColorCount);
         return edit;
     }
 
     void showSupportWorkspace()
     {
-        pushWorkspaceAccent(supportWorkspaceAccent);
-        ImGui::PushStyleColor(
-            ImGuiCol_Text,
-            quantum::editor::palette::black
-        );
         ImGui::Begin(supportWorkspaceWindowName);
-        ImGui::PopStyleColor();
 
         ImGui::BeginDisabled();
-        ImGui::Button("Prefab Panel...");
-        ImGui::Button("Foundation Generator...");
-        ImGui::Button("Rail Connector Generator...");
+        ImGui::Button("Support prefabs\xe2\x80\xa6###Prefab Panel...");
+        ImGui::Button("Foundations\xe2\x80\xa6###Foundation Generator...");
+        ImGui::Button("Rail connectors\xe2\x80\xa6###Rail Connector Generator...");
         ImGui::Button("Support Settings...");
         ImGui::EndDisabled();
 
@@ -2393,7 +2317,6 @@ namespace
         ImGui::PopStyleColor();
 
         ImGui::End();
-        ImGui::PopStyleColor(workspaceAccentColorCount);
     }
 
     // Floating preferences window for the shared Transition Editor drag
@@ -2532,11 +2455,6 @@ namespace
             inputSettings)
     {
         TransitionEditorEdit edit;
-        pushWorkspaceAccent(transitionEditorAccent);
-        ImGui::PushStyleColor(
-            ImGuiCol_Border,
-            quantum::editor::palette::transitionEditorBlue
-        );
         ImGui::Begin("Transition Editor");
 
         for (const ProfileRowView& row : profileRows)
@@ -2640,7 +2558,7 @@ namespace
             : selectedEndpoint
                 == quantum::editor::ScalarProfileEndpoint::End
             ? "end marker"
-            : "analytic segment";
+            : "curve segment";
         if (focusedSegment != nullptr)
         {
             ImGui::SameLine();
@@ -2916,7 +2834,7 @@ namespace
                     std::snprintf(
                         netRotationLabel,
                         sizeof(netRotationLabel),
-                        "NET ROTATION  Roll %+.1f  Pitch %+.1f  "
+                        "Total rotation  Roll %+.1f  Pitch %+.1f  "
                         "Yaw %+.1f deg",
                         netRollDegrees,
                         netPitchDegrees,
@@ -3480,7 +3398,6 @@ namespace
         ImGui::EndChild();
 
         ImGui::End();
-        ImGui::PopStyleColor(workspaceAccentColorCount + 1);
         return edit;
     }
 
@@ -3525,7 +3442,7 @@ namespace
             &centerId
         );
 
-        ImGui::DockBuilderDockWindow("TRACK WORKSPACE", leftId);
+        ImGui::DockBuilderDockWindow(trackWorkspaceWindowName, leftId);
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
@@ -4714,7 +4631,7 @@ namespace quantum::editor
         switch (displayedAnchor.kind)
         {
         case ViewportTrackAnchorKind::Start:
-            status = "Track start - editable authored start pose";
+            status = "Track Start \xe2\x80\x94 editable";
             break;
         case ViewportTrackAnchorKind::Interior:
             status = "Shared region boundary - constrained editing not implemented yet";
@@ -4749,11 +4666,9 @@ namespace quantum::editor
     float EditorUi::showMainMenuBar()
     {
         const float height = ImGui::GetFrameHeight();
-        pushTopRegionStyle();
 
         if (!ImGui::BeginMainMenuBar())
         {
-            ImGui::PopStyleColor(topRegionColorCount);
             return 0.0F;
         }
 
@@ -4872,7 +4787,6 @@ namespace quantum::editor
         }
 
         ImGui::EndMainMenuBar();
-        ImGui::PopStyleColor(topRegionColorCount);
         return height;
     }
 
@@ -5148,34 +5062,47 @@ namespace quantum::editor
         {
             const auto presetButton = [this](
                 const char* const label,
-                const ViewportCameraPreset preset)
+                const ViewportCameraPreset preset,
+                const char* const tooltip)
             {
                 if (ImGui::SmallButton(label))
                 {
                     applyViewportPreset(preset);
                 }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("%s", tooltip);
+                }
             };
 
-            presetButton("Persp", ViewportCameraPreset::Perspective);
+            presetButton("Persp", ViewportCameraPreset::Perspective, "Perspective view");
             ImGui::SameLine();
-            presetButton("Iso", ViewportCameraPreset::Isometric);
+            presetButton("Iso", ViewportCameraPreset::Isometric, "Isometric view");
             ImGui::SameLine();
-            presetButton("Top", ViewportCameraPreset::Top);
+            presetButton("Top", ViewportCameraPreset::Top, "Top view");
             ImGui::SameLine();
-            presetButton("Bot", ViewportCameraPreset::Bottom);
+            presetButton("Bot", ViewportCameraPreset::Bottom, "Bottom view");
             ImGui::SameLine();
-            presetButton("Lft", ViewportCameraPreset::Left);
+            presetButton("Lft", ViewportCameraPreset::Left, "Left view");
             ImGui::SameLine();
-            presetButton("Rgt", ViewportCameraPreset::Right);
+            presetButton("Rgt", ViewportCameraPreset::Right, "Right view");
             ImGui::SameLine();
             if (ImGui::SmallButton("Trk"))
             {
                 applyTrackViewPreset(false);
             }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Track view");
+            }
             ImGui::SameLine();
             if (ImGui::SmallButton("Wlk"))
             {
                 applyTrackViewPreset(true);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Walking view");
             }
             ImGui::SameLine();
             if (ImGui::SmallButton("Focus"))
@@ -5210,15 +5137,25 @@ namespace quantum::editor
                 const bool selected = startPoseTransformMode_ == mode;
                 if (selected)
                 {
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0F);
                     ImGui::PushStyleColor(
                         ImGuiCol_Button,
-                        quantum::editor::palette::trackWorkspaceBlue
+                        quantum::editor::palette::selection
                     );
+                    ImGui::PushStyleColor(ImGuiCol_Border, palette::accent);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, palette::selectionHovered);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, palette::selectionActive);
                 }
                 const bool clicked = ImGui::SmallButton(label);
                 if (selected)
                 {
-                    ImGui::PopStyleColor();
+                    ImGui::PopStyleColor(4);
+                    ImGui::PopStyleVar();
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("%s Track Start%s", label,
+                        selected ? " (active tool)" : "");
                 }
                 if (clicked && !selected)
                 {
@@ -5459,11 +5396,6 @@ namespace quantum::editor
 
         if (editedSection.kind != coaster::RegionKind::RateProfiles)
         {
-            pushWorkspaceAccent(transitionEditorAccent);
-            ImGui::PushStyleColor(
-                ImGuiCol_Border,
-                quantum::editor::palette::transitionEditorBlue
-            );
             ImGui::SetNextWindowPos(
                 ImVec2(80.0F, 260.0F),
                 ImGuiCond_Appearing
@@ -5472,7 +5404,7 @@ namespace quantum::editor
 
             if (coaster::isForceDrivenSection(editedSection))
             {
-                ImGui::TextDisabled("Geometry / Force Driven - read-only");
+                ImGui::TextDisabled("Force-Based \xe2\x80\x94 read-only");
                 ImGui::TextWrapped("Target profile editing is not available yet. Actual loads appear in Force Diagnostics.");
             }
             else
@@ -5482,12 +5414,20 @@ namespace quantum::editor
                     std::get<coaster::GeometryRegion>(
                         editedSection.region).construction);
 
-            ImGui::TextDisabled("Geometry / Planar Arc authoring");
+            ImGui::TextDisabled("Circular arc");
             ImGui::Spacing();
 
             // Angle fields present degrees; commands carry Core radians.
             // Every edit flows through the same candidate/commit pipeline
             // as rate-profile edits.
+            // Leave room for labels/units in narrow persisted windows when
+            // applying the explicit font and frame metrics.
+            ImGui::PushItemWidth(std::min(
+                ImGui::CalcItemWidth(),
+                std::max(100.0F, ImGui::GetContentRegionAvail().x
+                    - ImGui::CalcTextSize("Bank Change (deg)").x
+                    - ImGui::GetStyle().ItemInnerSpacing.x)
+            ));
             if (ImGui::InputDouble(
                 "Radius",
                 &planarArcEditBuffers_[0],
@@ -5502,7 +5442,7 @@ namespace quantum::editor
             }
 
             if (ImGui::InputDouble(
-                "Swept Angle (deg)",
+                "Arc angle (deg)###Swept Angle (deg)",
                 &planarArcEditBuffers_[1],
                 5.0,
                 15.0,
@@ -5542,6 +5482,7 @@ namespace quantum::editor
                     selectedSection_,
                     planarArcEditBuffers_[3] * radiansPerDegree};
             }
+            ImGui::PopItemWidth();
 
             ImGui::Spacing();
             ImGui::Text(
@@ -5550,7 +5491,7 @@ namespace quantum::editor
             );
 
             ImGui::Spacing();
-            if (ImGui::Button("Convert to Rate Profiles",
+            if (ImGui::Button("Convert to Profile###Convert to Rate Profiles",
                 ImVec2(-1.0F, 0.0F)))
             {
                 regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
@@ -5559,7 +5500,6 @@ namespace quantum::editor
             }
 
             ImGui::End();
-            ImGui::PopStyleColor(workspaceAccentColorCount + 1);
         }
         else
         {
