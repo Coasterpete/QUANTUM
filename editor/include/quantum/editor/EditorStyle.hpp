@@ -46,6 +46,8 @@ namespace quantum::editor
         inline const ImVec4 border = fromSrgb(76, 76, 76);
         inline const ImVec4 text = fromSrgb(224, 224, 224);
         inline const ImVec4 textSecondary = fromSrgb(148, 148, 148);
+        inline const ImVec4 plotDot = fromSrgb(53, 53, 53);
+        inline const ImVec4 plotReference = fromSrgb(72, 72, 72);
 
         inline const ImVec4 accent = fromSrgb(80, 204, 196);
         inline const ImVec4 selection = fromSrgb(32, 83, 81);

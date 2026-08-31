@@ -156,6 +156,34 @@ namespace
         )
     };
 
+    // Continue a small group only when it fits; otherwise ImGui's normal
+    // next-row cursor placement keeps narrow docked panels usable.
+    void sameLineIfFits(const float width)
+    {
+        const float nextX = ImGui::GetItemRectMax().x
+            + ImGui::GetStyle().ItemSpacing.x;
+        const float right = ImGui::GetWindowPos().x
+            + ImGui::GetWindowContentRegionMax().x;
+        if (nextX + width <= right)
+        {
+            ImGui::SameLine();
+        }
+    }
+
+    [[nodiscard]] float buttonWidth(const char* const label)
+    {
+        return ImGui::CalcTextSize(label, nullptr, true).x
+            + 2.0F * ImGui::GetStyle().FramePadding.x;
+    }
+
+    void itemTooltip(const char* const text)
+    {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+        {
+            ImGui::SetTooltip("%s", text);
+        }
+    }
+
     struct AuthoredDomainView
     {
         double domainBegin;
@@ -624,12 +652,9 @@ namespace
         ImDrawList* const drawList,
         const AuthoredDomainView& domainView,
         const ImVec2 canvasBegin,
-        const float rulerLineY,
-        const float profileBeginY,
-        const float profileEndY)
+        const float rulerLineY)
     {
         const ImU32 borderColor = ImGui::GetColorU32(ImGuiCol_Border);
-        const ImU32 gridColor = ImGui::GetColorU32(ImGuiCol_Separator);
         const ImU32 textColor = ImGui::GetColorU32(ImGuiCol_Text);
         const ImU32 disabledTextColor = ImGui::GetColorU32(
             ImGuiCol_TextDisabled
@@ -641,7 +666,7 @@ namespace
         std::snprintf(
             domainLabel,
             sizeof(domainLabel),
-            "%.0f -> %.0f (region-local)",
+            "%.4g -> %.4g (region-local)",
             domainView.domainBegin,
             domainView.domainEnd
         );
@@ -657,12 +682,16 @@ namespace
             borderColor
         );
 
+        const int divisions = std::clamp(static_cast<int>(
+            (domainView.pixelEnd - domainView.pixelBegin)
+                / (ImGui::CalcTextSize("-0.000e+00").x + 16.0F)),
+            1, domainDivisionCount);
         for (int division = 0;
-            division <= domainDivisionCount;
+            division <= divisions;
             ++division)
         {
             const double progress = static_cast<double>(division)
-                / static_cast<double>(domainDivisionCount);
+                / static_cast<double>(divisions);
             const double domainValue = domainView.domainBegin
                 + progress
                     * (domainView.domainEnd - domainView.domainBegin);
@@ -673,24 +702,19 @@ namespace
                 ImVec2(x, rulerLineY + 4.0F),
                 borderColor
             );
-            drawList->AddLine(
-                ImVec2(x, profileBeginY),
-                ImVec2(x, profileEndY),
-                gridColor
-            );
-
             char tickLabel[32]{};
             std::snprintf(
                 tickLabel,
                 sizeof(tickLabel),
-                "%.0f",
+                "%.4g",
                 domainValue
             );
             const float tickLabelWidth = ImGui::CalcTextSize(tickLabel).x;
             const float tickLabelX = std::clamp(
                 x - tickLabelWidth * 0.5F,
                 domainView.pixelBegin,
-                domainView.pixelEnd - tickLabelWidth
+                std::max(domainView.pixelBegin,
+                    domainView.pixelEnd - tickLabelWidth)
             );
             drawList->AddText(
                 ImVec2(tickLabelX, rulerLineY + 5.0F),
@@ -771,25 +795,45 @@ namespace
 
     void showRiderLoadDiagnostics(
         const quantum::editor::SectionRiderLoadDiagnostics& diagnostics,
-        const quantum::coaster::TrackPhysicalSettings& settings)
+        const quantum::coaster::TrackPhysicalSettings& settings,
+        bool* const open)
     {
         using quantum::editor::RiderLoadUnreachableLocation;
 
-        ImGui::SetNextWindowSize(ImVec2(760.0F, 380.0F),
+        if (!*open)
+        {
+            return;
+        }
+        ImGui::SetNextWindowSize(ImVec2(520.0F, 460.0F),
             ImGuiCond_FirstUseEver);
-        ImGui::Begin(riderLoadDiagnosticsWindowName);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(280.0F, 240.0F),
+            ImVec2(FLT_MAX, FLT_MAX));
+        if (!ImGui::Begin(riderLoadDiagnosticsWindowName, open))
+        {
+            ImGui::End();
+            return;
+        }
 
+        ImGui::PushTextWrapPos();
         ImGui::Text(
-            "Evaluated rider loads - Region %zu - read-only",
+            "Region %zu - Actual rider loads (read-only)",
             diagnostics.sectionIndex + 1
         );
-        ImGui::TextDisabled(
-            "Document settings: Initial Speed %.2f m/s | "
-            "Scale %.3f m/coordinate unit | gravity-only point mass",
-            settings.initialSpeed,
-            settings.metersPerCoordinateUnit
-        );
+        ImGui::PopTextWrapPos();
+        if (ImGui::TreeNode("Evaluation settings"))
+        {
+            ImGui::PushTextWrapPos();
+            ImGui::TextDisabled(
+                "Document settings: Initial Speed %.2f m/s | "
+                "Scale %.3f m/coordinate unit | gravity-only point mass",
+                settings.initialSpeed,
+                settings.metersPerCoordinateUnit
+            );
+            ImGui::PopTextWrapPos();
+            ImGui::TreePop();
+        }
 
+        ImGui::PushTextWrapPos();
         if (diagnostics.unreachable.has_value())
         {
             ImGui::PushTextWrapPos();
@@ -843,39 +887,40 @@ namespace
                 "region's section-local samples."
             );
         }
+        ImGui::PopTextWrapPos();
 
-        constexpr ImGuiWindowFlags plotWindowFlags =
-            ImGuiWindowFlags_NoScrollbar
-            | ImGuiWindowFlags_NoScrollWithMouse;
         if (ImGui::BeginChild(
             "##RiderLoadDiagnosticPlots",
             ImVec2(0.0F, 0.0F),
-            ImGuiChildFlags_Borders,
-            plotWindowFlags))
+            ImGuiChildFlags_Borders))
         {
             const ImVec2 canvasBegin = ImGui::GetCursorScreenPos();
-            const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+            constexpr float minimumPlotHeight = 64.0F;
+            const float labelHeight = 2.0F * ImGui::GetTextLineHeight() + 8.0F;
+            const float rulerHeight = 3.0F * ImGui::GetTextLineHeight() + 14.0F;
+            constexpr float rowGap = 10.0F;
+            constexpr std::size_t diagnosticChannelCount = 4;
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            const ImVec2 canvasSize{available.x, std::max(available.y,
+                rulerHeight + static_cast<float>(diagnosticChannelCount)
+                    * (labelHeight + minimumPlotHeight)
+                    + rowGap * static_cast<float>(diagnosticChannelCount - 1))};
             const ImVec2 canvasEnd{
                 canvasBegin.x + canvasSize.x,
                 canvasBegin.y + canvasSize.y
             };
-            constexpr float labelWidth = 128.0F;
-            constexpr float rulerHeight = 50.0F;
-            constexpr float rowGap = 5.0F;
-            constexpr std::size_t diagnosticChannelCount = 4;
-            const float plotBeginX = canvasBegin.x + labelWidth;
+            const float plotBeginX = canvasBegin.x + 4.0F;
             const float plotEndX = canvasEnd.x - 8.0F;
             const float plotsBeginY = canvasBegin.y + rulerHeight;
             const float availablePlotHeight = canvasEnd.y - plotsBeginY;
-            const float rowHeight = (
+            const float rowHeight = std::max(labelHeight + minimumPlotHeight, (
                 availablePlotHeight
                     - rowGap * static_cast<float>(
                         diagnosticChannelCount - 1))
-                / static_cast<float>(diagnosticChannelCount);
+                / static_cast<float>(diagnosticChannelCount));
 
             if (diagnostics.sectionLength <= 0.0
-                || plotEndX - plotBeginX < 80.0F
-                || rowHeight < 30.0F)
+                || plotEndX - plotBeginX < 80.0F)
             {
                 ImGui::TextDisabled(
                     "Resize Force Diagnostics to view the shared "
@@ -925,9 +970,7 @@ namespace
                     drawList,
                     domainView,
                     canvasBegin,
-                    canvasBegin.y + ImGui::GetTextLineHeight() + 8.0F,
-                    plotsBeginY,
-                    canvasEnd.y
+                    canvasBegin.y + 2.0F * ImGui::GetTextLineHeight() + 4.0F
                 );
 
                 std::vector<ImVec2> points;
@@ -938,10 +981,12 @@ namespace
                 {
                     const RiderLoadChannelView& channel =
                         channels[channelIndex];
-                    const float rowBeginY = plotsBeginY
+                    const float labelBeginY = plotsBeginY
                         + static_cast<float>(channelIndex)
                             * (rowHeight + rowGap);
-                    const float rowEndY = rowBeginY + rowHeight;
+                    const float rowBeginY = labelBeginY + labelHeight;
+                    const float rowEndY = labelBeginY + rowHeight;
+                    const float plotHeight = rowEndY - rowBeginY;
                     const RiderLoadPlotRange valueRange =
                         fitRiderLoadPlotRange(
                             diagnostics.samples,
@@ -970,14 +1015,14 @@ namespace
                         channel.unit
                     );
                     drawList->AddText(
-                        ImVec2(canvasBegin.x + 4.0F, rowBeginY + 4.0F),
+                        ImVec2(plotBeginX, labelBeginY),
                         channel.color,
                         channel.label
                     );
                     drawList->AddText(
                         ImVec2(
-                            canvasBegin.x + 4.0F,
-                            rowBeginY + 5.0F + ImGui::GetTextLineHeight()),
+                            plotBeginX,
+                            labelBeginY + ImGui::GetTextLineHeight() + 2.0F),
                         ImGui::GetColorU32(ImGuiCol_TextDisabled),
                         rangeLabel
                     );
@@ -988,7 +1033,7 @@ namespace
                         const float zeroY = rowEndY
                             - static_cast<float>(
                                 (0.0 - valueRange.minimum) / valueSpan)
-                                * rowHeight;
+                                * plotHeight;
                         drawList->AddLine(
                             ImVec2(plotBeginX, zeroY),
                             ImVec2(plotEndX, zeroY),
@@ -1008,7 +1053,7 @@ namespace
                         const float y = rowEndY
                             - static_cast<float>(
                                 (value - valueRange.minimum) / valueSpan)
-                                * rowHeight;
+                                * plotHeight;
                         points.push_back({x, y});
                     }
 
@@ -1055,6 +1100,9 @@ namespace
                 }
                 drawList->PopClipRect();
             }
+            // Register the full plot extent so smaller windows scroll
+            // vertically instead of shrinking the channels into slivers.
+            ImGui::Dummy(canvasSize);
         }
         ImGui::EndChild();
         ImGui::End();
@@ -1093,35 +1141,23 @@ namespace
         }
 
         ImGui::PushID(row.label);
-        const float spacing = ImGui::GetStyle().ItemSpacing.x;
-        const float remainingWidth = std::max(
-            260.0F,
-            groupWidth
-        );
-        const float valueWidth = std::clamp(
-            remainingWidth * 0.34F,
-            120.0F,
-            180.0F
-        );
-        const float typeWidth = std::max(
-            140.0F,
-            std::min(
-                260.0F,
-                remainingWidth - valueWidth - 4.0F * spacing
-            )
-        );
+        const bool sideBySide = groupWidth >= 460.0F;
+        const float valueWidth = sideBySide ? 220.0F : groupWidth;
+        const float typeWidth = sideBySide
+            ? std::min(300.0F, groupWidth - valueWidth
+                - ImGui::GetStyle().ItemSpacing.x) : groupWidth;
 
         const quantum::editor::ScalarProfileEndpoint numericEndpoint =
             selectedEndpoint
                 == quantum::editor::ScalarProfileEndpoint::Begin
             ? quantum::editor::ScalarProfileEndpoint::Begin
             : quantum::editor::ScalarProfileEndpoint::End;
+        ImGui::BeginGroup();
         ImGui::TextDisabled(
             numericEndpoint == quantum::editor::ScalarProfileEndpoint::Begin
                 ? "Start rate"
                 : "End rate"
         );
-        ImGui::SameLine();
         ImGui::SetNextItemWidth(valueWidth);
         edit.valueEndEdited = ImGui::InputDouble(
             "##SelectedValue",
@@ -1140,9 +1176,10 @@ namespace
             );
         }
 
-        ImGui::SameLine();
+        ImGui::EndGroup();
+        sameLineIfFits(typeWidth);
+        ImGui::BeginGroup();
         ImGui::TextDisabled("Shape");
-        ImGui::SameLine();
         ImGui::SetNextItemWidth(typeWidth);
         edit.transitionType = drawTransitionTypeCombo(
             "##TransitionType",
@@ -1150,6 +1187,7 @@ namespace
                 ? focused->transition.transitionType
                 : quantum::math::TransitionType::Linear
         );
+        ImGui::EndGroup();
         ImGui::PopID();
         return edit;
     }
@@ -1372,6 +1410,85 @@ namespace
         );
     }
 
+    [[nodiscard]] double plotLatticeStep(
+        const double span, const float pixels)
+    {
+        // 1/2/5 decades give meaningful display-unit coordinates while
+        // maintaining a quiet density as the plot or value range changes.
+        const double intervals = std::clamp(
+            std::floor(static_cast<double>(pixels) / 24.0), 1.0, 512.0);
+        const double rawStep = span / intervals;
+        const double decade = std::pow(10.0, std::floor(std::log10(rawStep)));
+        const double fraction = rawStep / decade;
+        return (fraction <= 1.0 ? 1.0 : fraction <= 2.0 ? 2.0
+            : fraction <= 5.0 ? 5.0 : 10.0) * decade;
+    }
+
+    void drawScalarDotGrid(
+        ImDrawList* const drawList,
+        const ScalarProfileMapping& mapping)
+    {
+        const double distanceSpan = mapping.domainView.domainEnd
+            - mapping.domainView.domainBegin;
+        const double valueSpan = mapping.valueRange.maximum
+            - mapping.valueRange.minimum;
+        const float width = mapping.domainView.pixelEnd
+            - mapping.domainView.pixelBegin;
+        const float height = mapping.pixelEndY - mapping.pixelBeginY;
+        if (!std::isfinite(distanceSpan) || distanceSpan <= 0.0
+            || !std::isfinite(valueSpan) || valueSpan <= 0.0
+            || width <= 0.0F || height <= 0.0F)
+        {
+            return;
+        }
+
+        const double distanceStep = plotLatticeStep(distanceSpan, width);
+        const double valueStep = plotLatticeStep(valueSpan, height);
+        if (!std::isfinite(distanceStep) || distanceStep <= 0.0
+            || !std::isfinite(valueStep) || valueStep <= 0.0)
+        {
+            return;
+        }
+        const double firstDistance = std::ceil(
+            mapping.domainView.domainBegin / distanceStep) * distanceStep;
+        const double firstValue = std::ceil(
+            mapping.valueRange.minimum / valueStep) * valueStep;
+        const int columns = static_cast<int>(distanceSpan / distanceStep) + 1;
+        const int rows = static_cast<int>(valueSpan / valueStep) + 1;
+        const ImVec2 begin{mapping.domainView.pixelBegin, mapping.pixelBeginY};
+        const ImVec2 end{mapping.domainView.pixelEnd, mapping.pixelEndY};
+        const ImU32 dotColor = ImGui::ColorConvertFloat4ToU32(
+            quantum::editor::palette::plotDot);
+
+        // The mapping is in display units, with no knowledge of angular
+        // channels or snapping. It can also draw future scalar G targets.
+        drawList->PushClipRect(begin, end, true);
+        for (int column = 0; column < columns; ++column)
+        {
+            const double distance = firstDistance + column * distanceStep;
+            for (int row = 0; row < rows; ++row)
+            {
+                const double value = firstValue + row * valueStep;
+                if (distance <= mapping.domainView.domainEnd
+                    && value <= mapping.valueRange.maximum)
+                {
+                    drawList->AddCircleFilled(
+                        mapping.toPixel(distance, value), 1.0F, dotColor, 4);
+                }
+            }
+        }
+        if (mapping.valueRange.minimum <= 0.0
+            && mapping.valueRange.maximum >= 0.0)
+        {
+            const float zeroY = mapping.toPixel(
+                mapping.domainView.domainBegin, 0.0).y;
+            drawList->AddLine({begin.x, zeroY}, {end.x, zeroY},
+                ImGui::ColorConvertFloat4ToU32(
+                    quantum::editor::palette::plotReference));
+        }
+        drawList->PopClipRect();
+    }
+
     void drawSharedValueGrid(
         ImDrawList* const drawList,
         const AuthoredDomainView& domainView,
@@ -1380,10 +1497,14 @@ namespace
         const quantum::editor::GraphValueRange activeRange,
         const ImU32 activeColor)
     {
-        const ImU32 gridColor = ImGui::GetColorU32(ImGuiCol_Separator);
         const ImU32 disabledTextColor = ImGui::GetColorU32(
             ImGuiCol_TextDisabled
         );
+        drawScalarDotGrid(drawList, {
+            domainView,
+            {activeRange.minimum * quantum::editor::degreesPerRadian,
+                activeRange.maximum * quantum::editor::degreesPerRadian},
+            plotBeginY, plotEndY});
 
         drawList->AddRect(
             ImVec2(domainView.pixelBegin, plotBeginY),
@@ -1391,21 +1512,18 @@ namespace
             ImGui::GetColorU32(ImGuiCol_Border)
         );
 
+        const int divisions = plotEndY - plotBeginY
+                >= valueDivisionCount * (2.0F * ImGui::GetTextLineHeight() + 4.0F)
+            ? valueDivisionCount : 2;
         for (int division = 0;
-            division <= valueDivisionCount;
+            division <= divisions;
             ++division)
         {
             const double normalized = static_cast<double>(division)
-                / static_cast<double>(valueDivisionCount);
+                / static_cast<double>(divisions);
             const float y = plotEndY
                 - static_cast<float>(normalized)
                     * (plotEndY - plotBeginY);
-            drawList->AddLine(
-                ImVec2(domainView.pixelBegin, y),
-                ImVec2(domainView.pixelEnd, y),
-                gridColor
-            );
-
             const double radians =
                 quantum::editor::normalizedToGraphValue(
                     normalized,
@@ -1419,8 +1537,10 @@ namespace
                 radians * quantum::editor::degreesPerRadian
             );
             drawList->AddText(
-                ImVec2(domainView.pixelBegin + 4.0F, y + 2.0F),
-                division == valueDivisionCount / 2
+                ImVec2(domainView.pixelBegin + 4.0F,
+                    std::min(y + 2.0F,
+                        plotEndY - ImGui::GetTextLineHeight() - 2.0F)),
+                division == divisions / 2
                     ? activeColor
                     : disabledTextColor,
                 label
@@ -1924,89 +2044,12 @@ namespace
         TrackWorkspaceEdit edit;
         ImGui::Begin(trackWorkspaceWindowName);
 
-        ImGui::BeginDisabled();
-        ImGui::Button("Track Style Properties...");
-        ImGui::Button("Mechanism Segment Properties...");
-        ImGui::Button("Track Segment Properties...");
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
         if (ImGui::BeginChild(
             "Section List",
             ImVec2(0.0F, 0.0F),
             ImGuiChildFlags_Borders))
         {
-            ImGui::TextUnformatted("Regions");
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-
-            // Layout Mode selector
-            ImGui::TextUnformatted("Layout");
-            const quantum::coaster::LayoutMode currentMode =
-                track.layoutMode();
-            const bool isCircuit =
-                currentMode == quantum::coaster::LayoutMode::Circuit;
-
-            const float layoutModeHalfWidth =
-                (ImGui::GetContentRegionAvail().x
-                - ImGui::GetStyle().ItemSpacing.x) * 0.5F;
-
-            if (ImGui::Button(
-                isCircuit ? "[ Circuit ]" : "Circuit",
-                ImVec2(layoutModeHalfWidth, 0.0F)))
-            {
-                edit.layoutModeChanged =
-                    quantum::coaster::LayoutMode::Circuit;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button(
-                !isCircuit ? "[ Shuttle ]" : "Shuttle",
-                ImVec2(-1.0F, 0.0F)))
-            {
-                edit.layoutModeChanged =
-                    quantum::coaster::LayoutMode::Shuttle;
-            }
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-
-            // Track Topology summary
-            const quantum::coaster::LayoutStatus status =
-                quantum::coaster::computeLayoutStatus(
-                    currentMode, topology.kind);
-
-            ImGui::TextUnformatted("Track connectivity");
-            ImGui::TextColored(
-                status == quantum::coaster::LayoutStatus::CircuitIncomplete
-                    ? quantum::editor::palette::warning
-                    : quantum::editor::palette::text,
-                "%s",
-                quantum::coaster::layoutStatusLabel(status));
-
-            if (topology.kind
-                == quantum::coaster::TopologyKind::OpenLinear)
-            {
-                ImGui::Text(
-                    "Closure gap: %.1f m",
-                    topology.diagnostics.positionalGap);
-                ImGui::Text(
-                    "Tangent mismatch: %.1f deg",
-                    topology.diagnostics.tangentMismatchDegrees);
-                ImGui::Text(
-                    "Frame mismatch: %.1f deg",
-                    topology.diagnostics.frameMismatchDegrees);
-            }
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-
+            ImGui::SeparatorText("Regions");
             const std::size_t sectionCount = track.sectionCount();
             for (std::size_t index = 0; index < sectionCount; ++index)
             {
@@ -2029,7 +2072,7 @@ namespace
                 std::snprintf(
                     label,
                     sizeof(label),
-                    "Region %llu - %s (%.3g)###Region %llu - %s (%.3g)",
+                    "%llu. %s\nLength %.3g###Region %llu - %s (%.3g)",
                     static_cast<unsigned long long>(index + 1),
                     kindName,
                     quantum::coaster::sectionLength(track.section(index)),
@@ -2042,16 +2085,23 @@ namespace
                 {
                     edit.selectRequest = index;
                 }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                {
+                    ImGui::SetTooltip("Region %zu - %s\nLength %.6g coordinate units",
+                        index + 1, kindName,
+                        quantum::coaster::sectionLength(track.section(index)));
+                }
             }
 
             if (selectedIndex < sectionCount && sectionLengthEdit != nullptr)
             {
                 ImGui::Spacing();
-                ImGui::Separator();
-                ImGui::TextUnformatted("Selected Region");
+                ImGui::SeparatorText("Selected region");
 
+                ImGui::TextDisabled("Length");
+                ImGui::SetNextItemWidth(-1.0F);
                 if (ImGui::InputDouble(
-                    "Length",
+                    "###Length",
                     sectionLengthEdit,
                     1.0,
                     10.0,
@@ -2072,218 +2122,227 @@ namespace
                 const quantum::coaster::AuthoredTrackSection& selected =
                     track.section(selectedIndex);
 
-                const quantum::editor::RegionStations stations =
-                    quantum::editor::computeRegionStations(
-                        track,
-                        selectedIndex
-                    );
-                ImGui::Spacing();
-                ImGui::TextUnformatted("Track Position");
-                ImGui::Text(
-                    "Stations %.3f -> %.3f",
-                    stations.startStation,
-                    stations.endStation
-                );
-                if (ImGui::IsItemHovered())
+                if (ImGui::TreeNode("Position & rotation"))
                 {
-                    ImGui::SetTooltip(
-                        "Cumulative distance along the whole track at this "
-                        "region's start and end"
-                    );
-                }
-
-                ImGui::Text(
-                    "Track total length %.3f",
-                    stations.totalLength
-                );
-
-                if (selectedHeightDelta.has_value())
-                {
-                    ImGui::Text(
-                        "Entry-to-exit height change %+.3f",
-                        *selectedHeightDelta
-                    );
-                }
-
-                if (selected.kind == quantum::coaster::RegionKind::RateProfiles)
-                {
-                    const quantum::editor::RegionNetRotation netRotation =
-                        quantum::editor::computeNetRotationDegrees(
-                            selected.rateProfileRegion().rateProfiles
+                    const quantum::editor::RegionStations stations =
+                        quantum::editor::computeRegionStations(
+                            track,
+                            selectedIndex
                         );
-                    ImGui::Spacing();
-                    ImGui::TextUnformatted("Total rotation");
-                    ImGui::Text("Roll %+.2f deg", netRotation.rollDegrees);
-                    ImGui::Text("Pitch %+.2f deg", netRotation.pitchDegrees);
-                    ImGui::Text("Yaw %+.2f deg", netRotation.yawDegrees);
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                        quantum::editor::palette::textSecondary);
+                    ImGui::PushTextWrapPos();
+                    ImGui::Text(
+                        "Stations %.3f -> %.3f",
+                        stations.startStation,
+                        stations.endStation
+                    );
                     if (ImGui::IsItemHovered())
                     {
                         ImGui::SetTooltip(
-                            "Total angle accumulated by each rate channel "
-                            "across this region"
+                            "Cumulative distance along the whole track at this "
+                            "region's start and end"
                         );
                     }
-                }
 
-                // Kind conversion remains a secondary operation; geometry
-                // authoring is discovered through the typed create flow and
-                // edited in the dedicated Geometry Editor.
-                const bool isGeometry =
-                    selected.kind == quantum::coaster::RegionKind::Geometry
-                    && !quantum::coaster::isForceDrivenSection(selected);
-                if (ImGui::Button(
-                    isGeometry ? "Convert to Profile###Convert to Rate Profiles"
-                               : "Convert to Circular Arc###Convert to Planar Arc",
-                    ImVec2(-1.0F, 0.0F)))
-                {
-                    if (isGeometry)
+                    ImGui::Text(
+                        "Track total length %.3f",
+                        stations.totalLength
+                    );
+
+                    if (selectedHeightDelta.has_value())
                     {
-                        edit.convertToRateProfilesRequested = true;
+                        ImGui::Text(
+                            "Entry-to-exit height change %+.3f",
+                            *selectedHeightDelta
+                        );
                     }
-                    else
+
+                    if (selected.kind == quantum::coaster::RegionKind::RateProfiles)
                     {
-                        edit.convertToGeometryRequested = true;
+                        const quantum::editor::RegionNetRotation netRotation =
+                            quantum::editor::computeNetRotationDegrees(
+                                selected.rateProfileRegion().rateProfiles
+                            );
+                        ImGui::Spacing();
+                        ImGui::TextUnformatted("Total rotation");
+                        ImGui::Text("Roll %+.2f deg", netRotation.rollDegrees);
+                        ImGui::Text("Pitch %+.2f deg", netRotation.pitchDegrees);
+                        ImGui::Text("Yaw %+.2f deg", netRotation.yawDegrees);
+                        if (ImGui::IsItemHovered())
+                        {
+                            ImGui::SetTooltip(
+                                "Total angle accumulated by each rate channel "
+                                "across this region"
+                            );
+                        }
                     }
+                    ImGui::PopTextWrapPos();
+                    ImGui::PopStyleColor();
+                    ImGui::TreePop();
                 }
             }
 
-            const ImGuiStyle& style = ImGui::GetStyle();
-            const float buttonAreaHeight = 5.0F * ImGui::GetFrameHeight()
-                + 4.0F * style.ItemSpacing.y;
-            const float buttonAreaY = ImGui::GetWindowHeight()
-                - style.WindowPadding.y
-                - buttonAreaHeight;
-
-            if (buttonAreaY > ImGui::GetCursorPosY())
-            {
-                ImGui::SetCursorPosY(buttonAreaY);
-            }
-
+            ImGui::Spacing();
+            ImGui::SeparatorText("Region actions");
             const bool hasSelection = selectedIndex < sectionCount;
-            const float halfWidth = (ImGui::GetContentRegionAvail().x
-                - style.ItemSpacing.x) * 0.5F;
-
-            // Typed region creation: the first click swaps this row's
-            // content to the authoring-type choice. The row keeps its
-            // height in both states so nothing below it shifts while a
-            // choice is pending. The strip is shared by all three
-            // creation anchors; the clicked trigger button carries the
-            // direction context.
-            if (!regionCreateFlow.choicePending)
+            if (ImGui::Button("Append Region..."))
             {
-                if (ImGui::Button(
-                    "Append Region...",
-                    ImVec2(halfWidth, 0.0F)))
-                {
-                    regionCreateFlow.choicePending = true;
-                    regionCreateFlow.anchor =
-                        quantum::editor::RegionCreateAnchor::Append;
-                }
-
-                ImGui::SameLine();
-                if (ImGui::Button(
-                    "Prepend Region...",
-                    ImVec2(-1.0F, 0.0F)))
-                {
-                    regionCreateFlow.choicePending = true;
-                    regionCreateFlow.anchor =
-                        quantum::editor::RegionCreateAnchor::Prepend;
-                }
+                regionCreateFlow.choicePending = true;
+                regionCreateFlow.anchor = quantum::editor::RegionCreateAnchor::Append;
             }
-            else
+            itemTooltip("Add a Profile or Circular Arc at the end of the track");
+            sameLineIfFits(buttonWidth("More..."));
+            if (ImGui::Button("More..."))
             {
-                const float thirdWidth = (ImGui::GetContentRegionAvail().x
-                    - 2.0F * style.ItemSpacing.x) / 3.0F;
-                if (ImGui::Button(
-                    "Profile###Rate/Profile",
-                    ImVec2(thirdWidth, 0.0F)))
+                ImGui::OpenPopup("RegionActions");
+            }
+            itemTooltip("Prepend, insert, duplicate, reorder, or convert a region");
+            if (ImGui::BeginPopup("RegionActions"))
+            {
+                if (ImGui::MenuItem("Prepend Region..."))
                 {
-                    edit.createdRegionKind =
-                        quantum::coaster::RegionKind::RateProfiles;
+                    regionCreateFlow.choicePending = true;
+                    regionCreateFlow.anchor = quantum::editor::RegionCreateAnchor::Prepend;
                 }
-
-                ImGui::SameLine();
-                if (ImGui::Button(
-                    "Circular Arc###Geometry / Planar Arc",
-                    ImVec2(thirdWidth, 0.0F)))
+                if (ImGui::MenuItem("Insert After Selected...", nullptr, false, hasSelection))
                 {
-                    edit.createdRegionKind =
-                        quantum::coaster::RegionKind::Geometry;
+                    regionCreateFlow.choicePending = true;
+                    regionCreateFlow.anchor = quantum::editor::RegionCreateAnchor::AfterSelected;
                 }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Duplicate Selected", nullptr, false, hasSelection))
+                {
+                    edit.duplicateRequested = true;
+                }
+                if (ImGui::MenuItem("Move Up", nullptr, false,
+                    hasSelection && selectedIndex > 0))
+                {
+                    edit.moveUpRequested = true;
+                }
+                if (ImGui::MenuItem("Move Down", nullptr, false,
+                    hasSelection && selectedIndex + 1 < sectionCount))
+                {
+                    edit.moveDownRequested = true;
+                }
+                if (hasSelection)
+                {
+                    ImGui::Separator();
+                    const auto& selected = track.section(selectedIndex);
+                    const bool isGeometry = selected.kind
+                        == quantum::coaster::RegionKind::Geometry
+                        && !quantum::coaster::isForceDrivenSection(selected);
+                    if (ImGui::MenuItem(isGeometry ? "Convert to Profile"
+                        : "Convert to Circular Arc"))
+                    {
+                        if (isGeometry)
+                        {
+                            edit.convertToRateProfilesRequested = true;
+                        }
+                        else
+                        {
+                            edit.convertToGeometryRequested = true;
+                        }
+                    }
+                }
+                ImGui::EndPopup();
+            }
 
-                ImGui::SameLine();
-                if (ImGui::Button(
-                    "Cancel",
-                    ImVec2(-1.0F, 0.0F)))
+            // Preserve the typed creation request/acceptance flow. Choices
+            // wrap instead of squeezing full names into fixed thirds.
+            if (regionCreateFlow.choicePending)
+            {
+                const char* const placement = regionCreateFlow.anchor
+                        == quantum::editor::RegionCreateAnchor::Append
+                    ? "Append" : regionCreateFlow.anchor
+                        == quantum::editor::RegionCreateAnchor::Prepend
+                    ? "Prepend" : "Insert after selected";
+                ImGui::TextWrapped("%s: choose region type", placement);
+                if (ImGui::Button("Profile###Rate/Profile"))
+                {
+                    edit.createdRegionKind = quantum::coaster::RegionKind::RateProfiles;
+                }
+                sameLineIfFits(buttonWidth("Circular Arc"));
+                if (ImGui::Button("Circular Arc###Geometry / Planar Arc"))
+                {
+                    edit.createdRegionKind = quantum::coaster::RegionKind::Geometry;
+                }
+                sameLineIfFits(buttonWidth("Cancel"));
+                if (ImGui::Button("Cancel"))
                 {
                     regionCreateFlow.choicePending = false;
                 }
             }
 
-            ImGui::BeginDisabled(!hasSelection);
-            if (ImGui::Button(
-                "Insert After Selected...",
-                ImVec2(-1.0F, 0.0F)))
-            {
-                regionCreateFlow.choicePending = true;
-                regionCreateFlow.anchor =
-                    quantum::editor::RegionCreateAnchor::AfterSelected;
-            }
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip(
-                    "Creates a new region immediately after the selected "
-                    "region"
-                );
-            }
-
-            ImGui::BeginDisabled(!hasSelection);
-            if (ImGui::Button(
-                "Duplicate Selected",
-                ImVec2(halfWidth, 0.0F)))
-            {
-                edit.duplicateRequested = true;
-            }
-            ImGui::EndDisabled();
-
-            ImGui::SameLine();
-            ImGui::BeginDisabled(sectionCount <= 1);
+            ImGui::Spacing();
+            ImGui::BeginDisabled(!hasSelection || sectionCount <= 1);
             quantum::editor::pushDestructiveStyle();
-            if (ImGui::Button("Remove Selected", ImVec2(-1.0F, 0.0F)))
+            if (ImGui::SmallButton("Remove Selected"))
             {
                 edit.removeRequested = true;
             }
             quantum::editor::popDestructiveStyle();
             ImGui::EndDisabled();
+            itemTooltip("Remove the selected region; the final region cannot be removed");
 
-            ImGui::BeginDisabled(!hasSelection || selectedIndex == 0);
-            if (ImGui::Button("Move Up", ImVec2(halfWidth, 0.0F)))
+            ImGui::Spacing();
+            ImGui::SeparatorText("Layout & connectivity");
+            const auto currentMode = track.layoutMode();
+            const auto status = quantum::coaster::computeLayoutStatus(
+                currentMode, topology.kind);
+            ImGui::PushTextWrapPos();
+            ImGui::TextColored(
+                status == quantum::coaster::LayoutStatus::CircuitIncomplete
+                    ? quantum::editor::palette::warning
+                    : quantum::editor::palette::textSecondary,
+                "%s", quantum::coaster::layoutStatusLabel(status));
+            ImGui::PopTextWrapPos();
+            ImGui::SetNextItemWidth(-1.0F);
+            if (ImGui::BeginCombo("##LayoutMode",
+                currentMode == quantum::coaster::LayoutMode::Circuit
+                    ? "Circuit" : "Shuttle"))
             {
-                edit.moveUpRequested = true;
+                if (ImGui::Selectable("Circuit",
+                    currentMode == quantum::coaster::LayoutMode::Circuit))
+                {
+                    edit.layoutModeChanged = quantum::coaster::LayoutMode::Circuit;
+                }
+                if (ImGui::Selectable("Shuttle",
+                    currentMode == quantum::coaster::LayoutMode::Shuttle))
+                {
+                    edit.layoutModeChanged = quantum::coaster::LayoutMode::Shuttle;
+                }
+                ImGui::EndCombo();
             }
-            ImGui::EndDisabled();
-
-            ImGui::SameLine();
-            ImGui::BeginDisabled(
-                !hasSelection || selectedIndex + 1 >= sectionCount);
-            if (ImGui::Button("Move Down", ImVec2(-1.0F, 0.0F)))
+            itemTooltip("Authored layout mode: Circuit or Shuttle");
+            if (topology.kind == quantum::coaster::TopologyKind::OpenLinear)
             {
-                edit.moveDownRequested = true;
-            }
-            ImGui::EndDisabled();
-
-            if (topology.kind
-                    == quantum::coaster::TopologyKind::OpenLinear
-                && track.layoutMode()
-                    == quantum::coaster::LayoutMode::Circuit)
-            {
-                if (ImGui::Button(
-                    "Complete Circuit...",
-                    ImVec2(-1.0F, 0.0F)))
+                if (ImGui::TreeNode("Closure details"))
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                        quantum::editor::palette::textSecondary);
+                    ImGui::PushTextWrapPos();
+                    ImGui::Text("Closure gap: %.1f m", topology.diagnostics.positionalGap);
+                    ImGui::Text("Tangent mismatch: %.1f deg",
+                        topology.diagnostics.tangentMismatchDegrees);
+                    ImGui::Text("Frame mismatch: %.1f deg",
+                        topology.diagnostics.frameMismatchDegrees);
+                    ImGui::PopTextWrapPos();
+                    ImGui::PopStyleColor();
+                    ImGui::TreePop();
+                }
+                if (currentMode == quantum::coaster::LayoutMode::Circuit
+                    && ImGui::SmallButton("Complete Circuit..."))
                 {
                     edit.completeCircuitRequested = true;
                 }
+            }
+            if (ImGui::TreeNode("Planned properties"))
+            {
+                ImGui::BeginDisabled();
+                ImGui::TextWrapped("Track style, mechanism segments, and track segment properties are not available yet.");
+                ImGui::EndDisabled();
+                ImGui::TreePop();
             }
         }
         ImGui::EndChild();
@@ -2296,25 +2355,19 @@ namespace
     {
         ImGui::Begin(supportWorkspaceWindowName);
 
-        ImGui::BeginDisabled();
-        ImGui::Button("Support prefabs\xe2\x80\xa6###Prefab Panel...");
-        ImGui::Button("Foundations\xe2\x80\xa6###Foundation Generator...");
-        ImGui::Button("Rail connectors\xe2\x80\xa6###Rail Connector Generator...");
-        ImGui::Button("Support Settings...");
-        ImGui::EndDisabled();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::PushStyleColor(
-            ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)
-        );
-        ImGui::TextWrapped("Copy/Define (Autosaves as .qcwPrefab)...");
-        ImGui::Spacing();
-        ImGui::TextWrapped("Paste (Pastes as the autosaved Prefab)...");
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            quantum::editor::palette::textSecondary);
+        ImGui::TextWrapped("Support tools are not available yet.");
         ImGui::PopStyleColor();
+        if (ImGui::TreeNode("Planned tools"))
+        {
+            ImGui::BeginDisabled();
+            ImGui::TextWrapped("Support prefabs\nFoundations\nRail connectors\nSupport settings");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Prefab copy / define / paste (.qcwPrefab)");
+            ImGui::EndDisabled();
+            ImGui::TreePop();
+        }
 
         ImGui::End();
     }
@@ -2508,7 +2561,7 @@ namespace
         {
             if (rowIndex > 0)
             {
-                ImGui::SameLine();
+                sameLineIfFits(buttonWidth("[Pitch]"));
             }
             const ProfileRowView& row = profileRows[rowIndex];
             const std::size_t channelIndex = static_cast<std::size_t>(
@@ -2542,8 +2595,6 @@ namespace
             activeChannel
         );
         const char* const activeLabel = profileRows[activeIndex].label;
-        ImGui::SameLine();
-        ImGui::Text("Active: %s", activeLabel);
 
         const quantum::coaster::ProfileSegment* const focusedSegment =
             findProfileSegment(
@@ -2561,14 +2612,15 @@ namespace
             : "curve segment";
         if (focusedSegment != nullptr)
         {
-            ImGui::SameLine();
+            ImGui::PushTextWrapPos();
             ImGui::TextDisabled(
-                "| Selected: segment %u - %s [%.6g to %.6g m]",
+                "Selected: segment %u - %s [%.6g to %.6g m]",
                 selectedSegmentIds[activeIndex],
                 selectionKind,
                 focusedSegment->transition.domainBegin,
                 focusedSegment->transition.domainEnd
             );
+            ImGui::PopTextWrapPos();
         }
 
         const ScalarProfileRowEdit controlEdit =
@@ -2622,7 +2674,6 @@ namespace
             };
         }
 
-        ImGui::SameLine();
         if (ImGui::SmallButton("Fit Y"))
         {
             graphRanges[activeIndex] = fitProfileGraphRange(
@@ -2630,7 +2681,8 @@ namespace
                 activeChannel
             );
         }
-        ImGui::SameLine();
+        itemTooltip("Fit the active channel's vertical range to its authored values");
+        sameLineIfFits(buttonWidth("Y In"));
         if (ImGui::SmallButton("Y In"))
         {
             graphRanges[activeIndex] = quantum::editor::scaleGraphRange(
@@ -2638,7 +2690,8 @@ namespace
                 0.8
             );
         }
-        ImGui::SameLine();
+        itemTooltip("Zoom in on the active channel's vertical range");
+        sameLineIfFits(buttonWidth("Y Out"));
         if (ImGui::SmallButton("Y Out"))
         {
             graphRanges[activeIndex] = quantum::editor::scaleGraphRange(
@@ -2646,67 +2699,86 @@ namespace
                 1.25
             );
         }
-        ImGui::SameLine();
+        itemTooltip("Zoom out on the active channel's vertical range");
+        sameLineIfFits(ImGui::CalcTextSize("Y +/- 0.000e+00 deg/m").x);
         ImGui::TextDisabled(
             "Y +/- %.4g deg/m",
             graphRanges[activeIndex].magnitude()
                 * quantum::editor::degreesPerRadian
         );
 
-        const auto [diagnosticDistance, diagnosticRate] =
-            focusedEndpoint(activeIndex);
-        if (activeChannel == quantum::editor::RateChannel::Roll)
+        sameLineIfFits(buttonWidth("Details..."));
+        if (ImGui::SmallButton("Details..."))
         {
-            const double integratedRollDegrees = quantum::editor::
-                computeChannelNetRotationDegrees(
-                    *profileRows[activeIndex].profile
-                );
-            ImGui::TextDisabled(
-                "Roll Rate @ %.4g m: %+.5f deg/m  "
-                "Integrated region roll: %+.3f deg",
-                diagnosticDistance,
-                quantum::editor::angularRateRadiansToDegrees(
-                    diagnosticRate
-                ),
-                integratedRollDegrees
-            );
+            ImGui::OpenPopup("ProfileDiagnostics");
         }
-        else
+        itemTooltip("Read curvature, radius, and integrated rotation at the selected endpoint");
+        ImGui::SetNextWindowSize(ImVec2(360.0F, 0.0F), ImGuiCond_Appearing);
+        if (ImGui::BeginPopup("ProfileDiagnostics"))
         {
-            const quantum::editor::CurvatureDiagnostic activeDiagnostic =
-                quantum::editor::curvatureDiagnosticFromRateRadians(
-                    diagnosticRate
+            ImGui::PushTextWrapPos();
+            ImGui::SeparatorText("Selected endpoint");
+            const auto [diagnosticDistance, diagnosticRate] =
+                focusedEndpoint(activeIndex);
+            if (activeChannel == quantum::editor::RateChannel::Roll)
+            {
+                const double integratedRollDegrees = quantum::editor::
+                    computeChannelNetRotationDegrees(
+                        *profileRows[activeIndex].profile
+                    );
+                ImGui::TextDisabled(
+                    "Roll Rate @ %.4g m: %+.5f deg/m  "
+                    "Integrated region roll: %+.3f deg",
+                    diagnosticDistance,
+                    quantum::editor::angularRateRadiansToDegrees(
+                        diagnosticRate
+                    ),
+                    integratedRollDegrees
                 );
-            ImGui::TextDisabled(
-                "%s Rate @ %.4g m: %+.5f deg/m  "
-                "Curvature %+.6f 1/m",
-                activeLabel,
-                diagnosticDistance,
-                activeDiagnostic.rateDegreesPerMeter,
-                activeDiagnostic.curvaturePerMeter
+            }
+            else
+            {
+                const quantum::editor::CurvatureDiagnostic activeDiagnostic =
+                    quantum::editor::curvatureDiagnosticFromRateRadians(
+                        diagnosticRate
+                    );
+                ImGui::TextDisabled(
+                    "%s Rate @ %.4g m: %+.5f deg/m  "
+                    "Curvature %+.6f 1/m",
+                    activeLabel,
+                    diagnosticDistance,
+                    activeDiagnostic.rateDegreesPerMeter,
+                    activeDiagnostic.curvaturePerMeter
+                );
+                showRadiusLine("Radius", activeDiagnostic);
+            }
+            const double pitchRate = quantum::coaster::evaluateChannelProfile(
+                *profileRows[static_cast<std::size_t>(
+                    quantum::editor::RateChannel::Pitch)].profile,
+                diagnosticDistance
             );
-            ImGui::SameLine();
-            showRadiusLine("Radius", activeDiagnostic);
+            const double yawRate = quantum::coaster::evaluateChannelProfile(
+                *profileRows[static_cast<std::size_t>(
+                    quantum::editor::RateChannel::Yaw)].profile,
+                diagnosticDistance
+            );
+            const auto resultant = quantum::editor::
+                resultantCurvatureDiagnostic(pitchRate, yawRate);
+            ImGui::TextDisabled(
+                "Local centerline curvature @ %.4g m: %.6f 1/m",
+                diagnosticDistance,
+                resultant.curvaturePerMeter
+            );
+            showRadiusLine("Resultant radius", resultant);
+            ImGui::SeparatorText("Total rotation");
+            for (const ProfileRowView& row : profileRows)
+            {
+                ImGui::TextDisabled("%s %+.3f deg", row.label,
+                    quantum::editor::computeChannelNetRotationDegrees(*row.profile));
+            }
+            ImGui::PopTextWrapPos();
+            ImGui::EndPopup();
         }
-        const double pitchRate = quantum::coaster::evaluateChannelProfile(
-            *profileRows[static_cast<std::size_t>(
-                quantum::editor::RateChannel::Pitch)].profile,
-            diagnosticDistance
-        );
-        const double yawRate = quantum::coaster::evaluateChannelProfile(
-            *profileRows[static_cast<std::size_t>(
-                quantum::editor::RateChannel::Yaw)].profile,
-            diagnosticDistance
-        );
-        const auto resultant = quantum::editor::
-            resultantCurvatureDiagnostic(pitchRate, yawRate);
-        ImGui::TextDisabled(
-            "Local centerline curvature @ %.4g m: %.6f 1/m",
-            diagnosticDistance,
-            resultant.curvaturePerMeter
-        );
-        ImGui::SameLine();
-        showRadiusLine("Resultant radius", resultant);
 
         constexpr ImGuiWindowFlags timelineWindowFlags =
             ImGuiWindowFlags_NoScrollbar
@@ -2714,7 +2786,7 @@ namespace
 
         if (ImGui::BeginChild(
             "##TransitionTimeline",
-            ImVec2(0.0F, 0.0F),
+            ImVec2(0.0F, std::max(200.0F, ImGui::GetContentRegionAvail().y)),
             ImGuiChildFlags_Borders,
             timelineWindowFlags))
         {
@@ -2725,11 +2797,7 @@ namespace
                 canvasBegin.x + canvasSize.x,
                 canvasBegin.y + canvasSize.y
             };
-            const float rulerHeight = std::clamp(
-                canvasSize.y * 0.22F,
-                38.0F,
-                52.0F
-            );
+            const float rulerHeight = 3.0F * ImGui::GetTextLineHeight() + 14.0F;
             const float plotBeginX = canvasBegin.x
                 + endpointHandleRadius + 3.0F;
             const float plotEndX = canvasEnd.x
@@ -2776,7 +2844,7 @@ namespace
                 };
                 ImDrawList* const drawList = ImGui::GetWindowDrawList();
                 const float textHeight = ImGui::GetTextLineHeight();
-                const float rulerLineY = canvasBegin.y + textHeight + 8.0F;
+                const float rulerLineY = canvasBegin.y + 2.0F * textHeight + 4.0F;
 
                 drawList->PushClipRect(canvasBegin, canvasEnd, true);
                 drawList->AddRectFilled(
@@ -2793,9 +2861,7 @@ namespace
                     drawList,
                     domainView,
                     canvasBegin,
-                    rulerLineY,
-                    profileBeginY,
-                    profileEndY
+                    rulerLineY
                 );
                 drawSharedValueGrid(
                     drawList,
@@ -2805,57 +2871,6 @@ namespace
                     graphRanges[activeIndex],
                     profileCurveColors[activeIndex]
                 );
-
-                // Designer-readable summary of what the three authored rate
-                // channels accumulate to over this region, drawn in the
-                // free right side of the ruler band.
-                if (std::all_of(
-                    profileRows.begin(),
-                    profileRows.end(),
-                    [](const ProfileRowView& row)
-                    {
-                        return row.profile != nullptr;
-                    }))
-                {
-                    const double netRollDegrees =
-                        quantum::editor::computeChannelNetRotationDegrees(
-                            *profileRows[0].profile
-                        );
-                    const double netPitchDegrees =
-                        quantum::editor::computeChannelNetRotationDegrees(
-                            *profileRows[1].profile
-                        );
-                    const double netYawDegrees =
-                        quantum::editor::computeChannelNetRotationDegrees(
-                            *profileRows[2].profile
-                        );
-
-                    char netRotationLabel[128]{};
-                    std::snprintf(
-                        netRotationLabel,
-                        sizeof(netRotationLabel),
-                        "Total rotation  Roll %+.1f  Pitch %+.1f  "
-                        "Yaw %+.1f deg",
-                        netRollDegrees,
-                        netPitchDegrees,
-                        netYawDegrees
-                    );
-                    const ImVec2 netLabelSize = ImGui::CalcTextSize(
-                        netRotationLabel
-                    );
-                    drawList->AddText(
-                        ImVec2(
-                            std::max(
-                                plotBeginX + 8.0F,
-                                canvasEnd.x - netLabelSize.x - 10.0F
-                            ),
-                            canvasBegin.y + 4.0F
-                        ),
-                        ImGui::GetColorU32(ImGuiCol_Text),
-                        netRotationLabel
-                    );
-                }
-
 
                 std::array<std::optional<ScalarRowEditGeometry>,
                     quantum::editor::rateChannelCount> rowGeometries{};
@@ -4641,7 +4656,10 @@ namespace quantum::editor
             break;
         }
 
-        const ImVec2 textSize = ImGui::CalcTextSize(status);
+        const float statusWrapWidth = std::max(1.0F,
+            imageMaximum.x - imageMinimum.x - 34.0F);
+        const ImVec2 textSize = ImGui::CalcTextSize(
+            status, nullptr, false, statusWrapWidth);
         const ImVec2 statusMinimum{
             imageMinimum.x + 9.0F,
             imageMaximum.y - textSize.y - 17.0F
@@ -4653,14 +4671,48 @@ namespace quantum::editor
         drawList->AddRectFilled(
             statusMinimum,
             statusMaximum,
-            IM_COL32(9, 12, 17, 220),
+            ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
             4.0F
         );
         drawList->AddText(
+            ImGui::GetFont(), ImGui::GetFontSize(),
             ImVec2{statusMinimum.x + 8.0F, statusMinimum.y + 4.0F},
-            IM_COL32(220, 225, 232, 255),
-            status
+            ImGui::ColorConvertFloat4ToU32(palette::text),
+            status, nullptr, statusWrapWidth
         );
+    }
+
+    void EditorUi::showViewportViewMenuItems()
+    {
+        const auto presetItem = [this](const char* const label,
+            const ViewportCameraPreset preset)
+        {
+            if (ImGui::MenuItem(label))
+            {
+                applyViewportPreset(preset);
+            }
+            itemTooltip(label);
+        };
+        presetItem("Perspective", ViewportCameraPreset::Perspective);
+        presetItem("Isometric", ViewportCameraPreset::Isometric);
+        ImGui::Separator();
+        presetItem("Top", ViewportCameraPreset::Top);
+        presetItem("Bottom", ViewportCameraPreset::Bottom);
+        presetItem("Left", ViewportCameraPreset::Left);
+        presetItem("Right", ViewportCameraPreset::Right);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Track", nullptr, false,
+            selectedSectionSlice() != nullptr))
+        {
+            applyTrackViewPreset(false);
+        }
+        itemTooltip("View along the selected region's track frame");
+        if (ImGui::MenuItem("Walking", nullptr, false,
+            selectedSectionSlice() != nullptr))
+        {
+            applyTrackViewPreset(true);
+        }
+        itemTooltip("View from walking height near the selected region");
     }
 
     float EditorUi::showMainMenuBar()
@@ -4701,42 +4753,7 @@ namespace quantum::editor
 
         if (ImGui::BeginMenu("View"))
         {
-            const auto presetItem = [this](
-                const char* const label,
-                const ViewportCameraPreset preset)
-            {
-                if (ImGui::MenuItem(label))
-                {
-                    applyViewportPreset(preset);
-                }
-            };
-
-            presetItem("Perspective", ViewportCameraPreset::Perspective);
-            presetItem("Isometric", ViewportCameraPreset::Isometric);
-            ImGui::Separator();
-            presetItem("Top", ViewportCameraPreset::Top);
-            presetItem("Bottom", ViewportCameraPreset::Bottom);
-            presetItem("Left", ViewportCameraPreset::Left);
-            presetItem("Right", ViewportCameraPreset::Right);
-            ImGui::Separator();
-            if (ImGui::MenuItem(
-                "Track View",
-                nullptr,
-                false,
-                selectedSectionSlice() != nullptr
-            ))
-            {
-                applyTrackViewPreset(false);
-            }
-            if (ImGui::MenuItem(
-                "Walking View",
-                nullptr,
-                false,
-                selectedSectionSlice() != nullptr
-            ))
-            {
-                applyTrackViewPreset(true);
-            }
+            showViewportViewMenuItems();
             ImGui::Separator();
             if (ImGui::MenuItem(
                 "Focus Selected",
@@ -4752,6 +4769,8 @@ namespace quantum::editor
                 frameWholeTrack();
             }
             ImGui::Separator();
+            ImGui::MenuItem("Force Diagnostics", nullptr,
+                &riderLoadDiagnosticsWindowOpen_);
             if (ImGui::MenuItem(
                 "Viewport Settings",
                 nullptr,
@@ -5060,68 +5079,35 @@ namespace quantum::editor
 
         if (viewportContentVisible)
         {
-            const auto presetButton = [this](
-                const char* const label,
-                const ViewportCameraPreset preset,
-                const char* const tooltip)
+            const float toolbarWidth = ImGui::GetContentRegionAvail().x;
+            const float spacing = ImGui::GetStyle().ItemSpacing.x;
+            const float viewWidth = buttonWidth("View") + ImGui::GetFrameHeight();
+            ImGui::BeginGroup();
+            ImGui::SetNextItemWidth(viewWidth);
+            if (ImGui::BeginCombo("##ViewportView", "View",
+                ImGuiComboFlags_HeightLarge))
             {
-                if (ImGui::SmallButton(label))
-                {
-                    applyViewportPreset(preset);
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("%s", tooltip);
-                }
-            };
-
-            presetButton("Persp", ViewportCameraPreset::Perspective, "Perspective view");
-            ImGui::SameLine();
-            presetButton("Iso", ViewportCameraPreset::Isometric, "Isometric view");
-            ImGui::SameLine();
-            presetButton("Top", ViewportCameraPreset::Top, "Top view");
-            ImGui::SameLine();
-            presetButton("Bot", ViewportCameraPreset::Bottom, "Bottom view");
-            ImGui::SameLine();
-            presetButton("Lft", ViewportCameraPreset::Left, "Left view");
-            ImGui::SameLine();
-            presetButton("Rgt", ViewportCameraPreset::Right, "Right view");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Trk"))
-            {
-                applyTrackViewPreset(false);
+                showViewportViewMenuItems();
+                ImGui::EndCombo();
             }
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("Track view");
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Wlk"))
-            {
-                applyTrackViewPreset(true);
-            }
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("Walking view");
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Focus"))
-            {
-                focusSelectedSection();
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("All"))
+            itemTooltip("Choose Perspective, Isometric, Top, Bottom, Left, Right, Track, or Walking");
+            sameLineIfFits(buttonWidth("Frame All"));
+            if (ImGui::Button("Frame All"))
             {
                 frameWholeTrack();
             }
-            ImGui::SameLine();
-            if (ImGui::SmallButton(
-                viewportSettings_.anchorsVisible
-                    ? "Anchors: On"
-                    : "Anchors: Off"))
+            itemTooltip("Frame the whole track");
+            sameLineIfFits(buttonWidth("Focus"));
+            if (ImGui::Button("Focus"))
             {
-                viewportSettings_.anchorsVisible =
-                    !viewportSettings_.anchorsVisible;
+                focusSelectedSection();
+            }
+            itemTooltip("Focus the selected region");
+            sameLineIfFits(ImGui::GetFrameHeight()
+                + ImGui::GetStyle().ItemInnerSpacing.x
+                + ImGui::CalcTextSize("Anchors").x);
+            if (ImGui::Checkbox("Anchors", &viewportSettings_.anchorsVisible))
+            {
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Debug,
                     "CFG",
@@ -5129,7 +5115,23 @@ namespace quantum::editor
                     viewportSettings_.anchorsVisible ? "visible" : "hidden"
                 );
             }
-            ImGui::SameLine();
+            itemTooltip("Show or hide the track's semantic boundary anchors");
+            ImGui::EndGroup();
+
+            const float toolsWidth = buttonWidth("Move") + buttonWidth("Rotate")
+                + buttonWidth("Settings") + 2.0F * spacing;
+            const float navigationWidth = viewWidth + buttonWidth("Frame All")
+                + buttonWidth("Focus") + ImGui::GetFrameHeight()
+                + ImGui::GetStyle().ItemInnerSpacing.x
+                + ImGui::CalcTextSize("Anchors").x + 3.0F * spacing;
+            if (navigationWidth + toolsWidth + buttonWidth("|")
+                + 2.0F * spacing <= toolbarWidth)
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("|");
+                ImGui::SameLine();
+            }
+            ImGui::BeginGroup();
             const auto startPoseModeButton = [this](
                 const char* const label,
                 const StartPoseTransformMode mode)
@@ -5146,7 +5148,7 @@ namespace quantum::editor
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, palette::selectionHovered);
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, palette::selectionActive);
                 }
-                const bool clicked = ImGui::SmallButton(label);
+                const bool clicked = ImGui::Button(label);
                 if (selected)
                 {
                     ImGui::PopStyleColor(4);
@@ -5170,10 +5172,10 @@ namespace quantum::editor
                 }
             };
             startPoseModeButton("Move", StartPoseTransformMode::Move);
-            ImGui::SameLine();
+            sameLineIfFits(buttonWidth("Rotate"));
             startPoseModeButton("Rotate", StartPoseTransformMode::Rotate);
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Settings"))
+            sameLineIfFits(buttonWidth("Settings"));
+            if (ImGui::Button("Settings"))
             {
                 viewportSettingsWindowOpen_
                     = !viewportSettingsWindowOpen_;
@@ -5184,6 +5186,10 @@ namespace quantum::editor
                     viewportSettingsWindowOpen_ ? "open" : "closed"
                 );
             }
+
+            itemTooltip("Open viewport settings");
+            ImGui::EndGroup();
+            ImGui::Spacing();
 
             const ImVec2 availableSize = ImGui::GetContentRegionAvail();
             const ImVec2 framebufferScale =
@@ -5406,6 +5412,11 @@ namespace quantum::editor
             {
                 ImGui::TextDisabled("Force-Based \xe2\x80\x94 read-only");
                 ImGui::TextWrapped("Target profile editing is not available yet. Actual loads appear in Force Diagnostics.");
+                if (ImGui::SmallButton("Show Force Diagnostics"))
+                {
+                    riderLoadDiagnosticsWindowOpen_ = true;
+                    ImGui::SetWindowFocus(riderLoadDiagnosticsWindowName);
+                }
             }
             else
             {
@@ -5414,26 +5425,35 @@ namespace quantum::editor
                     std::get<coaster::GeometryRegion>(
                         editedSection.region).construction);
 
-            ImGui::TextDisabled("Circular arc");
-            ImGui::Spacing();
+            ImGui::SeparatorText("Circular arc geometry");
 
             // Angle fields present degrees; commands carry Core radians.
             // Every edit flows through the same candidate/commit pipeline
             // as rate-profile edits.
-            // Leave room for labels/units in narrow persisted windows when
-            // applying the explicit font and frame metrics.
-            ImGui::PushItemWidth(std::min(
-                ImGui::CalcItemWidth(),
-                std::max(100.0F, ImGui::GetContentRegionAvail().x
-                    - ImGui::CalcTextSize("Bank Change (deg)").x
-                    - ImGui::GetStyle().ItemInnerSpacing.x)
-            ));
-            if (ImGui::InputDouble(
-                "Radius",
+            const auto inputProperty = [](const char* const label,
+                const char* const id, double* const value,
+                const double step, const double fastStep)
+            {
+                const float labelWidth = ImGui::CalcTextSize("Bank change (deg)").x
+                    + ImGui::GetStyle().ItemSpacing.x;
+                const bool inlineField = ImGui::GetContentRegionAvail().x
+                    >= labelWidth + 200.0F;
+                const float rowX = ImGui::GetCursorPosX();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(label);
+                if (inlineField)
+                {
+                    ImGui::SameLine(rowX + labelWidth);
+                }
+                ImGui::SetNextItemWidth(std::min(320.0F,
+                    ImGui::GetContentRegionAvail().x));
+                return ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+            };
+            if (inputProperty(
+                "Radius", "###Radius",
                 &planarArcEditBuffers_[0],
                 1.0,
-                10.0,
-                "%.3f"
+                10.0
             ))
             {
                 regionCommand_ = {RegionCommandType::SetPlanarArcRadius,
@@ -5441,12 +5461,11 @@ namespace quantum::editor
                                   planarArcEditBuffers_[0]};
             }
 
-            if (ImGui::InputDouble(
-                "Arc angle (deg)###Swept Angle (deg)",
+            if (inputProperty(
+                "Arc angle (deg)", "###Swept Angle (deg)",
                 &planarArcEditBuffers_[1],
                 5.0,
-                15.0,
-                "%.3f"
+                15.0
             ))
             {
                 regionCommand_ = {
@@ -5455,12 +5474,11 @@ namespace quantum::editor
                     planarArcEditBuffers_[1] * radiansPerDegree};
             }
 
-            if (ImGui::InputDouble(
-                "Plane Tilt (deg)",
+            if (inputProperty(
+                "Plane tilt (deg)", "###Plane Tilt (deg)",
                 &planarArcEditBuffers_[2],
                 5.0,
-                15.0,
-                "%.3f"
+                15.0
             ))
             {
                 regionCommand_ = {
@@ -5469,12 +5487,13 @@ namespace quantum::editor
                     planarArcEditBuffers_[2] * radiansPerDegree};
             }
 
-            if (ImGui::InputDouble(
-                "Bank Change (deg)",
+            ImGui::Spacing();
+            ImGui::SeparatorText("Banking");
+            if (inputProperty(
+                "Bank change (deg)", "###Bank Change (deg)",
                 &planarArcEditBuffers_[3],
                 5.0,
-                15.0,
-                "%.3f"
+                15.0
             ))
             {
                 regionCommand_ = {
@@ -5482,17 +5501,16 @@ namespace quantum::editor
                     selectedSection_,
                     planarArcEditBuffers_[3] * radiansPerDegree};
             }
-            ImGui::PopItemWidth();
-
             ImGui::Spacing();
-            ImGui::Text(
+            ImGui::PushTextWrapPos();
+            ImGui::TextDisabled(
                 "Resulting length %.6g",
                 coaster::planarArcLength(committedArc)
             );
+            ImGui::PopTextWrapPos();
 
             ImGui::Spacing();
-            if (ImGui::Button("Convert to Profile###Convert to Rate Profiles",
-                ImVec2(-1.0F, 0.0F)))
+            if (ImGui::SmallButton("Convert to Profile###Convert to Rate Profiles"))
             {
                 regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
                                   selectedSection_, 0.0};
@@ -5853,7 +5871,8 @@ namespace quantum::editor
         {
             showRiderLoadDiagnostics(
                 riderLoadDiagnostics_.selectedSection(),
-                authoredTrack_->physicalSettings()
+                authoredTrack_->physicalSettings(),
+                &riderLoadDiagnosticsWindowOpen_
             );
         }
 

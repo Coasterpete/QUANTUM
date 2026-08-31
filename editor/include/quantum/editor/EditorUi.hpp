@@ -386,6 +386,7 @@ namespace quantum::editor
         void shutdownVulkanBackend() noexcept;
 
         [[nodiscard]] float showMainMenuBar();
+        void showViewportViewMenuItems();
         void applyViewportPreset(ViewportCameraPreset preset);
         void applyTrackViewPreset(bool walkingView);
         void focusSelectedSection();
@@ -457,6 +458,7 @@ namespace quantum::editor
         std::vector<CenterlineSectionSlice> centerlineSlices_;
         const CenterlineVisualization* centerlineVisualization_ = nullptr;
         RiderLoadDiagnosticsModel riderLoadDiagnostics_;
+        bool riderLoadDiagnosticsWindowOpen_ = true;
         double sectionLengthEditBuffer_ = 0.0;
         // Planar-arc numeric edit buffers, indexed by
         // planarArcParamIndex: radius, swept angle, plane tilt, bank.
