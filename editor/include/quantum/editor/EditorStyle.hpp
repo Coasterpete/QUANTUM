@@ -4,10 +4,48 @@
 
 #include <cmath>
 #include <cstdint>
+#include <array>
+#include <filesystem>
 
 namespace quantum::editor
 {
     inline constexpr float editorFontSize = 14.0F;
+    inline constexpr float editorHeaderFontSize = 15.0F;
+    inline constexpr float editorTechnicalFontSize = 14.0F;
+
+    // Borrowed handles only: the current ImGui atlas owns all three fonts.
+    struct EditorFonts
+    {
+        ImFont* normal = nullptr;
+        ImFont* header = nullptr;
+        ImFont* technical = nullptr;
+    };
+
+    [[nodiscard]] EditorFonts loadEditorFonts(const std::filesystem::path& basePath);
+    void editorHeading(const char* label, const EditorFonts& fonts);
+
+    namespace viewportStyle
+    {
+        inline constexpr float anchorRadius = 4.0F;
+        inline constexpr float selectedAnchorRadius = 6.0F;
+        inline constexpr float anchorRingRadius = 10.5F;
+        inline constexpr float selectedLineWidth = 3.0F;
+        inline constexpr float hoveredLineWidth = 2.0F;
+        inline constexpr float selectionCapRadius = 3.5F;
+        inline constexpr float anchorLabelGap = 14.0F;
+        inline constexpr float orientationAxisLength = 34.0F;
+        inline constexpr float moveHandleLength = 56.0F;
+        inline constexpr float moveHitRadius = 8.0F;
+        inline constexpr std::array<float, 3> rotateRadii{30.0F, 39.0F, 48.0F};
+        inline constexpr float rotateHitRadius = 5.0F;
+        inline constexpr float overlayMargin = 9.0F;
+        inline constexpr float overlayPadding = 4.0F;
+    }
+
+    // Logical drawing and hit-test dimensions use the same UI scale.
+    [[nodiscard]] float editorPresentationScale();
+    [[nodiscard]] ImVec2 clampViewportLabel(
+        ImVec2 position, ImVec2 size, ImVec2 minimum, ImVec2 maximum);
 
     namespace palette
     {
@@ -58,6 +96,13 @@ namespace quantum::editor
         inline const ImVec4 destructive = fromSrgb(67, 38, 39);
         inline const ImVec4 destructiveHovered = fromSrgb(92, 44, 46);
         inline const ImVec4 destructiveActive = fromSrgb(110, 48, 50);
+        inline const ImVec4 viewportAnchor = fromSrgb(126, 164, 169);
+        inline const ImVec4 viewportSelected = fromSrgb(153, 239, 232);
+        inline const ImVec4 viewportHovered = fromSrgb(241, 209, 145);
+        inline const ImVec4 viewportRing = fromSrgb(242, 247, 247);
+        inline const std::array<ImVec4, 3> viewportAxes{
+            fromSrgb(246, 117, 105), fromSrgb(119, 218, 151),
+            fromSrgb(128, 175, 250)};
 
         // Data channels retain their own colors, independent of UI status.
         inline const ImVec4 rollChannelRed = fromSrgb(255, 0, 0);

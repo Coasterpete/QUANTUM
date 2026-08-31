@@ -499,13 +499,33 @@ solved states and slices for picking, camera tools, summaries, and selection.
 
 Viewport picking tests the visible reference-curve segments within those exact
 section slices. Hits are resolved front-to-back with deterministic tie breaks,
-and empty space preserves the current selection. The renderer highlights the
-selected slice by drawing that range again over every visible curve; selection
-does not rewrite the geometry buffer. Accepted authored geometry or structure
+and empty space preserves the current selection. The Editor overlays the
+selected slice with thicker rails and square end caps (falling back to a visible
+reference curve when rails are hidden), and gives hover a separate emphasis.
+These image-clipped ImGui overlays do not rewrite the geometry buffer or add a
+Vulkan rendering pass. Accepted authored geometry or structure
 edits regenerate the whole continuous visualization and dynamically update the
 Vulkan track-curve buffer. An Editor-owned orbit camera supplies the
 view-projection matrix and supports navigation and region/whole-track framing.
 Viewport resize only recreates the offscreen color/depth target.
+
+Perspective starts at a 38-degree elevation with the existing 45-degree FOV.
+Only initialization or an explicit Perspective preset chooses that elevation;
+orbit, geometry updates, Frame All and Focus retain user orientation. Presets
+that choose a projection also synchronize the authoritative viewport setting.
+Axis presets keep the user's projection. Grid generation remains renderer-owned;
+its CPU vertex builder is independently tested for translated X/Y centers.
+The solved centerline bounds retain their original meaning. Separate display
+bounds include the generated rail and heartline offsets for Frame All, Focus
+and clipping, so those offsets cannot escape the frame on very short tracks.
+They refresh after visualization changes without moving the user camera.
+
+The Editor uses three static Overpass faces from the official v3.0.5 release:
+Regular at 14 logical pixels, SemiBold headings at 15, and Mono Regular technical
+values at 14. CMake deploys these with their license and provenance. ImGui's atlas
+owns the fonts; EditorFonts only borrows handles until context shutdown. DPI
+scales fonts and viewport drawing/picking dimensions together. Missing bundled
+fonts retain an explicit startup error.
 
 ### Semantic viewport region anchors
 

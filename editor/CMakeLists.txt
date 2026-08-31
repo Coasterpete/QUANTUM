@@ -51,33 +51,30 @@ target_compile_features(
         cxx_std_23
 )
 
-set(
-    quantum_editor_font_source
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Red_Hat_Mono/static/RedHatMono-SemiBold.ttf"
+set(quantum_editor_font_files
+    overpass-regular.otf
+    overpass-semibold.otf
+    overpass-mono-regular.otf
+    LICENSE.md
+    README.md
 )
-set(
-    quantum_editor_font_destination
-    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/fonts/RedHatMono-SemiBold.ttf"
-)
-
-add_custom_command(
-    OUTPUT "${quantum_editor_font_destination}"
-    COMMAND
-        ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/fonts"
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${quantum_editor_font_source}"
-        "${quantum_editor_font_destination}"
-    DEPENDS "${quantum_editor_font_source}"
-    COMMENT "Deploying the QUANTUM Editor UI font"
-    VERBATIM
-)
-
-add_custom_target(
-    QUANTUMEditorFont ALL
-    DEPENDS "${quantum_editor_font_destination}"
-)
+set(quantum_editor_font_outputs)
+foreach(font_file IN LISTS quantum_editor_font_files)
+    set(font_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/${font_file}")
+    set(font_destination "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/fonts/Overpass/${font_file}")
+    add_custom_command(
+        OUTPUT "${font_destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/fonts/Overpass"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${font_source}" "${font_destination}"
+        DEPENDS "${font_source}"
+        COMMENT "Deploying QUANTUM typography asset ${font_file}"
+        VERBATIM
+    )
+    list(APPEND quantum_editor_font_outputs "${font_destination}")
+endforeach()
+add_custom_target(QUANTUMEditorFont ALL DEPENDS ${quantum_editor_font_outputs})
 add_dependencies(QUANTUM QUANTUMEditorFont)
 
 add_custom_command(

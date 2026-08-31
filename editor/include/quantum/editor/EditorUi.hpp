@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/EditorStyle.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
@@ -228,6 +229,25 @@ namespace quantum::editor
         bool leftRailVisible = true;
         bool rightRailVisible = true;
         bool heartlineVisible = true;
+
+        void applyCameraSettings(ViewportCamera& camera) const
+        {
+            camera.setProjection(orthographic
+                ? ViewportProjection::Orthographic
+                : ViewportProjection::Perspective);
+            camera.setVerticalFieldOfView(
+                static_cast<double>(fieldOfViewDegrees)
+                    * 3.14159265358979323846 / 180.0);
+        }
+
+        void applyCameraPreset(ViewportCamera& camera, ViewportCameraPreset preset)
+        {
+            // Axis presets inherit the user's projection. Perspective and
+            // Isometric also update the authoritative per-frame setting.
+            applyCameraSettings(camera);
+            camera.applyPreset(preset);
+            orthographic = camera.projection() == ViewportProjection::Orthographic;
+        }
     };
 
     class EditorUi
@@ -391,6 +411,7 @@ namespace quantum::editor
         void applyTrackViewPreset(bool walkingView);
         void focusSelectedSection();
         void frameWholeTrack();
+        void refreshViewportDisplayBounds();
         [[nodiscard]] const CenterlineSectionSlice*
         selectedSectionSlice() const noexcept;
         void applyViewportSettings(renderer::VulkanContext& vulkan);
@@ -402,6 +423,9 @@ namespace quantum::editor
         VkDescriptorSet viewportTexture_ = VK_NULL_HANDLE;
         std::uint64_t swapchainGeneration_ = 0;
         ViewportCamera viewportCamera_;
+        EditorFonts fonts_;
+        std::optional<std::size_t> hoveredTrackAnchor_;
+        bool viewportDisplayBoundsDirty_ = true;
         CameraGesture cameraGesture_ = CameraGesture::None;
         bool initialViewportFramePending_ = true;
         double viewportAspectRatio_ = 16.0 / 9.0;

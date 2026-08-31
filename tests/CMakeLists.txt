@@ -3,6 +3,22 @@ add_executable(
     LoggingTests.cpp
 )
 
+add_executable(QuantumEditorViewportPresentationTests
+    ViewportPresentationTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorStyle.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+)
+target_include_directories(QuantumEditorViewportPresentationTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorViewportPresentationTests PRIVATE Quantum::Core Quantum::Engine SDL3::SDL3 imgui::imgui)
+target_compile_features(QuantumEditorViewportPresentationTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorViewportPresentationTests PROPERTIES CXX_EXTENSIONS OFF)
+add_dependencies(QuantumEditorViewportPresentationTests QUANTUMEditorFont)
+add_test(NAME QuantumEditor.ViewportPresentation COMMAND QuantumEditorViewportPresentationTests
+    "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
+set_tests_properties(QuantumEditor.ViewportPresentation PROPERTIES LABELS "editor;camera;viewport;typography")
+
 add_executable(QuantumCoreForceDrivenRegionTests ForceDrivenRegionTests.cpp)
 target_link_libraries(QuantumCoreForceDrivenRegionTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreForceDrivenRegionTests PRIVATE cxx_std_23)

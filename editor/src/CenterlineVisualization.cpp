@@ -328,6 +328,35 @@ namespace quantum::editor
         return visualization;
     }
 
+    std::pair<glm::dvec3, glm::dvec3> referenceCurveBounds(
+        const CenterlineVisualization& visualization,
+        const CenterlineSectionSlice* const slice)
+    {
+        const std::size_t first = slice != nullptr ? slice->firstVertex : 0;
+        const std::size_t count = slice != nullptr
+            ? slice->vertexCount : visualization.verticesPerCurve;
+        if (count == 0 || first + count > visualization.verticesPerCurve
+            || visualization.vertices.size() != static_cast<std::size_t>(
+                visualization.verticesPerCurve) * renderer::viewportCurveCount)
+        {
+            throw std::invalid_argument("Reference curve bounds require a valid nonempty curve range.");
+        }
+        glm::dvec3 minimum{std::numeric_limits<double>::max()};
+        glm::dvec3 maximum{std::numeric_limits<double>::lowest()};
+        for (std::size_t curve = 0; curve < renderer::viewportCurveCount; ++curve)
+        {
+            const std::size_t begin = curve * visualization.verticesPerCurve + first;
+            for (std::size_t index = begin; index < begin + count; ++index)
+            {
+                const auto& vertex = visualization.vertices[index];
+                const glm::dvec3 position{vertex.x, vertex.y, vertex.z};
+                minimum = glm::min(minimum, position);
+                maximum = glm::max(maximum, position);
+            }
+        }
+        return {minimum, maximum};
+    }
+
     void CenterlineVisualizationCache::markDirty() noexcept
     {
         dirty_ = true;
