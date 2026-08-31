@@ -852,7 +852,8 @@ namespace quantum::renderer
     void VulkanContext::initialize(
         SDL_Window* window,
         const std::span<const LineVertex> trackCurveVertices,
-        const std::uint32_t trackVerticesPerCurve)
+        const std::uint32_t trackVerticesPerCurve,
+        const bool enableFrameReadback)
     {
         if (window == nullptr)
         {
@@ -867,6 +868,7 @@ namespace quantum::renderer
         );
 
         window_ = window;
+        frameReadbackEnabled_ = enableFrameReadback;
 
         VkApplicationInfo appInfo{};
 
@@ -1273,6 +1275,17 @@ namespace quantum::renderer
         createInfo.imageExtent = extent;
         createInfo.imageArrayLayers = 1;
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (frameReadbackEnabled_)
+        {
+            if ((support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0)
+                throw std::runtime_error("The Vulkan surface does not support full-frame readback.");
+            if (surfaceFormat.format != VK_FORMAT_B8G8R8A8_SRGB
+                && surfaceFormat.format != VK_FORMAT_B8G8R8A8_UNORM
+                && surfaceFormat.format != VK_FORMAT_R8G8B8A8_SRGB
+                && surfaceFormat.format != VK_FORMAT_R8G8B8A8_UNORM)
+                throw std::runtime_error("Frame readback requires an RGBA8 or BGRA8 swapchain.");
+            createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        }
 
         if (graphicsQueueFamily_ != presentQueueFamily_)
         {
@@ -1291,7 +1304,8 @@ namespace quantum::renderer
             support.capabilities
         );
         createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-        createInfo.clipped = VK_TRUE;
+        // Readback must retain even pixels obscured by another desktop window.
+        createInfo.clipped = frameReadbackEnabled_ ? VK_FALSE : VK_TRUE;
         createInfo.oldSwapchain = swapchain_;
 
         VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
@@ -2215,7 +2229,8 @@ namespace quantum::renderer
     void VulkanContext::recordDrawCommands(
         const std::uint32_t imageIndex,
         const FrameRenderCallback renderCallback,
-        void* const userData)
+        void* const userData,
+        const bool readback)
     {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2579,13 +2594,42 @@ namespace quantum::renderer
 
         vkCmdEndRendering(commandBuffer_);
 
+        if (readback)
+        {
+            VkImageMemoryBarrier toTransfer = toColorAttachmentBarrier;
+            toTransfer.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            toTransfer.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+
+            VkBufferImageCopy copy{};
+            copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copy.imageSubresource.layerCount = 1;
+            copy.imageExtent = {swapchainExtent_.width, swapchainExtent_.height, 1};
+            vkCmdCopyImageToBuffer(commandBuffer_, swapchainImages_[imageIndex],
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackBuffer_, 1, &copy);
+
+            VkBufferMemoryBarrier toHost{};
+            toHost.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            toHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            toHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+            toHost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toHost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            toHost.buffer = readbackBuffer_;
+            toHost.size = VK_WHOLE_SIZE;
+            vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &toHost, 0, nullptr);
+        }
+
         VkImageMemoryBarrier toPresentBarrier{};
         toPresentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        toPresentBarrier.srcAccessMask =
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        toPresentBarrier.srcAccessMask = readback
+            ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         toPresentBarrier.dstAccessMask = 0;
-        toPresentBarrier.oldLayout =
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        toPresentBarrier.oldLayout = readback
+            ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         toPresentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         toPresentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toPresentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -2595,7 +2639,7 @@ namespace quantum::renderer
 
         vkCmdPipelineBarrier(
             commandBuffer_,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            readback ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
             0,
             0,
@@ -2614,10 +2658,48 @@ namespace quantum::renderer
         }
     }
 
+    void VulkanContext::prepareFrameReadback()
+    {
+        const VkDeviceSize size = static_cast<VkDeviceSize>(swapchainExtent_.width)
+            * swapchainExtent_.height * 4;
+        if (size == readbackSize_)
+            return;
+        // The caller has waited for the frame fence before replacing this buffer.
+        if (readbackBuffer_ != VK_NULL_HANDLE)
+            vmaDestroyBuffer(allocator_, readbackBuffer_, readbackAllocation_);
+        readbackBuffer_ = VK_NULL_HANDLE;
+        readbackAllocation_ = VK_NULL_HANDLE;
+        readbackMappedData_ = nullptr;
+        readbackSize_ = 0;
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT
+            | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo mapping{};
+        const VkResult result = vmaCreateBuffer(allocator_, &bufferInfo, &allocationInfo,
+            &readbackBuffer_, &readbackAllocation_, &mapping);
+        if (result != VK_SUCCESS)
+            throwVulkanError("vmaCreateBuffer for frame readback", result);
+        readbackMappedData_ = mapping.pMappedData;
+        readbackSize_ = size;
+    }
+
     void VulkanContext::drawFrame(
         const FrameRenderCallback renderCallback,
-        void* const userData)
+        void* const userData,
+        FrameImage* const readback)
     {
+        if (readback != nullptr)
+        {
+            *readback = {};
+            if (!frameReadbackEnabled_)
+                throw std::logic_error("Frame readback was not enabled during Vulkan initialization.");
+        }
         int width = 0;
         int height = 0;
 
@@ -2635,6 +2717,9 @@ namespace quantum::renderer
         }
 
         waitForFrameCompletion();
+
+        if (readback != nullptr)
+            prepareFrameReadback();
 
         std::uint32_t imageIndex = 0;
         const VkResult acquireResult = vkAcquireNextImageKHR(
@@ -2672,7 +2757,7 @@ namespace quantum::renderer
             throwVulkanError("vkResetCommandBuffer", result);
         }
 
-        recordDrawCommands(imageIndex, renderCallback, userData);
+        recordDrawCommands(imageIndex, renderCallback, userData, readback != nullptr);
 
         const VkPipelineStageFlags waitStage =
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -2708,6 +2793,28 @@ namespace quantum::renderer
             viewportImageInitialized_ = true;
         }
 
+        if (readback != nullptr)
+        {
+            // Host reads only after the copy completes, including noncoherent heaps.
+            waitForFrameCompletion();
+            const VkResult invalidateResult = vmaInvalidateAllocation(
+                allocator_, readbackAllocation_, 0, VK_WHOLE_SIZE);
+            if (invalidateResult != VK_SUCCESS)
+                throwVulkanError("vmaInvalidateAllocation for frame readback", invalidateResult);
+            readback->width = swapchainExtent_.width;
+            readback->height = swapchainExtent_.height;
+            const auto* bytes = static_cast<const std::uint8_t*>(readbackMappedData_);
+            readback->pixels.assign(bytes, bytes + static_cast<std::size_t>(readbackSize_));
+            const bool bgra = swapchainFormat_ == VK_FORMAT_B8G8R8A8_SRGB
+                || swapchainFormat_ == VK_FORMAT_B8G8R8A8_UNORM;
+            for (std::size_t offset = 0; offset < readback->pixels.size(); offset += 4)
+            {
+                if (bgra)
+                    std::swap(readback->pixels[offset], readback->pixels[offset + 2]);
+                readback->pixels[offset + 3] = 255;
+            }
+        }
+
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
@@ -2725,6 +2832,8 @@ namespace quantum::renderer
             || presentResult == VK_SUBOPTIMAL_KHR
             || acquireResult == VK_SUBOPTIMAL_KHR)
         {
+            if (readback != nullptr)
+                *readback = {};
             recreateSwapchain();
             return;
         }
@@ -2874,6 +2983,15 @@ namespace quantum::renderer
 
             destroySwapchain();
             destroyViewportTarget();
+
+            if (readbackBuffer_ != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(allocator_, readbackBuffer_, readbackAllocation_);
+                readbackBuffer_ = VK_NULL_HANDLE;
+                readbackAllocation_ = VK_NULL_HANDLE;
+                readbackMappedData_ = nullptr;
+                readbackSize_ = 0;
+            }
 
             if (graphicsPipeline_ != VK_NULL_HANDLE)
             {

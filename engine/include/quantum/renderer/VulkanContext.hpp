@@ -31,6 +31,14 @@ namespace quantum::renderer
     inline constexpr std::uint32_t viewportCurveCount = 4;
     inline constexpr std::uint32_t viewportAllCurvesVisibleMask = 0xFu;
 
+    // Tightly packed, top-to-bottom RGBA8 pixels of the complete client area.
+    struct FrameImage
+    {
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+        std::vector<std::uint8_t> pixels;
+    };
+
     class VulkanContext
     {
     public:
@@ -49,11 +57,15 @@ namespace quantum::renderer
         void initialize(
             SDL_Window* window,
             std::span<const LineVertex> trackCurveVertices,
-            std::uint32_t trackVerticesPerCurve
+            std::uint32_t trackVerticesPerCurve,
+            bool enableFrameReadback = false
         );
+        // Optional synchronous readback after the render callback. Empty on a
+        // skipped/out-of-date frame; requires opt-in during initialize().
         void drawFrame(
             FrameRenderCallback renderCallback = nullptr,
-            void* userData = nullptr
+            void* userData = nullptr,
+            FrameImage* readback = nullptr
         );
         void resizeViewportTarget(
             std::uint32_t width,
@@ -124,8 +136,10 @@ namespace quantum::renderer
         void recordDrawCommands(
             std::uint32_t imageIndex,
             FrameRenderCallback renderCallback,
-            void* userData
+            void* userData,
+            bool readback
         );
+        void prepareFrameReadback();
         void destroyViewportTarget() noexcept;
         void destroySwapchain() noexcept;
 
@@ -156,6 +170,12 @@ namespace quantum::renderer
         std::vector<VkImageView> swapchainImageViews_;
         std::vector<std::uint8_t> swapchainImageInitialized_;
         std::uint64_t swapchainGeneration_ = 0;
+
+        bool frameReadbackEnabled_ = false;
+        VkBuffer readbackBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation readbackAllocation_ = VK_NULL_HANDLE;
+        void* readbackMappedData_ = nullptr;
+        VkDeviceSize readbackSize_ = 0;
 
         VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline graphicsPipeline_ = VK_NULL_HANDLE;
