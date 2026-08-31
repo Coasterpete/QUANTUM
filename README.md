@@ -1,338 +1,111 @@
 # QUANTUM
 
-**An early-stage native roller-coaster software project built around authored geometry, rider-local track construction, and an interactive 3D editor.**
-
-![QUANTUM Editor](docs/images/quantum-editor-perspective.png)
-
-*Current QUANTUM development editor. The authored-track viewport, region authoring, topology foundation, and portions of the Transition Editor are functional. Many other visible controls represent experimental, incomplete, or planned systems.*
+**An early-stage native roller-coaster design and simulation project focused on authored geometry, rider-local track construction, force-aware design, and an interactive 3D editor.**
 
 > [!IMPORTANT]
 > ## QUANTUM is in active early development
 >
-> QUANTUM is **not a finished coaster simulator**.
+> QUANTUM is **not a finished coaster simulator**. Core authoring, geometry, diagnostics, document, and viewport foundations are functional, while major systems such as final track rendering, trains, supports, terrain, and production ride simulation remain future work.
 >
-> The editor currently contains a mixture of:
->
-> - functional systems;
-> - experimental systems;
-> - prototype interfaces;
-> - partially implemented workflows;
-> - and placeholders for planned features.
->
-> **A button, panel, menu item, or control appearing in a screenshot does not necessarily mean that the underlying feature is implemented yet.**
->
-> Expect major changes to the UI, internal architecture, project format, simulation model, and workflow as development continues.
+> The UI, project format, rendering pipeline, and workflows may continue to change substantially before an initial release.
 
----
+## What is QUANTUM?
 
-## Contents
+QUANTUM is an independent roller-coaster design and simulation application written primarily in modern C++.
 
-- [What is QUANTUM?](#what-is-quantum)
-- [Current Development Status](#current-development-status)
-- [What Works Today?](#what-works-today)
-- [What Does NOT Work Yet?](#what-does-not-work-yet)
-- [Current Editor Interface](#current-editor-interface)
-- [Track Visualization](#track-visualization)
-- [Geometry Architecture](#geometry-architecture)
-- [Circuit Completion](#circuit-completion)
-- [Development Roadmap](#development-roadmap)
-- [Technology](#technology)
-- [Building QUANTUM](#building-quantum)
-- [Running Tests](#running-tests)
-- [AI-Assisted Development](#ai-assisted-development)
-- [Disclaimer](#disclaimer)
+The project is being built around coaster-specific authoring concepts rather than treating an entire ride as one generic editable spline. Track is assembled from ordered authored **Regions** whose geometry and rider-local orientation are evaluated continuously over distance.
 
----
-
-# What is QUANTUM?
-
-QUANTUM is an independent roller-coaster design and simulation software project written primarily in modern C++.
-
-Its long-term goal is to provide a complete environment for:
+The long-term goal is a complete environment for:
 
 - designing coaster layouts;
-- authoring track geometry;
-- editing transitions over distance;
-- visualizing rider-local orientation and banking;
-- simulating trains and ride systems;
-- designing terrain-aware layouts;
-- building coaster environments;
-- and eventually presenting complete virtual rides.
+- authoring and refining track geometry;
+- shaping roll, pitch, and yaw behavior over distance;
+- designing around rider loads;
+- visualizing track orientation and banking;
+- adding final track styles, supports, terrain, trains, and ride systems;
+- and eventually presenting complete simulated rides.
 
-QUANTUM is being developed as more than a conventional spline editor.
-
-A major focus of the project is **coaster-oriented geometry authoring**: representing track through concepts such as distance, curvature, rider-local pitch/yaw/roll behavior, authored regions, transitions, topology, and eventually vehicle dynamics.
-
-The project is currently transitioning from foundational mathematics and solver development toward increasingly interactive track authoring inside the native editor.
+Detailed implementation notes and mathematical conventions live in [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
 # Current Development Status
 
-The current major milestone is:
+QUANTUM has progressed from isolated geometry experiments into a connected interactive authoring application.
 
-## Interactive Track Authoring
+Recent work has focused on three areas:
 
-QUANTUM can now represent and visualize complete connected authored tracks containing multiple region types.
+1. **Connected authored-track editing** — multiple Regions form one canonical track and regenerate through QuantumCore.
+2. **Force-aware geometry and diagnostics** — Force-Based construction and universal rider-load evaluation now share the same track pipeline.
+3. **Editor modernization** — the interface has received multiple presentation passes covering terminology, hierarchy, typography, viewport framing, selection, anchors, and camera behavior.
 
-Recent development has focused on making the editor behave increasingly like an actual coaster-design application rather than a collection of isolated geometry experiments.
+The current editor uses:
 
-Phases 1 and 2 now provide foundations including:
+- neutral charcoal application chrome;
+- a near-black 3D viewport;
+- Overpass for ordinary UI text;
+- Overpass Mono for technical and numeric values;
+- cyan/teal selection emphasis;
+- amber hover and warning emphasis;
+- red primarily for destructive and error states;
+- a distance-domain Transition Editor with a dot grid;
+- a compact viewport toolbar;
+- semantic track anchors and an editable authored Track Start.
 
-- complete connected multi-region `AuthoredTrack` visualization;
-- deterministic distance-domain visualization;
-- retained visualization caching and GPU buffers;
-- viewport authored-region picking;
-- complete selected-region highlighting;
-- Section List ↔ viewport selection synchronization;
-- Transition/Geometry Editor selection synchronization;
-- region mutation and selection preservation;
-- authoritative QuantumCore regeneration after authored geometry changes.
-
-The next authoring work is tighter live Transition/Geometry Editor feedback, allowing parameter and profile changes to update the connected coaster interactively while the user edits.
-
-Direct 3D manipulation, draggable track nodes, viewport deformation, and train simulation are not implemented.
+The current viewport remains an engineering/reference visualization rather than the final shaded coaster-track renderer.
 
 ---
 
 # What Works Today?
 
-The following represents functionality with an implemented foundation in the current development build.
-
-## Editor
+## Editor and documents
 
 - Native Windows desktop application
 - SDL3 application/window layer
 - Vulkan renderer
-- Dear ImGui editor interface
-- Docked editor workspace
-- Native 3D viewport
-- Perspective camera
-- Orthographic camera infrastructure
-- Isometric / top / side-oriented viewport modes
-- Ground/reference grid
-- Viewport focus tools
-- Section List
-- Transition Editor
-- Geometry Editor
-- Project/document state infrastructure
+- Dear ImGui docking interface
 - New / Open / Save / Save As document workflow
+- Authored-track document state and serialization foundation
+- Transaction-backed authored edits
+- Ordered multi-Region track editing
+- Selection preservation through accepted structural edits
 
-## Interactive Track Authoring
+## Viewport
 
-- Ordered authored-track regions
-- Complete connected multi-region visualization
-- Complete-track state and frame chaining
-- Viewport authored-region selection
-- Complete selected-region highlighting
-- Section List ↔ viewport selection synchronization
-- Transition/Geometry Editor synchronization
-- Region append
-- Region prepend
-- Region insertion
-- Region duplication
-- Region reordering
-- Region removal
-- Region-length editing
-- Selection preservation through mutations
-- Authoritative Core regeneration after accepted geometry edits
+QUANTUM currently includes these viewport modes:
 
-## Authored Geometry
+- Perspective
+- Isometric
+- Top
+- Bottom
+- Left
+- Right
+- Track
+- Walking
 
-- Rate/Profile regions
-- Planar Arc regions
-- Straight / zero-rate geometry
-- Rider-local pitch-rate integration
-- Rider-local yaw-rate integration
-- Rider-local roll-rate integration
-- Coupled pitch/yaw/roll geometry
-- Region-to-region frame propagation
-- Continuous position and orientation tracking
-- Distance-domain sampling
-- Region boundary tracking
+Current viewport interaction includes:
 
-## Transition/Profile Editing
+- orientation-aware **Frame All**;
+- **Focus** on selected geometry;
+- orbit and pan;
+- deterministic authored-Region picking;
+- distinct hover and selection presentation;
+- semantic track-boundary anchors;
+- Move / Rotate tools for the authored Track Start;
+- DPI-aware anchor and gizmo presentation;
+- ground/reference grid and track reference curves.
 
-Current profile channels include:
+The authored Track Start stores canonical world position and orientation. Moving or rotating it regenerates the downstream track from authored state; it is not a renderer-only visual offset.
 
-- Roll Rate
-- Pitch Rate
-- Yaw Rate
+Interior and final semantic anchors remain read-only until constrained neighboring-Region and terminal-pose solving exists.
 
-The Transition Editor operates over the authored region's distance domain rather than treating the profile as an unrelated generic graph.
+## Regions and geometry
 
-Several transition/profile function types are already represented internally and continue to evolve.
+QUANTUM currently supports multiple geometry-construction approaches inside the same authored track.
 
-## Track Topology
+### Profile
 
-- Circuit layout mode
-- Shuttle layout mode
-- Endpoint position-gap measurement
-- Endpoint tangent mismatch
-- Endpoint frame mismatch
-- Closed-circuit verification
-- Invalid/incomplete topology reporting
-- Circuit Completion integration for incomplete Circuit layouts
-
-## Experimental Circuit Completion Foundation
-
-QUANTUM includes an experimental automatic Circuit Completion solver.
-
-The solver can generate a connecting Rate/Profile region between the current track ending and beginning while attempting to satisfy:
-
-- endpoint position;
-- tangent orientation;
-- frame orientation.
-
-The production solver currently uses analytically propagated endpoint sensitivities for Jacobian construction.
-
-Finite differences remain available internally as a validation/reference path.
-
-## Mathematics / Core
-
-- 3D B-splines
-- NURBS
-- Analytic first derivatives
-- Analytic second derivatives
-- Curvature helpers
-- Radius helpers
-- Adaptive arc-length integration
-- Arc-length inversion
-- Arc-length lookup tables
-- Curve sampling
-- Rotation-minimizing frames
-- Deterministic geometry tests
-
-## Documents
-
-- Coaster document representation
-- Authored-track document state
-- Editor-side document state
-- Serialization foundation
-- Region editing workflow
-- Track topology stored separately from rendering state
-
----
-
-# What Does NOT Work Yet?
-
-A significant amount of QUANTUM is still unfinished.
-
-Examples of systems that are incomplete, experimental, placeholder-only, or not yet implemented include:
-
-## Simulation
-
-- Complete train simulation
-- Vehicle dynamics
-- Wheel/bogie simulation
-- Gravity-driven train motion
-- Kinetic/potential energy simulation
-- Train mass modeling
-- Multi-train operation
-- Block-section logic
-- Dispatch logic
-- Station operation
-- Lift hills and chain/cable lift behavior
-- LSM/LIM launch systems
-- Brakes and trim brakes
-- Transfer and switch tracks
-- Production ride testing
-
-## Track Rendering
-
-- Final rail/spine/cross-tie geometry
-- Manufacturer-specific track styles
-- Wooden coaster structures
-- Final materials
-- Production lighting
-
-The current viewport uses an **engineering visualization** rather than a finished coaster-track mesh.
-
-## Supports
-
-Visible Support Workspace controls currently represent future work.
-
-Systems such as the following should currently be treated as planned or incomplete:
-
-- Prefab Panel
-- Foundation Generator
-- Rail Connector Generator
-- Support Settings
-- Automatic support generation
-- Structural support analysis
-
-## Environment
-
-- Terrain authoring
-- Terrain sculpting
-- Terrain grading
-- Roads
-- Paths
-- Foliage
-- Scenery
-- Buildings
-- Water
-- Environment lighting workflow
-- Environmental effects
-
-## Analysis
-
-- Complete force-analysis workflow
-- Ride-envelope and clearance workflows
-- Restraint and evacuation analysis
-- Structural engineering
-- Certified safety analysis
-
-## Distribution
-
-- Production installer
-- Stable binary releases
-- Stable project compatibility guarantees
-- Maintained Linux build
-- Maintained macOS build
-
----
-
-# Current Editor Interface
-
-The interface itself is evolving alongside the underlying systems.
-
-Some controls represent functionality already implemented. Others intentionally exist as prototypes, planned workflows, placeholders, or partially implemented controls.
-
-For that reason, the current editor should be interpreted as a **development interface**, not a finished feature list.
-
----
-
-## Track Workspace
-
-![Track Workspace](docs/images/track-workspace.png)
-
-The Track Workspace currently contains authored-track and topology controls.
-
-Implemented foundations include:
-
-- Circuit / Shuttle layout selection;
-- track-topology information;
-- authored-region selection;
-- region length editing;
-- append/prepend/insert operations;
-- duplication;
-- removal;
-- reordering;
-- Planar Arc / Rate Profile workflows;
-- Circuit Completion integration.
-
-Other surrounding Track Workspace controls may remain incomplete.
-
----
-
-## Transition Editor
-
-![Transition Editor Input](docs/images/transition-editor-input.png)
-
-QUANTUM uses a **distance-domain transition workflow**.
-
-Authored channels belong to a track region and describe behavior as distance progresses through that region.
+Profile-based authoring uses distance-domain roll, pitch, and yaw rates to construct rider-local geometry.
 
 Current channels include:
 
@@ -340,38 +113,78 @@ Current channels include:
 - Pitch Rate
 - Yaw Rate
 
-Input behavior already includes concepts such as:
+The Transition Editor provides direct profile editing over Region distance and includes multiple transition-function families.
 
-- drag sensitivity;
-- fine drag sensitivity;
-- value snapping;
-- distance snapping.
+### Circular Arc
 
-The Transition Editor remains under active development and should not yet be considered feature-complete.
+Circular Arc Regions provide direct constant-curvature planar geometry using parameters such as radius and arc angle while remaining part of the same connected AuthoredTrack chain.
+
+### Force-Based
+
+Force-Based Regions generate track from authored target normal/lateral G behavior together with authored roll-rate behavior.
+
+Force-Based generation uses the same canonical track state and physical settings as the rest of the authored track rather than introducing a separate incompatible force-only track representation.
+
+## Rider-load diagnostics
+
+QUANTUM includes construction-independent rider-load evaluation for authored tracks.
+
+The current Force Diagnostics workflow can visualize actual:
+
+- speed;
+- normal G;
+- lateral G;
+- longitudinal G.
+
+Load evaluation is derived from the canonical generated track and rider frame.
+
+**Editable force-target authoring in the public editor is not yet complete.**
+
+## Track topology
+
+QUANTUM explicitly distinguishes layout topology.
+
+### Circuit
+
+Circuit layouts can be evaluated for:
+
+- endpoint position gap;
+- tangent mismatch;
+- rider-frame mismatch;
+- closed-circuit validity.
+
+An experimental Circuit Completion solver can generate a connecting Profile Region and attempt to satisfy the closure constraints.
+
+### Shuttle
+
+Shuttle layouts are not required to return to the starting pose and therefore do not use ordinary Circuit closure semantics.
+
+## Mathematical foundation
+
+QuantumCore includes reusable numerical and geometric infrastructure including:
+
+- 3D B-splines;
+- NURBS;
+- analytic first and second derivatives;
+- curvature and radius helpers;
+- adaptive arc-length integration;
+- arc-length inversion;
+- arc-length lookup tables;
+- distance-domain curve sampling;
+- rotation-minimizing frames;
+- rider-local roll/pitch/yaw integration;
+- whole-track kinematic evaluation;
+- sensitivity-based Circuit Completion Jacobian support.
+
+QuantumCore remains independent of Vulkan and Dear ImGui.
 
 ---
 
-## Viewport Settings
+# Current Track Visualization
 
-![Viewport Settings](docs/images/viewport-settings.png)
-
-Current viewport configuration includes camera and engineering-reference controls.
+The current viewport intentionally visualizes track through reference geometry rather than pretending that final coaster-track assets already exist.
 
 Reference elements include:
-
-- Ground Grid
-- Centerline
-- Left Rail
-- Right Rail
-- Heartline
-
-These are currently visualization/reference curves rather than final rendered coaster rails.
-
----
-
-# Track Visualization
-
-QUANTUM currently renders an engineering representation of the authored track using four primary reference curves:
 
 ```text
 Left Rail
@@ -380,956 +193,230 @@ Right Rail
 Heartline
 ```
 
-The rail offsets follow the solved rider-local lateral axis.
+Rail offsets follow the solved rider-local lateral direction, while the heartline follows rider-local up. This makes banking and frame orientation readable before final rail/spine/cross-tie meshes are implemented.
 
-The heartline follows the solved rider-local up axis.
-
-This makes banking and frame orientation visible before final track meshes exist.
-
-The visualization is generated from authoritative QuantumCore geometry.
-
-The renderer does not independently reconstruct coaster geometry.
-
-The current data path is conceptually:
+The data path remains conceptually:
 
 ```text
 AuthoredTrack
       ↓
-QuantumCore geometry integration
-      ↓
-Solved rider-local geometry samples
+QuantumCore geometry / kinematics
       ↓
 Editor visualization representation
       ↓
-Vulkan vertex buffer
+Vulkan rendering
       ↓
 3D viewport
 ```
 
-Visualization is retained and regenerated only when authored geometry changes.
-
-Ordinary frames reuse the already-generated geometry and GPU buffers.
+Final human-authored rail assemblies, material systems, shaded track rendering, and manufacturer/style-specific visual assets remain future work.
 
 ---
 
-# Interactive Viewport Selection
+# What Does NOT Work Yet?
 
-Authored regions can be selected directly from the 3D viewport.
+QUANTUM is still early-stage software. Major incomplete or planned areas include the following.
 
-Viewport selection and editor selection share the same authoritative selection state.
+## Final track rendering
 
-Conceptually:
+- Production rail/spine/cross-tie meshes
+- Manufacturer-specific visual track styles
+- Human-authored production material library
+- PBR material workflow
+- Production lighting and shadows
+- Final shaded track renderer
 
-```text
-Viewport click
-      ↓
-Selected authored region
-      ↓
-Section List
-      ↓
-Transition / Geometry Editor
-      ↓
-Viewport highlight
-```
+## Supports
 
-Selection from the Section List follows the same state in the opposite direction.
+The **Supports** workspace represents future functionality. Automatic support generation, foundations, connectors, structural analysis, and production support workflows are not yet implemented.
 
-The complete selected authored region is highlighted rather than only the individual line segment clicked.
+## Terrain and environment
 
-Selection does not regenerate coaster geometry.
+- Terrain authoring and sculpting
+- Terrain grading
+- Roads and paths
+- Foliage
+- Scenery and buildings
+- Water
+- Environment-lighting workflow
+- Environmental effects
 
-Viewport selection does not provide draggable nodes, direct 3D manipulation, or viewport deformation.
+## Trains and ride systems
 
----
+- Train/vehicle rendering
+- Complete train dynamics
+- Wheel/bogie simulation
+- Multi-train operation
+- Block systems
+- Stations and dispatch logic
+- Lift hills
+- LSM/LIM launches
+- Brakes and trims
+- Transfer/switch tracks
 
-# Geometry Architecture
+## Advanced authoring still planned
 
-QUANTUM does not treat the entire coaster as one generic editable spline.
+- Editable force-target profile workflow
+- Shared interior-anchor inverse solving
+- Terminal/end-pose constraint solving
+- Direct manipulation of constrained interior boundaries
+- Complete ride-envelope/clearance workflow
 
-Instead, layouts are assembled from **authored regions**.
+## Distribution
 
-Each region represents a portion of the track over a particular distance interval.
-
-Regions are evaluated in sequence.
-
-The ending position and orientation of one region becomes the starting state of the next.
-
-Conceptually:
-
-```text
-Region 1
-   ↓ final state
-Region 2
-   ↓ final state
-Region 3
-   ↓ final state
-Region 4
-   ↓
-...
-```
-
-This makes the authored track an ordered geometric construction rather than an unrelated collection of local curves.
-
----
-
-# Rider-Local Geometry
-
-A central part of QUANTUM's geometry model is the rider-local frame.
-
-At a position along the track, the system maintains an orientation basis including approximately:
-
-```text
-T = tangent / forward
-L = lateral
-U = up
-```
-
-Pitch, yaw, and roll behavior evolves this frame as distance progresses.
-
-This allows coaster geometry to be described using concepts that are naturally related to the rider and track rather than only through world-space control points.
-
-The geometry system supports coupled three-dimensional rotation.
-
-Pitch, yaw, and roll are therefore not treated as three completely independent transformations.
+- Production installer
+- Stable public binary releases
+- Stable project-format compatibility guarantees
+- Maintained native Linux build
+- Maintained macOS build
 
 ---
 
-# Rate/Profile Regions
+# Editor Architecture
 
-Rate/Profile regions represent track using three primary authored profiles:
+QUANTUM keeps authored numerical state separate from presentation and rendering.
 
-```text
-Pitch Rate(s)
-Yaw Rate(s)
-Roll Rate(s)
-```
-
-where `s` represents distance through the region.
-
-The profiles are integrated to construct the resulting three-dimensional track.
-
-This makes it possible to author transitions explicitly over track distance.
-
-A region can therefore describe behavior such as:
-
-- changing curvature;
-- changing elevation;
-- changing heading;
-- banking;
-- unbanking;
-- combined three-dimensional transitions.
-
----
-
-# Planar Arc Regions
-
-Planar Arc regions provide a more direct geometric representation for constant-curvature planar track.
-
-Parameters currently include concepts such as:
-
-- radius;
-- sweep angle;
-- plane tilt;
-- bank change.
-
-Planar Arc geometry participates in the same overall AuthoredTrack chain as Rate/Profile regions.
-
-Supported planar arcs can also be converted into equivalent Rate/Profile representations.
-
-Where conversion is supported, QUANTUM attempts to preserve the represented track geometry rather than merely preserving region length.
-
----
-
-# Transition Authoring
-
-QUANTUM's intended transition workflow is **timeline/distance-domain based**.
-
-Rather than treating every profile as an isolated generic graph, channels are authored over a region's physical distance.
-
-Conceptually:
-
-```text
-Region Distance
-0 m -------------------------------------- L m
-
-Roll Rate     ──────╮___________
-Pitch Rate    ____╭─────────────
-Yaw Rate      _________╭────────
-```
-
-The graphs describe how the track changes as the rider progresses through the region.
-
-The current Transition Editor is still evolving toward this broader workflow.
-
----
-
-# Circuit Completion
-
-Circuit Completion is an experimental automatic-closure system. It attempts to add one Rate/Profile connector between the end and beginning of an incomplete Circuit layout.
-
-The connector uses nine parameters, with piecewise-linear profiles between each channel's values:
-
-| Channel | Parameters |
-|---|---|
-| Pitch rate | start, midpoint, end |
-| Yaw rate | start, midpoint, end |
-| Roll rate | start, midpoint, end |
-
-The nonlinear solver targets endpoint position, tangent, and frame-orientation constraints while preserving the topology tolerances used to verify the completed track.
-
-The production solver constructs its Jacobian from endpoint sensitivities propagated through the discrete geometry integration. Finite differences remain available internally for derivative validation. Deterministic reflected non-planar basin-access seeds help the search reach solution basins without relying on floating-point noise.
-
-Convergence is not guaranteed for every layout.
-
-A failure to converge does not necessarily prove that no valid connector exists.
-
-The system deliberately reports failure rather than silently returning geometry that does not meet its closure requirements.
-
----
-
-# Track Topology
-
-QUANTUM explicitly models layout topology.
-
-## Circuit
-
-A Circuit layout is intended to return to its starting pose.
-
-Closure can be evaluated using:
-
-- positional gap;
-- tangent mismatch;
-- frame mismatch.
-
-Circuit Completion may be used on an incomplete Circuit.
-
-## Shuttle
-
-A Shuttle layout is not expected to form a conventional continuous closed loop.
-
-Circuit Completion is therefore not treated as required behavior for Shuttle layouts.
-
----
-
-# Curve Mathematics
-
-QUANTUM includes reusable mathematical infrastructure beyond the authored coaster system.
-
----
-
-## B-Splines
-
-Current B-spline functionality includes:
-
-- 3D curve evaluation;
-- analytic first derivatives;
-- analytic second derivatives.
-
----
-
-## NURBS
-
-Current NURBS functionality includes:
-
-- rational 3D curve evaluation;
-- analytic first derivatives;
-- analytic second derivatives.
-
----
-
-## Arc Length
-
-QUANTUM includes:
-
-- adaptive numerical arc-length integration;
-- arc-length inversion;
-- reusable arc-length lookup tables;
-- distance-domain curve sampling.
-
----
-
-## Curve Geometry
-
-Geometry utilities include concepts such as:
-
-- tangent;
-- curvature;
-- radius;
-- sampled geometric state.
-
----
-
-## Rotation-Minimizing Frames
-
-Rotation-minimizing frame infrastructure is available for geometric workflows where frame transport should minimize unnecessary twist.
-
----
-
-# Document Model
-
-QUANTUM separates numerical geometry, project data, editor state, visualization, and rendering.
-
-A simplified architecture is:
+A simplified flow is:
 
 ```text
 QuantumCore
      ↓
-CoasterDocument
+CoasterDocument / AuthoredTrack
      ↓
-AuthoredTrack
-     ↓
-Editor state
+Editor interaction state
      ↓
 Visualization data
      ↓
 Vulkan renderer
 ```
 
-QuantumCore does **not** depend on Vulkan or Dear ImGui.
+The Editor is the composition root. QuantumCore does not depend on the renderer, and the Vulkan engine does not own coaster-authoring truth.
 
-This separation is deliberate.
-
-QUANTUM is intended to evolve into a larger suite of coaster-related tools rather than forcing every subsystem into one inseparable executable.
-
----
-
-# Rendering Architecture
-
-QUANTUM currently uses a native Vulkan rendering backend.
-
-Current rendering technology includes:
-
-- Vulkan
-- SDL3
-- Vulkan Memory Allocator
-- GLSL
-- Dear ImGui
-- GPU-backed engineering-track visualization
-- retained vertex buffers
-- viewport camera infrastructure
-
-The current viewport is an engineering/editor viewport rather than a finished ride renderer.
-
----
-
-# Planned Simulation Foundation
-
-Track authoring comes before complete train simulation.
-
-Future simulation work is expected to include systems such as:
-
-```text
-Authored Track
-      ↓
-Train Placement
-      ↓
-Vehicle / Bogie Sampling
-      ↓
-Mass + Gravity
-      ↓
-Velocity / Energy
-      ↓
-Forces
-      ↓
-Ride Systems
-```
-
-Potential systems include:
-
-- train placement;
-- vehicle progression;
-- bogie positioning;
-- wheel path sampling;
-- train mass;
-- gravity;
-- velocity;
-- acceleration;
-- forces;
-- drag/friction models;
-- lifts;
-- launches;
-- brakes;
-- block sections;
-- dispatch logic.
-
-These systems are **not yet complete production features**.
-
----
-
-# Terrain and Environment
-
-QUANTUM's long-term vision includes terrain-aware coaster design.
-
-Future environment capabilities may include:
-
-- imported terrain;
-- terrain generation;
-- grading;
-- roads;
-- paths;
-- structures;
-- foliage;
-- scenery;
-- water;
-- lighting;
-- environmental effects.
-
-Detailed environment creation may eventually become a specialized part of the broader QUANTUM suite.
-
-The main coaster editor should nevertheless remain terrain-aware enough for designing terrain-following rides.
-
----
-
-# Long-Term Suite Direction
-
-QUANTUM is intended to grow beyond a single monolithic program.
-
-A possible future structure is:
-
-```text
-QUANTUM Editor
-      │
-      ├── Track authoring
-      ├── Ride configuration
-      └── Engineering workflow
-              │
-              ▼
-QUANTUM Simulation
-      │
-      ├── Train simulation
-      ├── Ride systems
-      └── Presentation
-              │
-              ▼
-QUANTUM Environment
-      │
-      ├── Terrain
-      ├── Scenery
-      └── World authoring
-```
-
-The exact product separation is still experimental and may change.
-
-All applications should ultimately share compatible project/document infrastructure rather than becoming unrelated tools.
-
----
-
-# Development Roadmap
-
-A simplified current direction is:
-
-```text
-Geometry Foundation
-        │
-        ▼
-Authored Track Foundation
-        │
-        ▼
-Circuit Completion
-        │
-        ▼
-Interactive Track Authoring   ← CURRENT
-        │
-        ▼
-Simulation Foundation
-        │
-        ▼
-Train / Track Visualization
-        │
-        ▼
-Ride Systems
-        │
-        ▼
-Terrain / Environment
-        │
-        ▼
-Expanded Simulation Workflow
-```
-
-The roadmap is intentionally flexible.
-
-Experiments may reveal that systems need to be reordered, redesigned, or split into smaller milestones.
+See [`docs/architecture.md`](docs/architecture.md) for the current subsystem boundaries, mathematical conventions, force-driven construction details, topology behavior, and editor transaction model.
 
 ---
 
 # Technology
 
-| Component | Technology |
-|---|---|
-| Primary language | C++23 |
-| Build system | CMake |
-| Dependency management | vcpkg |
-| Window / input layer | SDL3 |
-| Graphics API | Vulkan |
-| GPU memory | Vulkan Memory Allocator |
-| Editor UI | Dear ImGui |
-| Mathematics | GLM |
-| Serialization | nlohmann/json |
-| Shaders | GLSL |
-| Primary development platform | Windows |
+Current primary technologies include:
 
----
+- C++
+- CMake
+- Vulkan
+- Vulkan Memory Allocator
+- SDL3
+- Dear ImGui
+- GLM
+- nlohmann/json
+- vcpkg
 
-# Supported Platform
-
-QUANTUM is currently developed and tested primarily on:
-
-**Windows 11 + MSVC**
-
-Linux and macOS are long-term goals.
-
-They are not currently maintained or tested to the same level as Windows.
+QUANTUM currently targets Windows development first.
 
 ---
 
 # Building QUANTUM
 
-## Tested Windows Development Environment
+QUANTUM is under active development and does not yet provide a fully automated clean-machine bootstrap.
 
-The current Windows development environment is tested with:
+A current Windows development environment requires at least:
 
-- Windows 11;
-- Visual Studio 2026 / MSVC with C++ development tools, as selected by the checked-in preset;
-- CMake 3.25 or newer;
+- Visual Studio / MSVC with C++ desktop-development components;
+- CMake;
 - Git;
-- Vulkan SDK, including `glslangValidator`;
-- vcpkg.
+- vcpkg;
+- a Vulkan SDK/toolchain suitable for shader compilation;
+- the `VCPKG_ROOT` environment variable pointing at the local vcpkg installation.
 
-Tool versions will evolve over time.
-
----
-
-## 1. Clone the repository
+Example PowerShell workflow:
 
 ```powershell
 git clone https://github.com/Coasterpete/QUANTUM.git
 cd QUANTUM
-```
 
----
+$env:VCPKG_ROOT = "C:\path\to\vcpkg"
 
-## 2. Install vcpkg
-
-Example setup:
-
-```powershell
-New-Item -ItemType Directory -Force -Path C:\Dev\_tools | Out-Null
-git clone https://github.com/microsoft/vcpkg.git C:\Dev\_tools\vcpkg
-& C:\Dev\_tools\vcpkg\bootstrap-vcpkg.bat
-```
-
-Set `VCPKG_ROOT`:
-
-```powershell
-$env:VCPKG_ROOT = "C:\Dev\_tools\vcpkg"
-```
-
-To persist the variable for your Windows user:
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-    "VCPKG_ROOT",
-    "C:\Dev\_tools\vcpkg",
-    "User"
-)
-```
-
-The session-level assignment is enough to continue immediately. Newly opened terminals will receive the persistent value.
-
----
-
-## 3. Configure QUANTUM
-
-From the repository root, configure the Debug preset:
-
-```powershell
 cmake --preset windows-msvc-debug
+cmake --build build --config Debug --parallel 2
 ```
 
-The project's `vcpkg.json` manifest will install required dependencies.
+The Debug editor executable is normally produced under the configured build tree, for example:
 
----
-
-## 4. Build
-
-```powershell
-cmake --build --preset windows-msvc-debug
+```text
+build/editor/Debug/QUANTUM.exe
 ```
 
----
-
-## 5. Run the Editor
-
-```powershell
-.\build\editor\Debug\QUANTUM.exe
-```
-
----
-
-## 6. Interactive Authoring Demo
-
-Development builds currently contain an opt-in authored-track demo fixture.
-
-From PowerShell:
-
-```powershell
-$env:QUANTUM_INTERACTIVE_AUTHORING_DEMO = "1"
-.\build\editor\Debug\QUANTUM.exe
-```
-
-The demo is intended for development/testing and does not change the normal New-document contents.
-
-To disable it in the current PowerShell session:
-
-```powershell
-Remove-Item Env:QUANTUM_INTERACTIVE_AUTHORING_DEMO
-```
+The exact local Vulkan SDK and vcpkg locations depend on the developer machine.
 
 ---
 
 # Running Tests
 
-Run the complete Debug suite with:
+After configuring and building:
 
 ```powershell
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-QUANTUM contains intentionally expensive numerical regression tests.
+The test suite covers Core geometry/math, authored-track behavior, topology, force-driven generation, rider loads, document state, transactions, viewport behavior, selection, anchors, typography/presentation, and Circuit Completion.
 
-In particular, Circuit Completion validation may take several minutes in Debug builds.
-
-During normal development, focused test execution is recommended.
-
-For example:
-
-```powershell
-ctest --test-dir build -C Debug -R "AuthoredTrack|QuantumEditor|Viewport" --output-on-failure
-```
-
-Run the complete suite at important checkpoints such as:
-
-- major milestone completion;
-- numerical-core changes;
-- solver changes;
-- pull requests;
-- release verification.
-
-Release tests are dramatically faster for some numerical workloads.
+Some Circuit Completion numerical-validation tests are intentionally expensive and can dominate the total runtime of the complete suite.
 
 ---
 
-# Repository Layout
+# Development Direction
 
-```text
-QUANTUM/
-│
-├── core/
-│   ├── include/
-│   │   └── quantum/
-│   └── src/
-│
-├── editor/
-│   ├── assets/
-│   ├── include/
-│   └── src/
-│
-├── engine/
-│   ├── include/
-│   ├── shaders/
-│   └── src/
-│
-├── tests/
-│
-├── docs/
-│
-├── CMakeLists.txt
-├── CMakePresets.json
-└── vcpkg.json
-```
+Near-term development is expected to continue along two complementary tracks.
 
----
+## Authoring
 
-## `core`
+- Force target vs. actual workflows
+- Editable force-target profiles
+- Interior/shared-anchor constraints
+- Terminal pose constraints
+- Support-generation foundations
 
-Contains numerical and coaster-domain systems such as:
+## Visual / product
 
-- curves;
-- rider-local geometry;
-- authored tracks;
-- authored regions;
-- topology;
-- project/document structures;
-- Circuit Completion.
+- Human-authored track visual assets
+- Recolorable material controls
+- Smoothness/roughness and other material parameters
+- Non-repeating material variation for large surfaces
+- Shaded track rendering
+- Lighting, shadows, terrain, and environment presentation
 
----
-
-## `editor`
-
-Contains editor-facing systems such as:
-
-- editor state;
-- UI;
-- track visualization;
-- viewport picking;
-- selection logic;
-- transition tools;
-- region summaries;
-- camera controls.
-
----
-
-## `engine`
-
-Contains application/rendering systems such as:
-
-- Vulkan context;
-- GPU resources;
-- application lifecycle;
-- shaders;
-- rendering integration.
-
----
-
-## `tests`
-
-Contains deterministic automated verification for:
-
-- geometry;
-- curves;
-- arc length;
-- frames;
-- authored regions;
-- profile editing;
-- documents;
-- viewport behavior;
-- topology;
-- Circuit Completion;
-- numerical sensitivities;
-- solver determinism;
-- failure behavior.
-
----
-
-## `docs`
-
-Contains architecture notes and other development documentation.
-
----
-
-# Testing Philosophy
-
-QUANTUM intentionally has a relatively substantial numerical test suite for an early-stage independent project.
-
-Coaster geometry can appear visually reasonable while still being mathematically incorrect.
-
-Automated verification therefore covers behavior such as:
-
-- analytic derivatives;
-- curve geometry;
-- arc length;
-- frame orthogonality;
-- rider-local integration;
-- region chaining;
-- deterministic authoring;
-- topology;
-- solver convergence;
-- solver failure;
-- sensitivity derivatives;
-- viewport mapping;
-- selection behavior;
-- document state.
-
-A new implementation is not considered correct merely because it is faster or looks reasonable in the viewport.
-
-Numerical and topology behavior should remain explainable and reproducible.
-
----
-
-# Development Principles
-
-## Coaster-oriented authoring
-
-Track-authoring concepts should make sense for coaster design.
-
-Generic spline-control-point manipulation is useful, but it should not be the only available abstraction.
-
----
-
-## Distance-domain workflows
-
-Transitions should maintain an explicit relationship with physical distance along the track.
-
----
-
-## Geometry before cosmetics
-
-A beautiful mesh is not useful if:
-
-- the centerline is wrong;
-- the frame flips;
-- banking is inconsistent;
-- curvature is invalid;
-- topology is broken.
-
-Engineering geometry therefore comes before finished visual track models.
-
----
-
-## Determinism
-
-The same authored input should produce the same result.
-
-Deterministic behavior is especially important for:
-
-- geometry;
-- solver results;
-- project files;
-- regression tests.
-
----
-
-## Separation of concerns
-
-Core coaster mathematics should not depend on:
-
-- Dear ImGui;
-- Vulkan;
-- viewport UI;
-- presentation logic.
-
-Rendering should visualize authoritative geometry rather than duplicate it.
-
----
-
-## Explicit failure
-
-If a solver cannot satisfy its required constraints, QUANTUM should report failure.
-
-It should not silently pretend that invalid geometry is acceptable.
-
----
-
-## User-facing progress
-
-Deep mathematical infrastructure matters, but the eventual purpose of QUANTUM is to become a usable interactive coaster-design and simulation application.
-
-Development should therefore continue moving mathematical foundations into real editor workflows.
+The exact order may evolve as architecture and usability testing continue.
 
 ---
 
 # AI-Assisted Development
 
-QUANTUM is a **human-directed** project developed with the assistance of AI programming tools.
+QUANTUM is a **human-directed** project developed with substantial use of modern AI-assisted programming tools.
 
-AI may assist with implementation, testing, debugging, and documentation, while project direction, architecture, coaster-domain design, UX, assets, acceptance criteria, and engineering decisions remain human-directed.
+AI coding agents may assist with work such as:
 
-AI-assisted changes are reviewed and validated through appropriate builds, automated tests, numerical verification, and manual testing.
+- implementation;
+- testing;
+- debugging;
+- code review;
+- documentation;
+- repetitive integration work.
 
----
+The project's product direction, architecture decisions, UX direction, artistic direction, visual assets/models, sounds, acceptance criteria, and final testing decisions remain human-directed.
 
-# Contributions
-
-QUANTUM is evolving quickly.
-
-Before beginning a large contribution, consider discussing the proposed direction first.
-
-This helps avoid duplicating systems that are already being redesigned or actively developed.
-
-Contributions should generally avoid:
-
-- duplicating coaster geometry mathematics in UI/rendering code;
-- weakening tests simply to make a new implementation pass;
-- silently changing numerical tolerances;
-- introducing nondeterministic solver behavior without justification;
-- mixing unrelated architectural changes into narrowly scoped work;
-- presenting placeholder UI as completed functionality.
-
-More formal contribution guidelines may be added as the project matures.
-
----
-
-# Stability
-
-QUANTUM does not currently promise stable internal APIs or project-file compatibility.
-
-Breaking changes are expected.
-
-That may include changes to:
-
-- project/document schema;
-- authored-region representation;
-- UI layout;
-- rendering architecture;
-- simulation architecture;
-- track parameterization;
-- transition editing;
-- internal APIs.
-
-Projects created by early development builds may require migration or may become incompatible with later builds.
+AI assistance is treated as an implementation tool rather than a substitute for project ownership or design intent.
 
 ---
 
 # Disclaimer
 
-QUANTUM is a design and simulation software project.
+QUANTUM is experimental software under active development.
 
-It is **not** a certified:
-
-- structural engineering tool;
-- mechanical engineering tool;
-- ride-safety analysis system;
-- regulatory approval system;
-- manufacturer engineering package.
-
-Geometry, forces, clearances, train behavior, and other outputs should not be interpreted as professional engineering certification.
-
-Real amusement rides require extensive engineering, analysis, testing, manufacturer review, and regulatory approval beyond the scope of this software.
-
-QUANTUM is an independent project and is not affiliated with, endorsed by, or officially associated with any roller-coaster manufacturer or amusement park unless explicitly stated otherwise.
+It is not a certified engineering, structural-analysis, ride-safety, or regulatory tool. Numerical and simulation output should not be treated as professional engineering approval or safety certification.
 
 ---
 
-# Project Name
+# License / Distribution
 
-The public project name is:
+Licensing and public distribution policy are still evolving with the project.
 
-# **QUANTUM**
-
-The broader project may also be referred to during development as:
-
-**Quantum CoasterWorks**
-
----
-
-# The Road Ahead
-
-The immediate priority is not adding every imaginable coaster feature.
-
-QUANTUM first needs a strong authoring loop:
-
-```text
-AUTHOR
-  ↓
-VISUALIZE
-  ↓
-SELECT
-  ↓
-EDIT
-  ↓
-VALIDATE
-  ↓
-SIMULATE
-```
-
-The geometry foundation now exists.
-
-The editor foundation now exists.
-
-Interactive authoring has begun.
-
-The next stages will continue turning those foundations into a usable coaster-design workflow before expanding into increasingly sophisticated train, ride-system, terrain, environment, and presentation capabilities.
-
-For now:
-
-## Build the track first.
+Before using QUANTUM source or assets outside the repository, review the repository's current license and asset notices.
