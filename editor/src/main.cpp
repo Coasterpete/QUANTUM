@@ -1,5 +1,6 @@
 #include <quantum/engine/Application.hpp>
 #include <quantum/engine/Logging.hpp>
+#include <quantum/editor/ReadmeCapture.hpp>
 
 #include <SDL3/SDL_main.h>
 
@@ -7,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -66,6 +68,12 @@ int main(int argc, char* argv[])
     try
     {
         configureLogLevel(argc, argv);
+        std::vector<std::string_view> arguments;
+        for (int index = 1; index < argc; ++index)
+            arguments.emplace_back(argv[index]);
+        if (const auto manifest = quantum::editor::parseReadmeCaptureArguments(arguments))
+            return quantum::editor::runReadmeCapture(
+                quantum::editor::loadReadmeCaptureManifest(*manifest));
         quantum::engine::Application application;
         return application.run();
     }

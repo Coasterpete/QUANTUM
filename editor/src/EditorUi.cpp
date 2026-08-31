@@ -1,4 +1,5 @@
 #include <quantum/editor/EditorUi.hpp>
+#include <quantum/editor/ReadmeCapture.hpp>
 
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/coaster/TrackTopology.hpp>
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -3365,7 +3367,9 @@ namespace
 
     void buildDefaultDockLayout(
         const ImGuiID dockspaceId,
-        const ImVec2 dockspaceSize)
+        const ImVec2 dockspaceSize,
+        const float bottomFraction = 0.27F,
+        const bool captureLayout = false)
     {
         ImGui::DockBuilderRemoveNode(dockspaceId);
         ImGui::DockBuilderAddNode(
@@ -3380,7 +3384,7 @@ namespace
         ImGui::DockBuilderSplitNode(
             upperId,
             ImGuiDir_Down,
-            0.27F,
+            bottomFraction,
             &bottomId,
             &upperId
         );
@@ -3407,6 +3411,8 @@ namespace
         ImGui::DockBuilderDockWindow(trackWorkspaceWindowName, leftId);
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
+        if (captureLayout)
+            ImGui::DockBuilderDockWindow(geometryEditorWindowName, rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
         ImGui::DockBuilderDockWindow(
             riderLoadDiagnosticsWindowName,
@@ -3428,7 +3434,8 @@ namespace quantum::editor
         const renderer::VulkanContext& vulkan,
         const coaster::AuthoredTrack& authoredTrack,
         const glm::dvec3& centerlineMinimum,
-        const glm::dvec3& centerlineMaximum)
+        const glm::dvec3& centerlineMaximum,
+        const ReadmeCaptureScenario* const captureScenario)
     {
         if (window == nullptr)
         {
@@ -3455,6 +3462,8 @@ namespace quantum::editor
             centerlineMaximum
         );
         window_ = window;
+        captureScenario_ = captureScenario;
+        captureSetupPending_ = captureScenario != nullptr;
         authoredTrack_ = &authoredTrack;
         selectedSection_ = 0;
         selectedTrackAnchor_ = 0;
@@ -3521,7 +3530,17 @@ namespace quantum::editor
         {
             ImGuiIO& io = ImGui::GetIO();
             io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-            configureIniPath(iniPath_);
+            if (captureScenario_ != nullptr)
+            {
+                io.IniFilename = nullptr;
+                io.LogFilename = nullptr;
+                io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+                transitionEditorInputSettings_ = {};
+            }
+            else
+            {
+                configureIniPath(iniPath_);
+            }
 
             applyQuantumStyle();
             const char* const basePath = SDL_GetBasePath();
@@ -3532,7 +3551,7 @@ namespace quantum::editor
                     + SDL_GetError());
             }
             fonts_ = loadEditorFonts(basePath);
-            io.ConfigDpiScaleFonts = true;
+            io.ConfigDpiScaleFonts = captureScenario_ == nullptr;
 
             if (!ImGui_ImplSDL3_InitForVulkan(window))
             {
@@ -4082,11 +4101,21 @@ namespace quantum::editor
     {
         const double aspectRatio = static_cast<double>(pixelWidth)
             / static_cast<double>(pixelHeight);
+        const bool aspectChanged = aspectRatio != viewportAspectRatio_;
         viewportAspectRatio_ = aspectRatio;
 
         refreshViewportDisplayBounds();
 
-        if (initialViewportFramePending_)
+        if (captureScenario_ != nullptr && (initialViewportFramePending_ || aspectChanged))
+        {
+            // Fit using the actual docked viewport aspect, including startup layout changes.
+            if (captureScenario_->focusSelected)
+                focusSelectedSection();
+            else
+                viewportCamera_.frame(aspectRatio);
+            initialViewportFramePending_ = false;
+        }
+        else if (initialViewportFramePending_)
         {
             viewportCamera_.frame(aspectRatio);
             initialViewportFramePending_ = false;
@@ -5079,7 +5108,37 @@ namespace quantum::editor
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
+        if (captureScenario_ != nullptr)
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            io.ClearEventsQueue();
+            io.ClearInputKeys();
+            io.ClearInputMouse();
+            io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+            io.DeltaTime = 1.0F / 60.0F;
+            ImGui::GetStyle().FontScaleDpi = 1.0F;
+        }
         ImGui::NewFrame();
+
+        if (captureSetupPending_)
+        {
+            resetTransientState();
+            selectSection(captureScenario_->region, true);
+            viewportSettings_ = {};
+            viewportSettings_.anchorsVisible =
+                captureScenario_->kind == ReadmeCaptureKind::TrackStartGizmo;
+            startPoseTransformMode_ = captureScenario_->rotateGizmo
+                ? StartPoseTransformMode::Rotate : StartPoseTransformMode::Move;
+            if (viewportSettings_.anchorsVisible)
+                selectTrackAnchor(0);
+            riderLoadDiagnosticsWindowOpen_ =
+                captureScenario_->kind == ReadmeCaptureKind::ForceDiagnostics;
+            inputSettingsWindowOpen_ = false;
+            viewportSettingsWindowOpen_ = false;
+            applyViewportPreset(ViewportCameraPreset::Perspective);
+            initialViewportFramePending_ = true;
+            captureSetupPending_ = false;
+        }
 
         const bool anyEndpointDragReleased =
             firstActiveEndpoint(endpointDrags_)
@@ -5124,7 +5183,17 @@ namespace quantum::editor
                 );
             }
 
-            buildDefaultDockLayout(dockspaceId, defaultDockspaceSize);
+            float bottomFraction = 0.27F;
+            if (captureScenario_ != nullptr)
+            {
+                bottomFraction = 0.38F;
+                if (captureScenario_->kind == ReadmeCaptureKind::ForceDiagnostics)
+                    bottomFraction = 0.76F;
+                else if (captureScenario_->kind == ReadmeCaptureKind::TransitionEditor)
+                    bottomFraction = 0.52F;
+            }
+            buildDefaultDockLayout(dockspaceId, defaultDockspaceSize, bottomFraction,
+                captureScenario_ != nullptr);
         }
 
         constexpr ImGuiWindowFlags viewportWindowFlags =
@@ -5298,7 +5367,9 @@ namespace quantum::editor
 
         ImGui::End();
 
-        showSupportWorkspace();
+        if (captureScenario_ == nullptr
+            || authoredTrack_->section(selectedSection_).kind == coaster::RegionKind::RateProfiles)
+            showSupportWorkspace();
 
         // Clamp the selection against the live document before any panel
         // reads it; structural commits can shrink or reorder sections.
@@ -5461,10 +5532,13 @@ namespace quantum::editor
 
         if (editedSection.kind != coaster::RegionKind::RateProfiles)
         {
-            ImGui::SetNextWindowPos(
-                ImVec2(80.0F, 260.0F),
-                ImGuiCond_Appearing
-            );
+            if (captureScenario_ == nullptr)
+            {
+                ImGui::SetNextWindowPos(
+                    ImVec2(80.0F, 260.0F),
+                    ImGuiCond_Appearing
+                );
+            }
             ImGui::Begin(geometryEditorWindowName);
 
             if (coaster::isForceDrivenSection(editedSection))
@@ -5932,6 +6006,8 @@ namespace quantum::editor
 
         if (riderLoadDiagnostics_.sectionCount() == sectionCount)
         {
+            if (captureScenario_ != nullptr && riderLoadDiagnosticsWindowOpen_)
+                ImGui::SetNextWindowFocus();
             showRiderLoadDiagnostics(
                 riderLoadDiagnostics_.selectedSection(),
                 authoredTrack_->physicalSettings(),

@@ -7,6 +7,8 @@ add_executable(
     src/EditorUi.cpp
     src/PlatformDialogs.cpp
     src/RegionSummary.cpp
+    src/ReadmeCapture.cpp
+    src/ReadmeCaptureRunner.cpp
     src/RiderLoadDiagnostics.cpp
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
@@ -19,6 +21,7 @@ add_executable(
     include/quantum/editor/EditorUi.hpp
     include/quantum/editor/PlatformDialogs.hpp
     include/quantum/editor/RegionSummary.hpp
+    include/quantum/editor/ReadmeCapture.hpp
     include/quantum/editor/RegionSelection.hpp
     include/quantum/editor/RiderLoadDiagnostics.hpp
     include/quantum/editor/TransitionEditorModel.hpp
