@@ -153,6 +153,8 @@ namespace quantum::editor
         double domainEnd
     );
 
+    // Exact zero/one positions preserve the corresponding authored domain
+    // endpoint so graph sampling cannot drift outside an inclusive domain.
     [[nodiscard]] double normalizedToGraphDistance(
         double normalizedDistance,
         double domainBegin,

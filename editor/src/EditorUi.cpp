@@ -1276,9 +1276,12 @@ namespace
             {
                 const double progress = static_cast<double>(sample)
                     / static_cast<double>(sampleCount - 1);
-                const double domainValue = transition.domainBegin
-                    + progress
-                        * (transition.domainEnd - transition.domainBegin);
+                const double domainValue = quantum::editor::
+                    normalizedToGraphDistance(
+                        progress,
+                        transition.domainBegin,
+                        transition.domainEnd
+                    );
                 const double value = quantum::math::evaluateScalarTransition(
                     transition,
                     domainValue

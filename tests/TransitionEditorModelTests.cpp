@@ -385,6 +385,36 @@ namespace
             25.0, 0.0, "shared X-domain transform round trips");
     }
 
+    void graphSegmentSamplingPreservesExactDomainEndpoints()
+    {
+        using namespace quantum::editor;
+
+        const quantum::math::ScalarTransition transition{
+            0.3,
+            0.9,
+            1.0,
+            2.0,
+            quantum::math::TransitionType::Linear
+        };
+        const double finalSample = normalizedToGraphDistance(
+            1.0,
+            transition.domainBegin,
+            transition.domainEnd
+        );
+
+        requireNear(
+            quantum::math::evaluateScalarTransition(
+                transition,
+                finalSample
+            ),
+            transition.valueEnd,
+            0.0,
+            "the final graph sample remains a valid inclusive-domain query"
+        );
+        require(finalSample == transition.domainEnd,
+            "a graph segment's final sample keeps the exact authored end");
+    }
+
     void deterministicSemanticMarkerHitTesting()
     {
         using namespace quantum::editor;
@@ -646,6 +676,7 @@ int main()
         {"large roll graph range", largeRollRatesRemainRepresentableInTheGraph},
         {"semantic marker extraction", semanticMarkersReflectOnlyAuthoredProfileBoundaries},
         {"semantic marker transforms", markerTransformsPreserveFlatAndDistanceDomainSemantics},
+        {"exact graph sample endpoints", graphSegmentSamplingPreservesExactDomainEndpoints},
         {"semantic marker hit testing", deterministicSemanticMarkerHitTesting},
         {"marker drag proposals", markerAndBoundaryDragProposalsAreEngineeringSpaceEdits},
         {"marker numeric synchronization", markerIdentityAndNumericEditingShareTheAuthoritativeProfile},

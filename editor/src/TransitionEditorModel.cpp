@@ -463,6 +463,14 @@ namespace quantum::editor
                 "Graph domain must have positive length."
             );
         }
+        if (normalizedDistance == 0.0)
+        {
+            return domainBegin;
+        }
+        if (normalizedDistance == 1.0)
+        {
+            return domainEnd;
+        }
         return domainBegin
             + normalizedDistance * (domainEnd - domainBegin);
     }
