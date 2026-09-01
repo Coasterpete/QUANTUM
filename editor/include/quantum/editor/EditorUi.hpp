@@ -232,6 +232,7 @@ namespace quantum::editor
         bool leftRailVisible = true;
         bool rightRailVisible = true;
         bool heartlineVisible = true;
+        renderer::TrackPresentationState trackPresentation;
 
         void applyCameraSettings(ViewportCamera& camera) const
         {

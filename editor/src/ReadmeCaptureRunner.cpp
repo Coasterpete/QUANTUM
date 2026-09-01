@@ -83,7 +83,8 @@ namespace quantum::editor
             // Reverse destruction order: ImGui, Vulkan (including surface), then SDL window.
             renderer::VulkanContext vulkan;
             vulkan.initialize(window.get(), loaded.centerline.vertices,
-                loaded.centerline.verticesPerCurve, true);
+                loaded.centerline.verticesPerCurve,
+                loaded.centerline.renderableTrack, true);
             EditorUi ui;
             ui.initialize(window.get(), vulkan, loaded.track,
                 loaded.centerline.minimumPosition, loaded.centerline.maximumPosition, &scenario);

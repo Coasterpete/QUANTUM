@@ -15,14 +15,9 @@ namespace quantum::editor
 {
     namespace
     {
-        // Temporary stand-in track-style values so the viewport can render
-        // rails and the heartline before track style/vehicle authoring
-        // exists. When real style data arrives it replaces these at the
-        // single call site below; the curve construction itself is unchanged.
-        // gauge: lateral rail-to-rail distance. heartlineOffset: distance
-        // from the track center to the rider heart point along the solved,
-        // banking local up axis (not a world-vertical offset).
-        inline constexpr double temporaryTrackGauge = 1.2;
+        // The heartline remains an engineering reference rather than track-
+        // style geometry. Its future vehicle/rider offset is still outside
+        // the scope of the visual track preset.
         inline constexpr double temporaryHeartlineOffset = 1.4;
 
         inline constexpr std::array<float, 4> leftRailColor{
@@ -97,7 +92,8 @@ namespace quantum::editor
     }
 
     CenterlineVisualization createCenterlineVisualization(
-        const coaster::AuthoredTrack& track)
+        const coaster::AuthoredTrack& track,
+        const coaster::TrackStylePreset& style)
     {
         CenterlineVisualization visualization;
 
@@ -143,6 +139,11 @@ namespace quantum::editor
                 );
             }
         }
+
+        visualization.renderableTrack = coaster::generateRenderableTrack(
+            states,
+            style
+        );
 
         visualization.minimumPosition = glm::dvec3{
             std::numeric_limits<double>::max()
@@ -286,24 +287,31 @@ namespace quantum::editor
             renderer::viewportCurveCount * 2 * segmentCount
         );
 
-        const double halfGauge = temporaryTrackGauge * 0.5;
+        // The two engineering rail references follow the first two rails in
+        // the active preset. StandardDualRail supplies exactly two.
+        const coaster::RailOffset leftRailOffset = style.railOffsets.at(0);
+        const coaster::RailOffset rightRailOffset = style.railOffsets.at(1);
 
         appendReferenceCurveSegments(
             visualization.vertices,
             states,
             leftRailColor,
-            [halfGauge](const coaster::RiderLocalGeometryState& state)
+            [leftRailOffset](const coaster::RiderLocalGeometryState& state)
             {
-                return state.position - state.frame.lateral * halfGauge;
+                return state.position
+                    + state.frame.lateral * leftRailOffset.lateral
+                    + state.frame.up * leftRailOffset.vertical;
             });
 
         appendReferenceCurveSegments(
             visualization.vertices,
             states,
             rightRailColor,
-            [halfGauge](const coaster::RiderLocalGeometryState& state)
+            [rightRailOffset](const coaster::RiderLocalGeometryState& state)
             {
-                return state.position + state.frame.lateral * halfGauge;
+                return state.position
+                    + state.frame.lateral * rightRailOffset.lateral
+                    + state.frame.up * rightRailOffset.vertical;
             });
 
         appendReferenceCurveSegments(
@@ -362,6 +370,14 @@ namespace quantum::editor
         dirty_ = true;
     }
 
+    void CenterlineVisualizationCache::setTrackStyle(
+        coaster::TrackStylePreset style)
+    {
+        coaster::validateTrackStyle(style);
+        trackStyle_ = std::move(style);
+        markDirty();
+    }
+
     bool CenterlineVisualizationCache::rebuildIfDirty(
         const coaster::AuthoredTrack& track)
     {
@@ -370,7 +386,7 @@ namespace quantum::editor
             return false;
         }
 
-        replace(createCenterlineVisualization(track));
+        replace(createCenterlineVisualization(track, trackStyle_));
         return true;
     }
 
@@ -396,5 +412,11 @@ namespace quantum::editor
     CenterlineVisualizationCache::visualization() const noexcept
     {
         return visualization_;
+    }
+
+    const coaster::TrackStylePreset&
+    CenterlineVisualizationCache::trackStyle() const noexcept
+    {
+        return trackStyle_;
     }
 }

@@ -1804,7 +1804,7 @@ namespace
             "CFG",
             "viewport settings orthographic=%d fov=%.1f "
             "orbit=%.2f zoom=%.2f grid=%d centerline=%d leftRail=%d "
-            "rightRail=%d heartline=%d",
+            "rightRail=%d heartline=%d presentation=%s",
             settings.orthographic ? 1 : 0,
             static_cast<double>(settings.fieldOfViewDegrees),
             static_cast<double>(settings.orbitSensitivity),
@@ -1813,8 +1813,32 @@ namespace
             settings.centerlineVisible ? 1 : 0,
             settings.leftRailVisible ? 1 : 0,
             settings.rightRailVisible ? 1 : 0,
-            settings.heartlineVisible ? 1 : 0
+            settings.heartlineVisible ? 1 : 0,
+            quantum::renderer::trackPresentationModeName(
+                settings.trackPresentation.mode())
         );
+    }
+
+    bool showTrackPresentationMenuItems(
+        quantum::editor::ViewportSettings& settings)
+    {
+        bool changed = false;
+        for (const quantum::renderer::TrackPresentationMode mode : {
+            quantum::renderer::TrackPresentationMode::Shaded,
+            quantum::renderer::TrackPresentationMode::Wireframe,
+            quantum::renderer::TrackPresentationMode::ShadedWireframe,
+            quantum::renderer::TrackPresentationMode::CenterlineDebug})
+        {
+            if (ImGui::MenuItem(
+                quantum::renderer::trackPresentationModeName(mode),
+                nullptr,
+                settings.trackPresentation.mode() == mode))
+            {
+                settings.trackPresentation.setMode(mode);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     void showViewportSettingsWindow(
@@ -1839,6 +1863,26 @@ namespace
         }
 
         bool committed = false;
+
+        const char* const presentationNames[]{
+            "Shaded",
+            "Wireframe",
+            "Shaded + Wireframe",
+            "Centerline / Debug"
+        };
+        int presentationIndex = static_cast<int>(
+            settings.trackPresentation.mode());
+        if (ImGui::Combo(
+            "Track Presentation",
+            &presentationIndex,
+            presentationNames,
+            static_cast<int>(std::size(presentationNames))))
+        {
+            settings.trackPresentation.setMode(
+                static_cast<quantum::renderer::TrackPresentationMode>(
+                    presentationIndex));
+            committed = true;
+        }
 
         const char* const projectionNames[] = {
             "Perspective", "Orthographic"
@@ -4227,12 +4271,18 @@ namespace quantum::editor
                 }
                 else
                 {
+                    const std::uint32_t pickingCurveMask =
+                        viewportSettings_.trackPresentation.mode()
+                            == renderer::TrackPresentationMode::CenterlineDebug
+                        ? visibleTrackCurveMask(viewportSettings_)
+                        : (1u << renderer::viewportLeftRailCurve)
+                            | (1u << renderer::viewportRightRailCurve);
                     const auto trackHit = pickViewportSection(
                         *centerlineVisualization_,
                         viewportCamera_,
                         ray,
                         contentPixelDimension(logicalHeight, 1.0F),
-                        visibleTrackCurveMask(viewportSettings_),
+                        pickingCurveMask,
                         viewportSelectionTolerancePixels * presentationScale
                     );
 
@@ -4377,7 +4427,12 @@ namespace quantum::editor
                 const auto& slice = centerlineSlices_[section];
                 // Prefer authored rails; reference-only views still have a
                 // visible selection without promoting all four curves.
-                const std::uint32_t visible = visibleTrackCurveMask(viewportSettings_);
+                const std::uint32_t visible =
+                    viewportSettings_.trackPresentation.mode()
+                        == renderer::TrackPresentationMode::CenterlineDebug
+                    ? visibleTrackCurveMask(viewportSettings_)
+                    : (1u << renderer::viewportLeftRailCurve)
+                        | (1u << renderer::viewportRightRailCurve);
                 const std::uint32_t rails = (1u << renderer::viewportLeftRailCurve)
                     | (1u << renderer::viewportRightRailCurve);
                 const std::uint32_t mask = (visible & rails) != 0 ? visible & rails
@@ -4909,6 +4964,14 @@ namespace quantum::editor
         if (ImGui::BeginMenu("View"))
         {
             showViewportViewMenuItems();
+            if (ImGui::BeginMenu("Track Presentation"))
+            {
+                if (showTrackPresentationMenuItems(viewportSettings_))
+                {
+                    logViewportSettings(viewportSettings_);
+                }
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem(
                 "Focus Selected",
@@ -5132,9 +5195,15 @@ namespace quantum::editor
     {
         viewportSettings_.applyCameraSettings(viewportCamera_);
 
+        vulkan.setTrackPresentationMode(
+            viewportSettings_.trackPresentation.mode());
+        const std::uint32_t referenceCurveMask =
+            viewportSettings_.trackPresentation.mode()
+                == renderer::TrackPresentationMode::CenterlineDebug
+            ? visibleTrackCurveMask(viewportSettings_) : 0;
         vulkan.setViewportElementVisibility(
             viewportSettings_.gridVisible,
-            visibleTrackCurveMask(viewportSettings_)
+            referenceCurveMask
         );
 
         // Recentre the ground grid around the solved track's bounds so it
@@ -5486,6 +5555,23 @@ namespace quantum::editor
             itemTooltip("Frame the whole track (F while viewport is hovered)");
             ImGui::EndGroup();
 
+            const char* const presentationName =
+                renderer::trackPresentationModeName(
+                    viewportSettings_.trackPresentation.mode());
+            const float presentationButtonWidth =
+                buttonWidth(presentationName);
+            static_cast<void>(beginNextToolbarGroup(
+                presentationButtonWidth));
+            ImGui::BeginGroup();
+            if (ImGui::Button(
+                presentationName,
+                {presentationButtonWidth, iconButtonExtent}))
+            {
+                ImGui::OpenPopup("##TrackPresentationPopup");
+            }
+            itemTooltip("Choose shaded, wireframe, combined, or debug track presentation");
+            ImGui::EndGroup();
+
             const bool showMaximizePlaceholder =
                 toolbarWidth >= iconGroupWidth(4);
             const float viewGroupWidth = iconGroupWidth(
@@ -5593,6 +5679,14 @@ namespace quantum::editor
             if (ImGui::BeginPopup("##ViewportViewPopup"))
             {
                 showViewportViewMenuItems();
+                ImGui::EndPopup();
+            }
+            if (ImGui::BeginPopup("##TrackPresentationPopup"))
+            {
+                if (showTrackPresentationMenuItems(viewportSettings_))
+                {
+                    logViewportSettings(viewportSettings_);
+                }
                 ImGui::EndPopup();
             }
             if (ImGui::BeginPopup("##ViewportAxisPopup"))

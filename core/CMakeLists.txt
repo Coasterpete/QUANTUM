@@ -13,6 +13,7 @@ target_sources(
         src/CoasterDocument.cpp
         src/ForceDrivenRegion.cpp
         src/TrackPhysicalSettings.cpp
+        src/TrackStyle.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
@@ -29,6 +30,7 @@ target_sources(
         include/quantum/coaster/ForceDrivenRegion.hpp
         include/quantum/coaster/TrackGeneration.hpp
         include/quantum/coaster/TrackPhysicalSettings.hpp
+        include/quantum/coaster/TrackStyle.hpp
         include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLoads.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp

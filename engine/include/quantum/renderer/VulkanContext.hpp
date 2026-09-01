@@ -1,5 +1,8 @@
 #pragma once
 
+#include <quantum/coaster/TrackStyle.hpp>
+#include <quantum/renderer/ViewportTrackPresentation.hpp>
+
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
@@ -58,6 +61,7 @@ namespace quantum::renderer
             SDL_Window* window,
             std::span<const LineVertex> trackCurveVertices,
             std::uint32_t trackVerticesPerCurve,
+            const coaster::RenderableTrack& renderableTrack,
             bool enableFrameReadback = false
         );
         // Optional synchronous readback after the render callback. Empty on a
@@ -80,6 +84,10 @@ namespace quantum::renderer
             std::span<const LineVertex> trackCurveVertices,
             std::uint32_t trackVerticesPerCurve
         );
+        void updateRenderableTrack(
+            const coaster::RenderableTrack& renderableTrack
+        );
+        void setTrackPresentationMode(TrackPresentationMode mode);
 
         // Host-side draw skipping for the viewport reference elements.
         // Idempotent; intended to be pushed every frame from the editor's
@@ -118,6 +126,7 @@ namespace quantum::renderer
         [[nodiscard]] std::uint64_t swapchainGeneration() const noexcept;
         [[nodiscard]] VkExtent2D viewportExtent() const noexcept;
         [[nodiscard]] VkImageView viewportImageView() const noexcept;
+        [[nodiscard]] bool fillModeNonSolidSupported() const noexcept;
 
     private:
         void selectPhysicalDevice();
@@ -125,9 +134,11 @@ namespace quantum::renderer
         [[nodiscard]] bool createSwapchain();
         void createVertexBuffers(
             std::span<const LineVertex> trackCurveVertices,
-            std::uint32_t trackVerticesPerCurve
+            std::uint32_t trackVerticesPerCurve,
+            const coaster::RenderableTrack& renderableTrack
         );
         void createGraphicsPipeline();
+        void createTrackPipelines();
         void createViewportTarget(std::uint32_t width, std::uint32_t height);
         void createCommandResources();
         void createSynchronizationResources();
@@ -179,6 +190,11 @@ namespace quantum::renderer
 
         VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline graphicsPipeline_ = VK_NULL_HANDLE;
+        VkPipelineLayout trackPipelineLayout_ = VK_NULL_HANDLE;
+        VkPipeline trackShadedPipeline_ = VK_NULL_HANDLE;
+        VkPipeline trackEdgePipeline_ = VK_NULL_HANDLE;
+        VkPipeline hardwareShadedPipeline_ = VK_NULL_HANDLE;
+        VkPipeline hardwareEdgePipeline_ = VK_NULL_HANDLE;
 
         VkImage viewportImage_ = VK_NULL_HANDLE;
         VmaAllocation viewportAllocation_ = VK_NULL_HANDLE;
@@ -210,6 +226,8 @@ namespace quantum::renderer
             viewportAllCurvesVisibleMask;
         std::uint32_t trackHighlightFirstVertex_ = 0;
         std::uint32_t trackHighlightVertexCount_ = 0;
+        TrackPresentationState trackPresentation_;
+        bool fillModeNonSolidSupported_ = false;
         VkBuffer trackCurveVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* trackCurveVertexMappedData_ = nullptr;
@@ -220,6 +238,49 @@ namespace quantum::renderer
         VmaAllocation spareTrackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* spareTrackCurveVertexMappedData_ = nullptr;
         VkDeviceSize spareTrackCurveVertexCapacity_ = 0;
+
+        VkBuffer trackMeshVertexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation trackMeshVertexAllocation_ = VK_NULL_HANDLE;
+        void* trackMeshVertexMappedData_ = nullptr;
+        VkDeviceSize trackMeshVertexCapacity_ = 0;
+        std::uint32_t trackMeshVertexCount_ = 0;
+        VkBuffer trackTriangleIndexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation trackTriangleIndexAllocation_ = VK_NULL_HANDLE;
+        void* trackTriangleIndexMappedData_ = nullptr;
+        VkDeviceSize trackTriangleIndexCapacity_ = 0;
+        std::uint32_t trackTriangleIndexCount_ = 0;
+        VkBuffer trackEdgeIndexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation trackEdgeIndexAllocation_ = VK_NULL_HANDLE;
+        void* trackEdgeIndexMappedData_ = nullptr;
+        VkDeviceSize trackEdgeIndexCapacity_ = 0;
+        std::uint32_t trackEdgeIndexCount_ = 0;
+        std::array<float, 4> trackBaseColor_{
+            0.20F, 0.34F, 0.48F, 1.0F};
+
+        // The first asset seam recognizes only the explicitly labeled built-
+        // in diagnostic hardware mesh. Instances remain one contiguous GPU
+        // stream and draw with hardware instancing rather than per-object draws.
+        struct HardwareDrawBatch
+        {
+            std::uint32_t firstInstance = 0;
+            std::uint32_t instanceCount = 0;
+            std::array<float, 4> baseColor{0.28F, 0.30F, 0.32F, 1.0F};
+        };
+        VkBuffer hardwareVertexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation hardwareVertexAllocation_ = VK_NULL_HANDLE;
+        VkBuffer hardwareTriangleIndexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation hardwareTriangleIndexAllocation_ = VK_NULL_HANDLE;
+        VkBuffer hardwareEdgeIndexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation hardwareEdgeIndexAllocation_ = VK_NULL_HANDLE;
+        std::uint32_t hardwareVertexCount_ = 0;
+        std::uint32_t hardwareTriangleIndexCount_ = 0;
+        std::uint32_t hardwareEdgeIndexCount_ = 0;
+        VkBuffer hardwareInstanceBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation hardwareInstanceAllocation_ = VK_NULL_HANDLE;
+        void* hardwareInstanceMappedData_ = nullptr;
+        VkDeviceSize hardwareInstanceCapacity_ = 0;
+        std::uint32_t hardwareInstanceCount_ = 0;
+        std::vector<HardwareDrawBatch> hardwareDrawBatches_;
 
         VkCommandPool commandPool_ = VK_NULL_HANDLE;
         VkCommandBuffer commandBuffer_ = VK_NULL_HANDLE;

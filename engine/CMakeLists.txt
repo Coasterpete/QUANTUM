@@ -11,11 +11,20 @@ set(
     QUANTUM_FRAGMENT_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/centerline.frag.spv"
 )
+set(QUANTUM_TRACK_VERTEX_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/track.vert.spv")
+set(QUANTUM_TRACK_FRAGMENT_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/track.frag.spv")
+set(QUANTUM_HARDWARE_VERTEX_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/hardware.vert.spv")
 
 add_custom_command(
     OUTPUT
         "${QUANTUM_VERTEX_SHADER}"
         "${QUANTUM_FRAGMENT_SHADER}"
+        "${QUANTUM_TRACK_VERTEX_SHADER}"
+        "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+        "${QUANTUM_HARDWARE_VERTEX_SHADER}"
     COMMAND
         ${CMAKE_COMMAND} -E make_directory
         "${QUANTUM_SHADER_BINARY_DIR}"
@@ -31,9 +40,30 @@ add_custom_command(
         --target-env vulkan1.3
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/centerline.frag"
         -o "${QUANTUM_FRAGMENT_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V
+        --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/track.vert"
+        -o "${QUANTUM_TRACK_VERTEX_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V
+        --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/track.frag"
+        -o "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V
+        --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/hardware.vert"
+        -o "${QUANTUM_HARDWARE_VERTEX_SHADER}"
     DEPENDS
         shaders/centerline.vert
         shaders/centerline.frag
+        shaders/track.vert
+        shaders/track.frag
+        shaders/hardware.vert
     VERBATIM
 )
 
@@ -42,6 +72,20 @@ add_custom_target(
     DEPENDS
         "${QUANTUM_VERTEX_SHADER}"
         "${QUANTUM_FRAGMENT_SHADER}"
+        "${QUANTUM_TRACK_VERTEX_SHADER}"
+        "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+        "${QUANTUM_HARDWARE_VERTEX_SHADER}"
+)
+
+install(
+    FILES
+        "${QUANTUM_VERTEX_SHADER}"
+        "${QUANTUM_FRAGMENT_SHADER}"
+        "${QUANTUM_TRACK_VERTEX_SHADER}"
+        "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+        "${QUANTUM_HARDWARE_VERTEX_SHADER}"
+    DESTINATION shaders
+    COMPONENT Runtime
 )
 
 target_sources(
@@ -51,6 +95,7 @@ target_sources(
         src/VulkanContext.cpp
         src/ViewportAids.cpp
         include/quantum/renderer/ViewportAids.hpp
+        include/quantum/renderer/ViewportTrackPresentation.hpp
         include/quantum/engine/Logging.hpp
         include/quantum/renderer/VulkanContext.hpp
 )
@@ -82,6 +127,7 @@ target_link_libraries(
         # so consumers compiling against engine headers need Vulkan includes.
         Vulkan::Vulkan
         GPUOpen::VulkanMemoryAllocator
+        Quantum::Core
     PRIVATE
         SDL3::SDL3
 )

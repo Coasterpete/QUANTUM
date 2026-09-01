@@ -63,6 +63,44 @@ namespace
         require(camera.yaw() == yaw && camera.pitch() == pitch, "settings must not reset orbit");
     }
 
+    void trackPresentationState()
+    {
+        using quantum::renderer::TrackPresentationMode;
+        using quantum::renderer::TrackPresentationState;
+
+        TrackPresentationState state;
+        require(state.mode() == TrackPresentationMode::Shaded,
+            "viewport track presentation defaults to shaded");
+        for (const TrackPresentationMode mode : {
+            TrackPresentationMode::Shaded,
+            TrackPresentationMode::Wireframe,
+            TrackPresentationMode::ShadedWireframe,
+            TrackPresentationMode::CenterlineDebug})
+        {
+            require(quantum::renderer::isValidTrackPresentationMode(mode),
+                "declared presentation mode is valid");
+            state.setMode(mode);
+            require(state.mode() == mode,
+                "presentation mode change is retained without geometry state");
+        }
+
+        bool rejected = false;
+        try
+        {
+            state.setMode(static_cast<TrackPresentationMode>(255));
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejected = true;
+        }
+        require(rejected, "invalid presentation mode is rejected");
+
+        ViewportSettings settings;
+        require(settings.trackPresentation.mode()
+                == TrackPresentationMode::Shaded,
+            "viewport settings use the product-facing shaded default");
+    }
+
     void translatedGrid()
     {
         using namespace quantum::renderer;
@@ -241,6 +279,7 @@ int main(int argc, char** argv)
     {
         require(argc == 2, "pass the deployed editor asset directory");
         presetSurvivesSettings();
+        trackPresentationState();
         translatedGrid();
         framingMatrix();
         actualReferenceCurvesFit();

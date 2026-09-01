@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -40,6 +41,10 @@ namespace quantum::editor
         // reference curves: left rail, right rail, centerline, heartline.
         std::vector<renderer::LineVertex> vertices;
 
+        // Renderer-neutral indexed rail mesh plus contiguous repeating-
+        // hardware instance batches generated from the same solved samples.
+        coaster::RenderableTrack renderableTrack;
+
         // Vertex count of each of the four equal-length reference-curve
         // runs concatenated inside `vertices`, in the order above.
         std::uint32_t verticesPerCurve = 0;
@@ -64,7 +69,9 @@ namespace quantum::editor
     // continuous whole-track solve and derives its viewport reference curves
     // from the per-sample solved frames.
     [[nodiscard]] CenterlineVisualization createCenterlineVisualization(
-        const coaster::AuthoredTrack& track
+        const coaster::AuthoredTrack& track,
+        const coaster::TrackStylePreset& style =
+            coaster::createStandardDualRailPreset()
     );
 
     // Display-only bounds for Frame All/Focus. Keep the solved centerline
@@ -80,6 +87,9 @@ namespace quantum::editor
     {
     public:
         void markDirty() noexcept;
+        // The caller invokes this only for an accepted style/preset edit;
+        // presentation-mode changes deliberately do not touch this state.
+        void setTrackStyle(coaster::TrackStylePreset style);
         [[nodiscard]] bool rebuildIfDirty(const coaster::AuthoredTrack& track);
         void replace(CenterlineVisualization visualization);
 
@@ -87,9 +97,13 @@ namespace quantum::editor
         [[nodiscard]] std::uint64_t generation() const noexcept;
         [[nodiscard]] const CenterlineVisualization& visualization()
             const noexcept;
+        [[nodiscard]] const coaster::TrackStylePreset& trackStyle()
+            const noexcept;
 
     private:
         CenterlineVisualization visualization_;
+        coaster::TrackStylePreset trackStyle_ =
+            coaster::createStandardDualRailPreset();
         std::uint64_t generation_ = 0;
         bool dirty_ = true;
     };

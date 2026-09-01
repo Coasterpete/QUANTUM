@@ -3,6 +3,20 @@ add_executable(
     LoggingTests.cpp
 )
 
+add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
+target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreTrackStyleTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.TrackStyle COMMAND QuantumCoreTrackStyleTests)
+set_tests_properties(QuantumCore.TrackStyle PROPERTIES LABELS "core;coaster;track-style;geometry")
+
+add_executable(QuantumCoreTrackHardwarePlacementTests TrackHardwarePlacementTests.cpp)
+target_link_libraries(QuantumCoreTrackHardwarePlacementTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreTrackHardwarePlacementTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreTrackHardwarePlacementTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.TrackHardwarePlacement COMMAND QuantumCoreTrackHardwarePlacementTests)
+set_tests_properties(QuantumCore.TrackHardwarePlacement PROPERTIES LABELS "core;coaster;track-style;hardware")
+
 add_executable(QuantumEditorReadmeCaptureTests
     ReadmeCaptureTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ReadmeCapture.cpp

@@ -41,10 +41,252 @@ namespace
         std::uint32_t vertexCount = 0;
     };
 
+    struct CreatedBuffer
+    {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        void* mappedData = nullptr;
+        VkDeviceSize capacity = 0;
+        std::uint32_t elementCount = 0;
+    };
+
     [[noreturn]] void throwVulkanError(
         std::string_view operation,
         VkResult result
     );
+
+    template<typename Element>
+    [[nodiscard]] CreatedBuffer createHostVisibleBuffer(
+        const VmaAllocator allocator,
+        const std::span<const Element> elements,
+        const VkBufferUsageFlags usage,
+        const char* const context)
+    {
+        if (elements.empty()
+            || elements.size() > std::numeric_limits<std::uint32_t>::max())
+        {
+            throw std::length_error(
+                std::string(context) + " element count is outside Vulkan's draw range."
+            );
+        }
+
+        const VkDeviceSize size = sizeof(Element) * elements.size();
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size = size;
+        bufferCreateInfo.usage = usage;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocationCreateInfo{};
+        allocationCreateInfo.flags =
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+            | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        allocationCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        CreatedBuffer created;
+        VmaAllocationInfo allocationInfo{};
+        VkResult result = vmaCreateBuffer(
+            allocator,
+            &bufferCreateInfo,
+            &allocationCreateInfo,
+            &created.buffer,
+            &created.allocation,
+            &allocationInfo
+        );
+        if (result != VK_SUCCESS)
+        {
+            throwVulkanError(context, result);
+        }
+        if (allocationInfo.pMappedData == nullptr)
+        {
+            vmaDestroyBuffer(allocator, created.buffer, created.allocation);
+            throw std::runtime_error(
+                std::string(context) + " allocation was not mapped by VMA."
+            );
+        }
+
+        std::memcpy(allocationInfo.pMappedData, elements.data(), size);
+        result = vmaFlushAllocation(
+            allocator, created.allocation, 0, size);
+        if (result != VK_SUCCESS)
+        {
+            vmaDestroyBuffer(allocator, created.buffer, created.allocation);
+            throwVulkanError(context, result);
+        }
+
+        created.mappedData = allocationInfo.pMappedData;
+        created.capacity = size;
+        created.elementCount = static_cast<std::uint32_t>(elements.size());
+        return created;
+    }
+
+    template<typename Element>
+    void writeHostVisibleBuffer(
+        const VmaAllocator allocator,
+        const VmaAllocation allocation,
+        void* const mappedData,
+        const VkDeviceSize capacity,
+        const std::span<const Element> elements,
+        const char* const context)
+    {
+        const VkDeviceSize size = sizeof(Element) * elements.size();
+        if (allocation == VK_NULL_HANDLE || mappedData == nullptr
+            || elements.empty() || size > capacity)
+        {
+            throw std::logic_error(
+                std::string(context) + " reusable buffer is invalid or too small."
+            );
+        }
+        std::memcpy(mappedData, elements.data(), size);
+        const VkResult result = vmaFlushAllocation(
+            allocator, allocation, 0, size);
+        if (result != VK_SUCCESS)
+        {
+            throwVulkanError(context, result);
+        }
+    }
+
+    template<typename Element>
+    void updateHostVisibleBuffer(
+        const VmaAllocator allocator,
+        const std::span<const Element> elements,
+        const VkBufferUsageFlags usage,
+        VkBuffer& buffer,
+        VmaAllocation& allocation,
+        void*& mappedData,
+        VkDeviceSize& capacity,
+        std::uint32_t& elementCount,
+        const char* const context)
+    {
+        if (elements.empty())
+        {
+            elementCount = 0;
+            return;
+        }
+
+        const VkDeviceSize size = sizeof(Element) * elements.size();
+        if (buffer != VK_NULL_HANDLE && size <= capacity)
+        {
+            writeHostVisibleBuffer(
+                allocator, allocation, mappedData, capacity, elements, context);
+            elementCount = static_cast<std::uint32_t>(elements.size());
+            return;
+        }
+
+        CreatedBuffer created = createHostVisibleBuffer(
+            allocator, elements, usage, context);
+        if (buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(allocator, buffer, allocation);
+        }
+        buffer = created.buffer;
+        allocation = created.allocation;
+        mappedData = created.mappedData;
+        capacity = created.capacity;
+        elementCount = created.elementCount;
+    }
+
+    [[nodiscard]] bool finite(const glm::vec3& value) noexcept
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y)
+            && std::isfinite(value.z);
+    }
+
+    void requireValidRenderableTrack(
+        const quantum::coaster::RenderableTrack& track)
+    {
+        const auto& mesh = track.continuousMesh;
+        if (mesh.vertices.empty() || mesh.triangleIndices.empty()
+            || mesh.edgeIndices.empty() || track.materials.empty())
+        {
+            throw std::invalid_argument(
+                "VulkanContext requires nonempty indexed track mesh data."
+            );
+        }
+        for (const auto& vertex : mesh.vertices)
+        {
+            if (!finite(vertex.position) || !finite(vertex.normal)
+                || glm::length(vertex.normal) <= 1.0e-6F)
+            {
+                throw std::invalid_argument(
+                    "VulkanContext cannot upload a non-finite or degenerate track vertex."
+                );
+            }
+        }
+        for (const std::uint32_t index : mesh.triangleIndices)
+        {
+            if (index >= mesh.vertices.size())
+            {
+                throw std::invalid_argument(
+                    "A track triangle index is outside the vertex stream."
+                );
+            }
+        }
+        for (const std::uint32_t index : mesh.edgeIndices)
+        {
+            if (index >= mesh.vertices.size())
+            {
+                throw std::invalid_argument(
+                    "A track edge index is outside the vertex stream."
+                );
+            }
+        }
+        for (const auto& batch : track.hardwareBatches)
+        {
+            if (batch.asset.path
+                != "builtin://diagnostic/track-hardware-placeholder")
+            {
+                throw std::runtime_error(
+                    "No static mesh importer is configured for repeating-hardware asset: "
+                    + batch.asset.path
+                );
+            }
+            for (const auto& instance : batch.instances)
+            {
+                for (int column = 0; column < 4; ++column)
+                for (int row = 0; row < 4; ++row)
+                {
+                    if (!std::isfinite(instance.transform[column][row]))
+                    {
+                        throw std::invalid_argument(
+                            "VulkanContext cannot upload a non-finite hardware instance transform."
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] std::array<quantum::coaster::TrackMeshVertex, 8>
+    diagnosticHardwareVertices()
+    {
+        constexpr float n = 0.57735026919F;
+        return {{
+            {{-0.5F, -0.5F, -0.5F}, {-n, -n, -n}},
+            {{ 0.5F, -0.5F, -0.5F}, { n, -n, -n}},
+            {{ 0.5F,  0.5F, -0.5F}, { n,  n, -n}},
+            {{-0.5F,  0.5F, -0.5F}, {-n,  n, -n}},
+            {{-0.5F, -0.5F,  0.5F}, {-n, -n,  n}},
+            {{ 0.5F, -0.5F,  0.5F}, { n, -n,  n}},
+            {{ 0.5F,  0.5F,  0.5F}, { n,  n,  n}},
+            {{-0.5F,  0.5F,  0.5F}, {-n,  n,  n}}
+        }};
+    }
+
+    constexpr std::array<std::uint32_t, 36> diagnosticHardwareTriangles{
+        0, 2, 1, 0, 3, 2,
+        4, 5, 6, 4, 6, 7,
+        0, 1, 5, 0, 5, 4,
+        1, 2, 6, 1, 6, 5,
+        2, 3, 7, 2, 7, 6,
+        3, 0, 4, 3, 4, 7
+    };
+
+    constexpr std::array<std::uint32_t, 24> diagnosticHardwareEdges{
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7
+    };
 
     // The track-curve stream carries complete line segments: each consecutive
     // vertex pair is one independent segment, and the stream concatenates
@@ -853,6 +1095,7 @@ namespace quantum::renderer
         SDL_Window* window,
         const std::span<const LineVertex> trackCurveVertices,
         const std::uint32_t trackVerticesPerCurve,
+        const coaster::RenderableTrack& renderableTrack,
         const bool enableFrameReadback)
     {
         if (window == nullptr)
@@ -866,6 +1109,7 @@ namespace quantum::renderer
             trackCurveVertices,
             trackVerticesPerCurve
         );
+        requireValidRenderableTrack(renderableTrack);
 
         window_ = window;
         frameReadbackEnabled_ = enableFrameReadback;
@@ -1054,8 +1298,13 @@ namespace quantum::renderer
                 "window."
             );
         }
-        createVertexBuffers(trackCurveVertices, trackVerticesPerCurve);
+        createVertexBuffers(
+            trackCurveVertices,
+            trackVerticesPerCurve,
+            renderableTrack
+        );
         createGraphicsPipeline();
+        createTrackPipelines();
         createCommandResources();
         createSynchronizationResources();
     }
@@ -1147,6 +1396,14 @@ namespace quantum::renderer
             physicalDevice_ = device;
             graphicsQueueFamily_ = *indices.graphics;
             presentQueueFamily_ = *indices.present;
+            fillModeNonSolidSupported_ =
+                features.features.fillModeNonSolid == VK_TRUE;
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Info,
+                "VK",
+                "fillModeNonSolid=%d; track wireframe uses portable explicit mesh edges",
+                fillModeNonSolidSupported_ ? 1 : 0
+            );
             return;
         }
 
@@ -1465,7 +1722,8 @@ namespace quantum::renderer
 
     void VulkanContext::createVertexBuffers(
         const std::span<const LineVertex> trackCurveVertices,
-        const std::uint32_t trackVerticesPerCurve)
+        const std::uint32_t trackVerticesPerCurve,
+        const coaster::RenderableTrack& renderableTrack)
     {
         const CreatedVertexBuffer staticBuffer =
             createHostVisibleVertexBuffer(
@@ -1500,6 +1758,8 @@ namespace quantum::renderer
         trackVerticesPerCurve_ = trackCurveVertices.empty()
             ? 0
             : trackVerticesPerCurve;
+
+        updateRenderableTrack(renderableTrack);
     }
 
     // Regenerates the grid and axes in place. The vertex count never changes,
@@ -1738,6 +1998,220 @@ namespace quantum::renderer
         }
 
         graphicsPipeline_ = newPipeline;
+    }
+
+    void VulkanContext::createTrackPipelines()
+    {
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags =
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(viewportViewProjection_)
+            + 8 * sizeof(float);
+
+        VkPipelineLayoutCreateInfo layoutCreateInfo{};
+        layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutCreateInfo.pushConstantRangeCount = 1;
+        layoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+        VkResult result = vkCreatePipelineLayout(
+            device_, &layoutCreateInfo, nullptr, &trackPipelineLayout_);
+        if (result != VK_SUCCESS)
+        {
+            throwVulkanError("vkCreatePipelineLayout for track", result);
+        }
+
+        const VkShaderModule trackVertexShader = createShaderModule(
+            device_, readSpirv(shaderPath("track.vert.spv")));
+        VkShaderModule hardwareVertexShader = VK_NULL_HANDLE;
+        VkShaderModule fragmentShader = VK_NULL_HANDLE;
+
+        try
+        {
+            hardwareVertexShader = createShaderModule(
+                device_, readSpirv(shaderPath("hardware.vert.spv")));
+            fragmentShader = createShaderModule(
+                device_, readSpirv(shaderPath("track.frag.spv")));
+
+            const auto createPipeline = [this, fragmentShader](
+                const VkShaderModule vertexShader,
+                const bool instanced,
+                const VkPrimitiveTopology topology,
+                const bool depthWrite,
+                VkPipeline& destination)
+            {
+                const std::array shaderStages{
+                    VkPipelineShaderStageCreateInfo{
+                        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                        nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT,
+                        vertexShader, "main", nullptr},
+                    VkPipelineShaderStageCreateInfo{
+                        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                        nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT,
+                        fragmentShader, "main", nullptr}
+                };
+
+                const std::array bindings{
+                    VkVertexInputBindingDescription{
+                        0,
+                        sizeof(coaster::TrackMeshVertex),
+                        VK_VERTEX_INPUT_RATE_VERTEX},
+                    VkVertexInputBindingDescription{
+                        1,
+                        sizeof(coaster::HardwareInstance),
+                        VK_VERTEX_INPUT_RATE_INSTANCE}
+                };
+                const std::array attributes{
+                    VkVertexInputAttributeDescription{
+                        0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                        static_cast<std::uint32_t>(offsetof(
+                            coaster::TrackMeshVertex, position))},
+                    VkVertexInputAttributeDescription{
+                        1, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                        static_cast<std::uint32_t>(offsetof(
+                            coaster::TrackMeshVertex, normal))},
+                    VkVertexInputAttributeDescription{
+                        2, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                        static_cast<std::uint32_t>(offsetof(
+                            coaster::HardwareInstance, transform))},
+                    VkVertexInputAttributeDescription{
+                        3, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                        static_cast<std::uint32_t>(offsetof(
+                            coaster::HardwareInstance, transform)
+                            + sizeof(glm::vec4))},
+                    VkVertexInputAttributeDescription{
+                        4, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                        static_cast<std::uint32_t>(offsetof(
+                            coaster::HardwareInstance, transform)
+                            + 2 * sizeof(glm::vec4))},
+                    VkVertexInputAttributeDescription{
+                        5, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                        static_cast<std::uint32_t>(offsetof(
+                            coaster::HardwareInstance, transform)
+                            + 3 * sizeof(glm::vec4))}
+                };
+
+                VkPipelineVertexInputStateCreateInfo vertexInput{};
+                vertexInput.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+                vertexInput.vertexBindingDescriptionCount = instanced ? 2u : 1u;
+                vertexInput.pVertexBindingDescriptions = bindings.data();
+                vertexInput.vertexAttributeDescriptionCount = instanced ? 6u : 2u;
+                vertexInput.pVertexAttributeDescriptions = attributes.data();
+
+                VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+                inputAssembly.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+                inputAssembly.topology = topology;
+
+                VkPipelineViewportStateCreateInfo viewportState{};
+                viewportState.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+                viewportState.viewportCount = 1;
+                viewportState.scissorCount = 1;
+
+                VkPipelineRasterizationStateCreateInfo rasterization{};
+                rasterization.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+                rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+                rasterization.cullMode = VK_CULL_MODE_NONE;
+                rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+                rasterization.lineWidth = 1.0F;
+
+                VkPipelineMultisampleStateCreateInfo multisampling{};
+                multisampling.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+                multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+                VkPipelineDepthStencilStateCreateInfo depthStencil{};
+                depthStencil.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+                depthStencil.depthTestEnable = VK_TRUE;
+                depthStencil.depthWriteEnable = depthWrite ? VK_TRUE : VK_FALSE;
+                depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+                VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+                colorBlendAttachment.colorWriteMask =
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+                    | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                VkPipelineColorBlendStateCreateInfo colorBlending{};
+                colorBlending.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+                colorBlending.attachmentCount = 1;
+                colorBlending.pAttachments = &colorBlendAttachment;
+
+                constexpr std::array dynamicStates{
+                    VK_DYNAMIC_STATE_VIEWPORT,
+                    VK_DYNAMIC_STATE_SCISSOR
+                };
+                VkPipelineDynamicStateCreateInfo dynamicState{};
+                dynamicState.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+                dynamicState.dynamicStateCount =
+                    static_cast<std::uint32_t>(dynamicStates.size());
+                dynamicState.pDynamicStates = dynamicStates.data();
+
+                VkPipelineRenderingCreateInfo renderingCreateInfo{};
+                renderingCreateInfo.sType =
+                    VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+                renderingCreateInfo.colorAttachmentCount = 1;
+                renderingCreateInfo.pColorAttachmentFormats =
+                    &viewportColorFormat;
+                renderingCreateInfo.depthAttachmentFormat = viewportDepthFormat;
+
+                VkGraphicsPipelineCreateInfo createInfo{};
+                createInfo.sType =
+                    VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+                createInfo.pNext = &renderingCreateInfo;
+                createInfo.stageCount =
+                    static_cast<std::uint32_t>(shaderStages.size());
+                createInfo.pStages = shaderStages.data();
+                createInfo.pVertexInputState = &vertexInput;
+                createInfo.pInputAssemblyState = &inputAssembly;
+                createInfo.pViewportState = &viewportState;
+                createInfo.pRasterizationState = &rasterization;
+                createInfo.pMultisampleState = &multisampling;
+                createInfo.pDepthStencilState = &depthStencil;
+                createInfo.pColorBlendState = &colorBlending;
+                createInfo.pDynamicState = &dynamicState;
+                createInfo.layout = trackPipelineLayout_;
+
+                const VkResult pipelineResult = vkCreateGraphicsPipelines(
+                    device_, VK_NULL_HANDLE, 1, &createInfo, nullptr,
+                    &destination);
+                if (pipelineResult != VK_SUCCESS)
+                {
+                    throwVulkanError(
+                        "vkCreateGraphicsPipelines for track presentation",
+                        pipelineResult);
+                }
+            };
+
+            createPipeline(trackVertexShader, false,
+                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
+                trackShadedPipeline_);
+            createPipeline(trackVertexShader, false,
+                VK_PRIMITIVE_TOPOLOGY_LINE_LIST, false,
+                trackEdgePipeline_);
+            createPipeline(hardwareVertexShader, true,
+                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
+                hardwareShadedPipeline_);
+            createPipeline(hardwareVertexShader, true,
+                VK_PRIMITIVE_TOPOLOGY_LINE_LIST, false,
+                hardwareEdgePipeline_);
+        }
+        catch (...)
+        {
+            if (fragmentShader != VK_NULL_HANDLE)
+                vkDestroyShaderModule(device_, fragmentShader, nullptr);
+            if (hardwareVertexShader != VK_NULL_HANDLE)
+                vkDestroyShaderModule(device_, hardwareVertexShader, nullptr);
+            vkDestroyShaderModule(device_, trackVertexShader, nullptr);
+            throw;
+        }
+
+        vkDestroyShaderModule(device_, fragmentShader, nullptr);
+        vkDestroyShaderModule(device_, hardwareVertexShader, nullptr);
+        vkDestroyShaderModule(device_, trackVertexShader, nullptr);
     }
 
     void VulkanContext::createViewportTarget(
@@ -2158,6 +2632,151 @@ namespace quantum::renderer
         trackVerticesPerCurve_ = trackVerticesPerCurve;
     }
 
+    void VulkanContext::updateRenderableTrack(
+        const coaster::RenderableTrack& renderableTrack)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update renderable track data before initialization."
+            );
+        }
+
+        requireValidRenderableTrack(renderableTrack);
+        waitForFrameCompletion();
+
+        const coaster::ContinuousTrackMesh& mesh =
+            renderableTrack.continuousMesh;
+        updateHostVisibleBuffer(
+            allocator_,
+            std::span<const coaster::TrackMeshVertex>{mesh.vertices},
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            trackMeshVertexBuffer_,
+            trackMeshVertexAllocation_,
+            trackMeshVertexMappedData_,
+            trackMeshVertexCapacity_,
+            trackMeshVertexCount_,
+            "track mesh vertex upload"
+        );
+        updateHostVisibleBuffer(
+            allocator_,
+            std::span<const std::uint32_t>{mesh.triangleIndices},
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            trackTriangleIndexBuffer_,
+            trackTriangleIndexAllocation_,
+            trackTriangleIndexMappedData_,
+            trackTriangleIndexCapacity_,
+            trackTriangleIndexCount_,
+            "track triangle-index upload"
+        );
+        updateHostVisibleBuffer(
+            allocator_,
+            std::span<const std::uint32_t>{mesh.edgeIndices},
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            trackEdgeIndexBuffer_,
+            trackEdgeIndexAllocation_,
+            trackEdgeIndexMappedData_,
+            trackEdgeIndexCapacity_,
+            trackEdgeIndexCount_,
+            "track edge-index upload"
+        );
+        trackBaseColor_ = {
+            renderableTrack.materials.front().baseColor.r,
+            renderableTrack.materials.front().baseColor.g,
+            renderableTrack.materials.front().baseColor.b,
+            renderableTrack.materials.front().baseColor.a
+        };
+
+        if (hardwareVertexBuffer_ == VK_NULL_HANDLE)
+        {
+            const auto vertices = diagnosticHardwareVertices();
+            const CreatedBuffer vertexBuffer = createHostVisibleBuffer(
+                allocator_,
+                std::span<const coaster::TrackMeshVertex>{vertices},
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                "diagnostic hardware vertex upload"
+            );
+            hardwareVertexBuffer_ = vertexBuffer.buffer;
+            hardwareVertexAllocation_ = vertexBuffer.allocation;
+            hardwareVertexCount_ = vertexBuffer.elementCount;
+            const CreatedBuffer triangleBuffer = createHostVisibleBuffer(
+                allocator_,
+                std::span<const std::uint32_t>{diagnosticHardwareTriangles},
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                "diagnostic hardware triangle-index upload"
+            );
+            hardwareTriangleIndexBuffer_ = triangleBuffer.buffer;
+            hardwareTriangleIndexAllocation_ = triangleBuffer.allocation;
+            hardwareTriangleIndexCount_ = triangleBuffer.elementCount;
+            const CreatedBuffer edgeBuffer = createHostVisibleBuffer(
+                allocator_,
+                std::span<const std::uint32_t>{diagnosticHardwareEdges},
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                "diagnostic hardware edge-index upload"
+            );
+            hardwareEdgeIndexBuffer_ = edgeBuffer.buffer;
+            hardwareEdgeIndexAllocation_ = edgeBuffer.allocation;
+            hardwareEdgeIndexCount_ = edgeBuffer.elementCount;
+        }
+
+        std::vector<coaster::HardwareInstance> instances;
+        std::size_t totalInstanceCount = 0;
+        for (const auto& batch : renderableTrack.hardwareBatches)
+        {
+            totalInstanceCount += batch.instances.size();
+        }
+        if (totalInstanceCount > std::numeric_limits<std::uint32_t>::max())
+        {
+            throw std::length_error(
+                "Track hardware instance count exceeds Vulkan's 32-bit draw range."
+            );
+        }
+        instances.reserve(totalInstanceCount);
+        hardwareDrawBatches_.clear();
+        hardwareDrawBatches_.reserve(renderableTrack.hardwareBatches.size());
+        for (const auto& batch : renderableTrack.hardwareBatches)
+        {
+            HardwareDrawBatch drawBatch;
+            drawBatch.firstInstance = static_cast<std::uint32_t>(
+                instances.size());
+            drawBatch.instanceCount = static_cast<std::uint32_t>(
+                batch.instances.size());
+            if (batch.materialOverride.has_value())
+            {
+                const glm::vec4 color = batch.materialOverride->baseColor;
+                drawBatch.baseColor = {color.r, color.g, color.b, color.a};
+            }
+            instances.insert(
+                instances.end(), batch.instances.begin(), batch.instances.end());
+            hardwareDrawBatches_.push_back(drawBatch);
+        }
+
+        if (instances.empty())
+        {
+            hardwareInstanceCount_ = 0;
+        }
+        else
+        {
+            updateHostVisibleBuffer(
+                allocator_,
+                std::span<const coaster::HardwareInstance>{instances},
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                hardwareInstanceBuffer_,
+                hardwareInstanceAllocation_,
+                hardwareInstanceMappedData_,
+                hardwareInstanceCapacity_,
+                hardwareInstanceCount_,
+                "track hardware instance upload"
+            );
+        }
+    }
+
+    void VulkanContext::setTrackPresentationMode(
+        const TrackPresentationMode mode)
+    {
+        trackPresentation_.setMode(mode);
+    }
+
     void VulkanContext::setViewportElementVisibility(
         const bool gridVisible,
         const std::uint32_t curveVisibilityMask)
@@ -2363,12 +2982,6 @@ namespace quantum::renderer
 
             vkCmdBeginRendering(commandBuffer_, &viewportRenderingInfo);
 
-            vkCmdBindPipeline(
-                commandBuffer_,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                graphicsPipeline_
-            );
-
             VkViewport viewport{};
             viewport.width = static_cast<float>(viewportExtent_.width);
             viewport.height = static_cast<float>(viewportExtent_.height);
@@ -2379,6 +2992,126 @@ namespace quantum::renderer
             VkRect2D scissor{};
             scissor.extent = viewportExtent_;
             vkCmdSetScissor(commandBuffer_, 0, 1, &scissor);
+
+            const TrackPresentationMode presentationMode =
+                trackPresentation_.mode();
+            const bool drawShadedTrack =
+                presentationMode == TrackPresentationMode::Shaded
+                || presentationMode
+                    == TrackPresentationMode::ShadedWireframe;
+            const bool drawTrackEdges =
+                presentationMode == TrackPresentationMode::Wireframe
+                || presentationMode
+                    == TrackPresentationMode::ShadedWireframe;
+            constexpr std::array<float, 4> noTrackOverride{
+                1.0F, 0.82F, 0.12F, 0.0F};
+            const auto pushTrackDraw = [this](
+                const std::array<float, 4>& baseColor,
+                const std::array<float, 4>& colorOverride)
+            {
+                vkCmdPushConstants(
+                    commandBuffer_, trackPipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    0, sizeof(viewportViewProjection_),
+                    viewportViewProjection_.data());
+                vkCmdPushConstants(
+                    commandBuffer_, trackPipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    sizeof(viewportViewProjection_), sizeof(baseColor),
+                    baseColor.data());
+                vkCmdPushConstants(
+                    commandBuffer_, trackPipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    sizeof(viewportViewProjection_) + sizeof(baseColor),
+                    sizeof(colorOverride), colorOverride.data());
+            };
+
+            constexpr VkDeviceSize vertexOffset = 0;
+            if (drawShadedTrack && trackTriangleIndexCount_ > 0)
+            {
+                vkCmdBindPipeline(commandBuffer_,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, trackShadedPipeline_);
+                vkCmdBindVertexBuffers(commandBuffer_, 0, 1,
+                    &trackMeshVertexBuffer_, &vertexOffset);
+                vkCmdBindIndexBuffer(commandBuffer_,
+                    trackTriangleIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+                pushTrackDraw(trackBaseColor_, noTrackOverride);
+                vkCmdDrawIndexed(commandBuffer_, trackTriangleIndexCount_,
+                    1, 0, 0, 0);
+
+                if (hardwareInstanceCount_ > 0)
+                {
+                    vkCmdBindPipeline(commandBuffer_,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        hardwareShadedPipeline_);
+                    const std::array hardwareBuffers{
+                        hardwareVertexBuffer_, hardwareInstanceBuffer_};
+                    constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
+                    vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
+                        hardwareBuffers.data(), offsets.data());
+                    vkCmdBindIndexBuffer(commandBuffer_,
+                        hardwareTriangleIndexBuffer_, 0,
+                        VK_INDEX_TYPE_UINT32);
+                    for (const HardwareDrawBatch& batch
+                        : hardwareDrawBatches_)
+                    {
+                        if (batch.instanceCount == 0)
+                            continue;
+                        pushTrackDraw(batch.baseColor, noTrackOverride);
+                        vkCmdDrawIndexed(commandBuffer_,
+                            hardwareTriangleIndexCount_,
+                            batch.instanceCount, 0, 0,
+                            batch.firstInstance);
+                    }
+                }
+            }
+
+            if (drawTrackEdges && trackEdgeIndexCount_ > 0)
+            {
+                const std::array<float, 4> edgeColor = drawShadedTrack
+                    ? std::array<float, 4>{0.025F, 0.035F, 0.045F, 1.0F}
+                    : std::array<float, 4>{0.30F, 0.68F, 0.95F, 1.0F};
+                vkCmdBindPipeline(commandBuffer_,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, trackEdgePipeline_);
+                vkCmdBindVertexBuffers(commandBuffer_, 0, 1,
+                    &trackMeshVertexBuffer_, &vertexOffset);
+                vkCmdBindIndexBuffer(commandBuffer_,
+                    trackEdgeIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+                pushTrackDraw(edgeColor, noTrackOverride);
+                vkCmdDrawIndexed(commandBuffer_, trackEdgeIndexCount_,
+                    1, 0, 0, 0);
+
+                if (hardwareInstanceCount_ > 0)
+                {
+                    vkCmdBindPipeline(commandBuffer_,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        hardwareEdgePipeline_);
+                    const std::array hardwareBuffers{
+                        hardwareVertexBuffer_, hardwareInstanceBuffer_};
+                    constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
+                    vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
+                        hardwareBuffers.data(), offsets.data());
+                    vkCmdBindIndexBuffer(commandBuffer_,
+                        hardwareEdgeIndexBuffer_, 0,
+                        VK_INDEX_TYPE_UINT32);
+                    for (const HardwareDrawBatch& batch
+                        : hardwareDrawBatches_)
+                    {
+                        if (batch.instanceCount == 0)
+                            continue;
+                        pushTrackDraw(edgeColor, noTrackOverride);
+                        vkCmdDrawIndexed(commandBuffer_,
+                            hardwareEdgeIndexCount_, batch.instanceCount,
+                            0, 0, batch.firstInstance);
+                    }
+                }
+            }
+
+            vkCmdBindPipeline(
+                commandBuffer_,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                graphicsPipeline_
+            );
 
             vkCmdPushConstants(
                 commandBuffer_,
@@ -2400,7 +3133,6 @@ namespace quantum::renderer
                 noHighlight.data()
             );
 
-            constexpr VkDeviceSize vertexOffset = 0;
             if (viewportGridVisible_)
             {
                 vkCmdBindVertexBuffers(
@@ -2999,11 +3731,70 @@ namespace quantum::renderer
                 graphicsPipeline_ = VK_NULL_HANDLE;
             }
 
+            for (VkPipeline* const pipeline : {
+                &trackShadedPipeline_, &trackEdgePipeline_,
+                &hardwareShadedPipeline_, &hardwareEdgePipeline_})
+            {
+                if (*pipeline != VK_NULL_HANDLE)
+                {
+                    vkDestroyPipeline(device_, *pipeline, nullptr);
+                    *pipeline = VK_NULL_HANDLE;
+                }
+            }
+
             if (pipelineLayout_ != VK_NULL_HANDLE)
             {
                 vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
                 pipelineLayout_ = VK_NULL_HANDLE;
             }
+            if (trackPipelineLayout_ != VK_NULL_HANDLE)
+            {
+                vkDestroyPipelineLayout(
+                    device_, trackPipelineLayout_, nullptr);
+                trackPipelineLayout_ = VK_NULL_HANDLE;
+            }
+
+            const auto destroyAllocatedBuffer = [this](
+                VkBuffer& buffer, VmaAllocation& allocation)
+            {
+                if (buffer != VK_NULL_HANDLE)
+                {
+                    vmaDestroyBuffer(allocator_, buffer, allocation);
+                    buffer = VK_NULL_HANDLE;
+                    allocation = VK_NULL_HANDLE;
+                }
+            };
+            destroyAllocatedBuffer(
+                trackMeshVertexBuffer_, trackMeshVertexAllocation_);
+            destroyAllocatedBuffer(
+                trackTriangleIndexBuffer_, trackTriangleIndexAllocation_);
+            destroyAllocatedBuffer(
+                trackEdgeIndexBuffer_, trackEdgeIndexAllocation_);
+            destroyAllocatedBuffer(
+                hardwareVertexBuffer_, hardwareVertexAllocation_);
+            destroyAllocatedBuffer(
+                hardwareTriangleIndexBuffer_,
+                hardwareTriangleIndexAllocation_);
+            destroyAllocatedBuffer(
+                hardwareEdgeIndexBuffer_, hardwareEdgeIndexAllocation_);
+            destroyAllocatedBuffer(
+                hardwareInstanceBuffer_, hardwareInstanceAllocation_);
+            trackMeshVertexMappedData_ = nullptr;
+            trackTriangleIndexMappedData_ = nullptr;
+            trackEdgeIndexMappedData_ = nullptr;
+            hardwareInstanceMappedData_ = nullptr;
+            trackMeshVertexCapacity_ = 0;
+            trackTriangleIndexCapacity_ = 0;
+            trackEdgeIndexCapacity_ = 0;
+            hardwareInstanceCapacity_ = 0;
+            trackMeshVertexCount_ = 0;
+            trackTriangleIndexCount_ = 0;
+            trackEdgeIndexCount_ = 0;
+            hardwareVertexCount_ = 0;
+            hardwareTriangleIndexCount_ = 0;
+            hardwareEdgeIndexCount_ = 0;
+            hardwareInstanceCount_ = 0;
+            hardwareDrawBatches_.clear();
 
             if (trackCurveVertexBuffer_ != VK_NULL_HANDLE)
             {
@@ -3064,6 +3855,7 @@ namespace quantum::renderer
         graphicsQueue_ = VK_NULL_HANDLE;
         presentQueue_ = VK_NULL_HANDLE;
         physicalDevice_ = VK_NULL_HANDLE;
+        fillModeNonSolidSupported_ = false;
 
         if (surface_ != VK_NULL_HANDLE)
         {
@@ -3143,5 +3935,10 @@ namespace quantum::renderer
     VkImageView VulkanContext::viewportImageView() const noexcept
     {
         return viewportImageView_;
+    }
+
+    bool VulkanContext::fillModeNonSolidSupported() const noexcept
+    {
+        return fillModeNonSolidSupported_;
     }
 }

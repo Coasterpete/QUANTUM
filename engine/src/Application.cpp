@@ -208,7 +208,8 @@ namespace quantum::engine
                 vulkan.initialize(
                     window,
                     centerline.vertices,
-                    centerline.verticesPerCurve
+                    centerline.verticesPerCurve,
+                    centerline.renderableTrack
                 );
 
                 quantum::editor::EditorUi editorUi;
@@ -528,6 +529,8 @@ namespace quantum::engine
                                         centerline.vertices,
                                         centerline.verticesPerCurve
                                     );
+                                    vulkan.updateRenderableTrack(
+                                        centerline.renderableTrack);
                                     editorUi.updateWindowTitle(
                                         documentState.windowTitle()
                                     );
@@ -578,12 +581,16 @@ namespace quantum::engine
                                         {
                                             try
                                             {
-                                                loadedCenterline = quantum::editor::createCenterlineVisualization(*result);
+                                                loadedCenterline = quantum::editor::createCenterlineVisualization(
+                                                    *result,
+                                                    centerlineCache.trackStyle());
                                                 loadedRiderLoads = quantum::editor::evaluateRiderLoadDiagnostics(*result);
                                                 quantum::editor::AuthoredTrackEditTransaction loadedTransaction{*result};
                                                 loadedTransaction.requireAcceptableRiderLoads(*loadedRiderLoads);
                                                 vulkan.updateTrackCurveVertices(loadedCenterline->vertices,
                                                     loadedCenterline->verticesPerCurve);
+                                                vulkan.updateRenderableTrack(
+                                                    loadedCenterline->renderableTrack);
                                             }
                                             catch (const std::exception& error)
                                             {
@@ -1297,7 +1304,8 @@ namespace quantum::engine
                                     candidateCenterline =
                                         quantum::editor::
                                             createCenterlineVisualization(
-                                                candidateTrack
+                                                candidateTrack,
+                                                centerlineCache.trackStyle()
                                             );
                                 quantum::coaster::RiderLoadHistory
                                     candidateRiderLoads =
@@ -1320,6 +1328,8 @@ namespace quantum::engine
                                     candidateCenterline.vertices,
                                     candidateCenterline.verticesPerCurve
                                 );
+                                vulkan.updateRenderableTrack(
+                                    candidateCenterline.renderableTrack);
 
                                 centerlineCache.markDirty();
                                 centerlineCache.replace(
@@ -1764,7 +1774,8 @@ namespace quantum::engine
                                         newCenterline =
                                             quantum::editor::
                                                 createCenterlineVisualization(
-                                                    authoredTrack);
+                                                    authoredTrack,
+                                                    centerlineCache.trackStyle());
 
                                 editorUi.setCenterlineBounds(
                                     newCenterline.minimumPosition,
@@ -1774,6 +1785,8 @@ namespace quantum::engine
                                 vulkan.updateTrackCurveVertices(
                                     newCenterline.vertices,
                                     newCenterline.verticesPerCurve);
+                                vulkan.updateRenderableTrack(
+                                    newCenterline.renderableTrack);
 
                                 centerlineCache.markDirty();
                                 centerlineCache.replace(

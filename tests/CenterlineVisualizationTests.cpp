@@ -676,6 +676,17 @@ namespace
         require(cache.visualization().samples.size() != initialSampleCount
                 || cache.generation() > initialGeneration,
             "invalidating edits publish a later visualization generation");
+
+        auto style = cache.trackStyle();
+        style.railRadius *= 1.25;
+        const std::uint64_t beforeStyleChange = cache.generation();
+        cache.setTrackStyle(std::move(style));
+        require(cache.isDirty(),
+            "accepted track-style parameter change invalidates geometry");
+        require(cache.rebuildIfDirty(track),
+            "dirty track-style parameter rebuilds geometry");
+        require(cache.generation() == beforeStyleChange + 1,
+            "track-style rebuild advances visualization generation");
     }
 }
 
