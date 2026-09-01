@@ -149,3 +149,39 @@ set_target_properties(
     PROPERTIES
         CXX_EXTENSIONS OFF
 )
+
+install(
+    TARGETS QUANTUM
+    RUNTIME DESTINATION "."
+    COMPONENT Runtime
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/overpass-regular.otf"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/overpass-semibold.otf"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/overpass-mono-regular.otf"
+    DESTINATION assets/fonts/Overpass
+    COMPONENT Runtime
+)
+
+set(quantum_editor_runtime_icon_files)
+foreach(icon_file IN LISTS quantum_editor_icon_files)
+    list(APPEND quantum_editor_runtime_icon_files
+        "${PROJECT_SOURCE_DIR}/assets/icons/lucide/${icon_file}"
+    )
+endforeach()
+
+install(
+    FILES ${quantum_editor_runtime_icon_files}
+    DESTINATION assets/icons/lucide
+    COMPONENT Runtime
+)
+
+if(WIN32)
+    install(
+        FILES "$<TARGET_FILE_DIR:QUANTUM>/vulkan-1.dll"
+        DESTINATION "."
+        COMPONENT Runtime
+    )
+endif()
