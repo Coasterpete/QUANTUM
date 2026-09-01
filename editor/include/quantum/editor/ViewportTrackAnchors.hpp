@@ -16,6 +16,7 @@ namespace quantum::editor
 {
     enum class StartPoseTransformMode
     {
+        Select,
         Move,
         Rotate
     };

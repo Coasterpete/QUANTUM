@@ -3,6 +3,7 @@ add_executable(
     src/main.cpp
     src/CenterlineVisualization.cpp
     src/DocumentState.cpp
+    src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
     src/PlatformDialogs.cpp
@@ -17,6 +18,7 @@ add_executable(
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/DocumentState.hpp
+    include/quantum/editor/EditorIcons.hpp
     include/quantum/editor/EditorStyle.hpp
     include/quantum/editor/EditorUi.hpp
     include/quantum/editor/PlatformDialogs.hpp
@@ -79,6 +81,38 @@ foreach(font_file IN LISTS quantum_editor_font_files)
 endforeach()
 add_custom_target(QUANTUMEditorFont ALL DEPENDS ${quantum_editor_font_outputs})
 add_dependencies(QUANTUM QUANTUMEditorFont)
+
+set(quantum_editor_icon_files
+    mouse-pointer-2.svg
+    move-3d.svg
+    rotate-3d.svg
+    orbit.svg
+    hand.svg
+    focus.svg
+    camera.svg
+    axis-3d.svg
+    maximize.svg
+    play.svg
+    settings.svg
+)
+set(quantum_editor_icon_outputs)
+foreach(icon_file IN LISTS quantum_editor_icon_files)
+    set(icon_source "${PROJECT_SOURCE_DIR}/assets/icons/lucide/${icon_file}")
+    set(icon_destination "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/icons/lucide/${icon_file}")
+    add_custom_command(
+        OUTPUT "${icon_destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/icons/lucide"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${icon_source}" "${icon_destination}"
+        DEPENDS "${icon_source}"
+        COMMENT "Deploying QUANTUM Lucide toolbar icon ${icon_file}"
+        VERBATIM
+    )
+    list(APPEND quantum_editor_icon_outputs "${icon_destination}")
+endforeach()
+add_custom_target(QUANTUMEditorIcons ALL DEPENDS ${quantum_editor_icon_outputs})
+add_dependencies(QUANTUM QUANTUMEditorIcons)
 
 add_custom_command(
     TARGET QUANTUM
