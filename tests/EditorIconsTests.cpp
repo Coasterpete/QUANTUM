@@ -111,29 +111,77 @@ namespace
         return rendered;
     }
 
+    void verifyIconMappings(const std::filesystem::path& basePath)
+    {
+        using quantum::editor::EditorIcon;
+        constexpr std::array expectedFileNames{
+            "mouse-pointer-2.svg",
+            "move-3d.svg",
+            "rotate-3d.svg",
+            "orbit.svg",
+            "hand.svg",
+            "focus.svg",
+            "camera.svg",
+            "axis-3d.svg",
+            "maximize.svg",
+            "folder-open.svg",
+            "save.svg",
+            "undo-2.svg",
+            "redo-2.svg",
+            "eye.svg",
+            "eye-off.svg",
+            "lock.svg",
+            "lock-open.svg",
+            "zoom-in.svg",
+            "zoom-out.svg",
+            "play.svg",
+            "pause.svg",
+            "square-stop.svg",
+            "settings.svg"
+        };
+        require(expectedFileNames.size()
+                == static_cast<std::size_t>(EditorIcon::Count),
+            "The icon mapping test does not cover every editor icon.");
+
+        for (std::size_t index = 0; index < expectedFileNames.size(); ++index)
+        {
+            const EditorIcon icon = static_cast<EditorIcon>(index);
+            require(quantum::editor::editorIconFileName(icon)
+                    == expectedFileNames[index],
+                "An editor action maps to the wrong Lucide asset.");
+            require(std::filesystem::is_regular_file(
+                    basePath / "assets/icons/lucide"
+                        / expectedFileNames[index]),
+                "A mapped Lucide asset was not deployed with the editor.");
+        }
+
+        bool rejectedInvalidIcon = false;
+        try
+        {
+            static_cast<void>(quantum::editor::editorIconFileName(
+                EditorIcon::Count));
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejectedInvalidIcon = true;
+        }
+        require(rejectedInvalidIcon,
+            "The icon mapping accepted the Count sentinel as an icon.");
+    }
+
     void verifyMetricsAtDpi(
         const quantum::editor::EditorIcons& icons,
         const float dpiScale)
     {
         using quantum::editor::EditorIcon;
-        constexpr std::array allIcons{
-            EditorIcon::Select,
-            EditorIcon::Move,
-            EditorIcon::Rotate,
-            EditorIcon::Orbit,
-            EditorIcon::Pan,
-            EditorIcon::Focus,
-            EditorIcon::Camera,
-            EditorIcon::Axis,
-            EditorIcon::Maximize,
-            EditorIcon::Play,
-            EditorIcon::Settings
-        };
 
         ImGui::GetStyle().FontScaleDpi = dpiScale;
         const float expectedIconExtent = std::round(19.0F * dpiScale);
-        for (const EditorIcon icon : allIcons)
+        for (std::size_t index = 0;
+            index < static_cast<std::size_t>(EditorIcon::Count);
+            ++index)
         {
+            const EditorIcon icon = static_cast<EditorIcon>(index);
             const quantum::editor::EditorIconMetrics metrics =
                 icons.metrics(icon);
             requireNear(metrics.iconExtent, expectedIconExtent, 0.01F,
@@ -271,9 +319,10 @@ int main(const int argumentCount, const char* const* arguments)
     {
         require(argumentCount == 2, "Expected the editor asset directory.");
 
+        verifyIconMappings(std::filesystem::path{arguments[1]});
         quantum::editor::EditorIcons icons;
         icons.load(std::filesystem::path{arguments[1]});
-        require(icons.loaded(), "The eleven bundled Lucide icons did not load.");
+        require(icons.loaded(), "The bundled Lucide icon set did not load.");
 
         ImGui::CreateContext();
         try

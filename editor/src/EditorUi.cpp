@@ -1915,14 +1915,17 @@ namespace
 
     float showCommandArea(
         ImGuiViewport* const mainViewport,
+        const quantum::editor::EditorIcons& icons,
         std::optional<quantum::editor::FileOperationType>&
             pendingFileOperation)
     {
         const ImGuiStyle& style = ImGui::GetStyle();
+        const float iconButtonExtent = icons.metrics(
+            quantum::editor::EditorIcon::Open).buttonExtent;
         const float height = style.WindowPadding.y * 2.0F
             + ImGui::GetTextLineHeight()
             + style.ItemSpacing.y
-            + ImGui::GetFrameHeight();
+            + std::max(ImGui::GetFrameHeight(), iconButtonExtent);
         constexpr ImGuiWindowFlags windowFlags =
             ImGuiWindowFlags_NoDocking
             | ImGuiWindowFlags_NoTitleBar
@@ -1943,39 +1946,47 @@ namespace
         {
             ImGui::TextUnformatted("Commands");
 
-            if (ImGui::Button("New"))
+            if (ImGui::Button(
+                "New", {buttonWidth("New"), iconButtonExtent}))
             {
                 pendingFileOperation =
                     quantum::editor::FileOperationType::New;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Open"))
+            itemTooltip("Create a new coaster document (Ctrl+N)");
+            ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
+            if (icons.button(
+                quantum::editor::EditorIcon::Open,
+                "##OpenDocument",
+                "Open a coaster document (Ctrl+O)"))
             {
                 pendingFileOperation =
                     quantum::editor::FileOperationType::Open;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Save"))
+            ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
+            if (icons.button(
+                quantum::editor::EditorIcon::Save,
+                "##SaveDocument",
+                "Save the current coaster document (Ctrl+S)"))
             {
                 pendingFileOperation =
                     quantum::editor::FileOperationType::Save;
             }
-            ImGui::SameLine();
-            ImGui::BeginDisabled();
-            ImGui::Button("Undo");
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled();
-            ImGui::Button("Toggle");
-            ImGui::SameLine();
-            ImGui::Button("Visualization");
-            ImGui::SameLine();
-            ImGui::Button("Start Test");
-            ImGui::SameLine();
-            ImGui::Button("Stop Test");
-            ImGui::SameLine();
-            ImGui::Button("Clearance Envelope");
-            ImGui::EndDisabled();
+            ImGui::SameLine(0.0F, style.ItemSpacing.x * 1.5F);
+            static_cast<void>(icons.button(
+                quantum::editor::EditorIcon::Undo,
+                "##UndoDocumentEdit",
+                "Undo history is not available yet",
+                false,
+                false
+            ));
+            ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
+            static_cast<void>(icons.button(
+                quantum::editor::EditorIcon::Redo,
+                "##RedoDocumentEdit",
+                "Redo history is not available yet",
+                false,
+                false
+            ));
         }
 
         ImGui::End();
@@ -4838,6 +4849,30 @@ namespace quantum::editor
     {
         const float height = ImGui::GetFrameHeight();
 
+        constexpr ImGuiInputFlags shortcutFlags =
+            ImGuiInputFlags_RouteGlobal;
+        if (ImGui::Shortcut(
+            ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags))
+        {
+            pendingFileOperation_ = FileOperationType::New;
+        }
+        if (ImGui::Shortcut(
+            ImGuiMod_Ctrl | ImGuiKey_O, shortcutFlags))
+        {
+            pendingFileOperation_ = FileOperationType::Open;
+        }
+        if (ImGui::Shortcut(
+            ImGuiMod_Ctrl | ImGuiKey_S, shortcutFlags))
+        {
+            pendingFileOperation_ = FileOperationType::Save;
+        }
+        if (ImGui::Shortcut(
+            ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S,
+            shortcutFlags))
+        {
+            pendingFileOperation_ = FileOperationType::SaveAs;
+        }
+
         if (!ImGui::BeginMainMenuBar())
         {
             return 0.0F;
@@ -4845,19 +4880,19 @@ namespace quantum::editor
 
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem("New"))
+            if (ImGui::MenuItem("New", "Ctrl+N"))
             {
                 pendingFileOperation_ = FileOperationType::New;
             }
-            if (ImGui::MenuItem("Open"))
+            if (ImGui::MenuItem("Open", "Ctrl+O"))
             {
                 pendingFileOperation_ = FileOperationType::Open;
             }
-            if (ImGui::MenuItem("Save"))
+            if (ImGui::MenuItem("Save", "Ctrl+S"))
             {
                 pendingFileOperation_ = FileOperationType::Save;
             }
-            if (ImGui::MenuItem("Save As"))
+            if (ImGui::MenuItem("Save As", "Ctrl+Shift+S"))
             {
                 pendingFileOperation_ = FileOperationType::SaveAs;
             }
@@ -4866,7 +4901,8 @@ namespace quantum::editor
 
         if (ImGui::BeginMenu("Edit"))
         {
-            ImGui::MenuItem("Undo", nullptr, false, false);
+            ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
+            ImGui::MenuItem("Redo", "Ctrl+Y", false, false);
             ImGui::EndMenu();
         }
 
@@ -5177,7 +5213,7 @@ namespace quantum::editor
 
         ImGuiViewport* const mainViewport = ImGui::GetMainViewport();
         const float commandAreaHeight = showCommandArea(
-            mainViewport, pendingFileOperation_);
+            mainViewport, icons_, pendingFileOperation_);
 
         showTransitionEditorInputSettings(
             transitionEditorInputSettings_,
@@ -5257,14 +5293,14 @@ namespace quantum::editor
                     + static_cast<float>(count - 1) * iconSpacing;
             };
             const auto beginNextToolbarGroup = [&]
-                (const float groupWidth)
+                (const float groupWidth, const bool hideWhenWrapped = false)
             {
                 const float requiredWidth = 2.0F * spacing
                     + separatorThickness + groupWidth;
                 if (ImGui::GetItemRectMax().x + requiredWidth
                     > toolbarRight)
                 {
-                    return;
+                    return !hideWhenWrapped;
                 }
 
                 ImGui::SameLine(0.0F, spacing);
@@ -5281,6 +5317,7 @@ namespace quantum::editor
                     separatorThickness
                 );
                 ImGui::SameLine(0.0F, spacing);
+                return true;
             };
 
             const auto startPoseModeButton = [this](
@@ -5310,6 +5347,16 @@ namespace quantum::editor
                 }
             };
 
+            const bool showAnchorLock = toolbarWidth >= iconGroupWidth(4);
+            const bool selectedAnchorEditable =
+                selectedTrackAnchor_.has_value()
+                && centerlineVisualization_ != nullptr
+                && *selectedTrackAnchor_
+                    < centerlineVisualization_->anchors.size()
+                && isViewportTrackAnchorEditable(
+                    centerlineVisualization_->anchors[
+                        *selectedTrackAnchor_].kind);
+
             ImGui::BeginGroup();
             startPoseModeButton(
                 EditorIcon::Select,
@@ -5334,29 +5381,90 @@ namespace quantum::editor
                 "Rotate Track Start (active tool)",
                 StartPoseTransformMode::Rotate
             );
+            if (showAnchorLock)
+            {
+                ImGui::SameLine(0.0F, iconSpacing);
+                const char* const lockTooltip =
+                    !selectedTrackAnchor_.has_value()
+                        ? "Select an anchor to inspect its edit state"
+                        : selectedAnchorEditable
+                            ? "Track Start locking is not available yet"
+                            : "Unlocking read-only anchors is not available yet";
+                static_cast<void>(icons_.button(
+                    selectedAnchorEditable
+                        ? EditorIcon::Lock : EditorIcon::Unlock,
+                    "##AnchorEditLock",
+                    lockTooltip,
+                    false,
+                    false
+                ));
+            }
             ImGui::EndGroup();
 
             const float frameAllWidth = buttonWidth("Frame All");
-            const float navigationGroupWidth = iconGroupWidth(3)
+            const float zoomNavigationWidth = iconGroupWidth(3)
                 + iconSpacing + frameAllWidth;
-            beginNextToolbarGroup(navigationGroupWidth);
+            const float gestureNavigationWidth = iconGroupWidth(5)
+                + iconSpacing + frameAllWidth;
+            const bool showZoomButtons =
+                toolbarWidth >= zoomNavigationWidth;
+            const bool showGestureHints =
+                toolbarWidth >= gestureNavigationWidth;
+            const std::size_t navigationIconCount = 1
+                + (showZoomButtons ? 2 : 0)
+                + (showGestureHints ? 2 : 0);
+            const float navigationGroupWidth = iconGroupWidth(
+                navigationIconCount) + iconSpacing + frameAllWidth;
+            static_cast<void>(beginNextToolbarGroup(navigationGroupWidth));
             ImGui::BeginGroup();
-            static_cast<void>(icons_.button(
-                EditorIcon::Orbit,
-                "##OrbitViewport",
-                "Orbit uses right-drag in the viewport",
-                false,
-                false
-            ));
-            ImGui::SameLine(0.0F, iconSpacing);
-            static_cast<void>(icons_.button(
-                EditorIcon::Pan,
-                "##PanViewport",
-                "Pan uses middle-drag in the viewport",
-                false,
-                false
-            ));
-            ImGui::SameLine(0.0F, iconSpacing);
+            if (showGestureHints)
+            {
+                static_cast<void>(icons_.button(
+                    EditorIcon::Orbit,
+                    "##OrbitViewport",
+                    "Orbit the viewport with right-drag",
+                    false,
+                    false
+                ));
+                ImGui::SameLine(0.0F, iconSpacing);
+                static_cast<void>(icons_.button(
+                    EditorIcon::Pan,
+                    "##PanViewport",
+                    "Pan the viewport with middle-drag",
+                    false,
+                    false
+                ));
+                ImGui::SameLine(0.0F, iconSpacing);
+            }
+            if (showZoomButtons)
+            {
+                if (icons_.button(
+                    EditorIcon::ZoomIn,
+                    "##ZoomViewportIn",
+                    "Zoom in (mouse wheel up)"))
+                {
+                    viewportCamera_.zoom(
+                        1.0,
+                        defaultViewportZoomExponentPerWheelUnit
+                            * viewportSettings_.zoomSensitivity
+                    );
+                    initialViewportFramePending_ = false;
+                }
+                ImGui::SameLine(0.0F, iconSpacing);
+                if (icons_.button(
+                    EditorIcon::ZoomOut,
+                    "##ZoomViewportOut",
+                    "Zoom out (mouse wheel down)"))
+                {
+                    viewportCamera_.zoom(
+                        -1.0,
+                        defaultViewportZoomExponentPerWheelUnit
+                            * viewportSettings_.zoomSensitivity
+                    );
+                    initialViewportFramePending_ = false;
+                }
+                ImGui::SameLine(0.0F, iconSpacing);
+            }
             if (icons_.button(
                 EditorIcon::Focus,
                 "##FocusSelected",
@@ -5375,15 +5483,14 @@ namespace quantum::editor
             {
                 frameWholeTrack();
             }
-            itemTooltip("Frame the whole track");
+            itemTooltip("Frame the whole track (F while viewport is hovered)");
             ImGui::EndGroup();
 
-            const float anchorsWidth = ImGui::GetFrameHeight()
-                + toolbarStyle.ItemInnerSpacing.x
-                + ImGui::CalcTextSize("Anchors").x;
-            const float viewGroupWidth = iconGroupWidth(3)
-                + iconSpacing + anchorsWidth;
-            beginNextToolbarGroup(viewGroupWidth);
+            const bool showMaximizePlaceholder =
+                toolbarWidth >= iconGroupWidth(4);
+            const float viewGroupWidth = iconGroupWidth(
+                showMaximizePlaceholder ? 4 : 3);
+            static_cast<void>(beginNextToolbarGroup(viewGroupWidth));
             ImGui::BeginGroup();
             if (icons_.button(
                 EditorIcon::Camera,
@@ -5401,22 +5508,17 @@ namespace quantum::editor
                 ImGui::OpenPopup("##ViewportAxisPopup");
             }
             ImGui::SameLine(0.0F, iconSpacing);
-            static_cast<void>(icons_.button(
-                EditorIcon::Maximize,
-                "##MaximizeViewport",
-                "Viewport maximize is not available yet",
-                false,
-                false
-            ));
-            ImGui::SameLine(0.0F, iconSpacing);
-            ImGui::SetCursorPosY(
-                ImGui::GetCursorPosY()
-                    + std::max(0.0F,
-                        (iconButtonExtent - ImGui::GetFrameHeight()) * 0.5F)
-            );
-            if (ImGui::Checkbox(
-                "Anchors", &viewportSettings_.anchorsVisible))
+            if (icons_.button(
+                viewportSettings_.anchorsVisible
+                    ? EditorIcon::Eye : EditorIcon::EyeOff,
+                "##ViewportAnchorsVisible",
+                viewportSettings_.anchorsVisible
+                    ? "Hide semantic boundary anchors"
+                    : "Show semantic boundary anchors",
+                viewportSettings_.anchorsVisible))
             {
+                viewportSettings_.anchorsVisible =
+                    !viewportSettings_.anchorsVisible;
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Debug,
                     "CFG",
@@ -5424,22 +5526,50 @@ namespace quantum::editor
                     viewportSettings_.anchorsVisible ? "visible" : "hidden"
                 );
             }
-            itemTooltip(
-                "Show or hide the track's semantic boundary anchors");
+            if (showMaximizePlaceholder)
+            {
+                ImGui::SameLine(0.0F, iconSpacing);
+                static_cast<void>(icons_.button(
+                    EditorIcon::Maximize,
+                    "##MaximizeViewport",
+                    "Viewport maximize is not available yet",
+                    false,
+                    false
+                ));
+            }
             ImGui::EndGroup();
 
-            beginNextToolbarGroup(iconButtonExtent);
-            ImGui::BeginGroup();
-            static_cast<void>(icons_.button(
-                EditorIcon::Play,
-                "##PlaySimulation",
-                "Ride simulation is not available yet",
-                false,
-                false
-            ));
-            ImGui::EndGroup();
+            const float simulationGroupWidth = iconGroupWidth(3);
+            if (beginNextToolbarGroup(simulationGroupWidth, true))
+            {
+                ImGui::BeginGroup();
+                static_cast<void>(icons_.button(
+                    EditorIcon::Play,
+                    "##PlaySimulation",
+                    "Ride simulation play is not available yet",
+                    false,
+                    false
+                ));
+                ImGui::SameLine(0.0F, iconSpacing);
+                static_cast<void>(icons_.button(
+                    EditorIcon::Pause,
+                    "##PauseSimulation",
+                    "Ride simulation pause is not available yet",
+                    false,
+                    false
+                ));
+                ImGui::SameLine(0.0F, iconSpacing);
+                static_cast<void>(icons_.button(
+                    EditorIcon::Stop,
+                    "##StopSimulation",
+                    "Ride simulation stop is not available yet",
+                    false,
+                    false
+                ));
+                ImGui::EndGroup();
+            }
 
-            beginNextToolbarGroup(iconButtonExtent);
+            static_cast<void>(beginNextToolbarGroup(iconButtonExtent));
             ImGui::BeginGroup();
             if (icons_.button(
                 EditorIcon::Settings,
