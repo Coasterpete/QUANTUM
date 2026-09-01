@@ -35,6 +35,14 @@ add_executable(
     ${PROJECT_SOURCE_DIR}/engine/include/quantum/engine/Application.hpp
 )
 
+if(WIN32)
+    target_sources(
+        QUANTUM
+        PRIVATE
+            platform/windows/QUANTUM.rc
+    )
+endif()
+
 target_include_directories(
     QUANTUM
     PRIVATE
@@ -92,7 +100,19 @@ set(quantum_editor_icon_files
     camera.svg
     axis-3d.svg
     maximize.svg
+    folder-open.svg
+    save.svg
+    undo-2.svg
+    redo-2.svg
+    eye.svg
+    eye-off.svg
+    lock.svg
+    lock-open.svg
+    zoom-in.svg
+    zoom-out.svg
     play.svg
+    pause.svg
+    square-stop.svg
     settings.svg
 )
 set(quantum_editor_icon_outputs)
