@@ -30,6 +30,19 @@ add_test(NAME QuantumEditor.ViewportPresentation COMMAND QuantumEditorViewportPr
     "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
 set_tests_properties(QuantumEditor.ViewportPresentation PROPERTIES LABELS "editor;camera;viewport;typography")
 
+add_executable(QuantumEditorIconsTests
+    EditorIconsTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/EditorIcons.cpp
+)
+target_include_directories(QuantumEditorIconsTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorIconsTests PRIVATE imgui::imgui)
+target_compile_features(QuantumEditorIconsTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorIconsTests PROPERTIES CXX_EXTENSIONS OFF)
+add_dependencies(QuantumEditorIconsTests QUANTUMEditorIcons)
+add_test(NAME QuantumEditor.Icons COMMAND QuantumEditorIconsTests
+    "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
+set_tests_properties(QuantumEditor.Icons PROPERTIES LABELS "editor;icons")
+
 add_executable(QuantumCoreForceDrivenRegionTests ForceDrivenRegionTests.cpp)
 target_link_libraries(QuantumCoreForceDrivenRegionTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreForceDrivenRegionTests PRIVATE cxx_std_23)

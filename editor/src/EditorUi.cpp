@@ -74,9 +74,14 @@ namespace
     [[nodiscard]] const char* startPoseModeName(
         const quantum::editor::StartPoseTransformMode mode) noexcept
     {
-        return mode == quantum::editor::StartPoseTransformMode::Move
-            ? "move"
-            : "rotate";
+        using quantum::editor::StartPoseTransformMode;
+        switch (mode)
+        {
+        case StartPoseTransformMode::Select: return "select";
+        case StartPoseTransformMode::Move: return "move";
+        case StartPoseTransformMode::Rotate: return "rotate";
+        }
+        return "select";
     }
 
     [[nodiscard]] double pointSegmentDistanceSquared(
@@ -3551,6 +3556,7 @@ namespace quantum::editor
                     + SDL_GetError());
             }
             fonts_ = loadEditorFonts(basePath);
+            icons_.load(basePath);
             io.ConfigDpiScaleFonts = captureScenario_ == nullptr;
 
             if (!ImGui_ImplSDL3_InitForVulkan(window))
@@ -3572,7 +3578,8 @@ namespace quantum::editor
         quantum::logging::logMessage(
             quantum::logging::LogLevel::Info,
             "APP",
-            "Dear ImGui initialized with SDL3, Vulkan, and docking support."
+            "Dear ImGui initialized with SDL3, Vulkan, docking, and Lucide "
+            "toolbar icons."
         );
     }
 
@@ -3918,6 +3925,11 @@ namespace quantum::editor
                 );
             }
             return true;
+        }
+
+        if (startPoseTransformMode_ == StartPoseTransformMode::Select)
+        {
+            return false;
         }
 
         if (!viewportHovered
@@ -4598,7 +4610,8 @@ namespace quantum::editor
         drawAxis(displayedAnchor.up,
             ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[2]), "U");
 
-        if (isViewportTrackAnchorEditable(displayedAnchor.kind))
+        if (isViewportTrackAnchorEditable(displayedAnchor.kind)
+            && startPoseTransformMode_ != StartPoseTransformMode::Select)
         {
             const std::array<ImU32, 3> axisColors{
                 ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[0]),
@@ -4721,7 +4734,8 @@ namespace quantum::editor
         );
         const ImVec2 anchorLabelSize = ImGui::CalcTextSize(anchorLabel);
         float labelClearance = viewportStyle::orientationAxisLength;
-        if (isViewportTrackAnchorEditable(displayedAnchor.kind))
+        if (isViewportTrackAnchorEditable(displayedAnchor.kind)
+            && startPoseTransformMode_ != StartPoseTransformMode::Select)
         {
             labelClearance = std::max(labelClearance,
                 startPoseTransformMode_ == StartPoseTransformMode::Move
@@ -4787,10 +4801,7 @@ namespace quantum::editor
         presetItem("Perspective", ViewportCameraPreset::Perspective);
         presetItem("Isometric", ViewportCameraPreset::Isometric);
         ImGui::Separator();
-        presetItem("Top", ViewportCameraPreset::Top);
-        presetItem("Bottom", ViewportCameraPreset::Bottom);
-        presetItem("Left", ViewportCameraPreset::Left);
-        presetItem("Right", ViewportCameraPreset::Right);
+        showViewportAxisMenuItems();
         ImGui::Separator();
         if (ImGui::MenuItem("Track", nullptr, false,
             selectedSectionSlice() != nullptr))
@@ -4804,6 +4815,23 @@ namespace quantum::editor
             applyTrackViewPreset(true);
         }
         itemTooltip("View from walking height near the selected region");
+    }
+
+    void EditorUi::showViewportAxisMenuItems()
+    {
+        const auto presetItem = [this](const char* const label,
+            const ViewportCameraPreset preset)
+        {
+            if (ImGui::MenuItem(label))
+            {
+                applyViewportPreset(preset);
+            }
+            itemTooltip(label);
+        };
+        presetItem("Top", ViewportCameraPreset::Top);
+        presetItem("Bottom", ViewportCameraPreset::Bottom);
+        presetItem("Left", ViewportCameraPreset::Left);
+        presetItem("Right", ViewportCameraPreset::Right);
     }
 
     float EditorUi::showMainMenuBar()
@@ -5206,86 +5234,69 @@ namespace quantum::editor
 
         if (viewportContentVisible)
         {
+            const ImGuiStyle& toolbarStyle = ImGui::GetStyle();
             const float toolbarWidth = ImGui::GetContentRegionAvail().x;
-            const float spacing = ImGui::GetStyle().ItemSpacing.x;
-            const float viewWidth = buttonWidth("View") + ImGui::GetFrameHeight();
-            ImGui::BeginGroup();
-            ImGui::SetNextItemWidth(viewWidth);
-            if (ImGui::BeginCombo("##ViewportView", "View",
-                ImGuiComboFlags_HeightLarge))
+            const float toolbarRight = ImGui::GetCursorScreenPos().x
+                + toolbarWidth;
+            const float spacing = toolbarStyle.ItemSpacing.x;
+            const float iconSpacing = toolbarStyle.ItemInnerSpacing.x;
+            const float iconButtonExtent = icons_.metrics(
+                EditorIcon::Move).buttonExtent;
+            const float presentationScale = std::max(
+                toolbarStyle.FontScaleMain * toolbarStyle.FontScaleDpi,
+                0.5F
+            );
+            const float separatorThickness = std::max(
+                1.0F, std::round(presentationScale));
+            const float separatorInset = std::round(
+                6.0F * presentationScale);
+            const auto iconGroupWidth = [iconButtonExtent, iconSpacing](
+                const std::size_t count)
             {
-                showViewportViewMenuItems();
-                ImGui::EndCombo();
-            }
-            itemTooltip("Choose Perspective, Isometric, Top, Bottom, Left, Right, Track, or Walking");
-            sameLineIfFits(buttonWidth("Frame All"));
-            if (ImGui::Button("Frame All"))
+                return static_cast<float>(count) * iconButtonExtent
+                    + static_cast<float>(count - 1) * iconSpacing;
+            };
+            const auto beginNextToolbarGroup = [&]
+                (const float groupWidth)
             {
-                frameWholeTrack();
-            }
-            itemTooltip("Frame the whole track");
-            sameLineIfFits(buttonWidth("Focus"));
-            if (ImGui::Button("Focus"))
-            {
-                focusSelectedSection();
-            }
-            itemTooltip("Focus the selected region");
-            sameLineIfFits(ImGui::GetFrameHeight()
-                + ImGui::GetStyle().ItemInnerSpacing.x
-                + ImGui::CalcTextSize("Anchors").x);
-            if (ImGui::Checkbox("Anchors", &viewportSettings_.anchorsVisible))
-            {
-                quantum::logging::logMessagef(
-                    quantum::logging::LogLevel::Debug,
-                    "CFG",
-                    "viewport semantic anchors %s",
-                    viewportSettings_.anchorsVisible ? "visible" : "hidden"
-                );
-            }
-            itemTooltip("Show or hide the track's semantic boundary anchors");
-            ImGui::EndGroup();
+                const float requiredWidth = 2.0F * spacing
+                    + separatorThickness + groupWidth;
+                if (ImGui::GetItemRectMax().x + requiredWidth
+                    > toolbarRight)
+                {
+                    return;
+                }
 
-            const float toolsWidth = buttonWidth("Move") + buttonWidth("Rotate")
-                + buttonWidth("Settings") + 2.0F * spacing;
-            const float navigationWidth = viewWidth + buttonWidth("Frame All")
-                + buttonWidth("Focus") + ImGui::GetFrameHeight()
-                + ImGui::GetStyle().ItemInnerSpacing.x
-                + ImGui::CalcTextSize("Anchors").x + 3.0F * spacing;
-            if (navigationWidth + toolsWidth + buttonWidth("|")
-                + 2.0F * spacing <= toolbarWidth)
-            {
-                ImGui::SameLine();
-                ImGui::TextDisabled("|");
-                ImGui::SameLine();
-            }
-            ImGui::BeginGroup();
+                ImGui::SameLine(0.0F, spacing);
+                const ImVec2 separatorMinimum =
+                    ImGui::GetCursorScreenPos();
+                ImGui::Dummy({separatorThickness, iconButtonExtent});
+                const float separatorX = separatorMinimum.x
+                    + separatorThickness * 0.5F;
+                ImGui::GetWindowDrawList()->AddLine(
+                    {separatorX, separatorMinimum.y + separatorInset},
+                    {separatorX, separatorMinimum.y + iconButtonExtent
+                        - separatorInset},
+                    ImGui::GetColorU32(palette::border),
+                    separatorThickness
+                );
+                ImGui::SameLine(0.0F, spacing);
+            };
+
             const auto startPoseModeButton = [this](
-                const char* const label,
+                const EditorIcon icon,
+                const char* const id,
+                const char* const tooltip,
+                const char* const activeTooltip,
                 const StartPoseTransformMode mode)
             {
                 const bool selected = startPoseTransformMode_ == mode;
-                if (selected)
-                {
-                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0F);
-                    ImGui::PushStyleColor(
-                        ImGuiCol_Button,
-                        quantum::editor::palette::selection
-                    );
-                    ImGui::PushStyleColor(ImGuiCol_Border, palette::accent);
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, palette::selectionHovered);
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, palette::selectionActive);
-                }
-                const bool clicked = ImGui::Button(label);
-                if (selected)
-                {
-                    ImGui::PopStyleColor(4);
-                    ImGui::PopStyleVar();
-                }
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip("%s Track Start%s", label,
-                        selected ? " (active tool)" : "");
-                }
+                const bool clicked = icons_.button(
+                    icon,
+                    id,
+                    selected ? activeTooltip : tooltip,
+                    selected
+                );
                 if (clicked && !selected)
                 {
                     startPoseTransformMode_ = mode;
@@ -5298,11 +5309,145 @@ namespace quantum::editor
                     );
                 }
             };
-            startPoseModeButton("Move", StartPoseTransformMode::Move);
-            sameLineIfFits(buttonWidth("Rotate"));
-            startPoseModeButton("Rotate", StartPoseTransformMode::Rotate);
-            sameLineIfFits(buttonWidth("Settings"));
-            if (ImGui::Button("Settings"))
+
+            ImGui::BeginGroup();
+            startPoseModeButton(
+                EditorIcon::Select,
+                "##SelectViewport",
+                "Select regions and anchors",
+                "Select regions and anchors (active tool)",
+                StartPoseTransformMode::Select
+            );
+            ImGui::SameLine(0.0F, iconSpacing);
+            startPoseModeButton(
+                EditorIcon::Move,
+                "##MoveTrackStart",
+                "Move Track Start",
+                "Move Track Start (active tool)",
+                StartPoseTransformMode::Move
+            );
+            ImGui::SameLine(0.0F, iconSpacing);
+            startPoseModeButton(
+                EditorIcon::Rotate,
+                "##RotateTrackStart",
+                "Rotate Track Start",
+                "Rotate Track Start (active tool)",
+                StartPoseTransformMode::Rotate
+            );
+            ImGui::EndGroup();
+
+            const float frameAllWidth = buttonWidth("Frame All");
+            const float navigationGroupWidth = iconGroupWidth(3)
+                + iconSpacing + frameAllWidth;
+            beginNextToolbarGroup(navigationGroupWidth);
+            ImGui::BeginGroup();
+            static_cast<void>(icons_.button(
+                EditorIcon::Orbit,
+                "##OrbitViewport",
+                "Orbit uses right-drag in the viewport",
+                false,
+                false
+            ));
+            ImGui::SameLine(0.0F, iconSpacing);
+            static_cast<void>(icons_.button(
+                EditorIcon::Pan,
+                "##PanViewport",
+                "Pan uses middle-drag in the viewport",
+                false,
+                false
+            ));
+            ImGui::SameLine(0.0F, iconSpacing);
+            if (icons_.button(
+                EditorIcon::Focus,
+                "##FocusSelected",
+                selectedSectionSlice() != nullptr
+                    ? "Focus the selected region"
+                    : "Select a region before focusing",
+                false,
+                selectedSectionSlice() != nullptr))
+            {
+                focusSelectedSection();
+            }
+            ImGui::SameLine(0.0F, iconSpacing);
+            if (ImGui::Button(
+                "Frame All",
+                {frameAllWidth, iconButtonExtent}))
+            {
+                frameWholeTrack();
+            }
+            itemTooltip("Frame the whole track");
+            ImGui::EndGroup();
+
+            const float anchorsWidth = ImGui::GetFrameHeight()
+                + toolbarStyle.ItemInnerSpacing.x
+                + ImGui::CalcTextSize("Anchors").x;
+            const float viewGroupWidth = iconGroupWidth(3)
+                + iconSpacing + anchorsWidth;
+            beginNextToolbarGroup(viewGroupWidth);
+            ImGui::BeginGroup();
+            if (icons_.button(
+                EditorIcon::Camera,
+                "##ViewportView",
+                "Choose a camera or view preset"))
+            {
+                ImGui::OpenPopup("##ViewportViewPopup");
+            }
+            ImGui::SameLine(0.0F, iconSpacing);
+            if (icons_.button(
+                EditorIcon::Axis,
+                "##ViewportAxis",
+                "Choose an axis-aligned view"))
+            {
+                ImGui::OpenPopup("##ViewportAxisPopup");
+            }
+            ImGui::SameLine(0.0F, iconSpacing);
+            static_cast<void>(icons_.button(
+                EditorIcon::Maximize,
+                "##MaximizeViewport",
+                "Viewport maximize is not available yet",
+                false,
+                false
+            ));
+            ImGui::SameLine(0.0F, iconSpacing);
+            ImGui::SetCursorPosY(
+                ImGui::GetCursorPosY()
+                    + std::max(0.0F,
+                        (iconButtonExtent - ImGui::GetFrameHeight()) * 0.5F)
+            );
+            if (ImGui::Checkbox(
+                "Anchors", &viewportSettings_.anchorsVisible))
+            {
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Debug,
+                    "CFG",
+                    "viewport semantic anchors %s",
+                    viewportSettings_.anchorsVisible ? "visible" : "hidden"
+                );
+            }
+            itemTooltip(
+                "Show or hide the track's semantic boundary anchors");
+            ImGui::EndGroup();
+
+            beginNextToolbarGroup(iconButtonExtent);
+            ImGui::BeginGroup();
+            static_cast<void>(icons_.button(
+                EditorIcon::Play,
+                "##PlaySimulation",
+                "Ride simulation is not available yet",
+                false,
+                false
+            ));
+            ImGui::EndGroup();
+
+            beginNextToolbarGroup(iconButtonExtent);
+            ImGui::BeginGroup();
+            if (icons_.button(
+                EditorIcon::Settings,
+                "##ViewportSettings",
+                viewportSettingsWindowOpen_
+                    ? "Close viewport settings"
+                    : "Open viewport settings",
+                viewportSettingsWindowOpen_))
             {
                 viewportSettingsWindowOpen_
                     = !viewportSettingsWindowOpen_;
@@ -5313,9 +5458,18 @@ namespace quantum::editor
                     viewportSettingsWindowOpen_ ? "open" : "closed"
                 );
             }
-
-            itemTooltip("Open viewport settings");
             ImGui::EndGroup();
+
+            if (ImGui::BeginPopup("##ViewportViewPopup"))
+            {
+                showViewportViewMenuItems();
+                ImGui::EndPopup();
+            }
+            if (ImGui::BeginPopup("##ViewportAxisPopup"))
+            {
+                showViewportAxisMenuItems();
+                ImGui::EndPopup();
+            }
             ImGui::Spacing();
 
             const ImVec2 availableSize = ImGui::GetContentRegionAvail();
@@ -6471,6 +6625,7 @@ namespace quantum::editor
         if (contextCreated_)
         {
             fonts_ = {};
+            icons_.clear();
             ImGui::DestroyContext();
             contextCreated_ = false;
         }

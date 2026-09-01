@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/EditorIcons.hpp>
 #include <quantum/editor/EditorStyle.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
@@ -410,6 +411,7 @@ namespace quantum::editor
 
         [[nodiscard]] float showMainMenuBar();
         void showViewportViewMenuItems();
+        void showViewportAxisMenuItems();
         void applyViewportPreset(ViewportCameraPreset preset);
         void applyTrackViewPreset(bool walkingView);
         void focusSelectedSection();
@@ -428,6 +430,7 @@ namespace quantum::editor
         VkDevice device_ = VK_NULL_HANDLE;
         VkDescriptorSet viewportTexture_ = VK_NULL_HANDLE;
         std::uint64_t swapchainGeneration_ = 0;
+        EditorIcons icons_;
         ViewportCamera viewportCamera_;
         EditorFonts fonts_;
         std::optional<std::size_t> hoveredTrackAnchor_;
