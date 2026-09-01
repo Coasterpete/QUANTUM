@@ -17,6 +17,15 @@ set_target_properties(QuantumCoreTrackHardwarePlacementTests PROPERTIES CXX_EXTE
 add_test(NAME QuantumCore.TrackHardwarePlacement COMMAND QuantumCoreTrackHardwarePlacementTests)
 set_tests_properties(QuantumCore.TrackHardwarePlacement PROPERTIES LABELS "core;coaster;track-style;hardware")
 
+add_executable(QuantumEngineStaticMeshAssetTests StaticMeshAssetTests.cpp)
+target_link_libraries(QuantumEngineStaticMeshAssetTests PRIVATE Quantum::Engine)
+target_compile_features(QuantumEngineStaticMeshAssetTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEngineStaticMeshAssetTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEngine.StaticMeshAssets COMMAND QuantumEngineStaticMeshAssetTests
+    "${PROJECT_SOURCE_DIR}")
+set_tests_properties(QuantumEngine.StaticMeshAssets PROPERTIES
+    LABELS "engine;renderer;assets;hardware")
+
 add_executable(QuantumEditorReadmeCaptureTests
     ReadmeCaptureTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ReadmeCapture.cpp
@@ -1453,6 +1462,47 @@ set_tests_properties(
     QuantumEditor.DocumentState
     PROPERTIES
         LABELS "editor;document"
+)
+
+add_executable(
+    QuantumEditorDocumentHistoryTests
+    DocumentHistoryTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+)
+
+target_include_directories(
+    QuantumEditorDocumentHistoryTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorDocumentHistoryTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorDocumentHistoryTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorDocumentHistoryTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.DocumentHistory
+    COMMAND QuantumEditorDocumentHistoryTests
+)
+
+set_tests_properties(
+    QuantumEditor.DocumentHistory
+    PROPERTIES
+        LABELS "editor;document;history;transaction"
 )
 
 add_executable(

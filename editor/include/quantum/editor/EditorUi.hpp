@@ -215,6 +215,12 @@ namespace quantum::editor
         SaveAs
     };
 
+    enum class HistoryOperationType
+    {
+        Undo,
+        Redo
+    };
+
     // Authoritative viewport display configuration. The editor owns these
     // values and pushes them into the camera and renderer every frame.
     struct ViewportSettings
@@ -225,6 +231,10 @@ namespace quantum::editor
         // Multipliers on the camera's natural drag response.
         float orbitSensitivity = 1.0F;
         float zoomSensitivity = 1.0F;
+        float movementUnitsPerSecond =
+            static_cast<float>(defaultViewportMovementUnitsPerSecond);
+        float fastMovementMultiplier =
+            static_cast<float>(defaultViewportFastMovementMultiplier);
 
         bool gridVisible = true;
         bool anchorsVisible = true;
@@ -343,6 +353,11 @@ namespace quantum::editor
         [[nodiscard]] std::optional<FileOperationType>
         takePendingFileOperation() noexcept;
 
+        [[nodiscard]] std::optional<HistoryOperationType>
+        takePendingHistoryOperation() noexcept;
+        void setHistoryAvailability(bool canUndo, bool canRedo) noexcept;
+        [[nodiscard]] bool documentDragActive() const noexcept;
+
         // Layout mode: returns any pending layout mode change requested
         // through the Track Workspace selector buttons.
         [[nodiscard]] std::optional<coaster::LayoutMode>
@@ -364,6 +379,7 @@ namespace quantum::editor
         enum class CameraGesture
         {
             None,
+            Look,
             Orbit,
             Pan
         };
@@ -437,6 +453,7 @@ namespace quantum::editor
         std::optional<std::size_t> hoveredTrackAnchor_;
         bool viewportDisplayBoundsDirty_ = true;
         CameraGesture cameraGesture_ = CameraGesture::None;
+        bool viewportNavigationActive_ = false;
         bool initialViewportFramePending_ = true;
         double viewportAspectRatio_ = 16.0 / 9.0;
         const coaster::AuthoredTrack* authoredTrack_ = nullptr;
@@ -512,6 +529,9 @@ namespace quantum::editor
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
         std::optional<FileOperationType> pendingFileOperation_;
+        std::optional<HistoryOperationType> pendingHistoryOperation_;
+        bool canUndo_ = false;
+        bool canRedo_ = false;
         std::optional<coaster::LayoutMode> pendingLayoutModeChange_;
         bool pendingCircuitCompletion_ = false;
     };

@@ -47,6 +47,17 @@ namespace
 
 namespace quantum::editor
 {
+    bool acceptsViewportKeyboardNavigation(
+        const ViewportKeyboardNavigationState& state) noexcept
+    {
+        return state.viewportActive
+            && !state.keyboardCaptured
+            && !state.textInputActive
+            && !state.itemActive
+            && !state.popupOpen
+            && !state.commandModifierDown;
+    }
+
     ViewportCamera::ViewportCamera()
         : yaw_(std::atan2(-1.5, 1.2)),
           pitch_(perspectiveElevation),
@@ -373,6 +384,76 @@ namespace quantum::editor
             minimumDistance_,
             maximumDistance_
         );
+    }
+
+    void ViewportCamera::look(
+        const double yawDeltaRadians,
+        const double pitchDeltaRadians)
+    {
+        if (!std::isfinite(yawDeltaRadians)
+            || !std::isfinite(pitchDeltaRadians))
+        {
+            throw std::invalid_argument(
+                "ViewportCamera look deltas must be finite."
+            );
+        }
+
+        const glm::dvec3 eye = position();
+        yaw_ = std::remainder(yaw_ + yawDeltaRadians, 2.0 * pi);
+        pitch_ = std::clamp(
+            pitch_ + pitchDeltaRadians,
+            -maximumPitch,
+            maximumPitch
+        );
+        focus_ = eye - distance_ * directionFromFocus();
+    }
+
+    void ViewportCamera::moveLocal(
+        const double forwardInput,
+        const double rightInput,
+        const double upInput,
+        const double deltaSeconds,
+        const double unitsPerSecond)
+    {
+        if (!std::isfinite(forwardInput)
+            || !std::isfinite(rightInput)
+            || !std::isfinite(upInput)
+            || !std::isfinite(deltaSeconds)
+            || !std::isfinite(unitsPerSecond)
+            || deltaSeconds < 0.0
+            || unitsPerSecond < 0.0)
+        {
+            throw std::invalid_argument(
+                "ViewportCamera movement requires finite inputs and "
+                "non-negative time and speed."
+            );
+        }
+
+        glm::dvec3 localInput{rightInput, upInput, forwardInput};
+        const double inputLength = glm::length(localInput);
+        if (inputLength == 0.0 || deltaSeconds == 0.0
+            || unitsPerSecond == 0.0)
+        {
+            return;
+        }
+
+        if (inputLength > 1.0)
+        {
+            localInput /= inputLength;
+        }
+
+        const glm::dvec3 displacement = deltaSeconds * unitsPerSecond
+            * (localInput.z * -directionFromFocus()
+                + localInput.x * right()
+                + localInput.y * up());
+        if (!isFinite(displacement))
+        {
+            throw std::runtime_error(
+                "ViewportCamera movement produced a non-finite displacement."
+            );
+        }
+
+        focus_ += displacement;
     }
 
     void ViewportCamera::setProjection(

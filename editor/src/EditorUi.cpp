@@ -1806,12 +1806,15 @@ namespace
             quantum::logging::LogLevel::Info,
             "CFG",
             "viewport settings orthographic=%d fov=%.1f "
-            "orbit=%.2f zoom=%.2f grid=%d centerline=%d leftRail=%d "
+            "orbit=%.2f zoom=%.2f moveSpeed=%.2f fast=%.2f "
+            "grid=%d centerline=%d leftRail=%d "
             "rightRail=%d heartline=%d presentation=%s",
             settings.orthographic ? 1 : 0,
             static_cast<double>(settings.fieldOfViewDegrees),
             static_cast<double>(settings.orbitSensitivity),
             static_cast<double>(settings.zoomSensitivity),
+            static_cast<double>(settings.movementUnitsPerSecond),
+            static_cast<double>(settings.fastMovementMultiplier),
             settings.gridVisible ? 1 : 0,
             settings.centerlineVisible ? 1 : 0,
             settings.leftRailVisible ? 1 : 0,
@@ -1934,6 +1937,28 @@ namespace
             committed = true;
         }
 
+        if (ImGui::SliderFloat(
+            "Fly Speed",
+            &settings.movementUnitsPerSecond,
+            1.0F,
+            200.0F,
+            "%.1f units/s",
+            ImGuiSliderFlags_AlwaysClamp))
+        {
+            committed = true;
+        }
+
+        if (ImGui::SliderFloat(
+            "Shift Speed Multiplier",
+            &settings.fastMovementMultiplier,
+            1.0F,
+            10.0F,
+            "%.1fx",
+            ImGuiSliderFlags_AlwaysClamp))
+        {
+            committed = true;
+        }
+
         ImGui::SeparatorText("Reference Elements");
 
         committed = ImGui::Checkbox(
@@ -1964,7 +1989,11 @@ namespace
         ImGuiViewport* const mainViewport,
         const quantum::editor::EditorIcons& icons,
         std::optional<quantum::editor::FileOperationType>&
-            pendingFileOperation)
+            pendingFileOperation,
+        std::optional<quantum::editor::HistoryOperationType>&
+            pendingHistoryOperation,
+        const bool canUndo,
+        const bool canRedo)
     {
         const ImGuiStyle& style = ImGui::GetStyle();
         const float iconButtonExtent = icons.metrics(
@@ -2019,21 +2048,31 @@ namespace
                     quantum::editor::FileOperationType::Save;
             }
             ImGui::SameLine(0.0F, style.ItemSpacing.x * 1.5F);
-            static_cast<void>(icons.button(
+            if (icons.button(
                 quantum::editor::EditorIcon::Undo,
                 "##UndoDocumentEdit",
-                "Undo history is not available yet",
+                canUndo ? "Undo the last document edit (Ctrl+Z)"
+                    : "No document edit to undo",
                 false,
-                false
-            ));
+                canUndo
+            ))
+            {
+                pendingHistoryOperation =
+                    quantum::editor::HistoryOperationType::Undo;
+            }
             ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
-            static_cast<void>(icons.button(
+            if (icons.button(
                 quantum::editor::EditorIcon::Redo,
                 "##RedoDocumentEdit",
-                "Redo history is not available yet",
+                canRedo ? "Redo the last document edit (Ctrl+Y)"
+                    : "No document edit to redo",
                 false,
-                false
-            ));
+                canRedo
+            ))
+            {
+                pendingHistoryOperation =
+                    quantum::editor::HistoryOperationType::Redo;
+            }
         }
 
         ImGui::End();
@@ -3798,6 +3837,7 @@ namespace quantum::editor
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
         {
             cameraGesture_ = CameraGesture::None;
+            viewportNavigationActive_ = false;
             endpointDrags_.fill(ScalarProfileEndpoint::None);
             for (std::optional<double>& lastValue : dragLastValues_)
             {
@@ -4196,6 +4236,13 @@ namespace quantum::editor
         ImGuiIO& io = ImGui::GetIO();
         const float presentationScale = editorPresentationScale();
 
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+            || ImGui::IsMouseClicked(ImGuiMouseButton_Right)
+            || ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+        {
+            viewportNavigationActive_ = viewportHovered;
+        }
+
         const bool startPoseManipulationCaptured =
             updateStartPoseManipulation(
                 viewportHovered,
@@ -4206,6 +4253,7 @@ namespace quantum::editor
         if (io.AppFocusLost)
         {
             cameraGesture_ = CameraGesture::None;
+            viewportNavigationActive_ = false;
         }
 
         if (firstActiveEndpoint(endpointDrags_)
@@ -4311,14 +4359,17 @@ namespace quantum::editor
         {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
+                const bool orbitRequested = io.KeyAlt;
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Trace,
                     "INP",
-                    "CAMERA_GESTURE_START Orbit MousePos=(%.0f,%.0f)",
+                    "CAMERA_GESTURE_START %s MousePos=(%.0f,%.0f)",
+                    orbitRequested ? "Orbit" : "Look",
                     io.MousePos.x,
                     io.MousePos.y
                 );
-                cameraGesture_ = CameraGesture::Orbit;
+                cameraGesture_ = orbitRequested
+                    ? CameraGesture::Orbit : CameraGesture::Look;
             }
             else if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
             {
@@ -4333,27 +4384,38 @@ namespace quantum::editor
             }
         }
 
-        if (cameraGesture_ == CameraGesture::Orbit)
+        if (cameraGesture_ == CameraGesture::Look
+            || cameraGesture_ == CameraGesture::Orbit)
         {
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
             {
-                quantum::logging::logMessage(
+                quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Trace,
                     "INP",
-                    "CAMERA_GESTURE_END Orbit"
+                    "CAMERA_GESTURE_END %s",
+                    cameraGesture_ == CameraGesture::Look ? "Look" : "Orbit"
                 );
                 cameraGesture_ = CameraGesture::None;
             }
             else
             {
-                viewportCamera_.orbit(
+                const double yawDelta =
                     -static_cast<double>(io.MouseDelta.x)
-                        * orbitRadiansPerPixel
-                        * viewportSettings_.orbitSensitivity,
+                    * orbitRadiansPerPixel
+                    * viewportSettings_.orbitSensitivity;
+                const double pitchDelta =
                     -static_cast<double>(io.MouseDelta.y)
-                        * orbitRadiansPerPixel
-                        * viewportSettings_.orbitSensitivity
-                );
+                    * orbitRadiansPerPixel
+                    * viewportSettings_.orbitSensitivity;
+                if (cameraGesture_ == CameraGesture::Look)
+                {
+                    viewportCamera_.look(yawDelta, pitchDelta);
+                }
+                else
+                {
+                    viewportCamera_.orbit(yawDelta, pitchDelta);
+                }
+                initialViewportFramePending_ = false;
             }
         }
         else if (cameraGesture_ == CameraGesture::Pan)
@@ -4375,6 +4437,53 @@ namespace quantum::editor
                     static_cast<double>(logicalWidth),
                     static_cast<double>(logicalHeight)
                 );
+            }
+        }
+
+        const ViewportKeyboardNavigationState keyboardState{
+            .viewportActive = viewportNavigationActive_
+                && !startPoseManipulationCaptured
+                && firstActiveEndpoint(endpointDrags_)
+                    == ScalarProfileEndpoint::None,
+            .keyboardCaptured = io.WantCaptureKeyboard,
+            .textInputActive = io.WantTextInput,
+            .itemActive = ImGui::IsAnyItemActive(),
+            .popupOpen = ImGui::IsPopupOpen(
+                nullptr, ImGuiPopupFlags_AnyPopupId),
+            .commandModifierDown = io.KeyCtrl || io.KeyAlt || io.KeySuper
+        };
+        if (acceptsViewportKeyboardNavigation(keyboardState))
+        {
+            const double forwardInput =
+                (ImGui::IsKeyDown(ImGuiKey_W) ? 1.0 : 0.0)
+                - (ImGui::IsKeyDown(ImGuiKey_S) ? 1.0 : 0.0);
+            const double rightInput =
+                (ImGui::IsKeyDown(ImGuiKey_D) ? 1.0 : 0.0)
+                - (ImGui::IsKeyDown(ImGuiKey_A) ? 1.0 : 0.0);
+            const double upInput =
+                (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0 : 0.0)
+                - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0 : 0.0);
+            const double speed = static_cast<double>(
+                viewportSettings_.movementUnitsPerSecond)
+                * (io.KeyShift
+                    ? static_cast<double>(
+                        viewportSettings_.fastMovementMultiplier)
+                    : 1.0);
+            const double deltaSeconds = std::clamp(
+                static_cast<double>(io.DeltaTime),
+                0.0,
+                maximumViewportNavigationDeltaSeconds
+            );
+            viewportCamera_.moveLocal(
+                forwardInput,
+                rightInput,
+                upInput,
+                deltaSeconds,
+                speed
+            );
+            if (forwardInput != 0.0 || rightInput != 0.0 || upInput != 0.0)
+            {
+                initialViewportFramePending_ = false;
             }
         }
 
@@ -4909,26 +5018,45 @@ namespace quantum::editor
 
         constexpr ImGuiInputFlags shortcutFlags =
             ImGuiInputFlags_RouteGlobal;
-        if (ImGui::Shortcut(
+        const ImGuiIO& io = ImGui::GetIO();
+        const bool documentShortcutAllowed = !io.WantTextInput
+            && !ImGui::IsAnyItemActive()
+            && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
+        if (documentShortcutAllowed && ImGui::Shortcut(
             ImGuiMod_Ctrl | ImGuiKey_N, shortcutFlags))
         {
             pendingFileOperation_ = FileOperationType::New;
         }
-        if (ImGui::Shortcut(
+        if (documentShortcutAllowed && ImGui::Shortcut(
             ImGuiMod_Ctrl | ImGuiKey_O, shortcutFlags))
         {
             pendingFileOperation_ = FileOperationType::Open;
         }
-        if (ImGui::Shortcut(
+        if (documentShortcutAllowed && ImGui::Shortcut(
             ImGuiMod_Ctrl | ImGuiKey_S, shortcutFlags))
         {
             pendingFileOperation_ = FileOperationType::Save;
         }
-        if (ImGui::Shortcut(
+        if (documentShortcutAllowed && ImGui::Shortcut(
             ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S,
             shortcutFlags))
         {
             pendingFileOperation_ = FileOperationType::SaveAs;
+        }
+
+        if (documentShortcutAllowed && canUndo_ && ImGui::Shortcut(
+            ImGuiMod_Ctrl | ImGuiKey_Z, shortcutFlags))
+        {
+            pendingHistoryOperation_ = HistoryOperationType::Undo;
+        }
+        if (documentShortcutAllowed && canRedo_
+            && (ImGui::Shortcut(
+                    ImGuiMod_Ctrl | ImGuiKey_Y, shortcutFlags)
+                || ImGui::Shortcut(
+                    ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z,
+                    shortcutFlags)))
+        {
+            pendingHistoryOperation_ = HistoryOperationType::Redo;
         }
 
         if (!ImGui::BeginMainMenuBar())
@@ -4959,8 +5087,14 @@ namespace quantum::editor
 
         if (ImGui::BeginMenu("Edit"))
         {
-            ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
-            ImGui::MenuItem("Redo", "Ctrl+Y", false, false);
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo_))
+            {
+                pendingHistoryOperation_ = HistoryOperationType::Undo;
+            }
+            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo_))
+            {
+                pendingHistoryOperation_ = HistoryOperationType::Redo;
+            }
             ImGui::EndMenu();
         }
 
@@ -5285,7 +5419,12 @@ namespace quantum::editor
 
         ImGuiViewport* const mainViewport = ImGui::GetMainViewport();
         const float commandAreaHeight = showCommandArea(
-            mainViewport, icons_, pendingFileOperation_);
+            mainViewport,
+            icons_,
+            pendingFileOperation_,
+            pendingHistoryOperation_,
+            canUndo_,
+            canRedo_);
 
         showTransitionEditorInputSettings(
             transitionEditorInputSettings_,
@@ -5494,7 +5633,7 @@ namespace quantum::editor
                 static_cast<void>(icons_.button(
                     EditorIcon::Orbit,
                     "##OrbitViewport",
-                    "Orbit the viewport with right-drag",
+                    "Look with right-drag; orbit with Alt+right-drag",
                     false,
                     false
                 ));
@@ -5502,7 +5641,7 @@ namespace quantum::editor
                 static_cast<void>(icons_.button(
                     EditorIcon::Pan,
                     "##PanViewport",
-                    "Pan the viewport with middle-drag",
+                    "Pan with middle-drag; move with WASD/QE (Shift faster)",
                     false,
                     false
                 ));
@@ -5737,12 +5876,14 @@ namespace quantum::editor
             else if (availableSize.x > 0.0F && availableSize.y > 0.0F)
             {
                 cameraGesture_ = CameraGesture::None;
+                viewportNavigationActive_ = false;
                 ImGui::Dummy(availableSize);
             }
         }
         else
         {
             cameraGesture_ = CameraGesture::None;
+            viewportNavigationActive_ = false;
             updateViewportTexture(vulkan, 0, 0);
         }
 
@@ -6859,6 +7000,7 @@ namespace quantum::editor
 
         swapchainGeneration_ = 0;
         cameraGesture_ = CameraGesture::None;
+        viewportNavigationActive_ = false;
         initialViewportFramePending_ = true;
         authoredTrack_ = nullptr;
         centerlineVisualization_ = nullptr;
@@ -6900,6 +7042,9 @@ namespace quantum::editor
         sectionLengthEdit_.reset();
         iniPath_.clear();
         pendingFileOperation_.reset();
+        pendingHistoryOperation_.reset();
+        canUndo_ = false;
+        canRedo_ = false;
     }
 
     std::optional<FileOperationType>
@@ -6908,6 +7053,29 @@ namespace quantum::editor
         const auto op = pendingFileOperation_;
         pendingFileOperation_.reset();
         return op;
+    }
+
+    std::optional<HistoryOperationType>
+    EditorUi::takePendingHistoryOperation() noexcept
+    {
+        const auto operation = pendingHistoryOperation_;
+        pendingHistoryOperation_.reset();
+        return operation;
+    }
+
+    void EditorUi::setHistoryAvailability(
+        const bool canUndo,
+        const bool canRedo) noexcept
+    {
+        canUndo_ = canUndo;
+        canRedo_ = canRedo;
+    }
+
+    bool EditorUi::documentDragActive() const noexcept
+    {
+        return startPoseManipulation_.has_value()
+            || firstActiveEndpoint(endpointDrags_)
+                != ScalarProfileEndpoint::None;
     }
 
     std::optional<coaster::LayoutMode>
@@ -6927,6 +7095,8 @@ namespace quantum::editor
 
     void EditorUi::resetTransientState()
     {
+        cameraGesture_ = CameraGesture::None;
+        viewportNavigationActive_ = false;
         selectedSection_ = 0;
         selectedTrackAnchor_ = 0;
         startPoseTransformMode_ = StartPoseTransformMode::Move;

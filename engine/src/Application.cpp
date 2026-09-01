@@ -5,6 +5,7 @@
 #include <quantum/coaster/CoasterDocument.hpp>
 #include <quantum/editor/AuthoredTrackEditTransaction.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/DocumentHistory.hpp>
 #include <quantum/editor/DocumentState.hpp>
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/PlatformDialogs.hpp>
@@ -181,6 +182,8 @@ namespace quantum::engine
                     ? createInteractiveAuthoringDemoTrack()
                     : quantum::coaster::createNewDocument();
                 quantum::editor::DocumentState documentState;
+                quantum::editor::DocumentHistory documentHistory;
+                documentHistory.reset(authoredTrack);
                 quantum::editor::CenterlineVisualizationCache
                     centerlineCache;
                 static_cast<void>(
@@ -227,6 +230,62 @@ namespace quantum::engine
                         authoredTrack)
                 );
                 editorUi.updateWindowTitle(documentState.windowTitle());
+                editorUi.setHistoryAvailability(
+                    documentHistory.canUndo(),
+                    documentHistory.canRedo());
+
+                const auto synchronizeDirtyState = [&]
+                {
+                    if (documentHistory.isDirty())
+                    {
+                        documentState.markDirty();
+                    }
+                    else
+                    {
+                        documentState.clearDirty();
+                    }
+                    editorUi.updateWindowTitle(documentState.windowTitle());
+                };
+
+                const auto publishHistoryState =
+                    [&](const quantum::coaster::AuthoredTrack& restoredTrack)
+                {
+                    quantum::editor::CenterlineVisualization
+                        restoredCenterline = quantum::editor::
+                            createCenterlineVisualization(
+                                restoredTrack,
+                                centerlineCache.trackStyle());
+                    quantum::coaster::RiderLoadHistory restoredRiderLoads =
+                        quantum::editor::evaluateRiderLoadDiagnostics(
+                            restoredTrack);
+                    quantum::editor::AuthoredTrackEditTransaction
+                        restoredTransaction{restoredTrack};
+                    restoredTransaction.requireAcceptableRiderLoads(
+                        restoredRiderLoads);
+
+                    // Use the same generated geometry and renderer uploads as
+                    // a forward authored edit before publishing the restored
+                    // authoritative state.
+                    vulkan.updateTrackCurveVertices(
+                        restoredCenterline.vertices,
+                        restoredCenterline.verticesPerCurve);
+                    vulkan.updateRenderableTrack(
+                        restoredCenterline.renderableTrack);
+
+                    const std::size_t restoredSelection = std::min(
+                        editorUi.selectedSection(),
+                        restoredTrack.sectionCount() - 1);
+                    authoredTrack = restoredTrack;
+                    centerlineCache.markDirty();
+                    centerlineCache.replace(std::move(restoredCenterline));
+                    editorUi.setCenterlineBounds(
+                        centerline.minimumPosition,
+                        centerline.maximumPosition);
+                    editorUi.setCenterlineSections(centerline.sectionSlices);
+                    editorUi.setRiderLoadHistory(
+                        std::move(restoredRiderLoads));
+                    editorUi.selectSection(restoredSelection, true);
+                };
 
                 bool running = true;
 
@@ -283,6 +342,7 @@ namespace quantum::engine
                                                     std::streamsize>(
                                                     json.size())))
                                         {
+                                            documentHistory.markSaved();
                                             documentState.clearDirty();
                                             running = false;
                                         }
@@ -328,6 +388,7 @@ namespace quantum::engine
                                                 documentState
                                                     .setOpenDocument(
                                                         *savePath);
+                                                documentHistory.markSaved();
                                                 running = false;
                                             }
                                             else
@@ -364,6 +425,58 @@ namespace quantum::engine
                         {
                             SDL_Delay(10);
                             continue;
+                        }
+
+                        const auto pendingHistoryOperation =
+                            editorUi.takePendingHistoryOperation();
+                        if (pendingHistoryOperation.has_value())
+                        {
+                            using quantum::editor::HistoryOperationType;
+                            const bool undoRequested =
+                                *pendingHistoryOperation
+                                    == HistoryOperationType::Undo;
+                            std::optional<quantum::coaster::AuthoredTrack>
+                                restoredTrack = undoRequested
+                                    ? documentHistory.undo()
+                                    : documentHistory.redo();
+                            if (restoredTrack.has_value())
+                            {
+                                try
+                                {
+                                    publishHistoryState(*restoredTrack);
+                                    synchronizeDirtyState();
+                                    quantum::logging::logMessage(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        undoRequested
+                                            ? "Undo restored the previous "
+                                                "document revision"
+                                            : "Redo restored the next "
+                                                "document revision");
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    // The cursor advances before publication;
+                                    // roll it back when generation or upload
+                                    // cannot publish the requested revision.
+                                    if (undoRequested)
+                                    {
+                                        static_cast<void>(
+                                            documentHistory.redo());
+                                    }
+                                    else
+                                    {
+                                        static_cast<void>(
+                                            documentHistory.undo());
+                                    }
+                                    SDL_ShowSimpleMessageBox(
+                                        SDL_MESSAGEBOX_ERROR,
+                                        undoRequested
+                                            ? "Undo Failed" : "Redo Failed",
+                                        exception.what(),
+                                        window);
+                                }
+                            }
                         }
 
                         // Process file operations requested through the
@@ -423,6 +536,7 @@ namespace quantum::engine
                                                     std::streamsize>(
                                                     json.size())))
                                         {
+                                            documentHistory.markSaved();
                                             documentState.clearDirty();
                                             editorUi.updateWindowTitle(
                                                 documentState.windowTitle()
@@ -467,6 +581,7 @@ namespace quantum::engine
                                             documentState.setOpenDocument(
                                                 *savePath
                                             );
+                                            documentHistory.markSaved();
                                             editorUi.updateWindowTitle(
                                                 documentState.windowTitle()
                                             );
@@ -505,9 +620,10 @@ namespace quantum::engine
                                 {
                                     authoredTrack =
                                         quantum::coaster::createNewDocument();
+                                    documentHistory.reset(authoredTrack);
                                     documentState.newDocument();
                                     editorUi.resetTransientState();
-                                    editorUi.selectSection(0);
+                                    editorUi.selectSection(0, true);
 
                                     centerlineCache.markDirty();
                                     static_cast<void>(
@@ -602,9 +718,10 @@ namespace quantum::engine
                                         {
                                             authoredTrack = std::move(*result);
                                             centerlineCache.replace(std::move(*loadedCenterline));
+                                            documentHistory.reset(authoredTrack);
                                             documentState.setOpenDocument(*openPath);
                                             editorUi.resetTransientState();
-                                            editorUi.selectSection(0);
+                                            editorUi.selectSection(0, true);
                                             editorUi.setCenterlineBounds(centerline.minimumPosition,
                                                 centerline.maximumPosition);
                                             editorUi.setCenterlineSections(centerline.sectionSlices);
@@ -668,6 +785,7 @@ namespace quantum::engine
                                             documentState.setOpenDocument(
                                                 *savePath
                                             );
+                                            documentHistory.markSaved();
                                             editorUi.updateWindowTitle(
                                                 documentState.windowTitle()
                                             );
@@ -709,6 +827,7 @@ namespace quantum::engine
                                                 std::streamsize>(
                                                 json.size())))
                                     {
+                                        documentHistory.markSaved();
                                         documentState.clearDirty();
                                         editorUi.updateWindowTitle(
                                             documentState.windowTitle()
@@ -763,6 +882,7 @@ namespace quantum::engine
                                         documentState.setOpenDocument(
                                             *savePath
                                         );
+                                        documentHistory.markSaved();
                                         editorUi.updateWindowTitle(
                                             documentState.windowTitle()
                                         );
@@ -821,6 +941,15 @@ namespace quantum::engine
                             || requestedDistanceEdit.has_value()
                             || (requestedStartPoseEdit.has_value()
                                 && requestedStartPoseEdit->continuous);
+                        // A paused pointer can produce no changed value for
+                        // one or more frames while the same drag is still
+                        // held. Keep that gesture coalesced until the UI
+                        // observes its release.
+                        if (!continuousDrag
+                            && !editorUi.documentDragActive())
+                        {
+                            documentHistory.endContinuousEdit();
+                        }
 
                         quantum::editor::AuthoredTrackEditTransaction
                             editTransaction{authoredTrack};
@@ -1335,13 +1464,13 @@ namespace quantum::engine
                                 centerlineCache.replace(
                                     std::move(candidateCenterline));
                                 editTransaction.commit(authoredTrack);
+                                documentHistory.record(
+                                    authoredTrack,
+                                    continuousDrag);
                                 editorUi.setRiderLoadHistory(
                                     std::move(candidateRiderLoads)
                                 );
-                                documentState.markDirty();
-                                editorUi.updateWindowTitle(
-                                    documentState.windowTitle()
-                                );
+                                synchronizeDirtyState();
 
                                 if (!continuousDrag)
                                 {
@@ -1724,9 +1853,8 @@ namespace quantum::engine
                         {
                             authoredTrack.setLayoutMode(
                                 *requestedLayoutMode);
-                            documentState.markDirty();
-                            editorUi.updateWindowTitle(
-                                documentState.windowTitle());
+                            documentHistory.record(authoredTrack);
+                            synchronizeDirtyState();
 
                             quantum::logging::logMessagef(
                                 quantum::logging::LogLevel::Info,
@@ -1796,9 +1924,8 @@ namespace quantum::engine
                                         evaluateRiderLoadDiagnostics(
                                             authoredTrack)
                                 );
-                                documentState.markDirty();
-                                editorUi.updateWindowTitle(
-                                    documentState.windowTitle());
+                                documentHistory.record(authoredTrack);
+                                synchronizeDirtyState();
 
                                 // Select the newly created connector.
                                 editorUi.selectSection(
@@ -1837,6 +1964,9 @@ namespace quantum::engine
                                 window);
                         }
 
+                        editorUi.setHistoryAvailability(
+                            documentHistory.canUndo(),
+                            documentHistory.canRedo());
                         editorUi.beginFrame(vulkan);
                         vulkan.drawFrame(
                             [](VkCommandBuffer commandBuffer, void* userData)

@@ -9,12 +9,30 @@ namespace quantum::editor
     // Wheel-dolly strength used when the caller has no explicit zoom
     // sensitivity configured; larger exponents dolly faster per wheel unit.
     inline constexpr double defaultViewportZoomExponentPerWheelUnit = 0.18;
+    inline constexpr double defaultViewportMovementUnitsPerSecond = 18.0;
+    inline constexpr double defaultViewportFastMovementMultiplier = 4.0;
+    inline constexpr double maximumViewportNavigationDeltaSeconds = 0.1;
 
     struct ViewportCameraClipPlanes
     {
         double nearPlane = 0.0;
         double farPlane = 0.0;
     };
+
+    // ImGui-derived focus/capture facts are reduced to this backend-neutral
+    // value so the navigation gate can be tested without a live UI context.
+    struct ViewportKeyboardNavigationState
+    {
+        bool viewportActive = false;
+        bool keyboardCaptured = false;
+        bool textInputActive = false;
+        bool itemActive = false;
+        bool popupOpen = false;
+        bool commandModifierDown = false;
+    };
+
+    [[nodiscard]] bool acceptsViewportKeyboardNavigation(
+        const ViewportKeyboardNavigationState& state) noexcept;
 
     // Orthographic mode derives its half-height at the focus from the same
     // distance and field of view as perspective mode, so switching between
@@ -111,6 +129,23 @@ namespace quantum::editor
             double wheelDelta,
             double exponentPerWheelUnit =
                 defaultViewportZoomExponentPerWheelUnit
+        );
+
+        // Rotates the viewing direction in place, preserving the eye
+        // position and focus distance. This is distinct from orbit(), which
+        // preserves the focus and moves the eye around it.
+        void look(double yawDeltaRadians, double pitchDeltaRadians);
+
+        // Translates the eye and focus together along the camera-local
+        // forward, right, and up axes. Input is normalized so diagonal
+        // movement is not faster. deltaSeconds and unitsPerSecond make the
+        // operation deterministic and frame-rate independent.
+        void moveLocal(
+            double forwardInput,
+            double rightInput,
+            double upInput,
+            double deltaSeconds,
+            double unitsPerSecond = defaultViewportMovementUnitsPerSecond
         );
 
         void setProjection(ViewportProjection projection);

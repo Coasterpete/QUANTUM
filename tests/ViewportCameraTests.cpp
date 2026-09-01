@@ -682,6 +682,108 @@ namespace
         require(threwNonFiniteFov, "non-finite FOV must be rejected");
     }
 
+    void testLocalFreeFlightMovement()
+    {
+        using quantum::editor::ViewportCameraPose;
+
+        ViewportCamera camera;
+        camera.setBounds({-10.0, -10.0, -10.0}, {10.0, 10.0, 10.0});
+        camera.setPose(ViewportCameraPose{
+            .focus = {0.0, 0.0, 0.0},
+            .yaw = 0.0,
+            .pitch = 0.0,
+            .distance = 10.0
+        });
+
+        const glm::dvec3 startEye = camera.position();
+        camera.moveLocal(1.0, 0.0, 0.0, 0.5, 8.0);
+        requireVectorNear(camera.position(), startEye + glm::dvec3{-4.0, 0.0, 0.0},
+            "forward movement follows camera forward");
+
+        camera.moveLocal(0.0, 1.0, 0.0, 0.25, 8.0);
+        requireVectorNear(camera.position(), startEye + glm::dvec3{-4.0, 2.0, 0.0},
+            "strafe movement follows camera right");
+
+        camera.moveLocal(0.0, 0.0, 1.0, 0.5, 8.0);
+        requireVectorNear(camera.position(), startEye + glm::dvec3{-4.0, 2.0, 4.0},
+            "vertical movement follows camera up");
+    }
+
+    void testFreeFlightIsFrameRateIndependentAndSpeedConfigurable()
+    {
+        ViewportCamera oneStep = makeFramedCamera();
+        ViewportCamera manySteps = oneStep;
+        const glm::dvec3 start = oneStep.position();
+
+        oneStep.moveLocal(1.0, 1.0, 0.0, 1.0, 12.0);
+        for (int step = 0; step < 120; ++step)
+        {
+            manySteps.moveLocal(1.0, 1.0, 0.0, 1.0 / 120.0, 12.0);
+        }
+        requireVectorNear(oneStep.position(), manySteps.position(),
+            "free-flight movement is frame-rate independent");
+        requireNear(glm::length(oneStep.position() - start), 12.0,
+            "diagonal input is normalized");
+
+        ViewportCamera normal = makeFramedCamera();
+        ViewportCamera fast = normal;
+        normal.moveLocal(1.0, 0.0, 0.0, 0.5, 10.0);
+        fast.moveLocal(1.0, 0.0, 0.0, 0.5, 40.0);
+        requireNear(
+            glm::length(fast.position() - start),
+            4.0 * glm::length(normal.position() - start),
+            "configured fast movement multiplier"
+        );
+    }
+
+    void testMouseLookPreservesEyeAndUsesLocalAxes()
+    {
+        ViewportCamera camera = makeFramedCamera();
+        const glm::dvec3 eyeBefore = camera.position();
+        const double distanceBefore = camera.distance();
+
+        camera.look(0.5, -0.25);
+        requireVectorNear(camera.position(), eyeBefore,
+            "mouse look preserves the eye position");
+        requireNear(camera.distance(), distanceBefore,
+            "mouse look preserves focus distance");
+
+        const glm::dvec3 movedFrom = camera.position();
+        const glm::dvec3 expectedForward = glm::normalize(
+            camera.focus() - camera.position());
+        camera.moveLocal(1.0, 0.0, 0.0, 0.25, 20.0);
+        requireVectorNear(camera.position(), movedFrom + 5.0 * expectedForward,
+            "movement uses the looked camera orientation");
+    }
+
+    void testKeyboardNavigationCaptureGate()
+    {
+        using quantum::editor::acceptsViewportKeyboardNavigation;
+        using quantum::editor::ViewportKeyboardNavigationState;
+
+        require(acceptsViewportKeyboardNavigation(
+                ViewportKeyboardNavigationState{.viewportActive = true}),
+            "an intentionally active viewport accepts navigation");
+        require(!acceptsViewportKeyboardNavigation({}),
+            "an inactive viewport suppresses navigation");
+
+        for (const ViewportKeyboardNavigationState blocked : {
+            ViewportKeyboardNavigationState{
+                .viewportActive = true, .keyboardCaptured = true},
+            ViewportKeyboardNavigationState{
+                .viewportActive = true, .textInputActive = true},
+            ViewportKeyboardNavigationState{
+                .viewportActive = true, .itemActive = true},
+            ViewportKeyboardNavigationState{
+                .viewportActive = true, .popupOpen = true},
+            ViewportKeyboardNavigationState{
+                .viewportActive = true, .commandModifierDown = true}})
+        {
+            require(!acceptsViewportKeyboardNavigation(blocked),
+                "UI capture and command modifiers suppress navigation");
+        }
+    }
+
     void testWorldSpaceViewportRays()
     {
         using quantum::editor::ViewportCameraPose;
@@ -752,6 +854,10 @@ int main()
         testFocusSphereFraming();
         testPoseApplication();
         testConfigurableInteractionResponse();
+        testLocalFreeFlightMovement();
+        testFreeFlightIsFrameRateIndependentAndSpeedConfigurable();
+        testMouseLookPreservesEyeAndUsesLocalAxes();
+        testKeyboardNavigationCaptureGate();
         testWorldSpaceViewportRays();
     }
     catch (const std::exception& exception)

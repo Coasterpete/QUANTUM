@@ -2,6 +2,7 @@ add_executable(
     QUANTUM
     src/main.cpp
     src/CenterlineVisualization.cpp
+    src/DocumentHistory.cpp
     src/DocumentState.cpp
     src/EditorIcons.cpp
     src/EditorStyle.cpp
@@ -17,6 +18,7 @@ add_executable(
     src/ViewportTrackAnchors.cpp
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
+    include/quantum/editor/DocumentHistory.hpp
     include/quantum/editor/DocumentState.hpp
     include/quantum/editor/EditorIcons.hpp
     include/quantum/editor/EditorStyle.hpp
@@ -134,6 +136,25 @@ endforeach()
 add_custom_target(QUANTUMEditorIcons ALL DEPENDS ${quantum_editor_icon_outputs})
 add_dependencies(QUANTUM QUANTUMEditorIcons)
 
+set(quantum_track_asset_source
+    "${PROJECT_SOURCE_DIR}/assets/track/test-crosstie-placeholder.glb")
+set(quantum_track_asset_destination
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/track/test-crosstie-placeholder.glb")
+add_custom_command(
+    OUTPUT "${quantum_track_asset_destination}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/track"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${quantum_track_asset_source}"
+        "${quantum_track_asset_destination}"
+    DEPENDS "${quantum_track_asset_source}"
+    COMMENT "Deploying QUANTUM test track-hardware GLB"
+    VERBATIM
+)
+add_custom_target(QUANTUMTrackAssets ALL
+    DEPENDS "${quantum_track_asset_destination}")
+add_dependencies(QUANTUM QUANTUMTrackAssets)
+
 add_custom_command(
     TARGET QUANTUM
     POST_BUILD
@@ -175,6 +196,13 @@ endforeach()
 install(
     FILES ${quantum_editor_runtime_icon_files}
     DESTINATION assets/icons/lucide
+    COMPONENT Runtime
+)
+
+install(
+    FILES
+        "${PROJECT_SOURCE_DIR}/assets/track/test-crosstie-placeholder.glb"
+    DESTINATION assets/track
     COMPONENT Runtime
 )
 
