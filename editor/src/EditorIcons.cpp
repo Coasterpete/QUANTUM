@@ -34,6 +34,34 @@ namespace
         float strokeWidth = 0.0F;
     };
 
+    constexpr std::array<std::string_view,
+        static_cast<std::size_t>(quantum::editor::EditorIcon::Count)>
+        editorIconFileNames{
+            "mouse-pointer-2.svg",
+            "move-3d.svg",
+            "rotate-3d.svg",
+            "orbit.svg",
+            "hand.svg",
+            "focus.svg",
+            "camera.svg",
+            "axis-3d.svg",
+            "maximize.svg",
+            "folder-open.svg",
+            "save.svg",
+            "undo-2.svg",
+            "redo-2.svg",
+            "eye.svg",
+            "eye-off.svg",
+            "lock.svg",
+            "lock-open.svg",
+            "zoom-in.svg",
+            "zoom-out.svg",
+            "play.svg",
+            "pause.svg",
+            "square-stop.svg",
+            "settings.svg"
+        };
+
     class NumberReader
     {
     public:
@@ -565,6 +593,68 @@ namespace
             drawing.strokes.push_back(std::move(circle));
         });
 
+        parseElements(svg, "line", [&](const std::string_view element)
+        {
+            drawing.strokes.push_back({{
+                {
+                    scalarAttribute(element, "x1"),
+                    scalarAttribute(element, "y1")
+                },
+                {
+                    scalarAttribute(element, "x2"),
+                    scalarAttribute(element, "y2")
+                }
+            }, false});
+        });
+
+        parseElements(svg, "rect", [&](const std::string_view element)
+        {
+            const float x = scalarAttribute(element, "x");
+            const float y = scalarAttribute(element, "y");
+            const float width = scalarAttribute(element, "width");
+            const float height = scalarAttribute(element, "height");
+            const float radius = std::min({
+                scalarAttribute(element, "rx"),
+                width * 0.5F,
+                height * 0.5F
+            });
+            if (width <= 0.0F || height <= 0.0F || radius < 0.0F)
+            {
+                throw std::runtime_error("invalid SVG rectangle");
+            }
+
+            ParsedStroke rectangle;
+            rectangle.closed = true;
+            constexpr int cornerSegments = 8;
+            rectangle.points.reserve(cornerSegments * 4);
+            const std::array<ImVec2, 4> centers{
+                ImVec2{x + width - radius, y + radius},
+                ImVec2{x + width - radius, y + height - radius},
+                ImVec2{x + radius, y + height - radius},
+                ImVec2{x + radius, y + radius}
+            };
+            for (std::size_t corner = 0; corner < centers.size(); ++corner)
+            {
+                const double startAngle = -std::numbers::pi_v<double> * 0.5
+                    + static_cast<double>(corner)
+                        * std::numbers::pi_v<double> * 0.5;
+                for (int segment = 0; segment < cornerSegments; ++segment)
+                {
+                    const double angle = startAngle
+                        + static_cast<double>(segment)
+                            * std::numbers::pi_v<double> * 0.5
+                            / static_cast<double>(cornerSegments - 1);
+                    rectangle.points.push_back({
+                        centers[corner].x
+                            + radius * static_cast<float>(std::cos(angle)),
+                        centers[corner].y
+                            + radius * static_cast<float>(std::sin(angle))
+                    });
+                }
+            }
+            drawing.strokes.push_back(std::move(rectangle));
+        });
+
         if (drawing.strokes.empty())
         {
             throw std::runtime_error("SVG contains no supported strokes");
@@ -606,28 +696,26 @@ namespace
 
 namespace quantum::editor
 {
+    std::string_view editorIconFileName(const EditorIcon icon)
+    {
+        const std::size_t index = static_cast<std::size_t>(icon);
+        if (index >= editorIconFileNames.size())
+        {
+            throw std::invalid_argument("Invalid editor icon.");
+        }
+        return editorIconFileNames[index];
+    }
+
     void EditorIcons::load(const std::filesystem::path& basePath)
     {
-        constexpr std::array<const char*, iconCount> fileNames{
-            "mouse-pointer-2.svg",
-            "move-3d.svg",
-            "rotate-3d.svg",
-            "orbit.svg",
-            "hand.svg",
-            "focus.svg",
-            "camera.svg",
-            "axis-3d.svg",
-            "maximize.svg",
-            "play.svg",
-            "settings.svg"
-        };
         const std::filesystem::path iconDirectory =
             basePath / "assets/icons/lucide";
         std::array<Drawing, iconCount> loadedDrawings;
 
-        for (std::size_t index = 0; index < fileNames.size(); ++index)
+        for (std::size_t index = 0; index < loadedDrawings.size(); ++index)
         {
-            const std::filesystem::path path = iconDirectory / fileNames[index];
+            const std::filesystem::path path = iconDirectory
+                / editorIconFileName(static_cast<EditorIcon>(index));
             try
             {
                 ParsedDrawing parsed = parseSvg(readFile(path));

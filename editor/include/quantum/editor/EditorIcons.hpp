@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <string_view>
 #include <vector>
 
 namespace quantum::editor
@@ -21,10 +22,24 @@ namespace quantum::editor
         Camera,
         Axis,
         Maximize,
+        Open,
+        Save,
+        Undo,
+        Redo,
+        Eye,
+        EyeOff,
+        Lock,
+        Unlock,
+        ZoomIn,
+        ZoomOut,
         Play,
+        Pause,
+        Stop,
         Settings,
         Count
     };
+
+    [[nodiscard]] std::string_view editorIconFileName(EditorIcon icon);
 
     struct EditorIconRenderStyle
     {
