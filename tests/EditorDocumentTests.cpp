@@ -486,7 +486,7 @@ namespace
         DocumentState state;
         requireEqual(
             state.windowTitle(),
-            "QUANTUM Editor \xe2\x80\x94 Untitled",
+            "QUANTUM \xe2\x80\x94 Untitled",
             "untitled clean title");
     }
 
@@ -496,7 +496,7 @@ namespace
         state.markDirty();
         requireEqual(
             state.windowTitle(),
-            "QUANTUM Editor \xe2\x80\x94 Untitled *",
+            "QUANTUM \xe2\x80\x94 Untitled *",
             "untitled dirty title");
     }
 
@@ -507,7 +507,7 @@ namespace
             std::filesystem::path("MyCoaster.quantum"));
         requireEqual(
             state.windowTitle(),
-            "QUANTUM Editor \xe2\x80\x94 MyCoaster.quantum",
+            "QUANTUM \xe2\x80\x94 MyCoaster.quantum",
             "file clean title");
     }
 
@@ -519,7 +519,7 @@ namespace
         state.markDirty();
         requireEqual(
             state.windowTitle(),
-            "QUANTUM Editor \xe2\x80\x94 MyCoaster.quantum *",
+            "QUANTUM \xe2\x80\x94 MyCoaster.quantum *",
             "file dirty title");
     }
 

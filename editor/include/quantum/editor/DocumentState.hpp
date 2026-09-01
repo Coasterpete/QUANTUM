@@ -56,7 +56,7 @@ namespace quantum::editor
         // "Untitled" when no path is set.
         [[nodiscard]] std::string displayName() const;
 
-        // Full window title: "QUANTUM Editor — <display> [*]"
+        // Full window title: "QUANTUM — <display> [*]"
         [[nodiscard]] std::string windowTitle() const;
 
     private:

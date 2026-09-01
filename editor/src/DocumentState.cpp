@@ -61,7 +61,7 @@ namespace quantum::editor
 
     std::string DocumentState::windowTitle() const
     {
-        std::string title = "QUANTUM Editor \xe2\x80\x94 ";
+        std::string title = "QUANTUM \xe2\x80\x94 ";
         title += displayName();
 
         if (dirty_)
