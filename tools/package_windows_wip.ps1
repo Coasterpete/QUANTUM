@@ -143,7 +143,9 @@ $ForbiddenExtensions = @(
     ".hpp",
     ".h",
     ".obj",
-    ".pdb"
+    ".pdb",
+    ".blend",
+    ".blend1"
 )
 
 $ForbiddenFiles = Get-ChildItem `

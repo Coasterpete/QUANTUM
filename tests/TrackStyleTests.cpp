@@ -69,8 +69,10 @@ namespace
         require(style.railCount == 2 && style.railOffsets.size() == 2,
             "default dual rail count");
         require(style.repeatingHardware.size() == 1
-                && style.repeatingHardware.front().asset.placeholder,
-            "default hardware is explicitly a placeholder");
+                && style.repeatingHardware.front().asset.placeholder
+                && style.repeatingHardware.front().asset.path
+                    == "assets://track/test-crosstie-placeholder.glb",
+            "default hardware is the explicit file-backed test placeholder");
     }
 
     void meshGenerationIsDeterministicAndIndexed()
@@ -219,6 +221,31 @@ namespace
         requireInvalid([](auto& style) {
             style.repeatingHardware[0].asset.path.clear();
         }, "missing required asset reference rejected");
+        requireInvalid([](auto& style) {
+            style.repeatingHardware[0].asset.path =
+                "C:/art/crosstie.glb";
+        }, "absolute hardware path rejected");
+        requireInvalid([](auto& style) {
+            style.repeatingHardware[0].asset.path =
+                "assets://track/../../outside.glb";
+        }, "hardware path traversal rejected");
+        requireInvalid([](auto& style) {
+            style.repeatingHardware[0].asset.path =
+                "assets://models/crosstie.glb";
+        }, "hardware outside assets track rejected");
+        requireInvalid([](auto& style) {
+            style.repeatingHardware[0].asset.path =
+                "assets://track/crosstie.gltf";
+        }, "non-GLB hardware rejected");
+
+        require(normalizeTrackHardwareAssetIdentifier(
+                "assets://track\\standard-dual-rail\\.\\crosstie.glb")
+                == "assets://track/standard-dual-rail/crosstie.glb",
+            "logical track hardware identity normalizes package separators");
+        require(normalizeTrackHardwareAssetIdentifier(
+                "builtin://diagnostic/track-hardware-placeholder")
+                == "builtin://diagnostic/track-hardware-placeholder",
+            "diagnostic builtin remains a valid authored hardware identity");
     }
 }
 

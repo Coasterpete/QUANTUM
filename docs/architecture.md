@@ -20,12 +20,15 @@ code.
 
 `QuantumEngine` is the Vulkan renderer library. `VulkanContext` owns the
 current Vulkan instance, presentation surface, selected device and queues,
-VMA allocator, swapchain, viewport line pipeline, viewport-aid and dynamic
-track-curve buffers, offscreen viewport color/depth attachments, command
-resources, and synchronization resources. SDL3 supplies the native window and
-Vulkan surface integration.
+VMA allocator, swapchain, viewport and track pipelines, renderer-side static
+mesh cache, GPU mesh allocations, viewport-aid and dynamic track/instance
+buffers, offscreen viewport color/depth attachments, command resources, and
+synchronization resources. SDL3 supplies the native window and Vulkan surface
+integration. It consumes renderer-neutral generated geometry and asset
+references from `QuantumCore`; Core does not depend on the renderer.
 
-`QuantumEngine` does not currently link to `QuantumCore`.
+The deliberately small Blender/GLB contract and asset lifetime boundary are
+documented in [`static-mesh-assets.md`](static-mesh-assets.md).
 
 ### `QUANTUM` Editor
 
@@ -40,17 +43,20 @@ edit buffers; it does not own the authored document.
 QuantumCore                         QuantumEngine
   |-- GLM                              |-- Vulkan
   +-- nlohmann JSON                    |-- VMA
+             \                         |-- nlohmann JSON (GLB metadata)
+              +----------------------->+-- QuantumCore renderable types
                                       +-- SDL3 platform integration
-        \                              /
-         +-------- QUANTUM Editor ----+
+                                       /
+                    QUANTUM Editor ---+
                     |-- Application orchestration
                     |-- Dear ImGui editor state
                     +-- SDL3 application/window lifetime
 ```
 
-`QuantumCore` and `QuantumEngine` do not depend on each other. The Editor is
-the composition root that translates Core-generated, double-precision solved
-states into renderer line vertices.
+`QuantumEngine` consumes renderer-neutral renderable types from `QuantumCore`;
+the dependency never points back into the renderer. The Editor remains the
+composition root that coordinates authored state, Core generation, renderer
+uploads, and UI state.
 
 The current authored-to-rendered data flow is:
 
@@ -129,8 +135,10 @@ conventions implemented by `applyRoll`, `applyLocalPitch`, and `applyLocalYaw`.
 
 `quantum::coaster::AuthoredTrack` is the ordered authored coaster document used
 by the Editor. It owns the layout intent (`Circuit` or `Shuttle`), one global
-`AuthoredStartPose`, `TrackPhysicalSettings`, and an ordered sequence of
-`AuthoredTrackSection` values.
+`AuthoredStartPose`, `TrackPhysicalSettings`, one `TrackStylePreset`, and an
+ordered sequence of `AuthoredTrackSection` values. The track style includes the
+logical repeating-hardware asset identity and its spacing, phase, and local
+transform; renderer cache entries and GPU handles are not document state.
 The start pose stores a world position and normalized quaternion that rotates
 the canonical local `(T, L, U)` axes into the initial rider frame. The UI calls
 the ordered section values regions; the Core type retains the established
@@ -148,10 +156,13 @@ can produce an empty `AuthoredTrack` for assembly and tests, but whole-track
 generation rejects an empty track.
 
 The current JSON document format serializes the layout mode, authored start
-pose, physical settings, and every authored region. Documents that predate the `startPose` field
-load with the original origin/identity pose. Deserialization constructs a new
-document and accepts it only after Core validation; it does not partially
-mutate an existing document on failure.
+pose, physical settings, track style, and every authored region. Track-hardware
+assets remain package-relative logical IDs such as `assets://track/...`.
+Documents that predate the `startPose` field load with the original
+origin/identity pose, and documents that predate `trackStyle` load the standard
+dual-rail preset. Deserialization constructs a new document and accepts it only
+after Core validation; it does not partially mutate an existing document on
+failure.
 
 ### Implemented region kinds
 
@@ -602,6 +613,13 @@ curves, centerline camera bounds, and Force Diagnostics through the canonical
 Core path before commit. A rejected candidate cancels the gizmo and returns it
 to the committed Anchor 0 pose; continuous frames remain Trace-level and one
 Info summary is emitted when a successful drag finishes.
+
+Track-hardware asset and placement controls also edit the candidate
+`AuthoredTrack`. Numeric drags publish live candidates and coalesce into one
+history entry per gesture. Because history snapshots the complete authored
+track, asset, spacing, phase, local position, local rotation, and local scale
+changes participate in the same Undo/Redo and saved-baseline semantics as
+region edits.
 
 Editor-visible effects derived from an authored edit become authoritative only
 after successful commit. This keeps the document, generated geometry, GPU

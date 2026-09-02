@@ -213,6 +213,73 @@ namespace
                 == openedSnapshot,
             "coalesced drag Undo must restore its pre-gesture state");
     }
+
+    void trackHardwareEditsUndoAndRedo()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+
+        auto setHardware = [&](const auto& edit, const bool continuous = false)
+        {
+            auto style = track.trackStyle();
+            edit(style.repeatingHardware.front());
+            track.setTrackStyle(style);
+            history.record(track, continuous);
+        };
+
+        setHardware([](auto& hardware) {
+            hardware.asset.path =
+                "assets://track/standard-dual-rail/crosstie.glb";
+            hardware.asset.placeholder = false;
+        });
+        setHardware([](auto& hardware) { hardware.spacing = 2.25; });
+        setHardware([](auto& hardware) {
+            hardware.localPosition = {0.1, -0.2, 0.3};
+        });
+        setHardware([](auto& hardware) {
+            hardware.localRotation = {0.2, 0.3, 0.4};
+        });
+        setHardware([](auto& hardware) {
+            hardware.localScale = {1.1, 1.2, 1.3};
+        });
+
+        AuthoredTrack state = requireState(history.undo(), "scale Undo missing");
+        require(state.trackStyle().repeatingHardware.front().localScale
+                == glm::dvec3{1.0},
+            "hardware scale Undo must restore the prior value");
+        state = requireState(history.undo(), "rotation Undo missing");
+        require(state.trackStyle().repeatingHardware.front().localRotation
+                == glm::dvec3{0.0},
+            "hardware rotation Undo must restore the prior value");
+        state = requireState(history.undo(), "position Undo missing");
+        require(state.trackStyle().repeatingHardware.front().localPosition
+                == glm::dvec3{0.0, 0.0, -0.11},
+            "hardware position Undo must restore the preset value");
+        state = requireState(history.undo(), "spacing Undo missing");
+        require(state.trackStyle().repeatingHardware.front().spacing == 1.5,
+            "hardware spacing Undo must restore the preset value");
+        state = requireState(history.undo(), "asset Undo missing");
+        require(state.trackStyle().repeatingHardware.front().asset.path
+                == "assets://track/test-crosstie-placeholder.glb",
+            "hardware asset Undo must restore the preset logical ID");
+        state = requireState(history.redo(), "asset Redo missing");
+        require(state.trackStyle().repeatingHardware.front().asset.path
+                == "assets://track/standard-dual-rail/crosstie.glb",
+            "hardware asset Redo must restore the authored logical ID");
+
+        history.reset(state);
+        track = state;
+        for (const double spacing : {1.7, 1.9, 2.1})
+        {
+            setHardware([spacing](auto& hardware) {
+                hardware.spacing = spacing;
+            }, true);
+        }
+        history.endContinuousEdit();
+        require(history.size() == 2,
+            "one hardware drag must coalesce into one history entry");
+    }
 }
 
 int main()
@@ -225,6 +292,7 @@ int main()
         rejectedTransactionDoesNotEnterHistory();
         dirtyStateTracksSavedRevision();
         newOpenResetAndContinuousCoalescing();
+        trackHardwareEditsUndoAndRedo();
     }
     catch (const std::exception& exception)
     {

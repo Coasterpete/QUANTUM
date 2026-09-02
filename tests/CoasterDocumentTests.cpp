@@ -805,6 +805,38 @@ namespace
             "Empty sections error");
     }
 
+    void trackHardwareRoundTrip()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        auto style = track.trackStyle();
+        auto& hardware = style.repeatingHardware.front();
+        hardware.asset = {
+            "assets://track/standard-dual-rail/crosstie.glb", false};
+        hardware.spacing = 2.125;
+        hardware.startOffset = 0.375;
+        hardware.localPosition = {0.1, -0.2, 0.3};
+        hardware.localRotation = {0.2, 0.4, -0.6};
+        hardware.localScale = {1.1, 1.2, 1.3};
+        track.setTrackStyle(style);
+
+        const std::string serialized = serializeCoasterDocument(track);
+        const auto restored = deserializeCoasterDocument(serialized);
+        requireValidDocument(restored, "track hardware round-trip");
+        const auto& restoredHardware =
+            restored->trackStyle().repeatingHardware.front();
+        require(restoredHardware.asset.path == hardware.asset.path,
+            "logical hardware asset ID must survive Save/Open");
+        require(restoredHardware.spacing == hardware.spacing
+                && restoredHardware.startOffset == hardware.startOffset,
+            "hardware longitudinal placement must survive Save/Open");
+        require(restoredHardware.localPosition == hardware.localPosition
+                && restoredHardware.localRotation == hardware.localRotation
+                && restoredHardware.localScale == hardware.localScale,
+            "hardware local transform must survive Save/Open");
+        require(serializeCoasterDocument(*restored) == serialized,
+            "hardware serialization must remain deterministic");
+    }
+
     // ----------------------------------------------------------------
     // Test runner
     // ----------------------------------------------------------------
@@ -839,6 +871,7 @@ namespace
             {"InvalidChannelDataRejection",     invalidChannelDataRejection},
             {"InvalidPlanarArcDataRejection",   invalidPlanarArcDataRejection},
             {"EmptySectionsRejection",           emptySectionsRejection},
+            {"TrackHardwareRoundTrip",           trackHardwareRoundTrip},
         };
 
         std::size_t failures = 0;

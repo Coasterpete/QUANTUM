@@ -4,6 +4,7 @@
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/coaster/TrackTopology.hpp>
 #include <quantum/editor/EditorStyle.hpp>
+#include <quantum/editor/PlatformDialogs.hpp>
 #include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/editor/ViewportPicking.hpp>
@@ -366,6 +367,7 @@ namespace
         // Present when the user picked an authoring type in the create
         // flow; the append/prepend direction lives in RegionCreateFlow.
         std::optional<quantum::coaster::RegionKind> createdRegionKind;
+        std::optional<quantum::editor::TrackHardwareEdit> hardwareEdit;
     };
 
     [[nodiscard]] float squaredDistance(
@@ -2079,14 +2081,309 @@ namespace
         return height;
     }
 
+    [[nodiscard]] std::optional<quantum::editor::TrackHardwareEdit>
+    showTrackHardwareControls(
+        const quantum::coaster::AuthoredTrack& track,
+        const quantum::renderer::VulkanContext& vulkan,
+        SDL_Window* const window,
+        std::array<char, 512>& assetIdBuffer,
+        std::string& assetIdBufferSource,
+        std::string& editError,
+        bool& dragActive)
+    {
+        using quantum::coaster::RepeatingHardwareStyle;
+        using quantum::editor::TrackHardwareEdit;
+        using quantum::editor::TrackHardwareEditType;
+
+        const auto& hardwareStyles = track.trackStyle().repeatingHardware;
+        if (hardwareStyles.empty())
+        {
+            ImGui::TextWrapped("This track style has no repeating hardware.");
+            if (ImGui::SmallButton("Restore diagnostic placeholder"))
+            {
+                RepeatingHardwareStyle hardware = quantum::coaster::
+                    createStandardDualRailPreset().repeatingHardware.front();
+                hardware.asset = {
+                    std::string(quantum::renderer::diagnosticHardwareAssetId),
+                    true};
+                return TrackHardwareEdit{
+                    TrackHardwareEditType::RestoreDiagnosticPlaceholder,
+                    std::move(hardware), false};
+            }
+            return std::nullopt;
+        }
+
+        const RepeatingHardwareStyle& committed = hardwareStyles.front();
+        if (assetIdBufferSource != committed.asset.path
+            && !ImGui::IsAnyItemActive())
+        {
+            std::snprintf(assetIdBuffer.data(), assetIdBuffer.size(), "%s",
+                committed.asset.path.c_str());
+            assetIdBufferSource = committed.asset.path;
+            editError.clear();
+        }
+
+        const auto validatedEdit = [&](RepeatingHardwareStyle candidate,
+            const bool continuous)
+            -> std::optional<TrackHardwareEdit>
+        {
+            try
+            {
+                quantum::coaster::TrackStylePreset style = track.trackStyle();
+                style.repeatingHardware.front() = candidate;
+                quantum::coaster::validateTrackStyle(style);
+                editError.clear();
+                return TrackHardwareEdit{
+                    TrackHardwareEditType::SetConfiguration,
+                    std::move(candidate), continuous};
+            }
+            catch (const std::exception& exception)
+            {
+                editError = exception.what();
+                return std::nullopt;
+            }
+        };
+
+        ImGui::TextDisabled("Hardware asset");
+        ImGui::SetNextItemWidth(-1.0F);
+        const bool submitted = ImGui::InputText(
+            "##TrackHardwareAssetId",
+            assetIdBuffer.data(), assetIdBuffer.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+
+        bool applyRequested = submitted;
+        if (ImGui::SmallButton("Apply asset"))
+            applyRequested = true;
+        itemTooltip("Apply the package-relative logical asset ID");
+        sameLineIfFits(buttonWidth("Choose GLB..."));
+        if (ImGui::SmallButton("Choose GLB..."))
+        {
+            if (const auto selected =
+                    quantum::editor::openTrackHardwareFileDialog(window))
+            {
+                const auto logicalId = quantum::editor::
+                    trackHardwareAssetIdFromPath(
+                        *selected, vulkan.runtimeAssetRoot());
+                if (logicalId)
+                {
+                    std::snprintf(assetIdBuffer.data(), assetIdBuffer.size(),
+                        "%s", logicalId->c_str());
+                    assetIdBufferSource = *logicalId;
+                    RepeatingHardwareStyle candidate = committed;
+                    candidate.asset.path = *logicalId;
+                    candidate.asset.placeholder = false;
+                    return validatedEdit(std::move(candidate), false);
+                }
+                editError = logicalId.error();
+            }
+        }
+
+        if (applyRequested)
+        {
+            try
+            {
+                const std::string logicalId = quantum::coaster::
+                    normalizeTrackHardwareAssetIdentifier(
+                        assetIdBuffer.data());
+                std::snprintf(assetIdBuffer.data(), assetIdBuffer.size(),
+                    "%s", logicalId.c_str());
+                assetIdBufferSource = logicalId;
+                RepeatingHardwareStyle candidate = committed;
+                candidate.asset.path = logicalId;
+                candidate.asset.placeholder = logicalId
+                    == quantum::renderer::diagnosticHardwareAssetId
+                    || logicalId
+                        == "assets://track/test-crosstie-placeholder.glb";
+                return validatedEdit(std::move(candidate), false);
+            }
+            catch (const std::exception& exception)
+            {
+                editError = exception.what();
+            }
+        }
+
+        if (!editError.empty())
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                quantum::editor::palette::error);
+            ImGui::TextWrapped("%s", editError.c_str());
+            ImGui::PopStyleColor();
+        }
+
+        std::string resolved;
+        if (committed.asset.path.starts_with("assets://"))
+            resolved = "assets/" + committed.asset.path.substr(9);
+        else
+            resolved = "built-in diagnostic mesh";
+        ImGui::TextDisabled("Resolved: %s", resolved.c_str());
+
+        if (const auto status = vulkan.hardwareAssetLoadStatus(
+                committed.asset.path))
+        {
+            const bool loaded = status->state
+                == quantum::renderer::HardwareAssetLoadState::Loaded;
+            ImGui::TextColored(loaded
+                    ? quantum::editor::palette::accent
+                    : quantum::editor::palette::error,
+                "%s", quantum::renderer::hardwareAssetLoadStateName(
+                    status->state));
+            if (!status->detail.empty()
+                && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+            {
+                ImGui::SetTooltip("%s", status->detail.c_str());
+            }
+            if (status->usingDiagnosticFallback)
+            {
+                ImGui::SameLine();
+                ImGui::TextColored(quantum::editor::palette::warning,
+                    "Using diagnostic fallback");
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled("Not loaded yet");
+        }
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Placement");
+        const auto dragValue = [&](const char* label, const char* id,
+            double* values,
+            const int components, const float speed,
+            const double* minimum = nullptr,
+            const double* maximum = nullptr)
+        {
+            ImGui::TextDisabled("%s", label);
+            ImGui::SetNextItemWidth(-1.0F);
+            const bool changed = ImGui::DragScalarN(
+                id, ImGuiDataType_Double, values, components, speed,
+                minimum, maximum, "%.3f",
+                minimum != nullptr ? ImGuiSliderFlags_AlwaysClamp
+                                   : ImGuiSliderFlags_None);
+            dragActive = dragActive || ImGui::IsItemActive();
+            return std::pair{changed, ImGui::IsItemActive()};
+        };
+
+        RepeatingHardwareStyle candidate = committed;
+        double spacing = committed.spacing;
+        const double positiveMinimum = 0.001;
+        const double placementMaximum = 100000.0;
+        if (const auto [changed, active] = dragValue(
+                "Spacing", "##HardwareSpacing", &spacing, 1, 0.02F,
+                &positiveMinimum, &placementMaximum); changed)
+        {
+            candidate.spacing = spacing;
+            return validatedEdit(std::move(candidate), active);
+        }
+        double phase = committed.startOffset;
+        const double zeroMinimum = 0.0;
+        if (const auto [changed, active] = dragValue(
+                "Start offset", "##HardwareStartOffset", &phase, 1, 0.02F,
+                &zeroMinimum, &placementMaximum); changed)
+        {
+            candidate.startOffset = phase;
+            return validatedEdit(std::move(candidate), active);
+        }
+
+        double position[3]{committed.localPosition.x,
+            committed.localPosition.y, committed.localPosition.z};
+        if (const auto [changed, active] = dragValue(
+                "Local position XYZ", "##HardwareLocalPosition",
+                position, 3, 0.01F); changed)
+        {
+            candidate.localPosition = {position[0], position[1], position[2]};
+            return validatedEdit(std::move(candidate), active);
+        }
+
+        double rotationDegrees[3]{
+            committed.localRotation.x * degreesPerRadian,
+            committed.localRotation.y * degreesPerRadian,
+            committed.localRotation.z * degreesPerRadian};
+        if (const auto [changed, active] = dragValue(
+                "Local rotation XYZ (deg)", "##HardwareLocalRotation",
+                rotationDegrees, 3, 0.25F);
+            changed)
+        {
+            candidate.localRotation = {
+                rotationDegrees[0] * radiansPerDegree,
+                rotationDegrees[1] * radiansPerDegree,
+                rotationDegrees[2] * radiansPerDegree};
+            return validatedEdit(std::move(candidate), active);
+        }
+
+        double scale[3]{committed.localScale.x,
+            committed.localScale.y, committed.localScale.z};
+        const double scaleMaximum = 1000.0;
+        if (const auto [changed, active] = dragValue(
+                "Local scale XYZ", "##HardwareLocalScale", scale, 3, 0.01F,
+                &positiveMinimum, &scaleMaximum); changed)
+        {
+            candidate.localScale = {scale[0], scale[1], scale[2]};
+            return validatedEdit(std::move(candidate), active);
+        }
+
+        ImGui::Spacing();
+        if (ImGui::SmallButton("Reset placement"))
+        {
+            const RepeatingHardwareStyle defaults = quantum::coaster::
+                createStandardDualRailPreset().repeatingHardware.front();
+            RepeatingHardwareStyle reset = committed;
+            reset.spacing = defaults.spacing;
+            reset.startOffset = defaults.startOffset;
+            reset.localPosition = defaults.localPosition;
+            reset.localRotation = defaults.localRotation;
+            reset.localScale = defaults.localScale;
+            return TrackHardwareEdit{
+                TrackHardwareEditType::ResetPlacement,
+                std::move(reset), false};
+        }
+        itemTooltip("Restore spacing, offset, rotation, and scale preset defaults");
+        sameLineIfFits(buttonWidth("Reload Hardware"));
+        ImGui::BeginDisabled(!committed.asset.path.starts_with("assets://"));
+        if (ImGui::SmallButton("Reload Hardware"))
+        {
+            ImGui::EndDisabled();
+            return TrackHardwareEdit{
+                TrackHardwareEditType::ReloadAsset, committed, false};
+        }
+        ImGui::EndDisabled();
+        itemTooltip("Reload only this GLB after exporting it again from Blender");
+
+        if (ImGui::SmallButton("Use diagnostic placeholder"))
+        {
+            RepeatingHardwareStyle diagnostic = committed;
+            diagnostic.asset = {
+                std::string(quantum::renderer::diagnosticHardwareAssetId), true};
+            return TrackHardwareEdit{
+                TrackHardwareEditType::RestoreDiagnosticPlaceholder,
+                std::move(diagnostic), false};
+        }
+
+        ImGui::TextDisabled("(?) Blender export expectations");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+        {
+            ImGui::SetTooltip(
+                "Blender export expectations:\n"
+                "- meters\n- +X track-forward\n- +Y lateral\n- +Z up\n"
+                "- apply transforms/modifiers\n"
+                "- export one selected mesh as GLB with normals");
+        }
+        return std::nullopt;
+    }
+
     [[nodiscard]] TrackWorkspaceEdit showTrackWorkspace(
         const quantum::coaster::AuthoredTrack& track,
+        const quantum::renderer::VulkanContext& vulkan,
+        SDL_Window* const window,
         const std::size_t selectedIndex,
         double* const sectionLengthEdit,
         quantum::editor::RegionCreateFlow& regionCreateFlow,
         const std::optional<double>& selectedHeightDelta,
         const quantum::coaster::TrackTopology& topology,
-        const quantum::editor::EditorFonts& fonts)
+        const quantum::editor::EditorFonts& fonts,
+        std::array<char, 512>& hardwareAssetIdBuffer,
+        std::string& hardwareAssetIdBufferSource,
+        std::string& hardwareEditError,
+        bool& hardwareDragActive)
     {
         TrackWorkspaceEdit edit;
         ImGui::Begin(trackWorkspaceWindowName);
@@ -2386,11 +2683,14 @@ namespace
                     edit.completeCircuitRequested = true;
                 }
             }
-            if (ImGui::TreeNode("Planned properties"))
+            ImGui::Spacing();
+            if (ImGui::TreeNodeEx(
+                    "Track Hardware", ImGuiTreeNodeFlags_DefaultOpen))
             {
-                ImGui::BeginDisabled();
-                ImGui::TextWrapped("Track style, mechanism segments, and track segment properties are not available yet.");
-                ImGui::EndDisabled();
+                edit.hardwareEdit = showTrackHardwareControls(
+                    track, vulkan, window, hardwareAssetIdBuffer,
+                    hardwareAssetIdBufferSource, hardwareEditError,
+                    hardwareDragActive);
                 ImGui::TreePop();
             }
         }
@@ -5389,6 +5689,7 @@ namespace quantum::editor
             ImGui::GetStyle().FontScaleDpi = 1.0F;
         }
         ImGui::NewFrame();
+        hardwareDragActive_ = false;
 
         if (captureSetupPending_)
         {
@@ -5939,13 +6240,24 @@ namespace quantum::editor
 
         const TrackWorkspaceEdit workspaceEdit = showTrackWorkspace(
             *authoredTrack_,
+            vulkan,
+            window_,
             selectedSection_,
             &sectionLengthEditBuffer_,
             regionCreateFlow_,
             selectedRegionHeightDelta,
             quantum::coaster::computeTrackTopology(*authoredTrack_),
-            fonts_
+            fonts_,
+            hardwareAssetIdBuffer_,
+            hardwareAssetIdBufferSource_,
+            hardwareAssetInputError_,
+            hardwareDragActive_
         );
+
+        if (workspaceEdit.hardwareEdit.has_value())
+        {
+            trackHardwareEdit_ = workspaceEdit.hardwareEdit;
+        }
 
         if (workspaceEdit.selectRequest.has_value())
         {
@@ -6658,6 +6970,14 @@ namespace quantum::editor
         return edit;
     }
 
+    std::optional<TrackHardwareEdit>
+    EditorUi::takeTrackHardwareEdit() noexcept
+    {
+        const auto edit = trackHardwareEdit_;
+        trackHardwareEdit_.reset();
+        return edit;
+    }
+
     void EditorUi::rejectStartPoseManipulation() noexcept
     {
         startPoseEdit_.reset();
@@ -7008,6 +7328,11 @@ namespace quantum::editor
         selectedSection_ = 0;
         startPoseManipulation_.reset();
         startPoseEdit_.reset();
+        hardwareAssetIdBuffer_.fill('\0');
+        hardwareAssetIdBufferSource_.clear();
+        hardwareAssetInputError_.clear();
+        hardwareDragActive_ = false;
+        trackHardwareEdit_.reset();
         valueEndEditBuffers_.fill(0.0);
         endpointSelections_.fill(ScalarProfileEndpoint::None);
         endpointDrags_.fill(ScalarProfileEndpoint::None);
@@ -7074,6 +7399,7 @@ namespace quantum::editor
     bool EditorUi::documentDragActive() const noexcept
     {
         return startPoseManipulation_.has_value()
+            || hardwareDragActive_
             || firstActiveEndpoint(endpointDrags_)
                 != ScalarProfileEndpoint::None;
     }
@@ -7102,6 +7428,11 @@ namespace quantum::editor
         startPoseTransformMode_ = StartPoseTransformMode::Move;
         startPoseManipulation_.reset();
         startPoseEdit_.reset();
+        hardwareAssetIdBuffer_.fill('\0');
+        hardwareAssetIdBufferSource_.clear();
+        hardwareAssetInputError_.clear();
+        hardwareDragActive_ = false;
+        trackHardwareEdit_.reset();
         if (riderLoadDiagnostics_.sectionCount() > 0)
         {
             riderLoadDiagnostics_.selectSection(0);

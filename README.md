@@ -193,6 +193,12 @@ Right Rail
 Heartline
 ```
 
+The first static-mesh seam also loads the explicitly labeled Blender-authored
+test crosstie fixture once and reuses it through the existing hardware
+instancing path. Its limited authoring/import contract is documented in
+[`docs/static-mesh-assets.md`](docs/static-mesh-assets.md); production track
+artwork and materials remain future work.
+
 Rail offsets follow the solved rider-local lateral direction, while the heartline follows rider-local up. This makes banking and frame orientation readable before final rail/spine/cross-tie meshes are implemented.
 
 The data path remains conceptually:

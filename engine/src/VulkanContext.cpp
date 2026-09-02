@@ -1,6 +1,7 @@
 // VMA requires its implementation macro in exactly one translation unit.
 #define VMA_IMPLEMENTATION
 #include <quantum/engine/Logging.hpp>
+#include <quantum/renderer/StaticMeshAssets.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 #include <quantum/renderer/ViewportAids.hpp>
 #include <SDL3/SDL_filesystem.h>
@@ -233,12 +234,10 @@ namespace
         }
         for (const auto& batch : track.hardwareBatches)
         {
-            if (batch.asset.path
-                != "builtin://diagnostic/track-hardware-placeholder")
+            if (batch.asset.path.empty())
             {
-                throw std::runtime_error(
-                    "No static mesh importer is configured for repeating-hardware asset: "
-                    + batch.asset.path
+                throw std::invalid_argument(
+                    "VulkanContext requires a hardware asset identifier."
                 );
             }
             for (const auto& instance : batch.instances)
@@ -256,37 +255,6 @@ namespace
             }
         }
     }
-
-    [[nodiscard]] std::array<quantum::coaster::TrackMeshVertex, 8>
-    diagnosticHardwareVertices()
-    {
-        constexpr float n = 0.57735026919F;
-        return {{
-            {{-0.5F, -0.5F, -0.5F}, {-n, -n, -n}},
-            {{ 0.5F, -0.5F, -0.5F}, { n, -n, -n}},
-            {{ 0.5F,  0.5F, -0.5F}, { n,  n, -n}},
-            {{-0.5F,  0.5F, -0.5F}, {-n,  n, -n}},
-            {{-0.5F, -0.5F,  0.5F}, {-n, -n,  n}},
-            {{ 0.5F, -0.5F,  0.5F}, { n, -n,  n}},
-            {{ 0.5F,  0.5F,  0.5F}, { n,  n,  n}},
-            {{-0.5F,  0.5F,  0.5F}, {-n,  n,  n}}
-        }};
-    }
-
-    constexpr std::array<std::uint32_t, 36> diagnosticHardwareTriangles{
-        0, 2, 1, 0, 3, 2,
-        4, 5, 6, 4, 6, 7,
-        0, 1, 5, 0, 5, 4,
-        1, 2, 6, 1, 6, 5,
-        2, 3, 7, 2, 7, 6,
-        3, 0, 4, 3, 4, 7
-    };
-
-    constexpr std::array<std::uint32_t, 24> diagnosticHardwareEdges{
-        0, 1, 1, 2, 2, 3, 3, 0,
-        4, 5, 5, 6, 6, 7, 7, 4,
-        0, 4, 1, 5, 2, 6, 3, 7
-    };
 
     // The track-curve stream carries complete line segments: each consecutive
     // vertex pair is one independent segment, and the stream concatenates
@@ -692,6 +660,12 @@ namespace
     };
 
     static_assert(sizeof(std::array<float, 16>) == 16 * sizeof(float));
+    static_assert(sizeof(quantum::renderer::StaticMeshVertex)
+        == sizeof(quantum::coaster::TrackMeshVertex));
+    static_assert(offsetof(quantum::renderer::StaticMeshVertex, position)
+        == offsetof(quantum::coaster::TrackMeshVertex, position));
+    static_assert(offsetof(quantum::renderer::StaticMeshVertex, normal)
+        == offsetof(quantum::coaster::TrackMeshVertex, normal));
 
     [[noreturn]] void throwVulkanError(
         const std::string_view operation,
@@ -705,7 +679,7 @@ namespace
         );
     }
 
-    std::filesystem::path shaderPath(const std::string_view fileName)
+    std::filesystem::path executableBasePath()
     {
         const char* const basePath = SDL_GetBasePath();
 
@@ -716,7 +690,12 @@ namespace
             );
         }
 
-        return std::filesystem::path(basePath) / "shaders" / fileName;
+        return std::filesystem::path(basePath);
+    }
+
+    std::filesystem::path shaderPath(const std::string_view fileName)
+    {
+        return executableBasePath() / "shaders" / fileName;
     }
 
     std::vector<std::uint32_t> readSpirv(
@@ -1110,6 +1089,8 @@ namespace quantum::renderer
             trackVerticesPerCurve
         );
         requireValidRenderableTrack(renderableTrack);
+
+        staticMeshAssets_.setRuntimeRoot(executableBasePath());
 
         window_ = window;
         frameReadbackEnabled_ = enableFrameReadback;
@@ -2632,6 +2613,103 @@ namespace quantum::renderer
         trackVerticesPerCurve_ = trackVerticesPerCurve;
     }
 
+    StaticMeshGpuHandle VulkanContext::uploadStaticMeshOnce(
+        const StaticMeshAsset& asset)
+    {
+        return staticMeshGpuHandles_.getOrUpload(
+            asset,
+            [this](const StaticMeshAsset& meshAsset)
+            {
+                if (availableHardwareMeshHandles_.empty()
+                    && hardwareMeshes_.size()
+                    >= std::numeric_limits<std::uint32_t>::max())
+                {
+                    throw std::length_error(
+                        "The static mesh GPU table exceeds 32-bit handles.");
+                }
+
+                GpuStaticMesh uploaded;
+                const auto destroyUploaded = [this, &uploaded]() noexcept
+                {
+                    if (uploaded.vertexBuffer != VK_NULL_HANDLE)
+                    {
+                        vmaDestroyBuffer(allocator_, uploaded.vertexBuffer,
+                            uploaded.vertexAllocation);
+                        uploaded.vertexBuffer = VK_NULL_HANDLE;
+                    }
+                    if (uploaded.triangleIndexBuffer != VK_NULL_HANDLE)
+                    {
+                        vmaDestroyBuffer(allocator_, uploaded.triangleIndexBuffer,
+                            uploaded.triangleIndexAllocation);
+                        uploaded.triangleIndexBuffer = VK_NULL_HANDLE;
+                    }
+                    if (uploaded.edgeIndexBuffer != VK_NULL_HANDLE)
+                    {
+                        vmaDestroyBuffer(allocator_, uploaded.edgeIndexBuffer,
+                            uploaded.edgeIndexAllocation);
+                        uploaded.edgeIndexBuffer = VK_NULL_HANDLE;
+                    }
+                };
+
+                try
+                {
+                    const CreatedBuffer vertexBuffer = createHostVisibleBuffer(
+                        allocator_,
+                        std::span<const StaticMeshVertex>{meshAsset.vertices},
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                        "static mesh vertex upload");
+                    uploaded.vertexBuffer = vertexBuffer.buffer;
+                    uploaded.vertexAllocation = vertexBuffer.allocation;
+                    uploaded.vertexCount = vertexBuffer.elementCount;
+
+                    const CreatedBuffer triangleBuffer = createHostVisibleBuffer(
+                        allocator_,
+                        std::span<const std::uint32_t>{meshAsset.triangleIndices},
+                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                        "static mesh triangle-index upload");
+                    uploaded.triangleIndexBuffer = triangleBuffer.buffer;
+                    uploaded.triangleIndexAllocation = triangleBuffer.allocation;
+                    uploaded.triangleIndexCount = triangleBuffer.elementCount;
+
+                    const CreatedBuffer edgeBuffer = createHostVisibleBuffer(
+                        allocator_,
+                        std::span<const std::uint32_t>{meshAsset.edgeIndices},
+                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                        "static mesh edge-index upload");
+                    uploaded.edgeIndexBuffer = edgeBuffer.buffer;
+                    uploaded.edgeIndexAllocation = edgeBuffer.allocation;
+                    uploaded.edgeIndexCount = edgeBuffer.elementCount;
+
+                    StaticMeshGpuHandle handle;
+                    if (availableHardwareMeshHandles_.empty())
+                    {
+                        handle.value = static_cast<std::uint32_t>(
+                            hardwareMeshes_.size());
+                        hardwareMeshes_.push_back(uploaded);
+                    }
+                    else
+                    {
+                        handle.value = availableHardwareMeshHandles_.back();
+                        availableHardwareMeshHandles_.pop_back();
+                        hardwareMeshes_.at(handle.value) = uploaded;
+                    }
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Info,
+                        "ASSET",
+                        "Uploaded static mesh once: %s (%u vertices, %u indices).",
+                        meshAsset.identifier.c_str(),
+                        uploaded.vertexCount,
+                        uploaded.triangleIndexCount);
+                    return handle;
+                }
+                catch (...)
+                {
+                    destroyUploaded();
+                    throw;
+                }
+            });
+    }
+
     void VulkanContext::updateRenderableTrack(
         const coaster::RenderableTrack& renderableTrack)
     {
@@ -2687,38 +2765,6 @@ namespace quantum::renderer
             renderableTrack.materials.front().baseColor.a
         };
 
-        if (hardwareVertexBuffer_ == VK_NULL_HANDLE)
-        {
-            const auto vertices = diagnosticHardwareVertices();
-            const CreatedBuffer vertexBuffer = createHostVisibleBuffer(
-                allocator_,
-                std::span<const coaster::TrackMeshVertex>{vertices},
-                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                "diagnostic hardware vertex upload"
-            );
-            hardwareVertexBuffer_ = vertexBuffer.buffer;
-            hardwareVertexAllocation_ = vertexBuffer.allocation;
-            hardwareVertexCount_ = vertexBuffer.elementCount;
-            const CreatedBuffer triangleBuffer = createHostVisibleBuffer(
-                allocator_,
-                std::span<const std::uint32_t>{diagnosticHardwareTriangles},
-                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                "diagnostic hardware triangle-index upload"
-            );
-            hardwareTriangleIndexBuffer_ = triangleBuffer.buffer;
-            hardwareTriangleIndexAllocation_ = triangleBuffer.allocation;
-            hardwareTriangleIndexCount_ = triangleBuffer.elementCount;
-            const CreatedBuffer edgeBuffer = createHostVisibleBuffer(
-                allocator_,
-                std::span<const std::uint32_t>{diagnosticHardwareEdges},
-                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                "diagnostic hardware edge-index upload"
-            );
-            hardwareEdgeIndexBuffer_ = edgeBuffer.buffer;
-            hardwareEdgeIndexAllocation_ = edgeBuffer.allocation;
-            hardwareEdgeIndexCount_ = edgeBuffer.elementCount;
-        }
-
         std::vector<coaster::HardwareInstance> instances;
         std::size_t totalInstanceCount = 0;
         for (const auto& batch : renderableTrack.hardwareBatches)
@@ -2734,6 +2780,9 @@ namespace quantum::renderer
         instances.reserve(totalInstanceCount);
         hardwareDrawBatches_.clear();
         hardwareDrawBatches_.reserve(renderableTrack.hardwareBatches.size());
+        hardwareAssetLoadStatuses_.clear();
+        hardwareAssetLoadStatuses_.reserve(
+            renderableTrack.hardwareBatches.size());
         for (const auto& batch : renderableTrack.hardwareBatches)
         {
             HardwareDrawBatch drawBatch;
@@ -2746,6 +2795,36 @@ namespace quantum::renderer
                 const glm::vec4 color = batch.materialOverride->baseColor;
                 drawBatch.baseColor = {color.r, color.g, color.b, color.a};
             }
+            HardwareAssetLoadStatus loadStatus;
+            loadStatus.requestedIdentifier = batch.asset.path;
+            std::shared_ptr<const StaticMeshAsset> meshAsset;
+            try
+            {
+                meshAsset = staticMeshAssets_.load(batch.asset.path);
+                loadStatus.usingDiagnosticFallback =
+                    meshAsset->identifier == diagnosticHardwareAssetId;
+            }
+            catch (const std::exception& exception)
+            {
+                loadStatus.state = classifyStaticMeshLoadFailure(
+                    exception.what());
+                loadStatus.usingDiagnosticFallback = true;
+                loadStatus.detail = exception.what();
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Error,
+                    "ASSET",
+                    "%s Falling back to %.*s for this hardware batch.",
+                    exception.what(),
+                    static_cast<int>(diagnosticHardwareAssetId.size()),
+                    diagnosticHardwareAssetId.data());
+                meshAsset = staticMeshAssets_.load(
+                    diagnosticHardwareAssetId);
+            }
+            if (!batch.instances.empty())
+            {
+                drawBatch.mesh = uploadStaticMeshOnce(*meshAsset);
+            }
+            hardwareAssetLoadStatuses_.push_back(std::move(loadStatus));
             instances.insert(
                 instances.end(), batch.instances.begin(), batch.instances.end());
             hardwareDrawBatches_.push_back(drawBatch);
@@ -2769,6 +2848,44 @@ namespace quantum::renderer
                 "track hardware instance upload"
             );
         }
+    }
+
+    void VulkanContext::reloadTrackHardwareAsset(
+        const std::string_view identifier,
+        const coaster::RenderableTrack& renderableTrack)
+    {
+        const std::string normalized =
+            normalizeStaticMeshAssetIdentifier(identifier);
+        if (!normalized.starts_with("assets://"))
+        {
+            throw std::invalid_argument(
+                "Only file-backed assets:// hardware can be reloaded.");
+        }
+
+        waitForFrameCompletion();
+        staticMeshAssets_.invalidate(normalized);
+        if (const auto handle = staticMeshGpuHandles_.invalidate(normalized))
+        {
+            GpuStaticMesh& mesh = hardwareMeshes_.at(handle->value);
+            if (mesh.vertexBuffer != VK_NULL_HANDLE)
+                vmaDestroyBuffer(allocator_, mesh.vertexBuffer,
+                    mesh.vertexAllocation);
+            if (mesh.triangleIndexBuffer != VK_NULL_HANDLE)
+                vmaDestroyBuffer(allocator_, mesh.triangleIndexBuffer,
+                    mesh.triangleIndexAllocation);
+            if (mesh.edgeIndexBuffer != VK_NULL_HANDLE)
+                vmaDestroyBuffer(allocator_, mesh.edgeIndexBuffer,
+                    mesh.edgeIndexAllocation);
+            mesh = {};
+            availableHardwareMeshHandles_.push_back(handle->value);
+        }
+
+        updateRenderableTrack(renderableTrack);
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Info,
+            "ASSET",
+            "Reloaded track hardware asset: %s",
+            normalized.c_str());
     }
 
     void VulkanContext::setTrackPresentationMode(
@@ -3044,22 +3161,24 @@ namespace quantum::renderer
                     vkCmdBindPipeline(commandBuffer_,
                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                         hardwareShadedPipeline_);
-                    const std::array hardwareBuffers{
-                        hardwareVertexBuffer_, hardwareInstanceBuffer_};
                     constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
-                    vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
-                        hardwareBuffers.data(), offsets.data());
-                    vkCmdBindIndexBuffer(commandBuffer_,
-                        hardwareTriangleIndexBuffer_, 0,
-                        VK_INDEX_TYPE_UINT32);
                     for (const HardwareDrawBatch& batch
                         : hardwareDrawBatches_)
                     {
                         if (batch.instanceCount == 0)
                             continue;
+                        const GpuStaticMesh& mesh =
+                            hardwareMeshes_.at(batch.mesh.value);
+                        const std::array hardwareBuffers{
+                            mesh.vertexBuffer, hardwareInstanceBuffer_};
+                        vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
+                            hardwareBuffers.data(), offsets.data());
+                        vkCmdBindIndexBuffer(commandBuffer_,
+                            mesh.triangleIndexBuffer, 0,
+                            VK_INDEX_TYPE_UINT32);
                         pushTrackDraw(batch.baseColor, noTrackOverride);
                         vkCmdDrawIndexed(commandBuffer_,
-                            hardwareTriangleIndexCount_,
+                            mesh.triangleIndexCount,
                             batch.instanceCount, 0, 0,
                             batch.firstInstance);
                     }
@@ -3086,22 +3205,24 @@ namespace quantum::renderer
                     vkCmdBindPipeline(commandBuffer_,
                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                         hardwareEdgePipeline_);
-                    const std::array hardwareBuffers{
-                        hardwareVertexBuffer_, hardwareInstanceBuffer_};
                     constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
-                    vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
-                        hardwareBuffers.data(), offsets.data());
-                    vkCmdBindIndexBuffer(commandBuffer_,
-                        hardwareEdgeIndexBuffer_, 0,
-                        VK_INDEX_TYPE_UINT32);
                     for (const HardwareDrawBatch& batch
                         : hardwareDrawBatches_)
                     {
                         if (batch.instanceCount == 0)
                             continue;
+                        const GpuStaticMesh& mesh =
+                            hardwareMeshes_.at(batch.mesh.value);
+                        const std::array hardwareBuffers{
+                            mesh.vertexBuffer, hardwareInstanceBuffer_};
+                        vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
+                            hardwareBuffers.data(), offsets.data());
+                        vkCmdBindIndexBuffer(commandBuffer_,
+                            mesh.edgeIndexBuffer, 0,
+                            VK_INDEX_TYPE_UINT32);
                         pushTrackDraw(edgeColor, noTrackOverride);
                         vkCmdDrawIndexed(commandBuffer_,
-                            hardwareEdgeIndexCount_, batch.instanceCount,
+                            mesh.edgeIndexCount, batch.instanceCount,
                             0, 0, batch.firstInstance);
                     }
                 }
@@ -3770,13 +3891,19 @@ namespace quantum::renderer
                 trackTriangleIndexBuffer_, trackTriangleIndexAllocation_);
             destroyAllocatedBuffer(
                 trackEdgeIndexBuffer_, trackEdgeIndexAllocation_);
-            destroyAllocatedBuffer(
-                hardwareVertexBuffer_, hardwareVertexAllocation_);
-            destroyAllocatedBuffer(
-                hardwareTriangleIndexBuffer_,
-                hardwareTriangleIndexAllocation_);
-            destroyAllocatedBuffer(
-                hardwareEdgeIndexBuffer_, hardwareEdgeIndexAllocation_);
+            for (GpuStaticMesh& mesh : hardwareMeshes_)
+            {
+                destroyAllocatedBuffer(
+                    mesh.vertexBuffer, mesh.vertexAllocation);
+                destroyAllocatedBuffer(
+                    mesh.triangleIndexBuffer, mesh.triangleIndexAllocation);
+                destroyAllocatedBuffer(
+                    mesh.edgeIndexBuffer, mesh.edgeIndexAllocation);
+            }
+            hardwareMeshes_.clear();
+            availableHardwareMeshHandles_.clear();
+            hardwareAssetLoadStatuses_.clear();
+            staticMeshGpuHandles_.clear();
             destroyAllocatedBuffer(
                 hardwareInstanceBuffer_, hardwareInstanceAllocation_);
             trackMeshVertexMappedData_ = nullptr;
@@ -3790,9 +3917,6 @@ namespace quantum::renderer
             trackMeshVertexCount_ = 0;
             trackTriangleIndexCount_ = 0;
             trackEdgeIndexCount_ = 0;
-            hardwareVertexCount_ = 0;
-            hardwareTriangleIndexCount_ = 0;
-            hardwareEdgeIndexCount_ = 0;
             hardwareInstanceCount_ = 0;
             hardwareDrawBatches_.clear();
 
@@ -3940,5 +4064,28 @@ namespace quantum::renderer
     bool VulkanContext::fillModeNonSolidSupported() const noexcept
     {
         return fillModeNonSolidSupported_;
+    }
+
+    const std::filesystem::path& VulkanContext::runtimeAssetRoot() const noexcept
+    {
+        return staticMeshAssets_.runtimeRoot();
+    }
+
+    std::optional<HardwareAssetLoadStatus>
+    VulkanContext::hardwareAssetLoadStatus(
+        const std::string_view identifier) const
+    {
+        const std::string normalized =
+            normalizeStaticMeshAssetIdentifier(identifier);
+        for (auto iterator = hardwareAssetLoadStatuses_.rbegin();
+            iterator != hardwareAssetLoadStatuses_.rend(); ++iterator)
+        {
+            if (normalizeStaticMeshAssetIdentifier(
+                    iterator->requestedIdentifier) == normalized)
+            {
+                return *iterator;
+            }
+        }
+        return std::nullopt;
     }
 }

@@ -75,3 +75,6 @@ Testing/
 .cache/
 # Local AI development tooling
 .opencode/
+
+# Generated WIP packages
+/dist/

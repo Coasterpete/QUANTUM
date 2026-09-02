@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/TrackStyle.hpp>
+#include <quantum/renderer/StaticMeshAssets.hpp>
 #include <quantum/renderer/ViewportTrackPresentation.hpp>
 
 #include <SDL3/SDL.h>
@@ -9,7 +10,9 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace quantum::renderer
@@ -87,6 +90,12 @@ namespace quantum::renderer
         void updateRenderableTrack(
             const coaster::RenderableTrack& renderableTrack
         );
+        // Invalidates and reloads one package-relative hardware mesh, then
+        // refreshes every draw batch in the supplied current track.
+        void reloadTrackHardwareAsset(
+            std::string_view identifier,
+            const coaster::RenderableTrack& renderableTrack
+        );
         void setTrackPresentationMode(TrackPresentationMode mode);
 
         // Host-side draw skipping for the viewport reference elements.
@@ -127,6 +136,9 @@ namespace quantum::renderer
         [[nodiscard]] VkExtent2D viewportExtent() const noexcept;
         [[nodiscard]] VkImageView viewportImageView() const noexcept;
         [[nodiscard]] bool fillModeNonSolidSupported() const noexcept;
+        [[nodiscard]] const std::filesystem::path& runtimeAssetRoot() const noexcept;
+        [[nodiscard]] std::optional<HardwareAssetLoadStatus>
+        hardwareAssetLoadStatus(std::string_view identifier) const;
 
     private:
         void selectPhysicalDevice();
@@ -153,6 +165,8 @@ namespace quantum::renderer
         void prepareFrameReadback();
         void destroyViewportTarget() noexcept;
         void destroySwapchain() noexcept;
+        [[nodiscard]] StaticMeshGpuHandle uploadStaticMeshOnce(
+            const StaticMeshAsset& asset);
 
         // Regenerates the grid/axes vertices in place through the retained
         // persistent mapping of the static viewport-aid buffer.
@@ -257,24 +271,33 @@ namespace quantum::renderer
         std::array<float, 4> trackBaseColor_{
             0.20F, 0.34F, 0.48F, 1.0F};
 
-        // The first asset seam recognizes only the explicitly labeled built-
-        // in diagnostic hardware mesh. Instances remain one contiguous GPU
-        // stream and draw with hardware instancing rather than per-object draws.
+        struct GpuStaticMesh
+        {
+            VkBuffer vertexBuffer = VK_NULL_HANDLE;
+            VmaAllocation vertexAllocation = VK_NULL_HANDLE;
+            VkBuffer triangleIndexBuffer = VK_NULL_HANDLE;
+            VmaAllocation triangleIndexAllocation = VK_NULL_HANDLE;
+            VkBuffer edgeIndexBuffer = VK_NULL_HANDLE;
+            VmaAllocation edgeIndexAllocation = VK_NULL_HANDLE;
+            std::uint32_t vertexCount = 0;
+            std::uint32_t triangleIndexCount = 0;
+            std::uint32_t edgeIndexCount = 0;
+        };
+
+        // Instances remain one contiguous GPU stream. Each batch selects one
+        // shared cached mesh and an instance range rather than owning buffers.
         struct HardwareDrawBatch
         {
+            StaticMeshGpuHandle mesh;
             std::uint32_t firstInstance = 0;
             std::uint32_t instanceCount = 0;
             std::array<float, 4> baseColor{0.28F, 0.30F, 0.32F, 1.0F};
         };
-        VkBuffer hardwareVertexBuffer_ = VK_NULL_HANDLE;
-        VmaAllocation hardwareVertexAllocation_ = VK_NULL_HANDLE;
-        VkBuffer hardwareTriangleIndexBuffer_ = VK_NULL_HANDLE;
-        VmaAllocation hardwareTriangleIndexAllocation_ = VK_NULL_HANDLE;
-        VkBuffer hardwareEdgeIndexBuffer_ = VK_NULL_HANDLE;
-        VmaAllocation hardwareEdgeIndexAllocation_ = VK_NULL_HANDLE;
-        std::uint32_t hardwareVertexCount_ = 0;
-        std::uint32_t hardwareTriangleIndexCount_ = 0;
-        std::uint32_t hardwareEdgeIndexCount_ = 0;
+        StaticMeshAssetCache staticMeshAssets_;
+        StaticMeshGpuHandleCache staticMeshGpuHandles_;
+        std::vector<GpuStaticMesh> hardwareMeshes_;
+        std::vector<std::uint32_t> availableHardwareMeshHandles_;
+        std::vector<HardwareAssetLoadStatus> hardwareAssetLoadStatuses_;
         VkBuffer hardwareInstanceBuffer_ = VK_NULL_HANDLE;
         VmaAllocation hardwareInstanceAllocation_ = VK_NULL_HANDLE;
         void* hardwareInstanceMappedData_ = nullptr;

@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 
@@ -217,20 +219,77 @@ namespace quantum::coaster
         style.railRadialSegments = 12;
         style.railMaterial.baseColor = {0.20F, 0.34F, 0.48F, 1.0F};
 
-        RepeatingHardwareStyle diagnosticCrosstie;
-        diagnosticCrosstie.asset = {
-            "builtin://diagnostic/track-hardware-placeholder",
+        RepeatingHardwareStyle testCrosstie;
+        testCrosstie.asset = {
+            "assets://track/test-crosstie-placeholder.glb",
             true
         };
-        diagnosticCrosstie.spacing = 1.5;
-        diagnosticCrosstie.startOffset = 0.0;
-        diagnosticCrosstie.localPosition = {0.0, 0.0, -0.11};
-        diagnosticCrosstie.localScale = {0.16, 1.42, 0.10};
-        diagnosticCrosstie.materialOverride = TrackMaterial{
+        testCrosstie.spacing = 1.5;
+        testCrosstie.startOffset = 0.0;
+        testCrosstie.localPosition = {0.0, 0.0, -0.11};
+        testCrosstie.localScale = {1.0, 1.0, 1.0};
+        testCrosstie.materialOverride = TrackMaterial{
             glm::vec4{0.28F, 0.30F, 0.32F, 1.0F}
         };
-        style.repeatingHardware.push_back(std::move(diagnosticCrosstie));
+        style.repeatingHardware.push_back(std::move(testCrosstie));
         return style;
+    }
+
+    std::string normalizeTrackHardwareAssetIdentifier(
+        const std::string_view identifier)
+    {
+        constexpr std::string_view assetsScheme = "assets://";
+        constexpr std::string_view diagnosticAsset =
+            "builtin://diagnostic/track-hardware-placeholder";
+
+        if (identifier.empty())
+        {
+            throw std::invalid_argument(
+                "Track hardware asset identifier cannot be empty.");
+        }
+
+        std::string normalized{identifier};
+        std::ranges::replace(normalized, '\\', '/');
+        if (normalized == diagnosticAsset)
+        {
+            return normalized;
+        }
+        if (!normalized.starts_with(assetsScheme))
+        {
+            throw std::invalid_argument(
+                "Track hardware asset identifier must use assets://track/... "
+                "or the builtin diagnostic placeholder.");
+        }
+
+        const std::filesystem::path relative = std::filesystem::path(
+            normalized.substr(assetsScheme.size())).lexically_normal();
+        if (relative.empty() || relative.is_absolute()
+            || relative.has_root_name() || relative.has_root_directory())
+        {
+            throw std::invalid_argument(
+                "Track hardware asset identifier must be package-relative.");
+        }
+        for (const std::filesystem::path& part : relative)
+        {
+            if (part == "..")
+            {
+                throw std::invalid_argument(
+                    "Track hardware asset identifier cannot escape the asset root.");
+            }
+        }
+
+        const std::string relativePath = relative.generic_string();
+        if (!relativePath.starts_with("track/"))
+        {
+            throw std::invalid_argument(
+                "Track hardware GLBs must be below assets://track/.");
+        }
+        if (relative.extension() != ".glb")
+        {
+            throw std::invalid_argument(
+                "Track hardware assets must use the .glb extension.");
+        }
+        return std::string(assetsScheme) + relativePath;
     }
 
     void validateTrackStyle(const TrackStylePreset& style)
@@ -304,6 +363,8 @@ namespace quantum::coaster
                     "Enabled repeating hardware requires an asset reference."
                 );
             }
+            static_cast<void>(normalizeTrackHardwareAssetIdentifier(
+                hardware.asset.path));
             if (!std::isfinite(hardware.spacing) || hardware.spacing <= 0.0)
             {
                 throw std::invalid_argument(

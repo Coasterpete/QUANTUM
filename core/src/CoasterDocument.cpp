@@ -162,6 +162,18 @@ namespace quantum::coaster
             }
         }
 
+        void requireBoolean(
+            const json& parent,
+            const std::string& key,
+            const std::string& path)
+        {
+            if (!parent.contains(key) || !parent[key].is_boolean())
+            {
+                throw std::runtime_error(
+                    path + ": missing or non-boolean '" + key + "'");
+            }
+        }
+
         void requireInteger(
             const json& parent,
             const std::string& key,
@@ -259,6 +271,91 @@ namespace quantum::coaster
                 {"z", pose.orientation.z}
             };
             return result;
+        }
+
+        json serializeTrackMaterial(const TrackMaterial& material)
+        {
+            return {{"baseColor", {
+                {"r", material.baseColor.r},
+                {"g", material.baseColor.g},
+                {"b", material.baseColor.b},
+                {"a", material.baseColor.a}}}};
+        }
+
+        json serializeTrackStyle(const TrackStylePreset& style)
+        {
+            validateTrackStyle(style);
+            json railOffsets = json::array();
+            for (const RailOffset& offset : style.railOffsets)
+            {
+                railOffsets.push_back({
+                    {"lateral", offset.lateral},
+                    {"vertical", offset.vertical}});
+            }
+
+            const auto spineTypeName = [](const ContinuousSpineType type)
+            {
+                switch (type)
+                {
+                case ContinuousSpineType::None: return "None";
+                case ContinuousSpineType::Tubular: return "Tubular";
+                case ContinuousSpineType::Box: return "Box";
+                }
+                return "None";
+            };
+            const auto frameFollowName = [](const HardwareFrameFollow follow)
+            {
+                return follow == HardwareFrameFollow::TrackFrame
+                    ? "TrackFrame" : "WorldAligned";
+            };
+
+            json repeatingHardware = json::array();
+            for (const RepeatingHardwareStyle& hardware : style.repeatingHardware)
+            {
+                json serialized{
+                    {"enabled", hardware.enabled},
+                    {"asset", {
+                        {"id", hardware.asset.path},
+                        {"placeholder", hardware.asset.placeholder}}},
+                    {"spacing", hardware.spacing},
+                    {"startOffset", hardware.startOffset},
+                    {"localPosition", {
+                        {"x", hardware.localPosition.x},
+                        {"y", hardware.localPosition.y},
+                        {"z", hardware.localPosition.z}}},
+                    {"localRotationRadians", {
+                        {"x", hardware.localRotation.x},
+                        {"y", hardware.localRotation.y},
+                        {"z", hardware.localRotation.z}}},
+                    {"localScale", {
+                        {"x", hardware.localScale.x},
+                        {"y", hardware.localScale.y},
+                        {"z", hardware.localScale.z}}},
+                    {"frameFollow", frameFollowName(hardware.frameFollow)}};
+                serialized["materialOverride"] = hardware.materialOverride
+                    ? serializeTrackMaterial(*hardware.materialOverride)
+                    : json(nullptr);
+                repeatingHardware.push_back(std::move(serialized));
+            }
+
+            return {
+                {"name", style.name},
+                {"geometryFamily", "DualRailTubular"},
+                {"railCount", style.railCount},
+                {"railOffsets", std::move(railOffsets)},
+                {"railRadius", style.railRadius},
+                {"railRadialSegments", style.railRadialSegments},
+                {"railMaterial", serializeTrackMaterial(style.railMaterial)},
+                {"spine", {
+                    {"enabled", style.spine.enabled},
+                    {"type", spineTypeName(style.spine.type)},
+                    {"offset", {
+                        {"lateral", style.spine.offset.lateral},
+                        {"vertical", style.spine.offset.vertical}}},
+                    {"dimensions", {
+                        {"x", style.spine.dimensions.x},
+                        {"y", style.spine.dimensions.y}}}}},
+                {"repeatingHardware", std::move(repeatingHardware)}};
         }
 
         json serializeSection(const AuthoredTrackSection& section)
@@ -565,6 +662,186 @@ namespace quantum::coaster
             };
         }
 
+        TrackMaterial deserializeTrackMaterial(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(object, {"baseColor"}, path);
+            requireObject(object, "baseColor", path);
+            const json& color = object["baseColor"];
+            requireNoUnknownFields(color, {"r", "g", "b", "a"},
+                path + ".baseColor");
+            for (const char* component : {"r", "g", "b", "a"})
+            {
+                requireNumber(color, component, path + ".baseColor");
+            }
+            return TrackMaterial{{
+                color["r"].get<float>(), color["g"].get<float>(),
+                color["b"].get<float>(), color["a"].get<float>()}};
+        }
+
+        glm::dvec3 deserializeDvec3(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(object, {"x", "y", "z"}, path);
+            for (const char* axis : {"x", "y", "z"})
+            {
+                requireNumber(object, axis, path);
+            }
+            return {object["x"].get<double>(), object["y"].get<double>(),
+                object["z"].get<double>()};
+        }
+
+        TrackStylePreset deserializeTrackStyle(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(object, {
+                "name", "geometryFamily", "railCount", "railOffsets",
+                "railRadius", "railRadialSegments", "railMaterial", "spine",
+                "repeatingHardware"}, path);
+            requireString(object, "name", path);
+            requireString(object, "geometryFamily", path);
+            requireInteger(object, "railCount", path);
+            requireArray(object, "railOffsets", path);
+            requireNumber(object, "railRadius", path);
+            requireInteger(object, "railRadialSegments", path);
+            requireObject(object, "railMaterial", path);
+            requireObject(object, "spine", path);
+            requireArray(object, "repeatingHardware", path);
+
+            if (object["geometryFamily"] != "DualRailTubular")
+            {
+                throw std::runtime_error(
+                    path + ".geometryFamily: unsupported track geometry family");
+            }
+            if (object["railCount"] < 0
+                || object["railCount"] > std::numeric_limits<std::uint32_t>::max()
+                || object["railRadialSegments"] < 0
+                || object["railRadialSegments"]
+                    > std::numeric_limits<std::uint32_t>::max())
+            {
+                throw std::runtime_error(path + ": rail count is out of range");
+            }
+
+            TrackStylePreset style;
+            style.name = object["name"].get<std::string>();
+            style.geometryFamily = TrackGeometryFamily::DualRailTubular;
+            style.railCount = object["railCount"].get<std::uint32_t>();
+            for (std::size_t index = 0; index < object["railOffsets"].size();
+                ++index)
+            {
+                const json& offset = object["railOffsets"][index];
+                const std::string offsetPath = path + ".railOffsets["
+                    + std::to_string(index) + "]";
+                if (!offset.is_object())
+                    throw std::runtime_error(offsetPath + ": expected an object");
+                requireNoUnknownFields(offset, {"lateral", "vertical"}, offsetPath);
+                requireNumber(offset, "lateral", offsetPath);
+                requireNumber(offset, "vertical", offsetPath);
+                style.railOffsets.push_back({offset["lateral"].get<double>(),
+                    offset["vertical"].get<double>()});
+            }
+            style.railRadius = object["railRadius"].get<double>();
+            style.railRadialSegments =
+                object["railRadialSegments"].get<std::uint32_t>();
+            style.railMaterial = deserializeTrackMaterial(
+                object["railMaterial"], path + ".railMaterial");
+
+            const json& spine = object["spine"];
+            const std::string spinePath = path + ".spine";
+            requireNoUnknownFields(spine,
+                {"enabled", "type", "offset", "dimensions"}, spinePath);
+            requireBoolean(spine, "enabled", spinePath);
+            requireString(spine, "type", spinePath);
+            requireObject(spine, "offset", spinePath);
+            requireObject(spine, "dimensions", spinePath);
+            const std::string spineType = spine["type"].get<std::string>();
+            if (spineType == "None") style.spine.type = ContinuousSpineType::None;
+            else if (spineType == "Tubular") style.spine.type = ContinuousSpineType::Tubular;
+            else if (spineType == "Box") style.spine.type = ContinuousSpineType::Box;
+            else throw std::runtime_error(spinePath + ".type: unsupported spine type");
+            style.spine.enabled = spine["enabled"].get<bool>();
+            const json& spineOffset = spine["offset"];
+            requireNoUnknownFields(spineOffset, {"lateral", "vertical"},
+                spinePath + ".offset");
+            requireNumber(spineOffset, "lateral", spinePath + ".offset");
+            requireNumber(spineOffset, "vertical", spinePath + ".offset");
+            style.spine.offset = {spineOffset["lateral"].get<double>(),
+                spineOffset["vertical"].get<double>()};
+            const json& dimensions = spine["dimensions"];
+            requireNoUnknownFields(dimensions, {"x", "y"},
+                spinePath + ".dimensions");
+            requireNumber(dimensions, "x", spinePath + ".dimensions");
+            requireNumber(dimensions, "y", spinePath + ".dimensions");
+            style.spine.dimensions = {dimensions["x"].get<double>(),
+                dimensions["y"].get<double>()};
+
+            for (std::size_t index = 0;
+                index < object["repeatingHardware"].size(); ++index)
+            {
+                const json& item = object["repeatingHardware"][index];
+                const std::string itemPath = path + ".repeatingHardware["
+                    + std::to_string(index) + "]";
+                if (!item.is_object())
+                    throw std::runtime_error(itemPath + ": expected an object");
+                requireNoUnknownFields(item, {
+                    "enabled", "asset", "spacing", "startOffset",
+                    "localPosition", "localRotationRadians", "localScale",
+                    "frameFollow", "materialOverride"}, itemPath);
+                requireBoolean(item, "enabled", itemPath);
+                requireObject(item, "asset", itemPath);
+                requireNumber(item, "spacing", itemPath);
+                requireNumber(item, "startOffset", itemPath);
+                requireObject(item, "localPosition", itemPath);
+                requireObject(item, "localRotationRadians", itemPath);
+                requireObject(item, "localScale", itemPath);
+                requireString(item, "frameFollow", itemPath);
+
+                const json& asset = item["asset"];
+                requireNoUnknownFields(asset, {"id", "placeholder"},
+                    itemPath + ".asset");
+                requireString(asset, "id", itemPath + ".asset");
+                requireBoolean(asset, "placeholder", itemPath + ".asset");
+
+                RepeatingHardwareStyle hardware;
+                hardware.enabled = item["enabled"].get<bool>();
+                hardware.asset = {asset["id"].get<std::string>(),
+                    asset["placeholder"].get<bool>()};
+                hardware.spacing = item["spacing"].get<double>();
+                hardware.startOffset = item["startOffset"].get<double>();
+                hardware.localPosition = deserializeDvec3(
+                    item["localPosition"], itemPath + ".localPosition");
+                hardware.localRotation = deserializeDvec3(
+                    item["localRotationRadians"],
+                    itemPath + ".localRotationRadians");
+                hardware.localScale = deserializeDvec3(
+                    item["localScale"], itemPath + ".localScale");
+                const std::string frameFollow =
+                    item["frameFollow"].get<std::string>();
+                if (frameFollow == "TrackFrame")
+                    hardware.frameFollow = HardwareFrameFollow::TrackFrame;
+                else if (frameFollow == "WorldAligned")
+                    hardware.frameFollow = HardwareFrameFollow::WorldAligned;
+                else throw std::runtime_error(
+                    itemPath + ".frameFollow: unsupported frame-follow mode");
+                if (item.contains("materialOverride")
+                    && !item["materialOverride"].is_null())
+                {
+                    if (!item["materialOverride"].is_object())
+                        throw std::runtime_error(
+                            itemPath + ".materialOverride: expected an object or null");
+                    hardware.materialOverride = deserializeTrackMaterial(
+                        item["materialOverride"], itemPath + ".materialOverride");
+                }
+                style.repeatingHardware.push_back(std::move(hardware));
+            }
+
+            validateTrackStyle(style);
+            return style;
+        }
+
         // ----------------------------------------------------------------
         // nextSegmentId consistency
         // ----------------------------------------------------------------
@@ -621,6 +898,7 @@ namespace quantum::coaster
             {"initialSpeed", physical.initialSpeed},
             {"metersPerCoordinateUnit", physical.metersPerCoordinateUnit},
             {"gravityAcceleration", physical.gravityAcceleration}};
+        root["trackStyle"] = serializeTrackStyle(track.trackStyle());
 
         json sectionsJson = json::array();
 
@@ -651,7 +929,8 @@ namespace quantum::coaster
 
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
-                "formatVersion", "sections", "layoutMode", "startPose", "physicalSettings"
+                "formatVersion", "sections", "layoutMode", "startPose",
+                "physicalSettings", "trackStyle"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -814,6 +1093,12 @@ namespace quantum::coaster
                 track.setPhysicalSettings({physical["initialSpeed"].get<double>(),
                     physical["metersPerCoordinateUnit"].get<double>(),
                     physical["gravityAcceleration"].get<double>()});
+            }
+            if (root.contains("trackStyle"))
+            {
+                requireObject(root, "trackStyle", "root");
+                track.setTrackStyle(deserializeTrackStyle(
+                    root["trackStyle"], "trackStyle"));
             }
 
             return track;

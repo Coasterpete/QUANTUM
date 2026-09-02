@@ -730,6 +730,17 @@ namespace quantum::coaster
         physicalSettings_ = settings;
     }
 
+    const TrackStylePreset& AuthoredTrack::trackStyle() const noexcept
+    {
+        return trackStyle_;
+    }
+
+    void AuthoredTrack::setTrackStyle(const TrackStylePreset& style)
+    {
+        validateTrackStyle(style);
+        trackStyle_ = style;
+    }
+
     AuthoredTrackSection createForceDrivenSection(const double length)
     {
         AuthoredTrackSection section = createRateProfileSection(length);

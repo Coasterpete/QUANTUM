@@ -4,6 +4,7 @@
 #include <quantum/coaster/ForceDrivenRegion.hpp>
 #include <quantum/coaster/PlanarArcRegion.hpp>
 #include <quantum/coaster/RiderLocalGeometry.hpp>
+#include <quantum/coaster/TrackStyle.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -203,6 +204,10 @@ namespace quantum::coaster
         // Validates before replacing the document's canonical physical inputs.
         void setPhysicalSettings(const TrackPhysicalSettings& settings);
 
+        [[nodiscard]] const TrackStylePreset& trackStyle() const noexcept;
+        // Validates the complete preset before replacing authored style state.
+        void setTrackStyle(const TrackStylePreset& style);
+
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
         // Throws std::out_of_range for an invalid index.
@@ -245,6 +250,7 @@ namespace quantum::coaster
         LayoutMode layoutMode_ = LayoutMode::Circuit;
         AuthoredStartPose startPose_;
         TrackPhysicalSettings physicalSettings_;
+        TrackStylePreset trackStyle_ = createStandardDualRailPreset();
         std::vector<AuthoredTrackSection> sections_;
     };
 

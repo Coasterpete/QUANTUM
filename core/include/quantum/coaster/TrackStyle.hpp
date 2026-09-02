@@ -98,6 +98,13 @@ namespace quantum::coaster
 
     [[nodiscard]] TrackStylePreset createStandardDualRailPreset();
 
+    // Returns a canonical package-relative identifier for repeating track
+    // hardware. File-backed hardware must live below assets/track and use the
+    // .glb extension. The retained builtin diagnostic placeholder is the only
+    // builtin identifier accepted as authored hardware.
+    [[nodiscard]] std::string normalizeTrackHardwareAssetIdentifier(
+        std::string_view identifier);
+
     // Throws std::invalid_argument for malformed values. Generation calls
     // this before allocating output, so invalid styles cannot publish partial
     // meshes or instance data.

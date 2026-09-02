@@ -186,6 +186,7 @@ namespace quantum::engine
                 documentHistory.reset(authoredTrack);
                 quantum::editor::CenterlineVisualizationCache
                     centerlineCache;
+                centerlineCache.setTrackStyle(authoredTrack.trackStyle());
                 static_cast<void>(
                     centerlineCache.rebuildIfDirty(authoredTrack));
                 const quantum::editor::CenterlineVisualization& centerline =
@@ -254,7 +255,7 @@ namespace quantum::engine
                         restoredCenterline = quantum::editor::
                             createCenterlineVisualization(
                                 restoredTrack,
-                                centerlineCache.trackStyle());
+                                restoredTrack.trackStyle());
                     quantum::coaster::RiderLoadHistory restoredRiderLoads =
                         quantum::editor::evaluateRiderLoadDiagnostics(
                             restoredTrack);
@@ -276,7 +277,8 @@ namespace quantum::engine
                         editorUi.selectedSection(),
                         restoredTrack.sectionCount() - 1);
                     authoredTrack = restoredTrack;
-                    centerlineCache.markDirty();
+                    centerlineCache.setTrackStyle(
+                        authoredTrack.trackStyle());
                     centerlineCache.replace(std::move(restoredCenterline));
                     editorUi.setCenterlineBounds(
                         centerline.minimumPosition,
@@ -626,6 +628,8 @@ namespace quantum::engine
                                     editorUi.selectSection(0, true);
 
                                     centerlineCache.markDirty();
+                                    centerlineCache.setTrackStyle(
+                                        authoredTrack.trackStyle());
                                     static_cast<void>(
                                         centerlineCache.rebuildIfDirty(
                                             authoredTrack));
@@ -699,7 +703,7 @@ namespace quantum::engine
                                             {
                                                 loadedCenterline = quantum::editor::createCenterlineVisualization(
                                                     *result,
-                                                    centerlineCache.trackStyle());
+                                                    result->trackStyle());
                                                 loadedRiderLoads = quantum::editor::evaluateRiderLoadDiagnostics(*result);
                                                 quantum::editor::AuthoredTrackEditTransaction loadedTransaction{*result};
                                                 loadedTransaction.requireAcceptableRiderLoads(*loadedRiderLoads);
@@ -717,6 +721,8 @@ namespace quantum::engine
                                         if (result.has_value())
                                         {
                                             authoredTrack = std::move(*result);
+                                            centerlineCache.setTrackStyle(
+                                                authoredTrack.trackStyle());
                                             centerlineCache.replace(std::move(*loadedCenterline));
                                             documentHistory.reset(authoredTrack);
                                             documentState.setOpenDocument(*openPath);
@@ -929,6 +935,8 @@ namespace quantum::engine
                             editorUi.takeProfileSegmentDistanceEdit();
                         const auto requestedStartPoseEdit =
                             editorUi.takeStartPoseEdit();
+                        const auto requestedHardwareEdit =
+                            editorUi.takeTrackHardwareEdit();
 
                         // Continuous handle drags queue a changed-value or
                         // changed-boundary edit every motion frame; both
@@ -940,7 +948,9 @@ namespace quantum::engine
                                 && requestedValueEdit->continuous)
                             || requestedDistanceEdit.has_value()
                             || (requestedStartPoseEdit.has_value()
-                                && requestedStartPoseEdit->continuous);
+                                && requestedStartPoseEdit->continuous)
+                            || (requestedHardwareEdit.has_value()
+                                && requestedHardwareEdit->continuous);
                         // A paused pointer can produce no changed value for
                         // one or more frames while the same drag is still
                         // held. Keep that gesture coalesced until the UI
@@ -981,8 +991,40 @@ namespace quantum::engine
                         quantum::coaster::SegmentId removeSurvivorId =
                             quantum::coaster::invalidSegmentId;
                         bool regionCommandApplied = false;
+                        bool hardwareEditApplied = false;
                         try
                         {
+                            if (requestedHardwareEdit.has_value())
+                            {
+                                using quantum::editor::TrackHardwareEditType;
+                                if (requestedHardwareEdit->type
+                                    == TrackHardwareEditType::ReloadAsset)
+                                {
+                                    vulkan.reloadTrackHardwareAsset(
+                                        requestedHardwareEdit
+                                            ->hardware.asset.path,
+                                        centerline.renderableTrack);
+                                }
+                                else
+                                {
+                                    quantum::coaster::TrackStylePreset style =
+                                        candidateTrack.trackStyle();
+                                    if (style.repeatingHardware.empty())
+                                    {
+                                        style.repeatingHardware.push_back(
+                                            requestedHardwareEdit->hardware);
+                                    }
+                                    else
+                                    {
+                                        style.repeatingHardware.front() =
+                                            requestedHardwareEdit->hardware;
+                                    }
+                                    candidateTrack.setTrackStyle(style);
+                                    candidateChanged = true;
+                                    hardwareEditApplied = true;
+                                }
+                            }
+
                             if (requestedStartPoseEdit.has_value())
                             {
                                 candidateTrack.setStartPose(
@@ -1434,7 +1476,7 @@ namespace quantum::engine
                                         quantum::editor::
                                             createCenterlineVisualization(
                                                 candidateTrack,
-                                                centerlineCache.trackStyle()
+                                                candidateTrack.trackStyle()
                                             );
                                 quantum::coaster::RiderLoadHistory
                                     candidateRiderLoads =
@@ -1460,7 +1502,8 @@ namespace quantum::engine
                                 vulkan.updateRenderableTrack(
                                     candidateCenterline.renderableTrack);
 
-                                centerlineCache.markDirty();
+                                centerlineCache.setTrackStyle(
+                                    candidateTrack.trackStyle());
                                 centerlineCache.replace(
                                     std::move(candidateCenterline));
                                 editTransaction.commit(authoredTrack);
@@ -1471,6 +1514,20 @@ namespace quantum::engine
                                     std::move(candidateRiderLoads)
                                 );
                                 synchronizeDirtyState();
+
+                                if (hardwareEditApplied && !continuousDrag)
+                                {
+                                    const auto& hardware = authoredTrack
+                                        .trackStyle().repeatingHardware.front();
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        "Track hardware updated: asset=%s "
+                                        "spacing=%.6f offset=%.6f",
+                                        hardware.asset.path.c_str(),
+                                        hardware.spacing,
+                                        hardware.startOffset);
+                                }
 
                                 if (!continuousDrag)
                                 {
@@ -1903,7 +1960,7 @@ namespace quantum::engine
                                             quantum::editor::
                                                 createCenterlineVisualization(
                                                     authoredTrack,
-                                                    centerlineCache.trackStyle());
+                                                    authoredTrack.trackStyle());
 
                                 editorUi.setCenterlineBounds(
                                     newCenterline.minimumPosition,
@@ -1916,7 +1973,8 @@ namespace quantum::engine
                                 vulkan.updateRenderableTrack(
                                     newCenterline.renderableTrack);
 
-                                centerlineCache.markDirty();
+                                centerlineCache.setTrackStyle(
+                                    authoredTrack.trackStyle());
                                 centerlineCache.replace(
                                     std::move(newCenterline));
                                 editorUi.setRiderLoadHistory(

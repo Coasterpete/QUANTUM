@@ -156,6 +156,48 @@ namespace
             "local Z scale is respected");
     }
 
+    void placementFollowsPitchYawAndBank()
+    {
+        const std::vector<quantum::geometry::CurveFrame> frames{
+            {
+                {0.0, 1.0, 0.0},
+                {-1.0, 0.0, 0.0},
+                {0.0, 0.0, 1.0}
+            },
+            {
+                {0.0, 0.0, 1.0},
+                {0.0, 1.0, 0.0},
+                {-1.0, 0.0, 0.0}
+            },
+            {
+                {1.0, 0.0, 0.0},
+                {0.0, 0.0, 1.0},
+                {0.0, -1.0, 0.0}
+            }
+        };
+
+        for (const auto& frame : frames)
+        {
+            const std::vector<RiderLocalGeometryState> samples{
+                {0.0, {0.0, 0.0, 0.0}, frame},
+                {1.0, frame.tangent, frame}
+            };
+            auto style = placementStyle();
+            style.repeatingHardware.front().spacing = 10.0;
+            const glm::mat4 transform = generateRenderableTrack(samples, style)
+                .hardwareBatches.front().instances.front().transform;
+            requireNear(glm::normalize(glm::dvec3{transform[0]}),
+                frame.tangent, 1.0e-6,
+                "asset local X follows track-forward through pitch/yaw/bank");
+            requireNear(glm::normalize(glm::dvec3{transform[1]}),
+                frame.lateral, 1.0e-6,
+                "asset local Y follows track-lateral through pitch/yaw/bank");
+            requireNear(glm::normalize(glm::dvec3{transform[2]}),
+                frame.up, 1.0e-6,
+                "asset local Z follows track-up through pitch/yaw/bank");
+        }
+    }
+
     void invalidHardwareIsRejectedAndOutputIsFinite()
     {
         auto style = placementStyle();
@@ -210,6 +252,7 @@ int main()
         placementIsDeterministicAndSpaced();
         placementFollowsCenterlineAndFrame();
         localRotationAndScaleAreApplied();
+        placementFollowsPitchYawAndBank();
         invalidHardwareIsRejectedAndOutputIsFinite();
     }
     catch (const std::exception& error)

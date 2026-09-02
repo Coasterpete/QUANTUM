@@ -158,6 +158,22 @@ namespace quantum::editor
         bool continuous = true;
     };
 
+    enum class TrackHardwareEditType
+    {
+        SetConfiguration,
+        ResetPlacement,
+        RestoreDiagnosticPlaceholder,
+        ReloadAsset
+    };
+
+    struct TrackHardwareEdit
+    {
+        TrackHardwareEditType type =
+            TrackHardwareEditType::SetConfiguration;
+        coaster::RepeatingHardwareStyle hardware;
+        bool continuous = false;
+    };
+
     // Which ordering position a typed region creation targets. The
     // choice strip is shared by all three triggers.
     enum class RegionCreateAnchor
@@ -299,6 +315,8 @@ namespace quantum::editor
         takeRegionCommand() noexcept;
         [[nodiscard]] std::optional<StartPoseEdit>
         takeStartPoseEdit() noexcept;
+        [[nodiscard]] std::optional<TrackHardwareEdit>
+        takeTrackHardwareEdit() noexcept;
         // Called when Core generation or renderer upload rejects a queued
         // gizmo candidate. The next frame draws only the committed pose.
         void rejectStartPoseManipulation() noexcept;
@@ -506,6 +524,10 @@ namespace quantum::editor
         bool inputSettingsWindowOpen_ = false;
         ViewportSettings viewportSettings_;
         bool viewportSettingsWindowOpen_ = false;
+        std::array<char, 512> hardwareAssetIdBuffer_{};
+        std::string hardwareAssetIdBufferSource_;
+        std::string hardwareAssetInputError_;
+        bool hardwareDragActive_ = false;
         std::vector<CenterlineSectionSlice> centerlineSlices_;
         const CenterlineVisualization* centerlineVisualization_ = nullptr;
         RiderLoadDiagnosticsModel riderLoadDiagnostics_;
@@ -526,6 +548,7 @@ namespace quantum::editor
         std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
         std::optional<StartPoseEdit> startPoseEdit_;
+        std::optional<TrackHardwareEdit> trackHardwareEdit_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
         std::optional<FileOperationType> pendingFileOperation_;

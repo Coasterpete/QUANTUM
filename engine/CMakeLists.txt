@@ -92,11 +92,13 @@ target_sources(
     QuantumEngine
     PRIVATE
         src/Logging.cpp
+        src/StaticMeshAssets.cpp
         src/VulkanContext.cpp
         src/ViewportAids.cpp
         include/quantum/renderer/ViewportAids.hpp
         include/quantum/renderer/ViewportTrackPresentation.hpp
         include/quantum/engine/Logging.hpp
+        include/quantum/renderer/StaticMeshAssets.hpp
         include/quantum/renderer/VulkanContext.hpp
 )
 
@@ -130,6 +132,7 @@ target_link_libraries(
         Quantum::Core
     PRIVATE
         SDL3::SDL3
+        nlohmann_json::nlohmann_json
 )
 
 set_target_properties(
