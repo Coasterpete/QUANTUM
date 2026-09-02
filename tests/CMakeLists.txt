@@ -3,6 +3,13 @@ add_executable(
     LoggingTests.cpp
 )
 
+add_executable(QuantumCoreTrackFollowerPhysicsTests TrackFollowerPhysicsTests.cpp)
+target_link_libraries(QuantumCoreTrackFollowerPhysicsTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreTrackFollowerPhysicsTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreTrackFollowerPhysicsTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.TrackFollowerPhysics COMMAND QuantumCoreTrackFollowerPhysicsTests)
+set_tests_properties(QuantumCore.TrackFollowerPhysics PROPERTIES LABELS "core;coaster;physics")
+
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)
