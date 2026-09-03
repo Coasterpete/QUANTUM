@@ -17,6 +17,7 @@ target_sources(
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
+        src/physics/CarPose.cpp
         src/physics/TrackFollower.cpp
         src/RiderLoads.cpp
         src/RiderLocalGeometry.cpp
@@ -47,6 +48,7 @@ target_sources(
         include/quantum/geometry/RotationMinimizingFrames.hpp
         include/quantum/math/ScalarTransition.hpp
         include/quantum/math/TransitionFunctions.hpp
+        include/quantum/physics/CarPose.hpp
         include/quantum/physics/TrackFollower.hpp
 )
 
