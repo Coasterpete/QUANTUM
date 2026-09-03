@@ -362,7 +362,7 @@ namespace
             : {&car.frontBogie, &car.rearBogie})
         {
             require(bogie->status
-                    == BogieReactionRecoveryStatus::MissingRotationalModel,
+                    == BogieReactionRecoveryStatus::MomentBalanceNotImplemented,
                 "front/rear split explicitly unavailable");
             require(!bogie->worldReactionNewtons
                     && !bogie->magnitudeNewtons
@@ -393,9 +393,9 @@ namespace
             1.0e-6,
             "off-center COG preserves aggregate static reaction");
         require(shiftedCar.frontBogie.status
-                == BogieReactionRecoveryStatus::MissingRotationalModel
+                == BogieReactionRecoveryStatus::MomentBalanceNotImplemented
                 && shiftedCar.rearBogie.status
-                    == BogieReactionRecoveryStatus::MissingRotationalModel,
+                    == BogieReactionRecoveryStatus::MomentBalanceNotImplemented,
             "off-center COG load split remains unavailable");
     }
 
@@ -567,7 +567,7 @@ namespace
             {0.0, 0.0, 9'806.65 - 2'000.0}, 1.0e-6,
             "off-center vertical external force");
         require(verticalCar.frontBogie.status
-                == BogieReactionRecoveryStatus::MissingRotationalModel,
+                == BogieReactionRecoveryStatus::MomentBalanceNotImplemented,
             "off-center force does not invent a moment split");
 
         const std::vector<ExternalForceApplication> lateral{

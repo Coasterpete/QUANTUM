@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -476,6 +477,50 @@ namespace quantum::physics
             return value;
         }
 
+        [[nodiscard]] glm::dvec3 shortestWorldRotationVector(
+            const glm::dquat& fromBodyToWorld,
+            const glm::dquat& toBodyToWorld)
+        {
+            // R_to*R_from^T is a world-space relative rotation. Canonicalizing
+            // its sign selects the same shortest representative even when
+            // independently solved endpoint quaternions differ by a sign.
+            glm::dquat relative = glm::normalize(
+                toBodyToWorld * glm::conjugate(fromBodyToWorld));
+            if (!finite(relative))
+            {
+                throw std::domain_error(
+                    "Car angular finite difference produced a non-finite relative orientation.");
+            }
+            if (relative.w < 0.0)
+            {
+                relative = -relative;
+            }
+            relative.w = glm::clamp(relative.w, 0.0, 1.0);
+            const glm::dvec3 vectorPart{
+                relative.x, relative.y, relative.z};
+            const double vectorLength = glm::length(vectorPart);
+            if (!std::isfinite(vectorLength))
+            {
+                throw std::domain_error(
+                    "Car angular finite difference rotation axis is non-finite.");
+            }
+            if (vectorLength <= 32.0 * std::numeric_limits<double>::epsilon())
+            {
+                return 2.0 * vectorPart;
+            }
+
+            const double angle = 2.0 * std::atan2(
+                vectorLength, relative.w);
+            if (!std::isfinite(angle)
+                || std::numbers::pi - angle
+                    <= angularDerivativeNearPiToleranceRadians)
+            {
+                throw std::domain_error(
+                    "Car angular finite difference is ill-conditioned near a pi-radian relative rotation.");
+            }
+            return (angle / vectorLength) * vectorPart;
+        }
+
         [[nodiscard]] glm::dvec3 relativeYawPitchRoll(
             const geometry::CurveFrame& leading,
             const geometry::CurveFrame& following)
@@ -549,6 +594,18 @@ namespace quantum::physics
             return result;
         }
 
+        [[nodiscard]] std::vector<glm::dquat> bodyOrientations(
+            const TrainPose& pose)
+        {
+            std::vector<glm::dquat> result;
+            result.reserve(pose.carCount());
+            for (const TrainCarPose& car : pose.cars())
+            {
+                result.push_back(car.carPose().bodyOrientation());
+            }
+            return result;
+        }
+
         void validateExternalForceApplications(
             const std::span<const ExternalForceApplication> applications,
             const std::size_t carCount)
@@ -598,6 +655,8 @@ namespace quantum::physics
         {
             std::vector<glm::dvec3> first;
             std::vector<glm::dvec3> second;
+            std::vector<glm::dvec3> angularFirst;
+            std::vector<glm::dvec3> angularSecond;
             std::vector<glm::dvec3> applicationPoints;
             std::vector<glm::dvec3> applicationPointFirst;
             TrainFiniteDifferenceKind kind =
@@ -619,9 +678,13 @@ namespace quantum::physics
                 track, definition, location, epsilon);
             const std::vector<glm::dvec3> centerPositions =
                 cogPositions(center);
+            const std::vector<glm::dquat> centerOrientations =
+                bodyOrientations(center);
             DerivativeSamples result;
             result.first.resize(center.carCount());
             result.second.resize(center.carCount());
+            result.angularFirst.resize(center.carCount());
+            result.angularSecond.resize(center.carCount());
             result.applicationPoints = applicationPointPositions(
                 center, applications);
             result.applicationPointFirst.resize(applications.size());
@@ -630,6 +693,8 @@ namespace quantum::physics
             {
                 const auto beforePositions = cogPositions(*before);
                 const auto afterPositions = cogPositions(*after);
+                const auto beforeOrientations = bodyOrientations(*before);
+                const auto afterOrientations = bodyOrientations(*after);
                 const auto beforeApplicationPoints = applicationPointPositions(
                     *before, applications);
                 const auto afterApplicationPoints = applicationPointPositions(
@@ -646,6 +711,18 @@ namespace quantum::physics
                             - 2.0 * centerPositions[index]
                             + beforePositions[index])
                         / (epsilon * epsilon);
+                    const glm::dvec3 beforeInterval =
+                        shortestWorldRotationVector(
+                            beforeOrientations[index],
+                            centerOrientations[index]) / epsilon;
+                    const glm::dvec3 afterInterval =
+                        shortestWorldRotationVector(
+                            centerOrientations[index],
+                            afterOrientations[index]) / epsilon;
+                    result.angularFirst[index] = 0.5
+                        * (beforeInterval + afterInterval);
+                    result.angularSecond[index] =
+                        (afterInterval - beforeInterval) / epsilon;
                 }
                 for (std::size_t index = 0;
                     index < applications.size();
@@ -670,6 +747,9 @@ namespace quantum::physics
                 }
                 const auto afterPositions = cogPositions(*after);
                 const auto afterTwicePositions = cogPositions(*afterTwice);
+                const auto afterOrientations = bodyOrientations(*after);
+                const auto afterTwiceOrientations =
+                    bodyOrientations(*afterTwice);
                 const auto afterApplicationPoints = applicationPointPositions(
                     *after, applications);
                 const auto afterTwiceApplicationPoints =
@@ -689,6 +769,18 @@ namespace quantum::physics
                             - 2.0 * afterPositions[index]
                             + afterTwicePositions[index])
                         / (epsilon * epsilon);
+                    const glm::dvec3 firstInterval =
+                        shortestWorldRotationVector(
+                            centerOrientations[index],
+                            afterOrientations[index]) / epsilon;
+                    const glm::dvec3 secondInterval =
+                        shortestWorldRotationVector(
+                            afterOrientations[index],
+                            afterTwiceOrientations[index]) / epsilon;
+                    result.angularFirst[index] = 1.5 * firstInterval
+                        - 0.5 * secondInterval;
+                    result.angularSecond[index] =
+                        (secondInterval - firstInterval) / epsilon;
                 }
                 for (std::size_t index = 0;
                     index < applications.size();
@@ -714,6 +806,9 @@ namespace quantum::physics
                 }
                 const auto beforePositions = cogPositions(*before);
                 const auto beforeTwicePositions = cogPositions(*beforeTwice);
+                const auto beforeOrientations = bodyOrientations(*before);
+                const auto beforeTwiceOrientations =
+                    bodyOrientations(*beforeTwice);
                 const auto beforeApplicationPoints = applicationPointPositions(
                     *before, applications);
                 const auto beforeTwiceApplicationPoints =
@@ -733,6 +828,18 @@ namespace quantum::physics
                             - 2.0 * beforePositions[index]
                             + beforeTwicePositions[index])
                         / (epsilon * epsilon);
+                    const glm::dvec3 firstInterval =
+                        shortestWorldRotationVector(
+                            beforeTwiceOrientations[index],
+                            beforeOrientations[index]) / epsilon;
+                    const glm::dvec3 secondInterval =
+                        shortestWorldRotationVector(
+                            beforeOrientations[index],
+                            centerOrientations[index]) / epsilon;
+                    result.angularFirst[index] = 1.5 * secondInterval
+                        - 0.5 * firstInterval;
+                    result.angularSecond[index] =
+                        (secondInterval - firstInterval) / epsilon;
                 }
                 for (std::size_t index = 0;
                     index < applications.size();
@@ -754,8 +861,11 @@ namespace quantum::physics
         struct CarLocalDerivativeSamples
         {
             glm::dvec3 centerOfGravity{0.0};
+            glm::dvec3 centerOfGravitySecond{0.0};
             glm::dvec3 frontHitch{0.0};
             glm::dvec3 rearHitch{0.0};
+            glm::dvec3 worldAngularRateJacobian{0.0};
+            glm::dvec3 worldAngularRateJacobianDerivative{0.0};
             std::vector<glm::dvec3> applicationPointDerivatives;
             TrainFiniteDifferenceKind kind =
                 TrainFiniteDifferenceKind::Central;
@@ -842,6 +952,7 @@ namespace quantum::physics
             const auto centerApplicationPoints =
                 localApplicationPointPositions(
                     center, applications, applicationIndices);
+            const glm::dquat& centerOrientation = center.bodyOrientation();
             result.applicationPointDerivatives.resize(
                 applicationIndices.size());
             if (before && after)
@@ -849,12 +960,29 @@ namespace quantum::physics
                 result.centerOfGravity = central(
                     before->worldCenterOfGravityMeters(),
                     after->worldCenterOfGravityMeters());
+                result.centerOfGravitySecond =
+                    (after->worldCenterOfGravityMeters()
+                        - 2.0 * center.worldCenterOfGravityMeters()
+                        + before->worldCenterOfGravityMeters())
+                    / (epsilon * epsilon);
                 result.frontHitch = central(
                     before->frontHitchWorldPositionMeters(),
                     after->frontHitchWorldPositionMeters());
                 result.rearHitch = central(
                     before->rearHitchWorldPositionMeters(),
                     after->rearHitchWorldPositionMeters());
+                const glm::dvec3 beforeInterval =
+                    shortestWorldRotationVector(
+                        before->bodyOrientation(), centerOrientation)
+                    / epsilon;
+                const glm::dvec3 afterInterval =
+                    shortestWorldRotationVector(
+                        centerOrientation, after->bodyOrientation())
+                    / epsilon;
+                result.worldAngularRateJacobian = 0.5
+                    * (beforeInterval + afterInterval);
+                result.worldAngularRateJacobianDerivative =
+                    (afterInterval - beforeInterval) / epsilon;
                 const auto beforeApplicationPoints =
                     localApplicationPointPositions(
                         *before, applications, applicationIndices);
@@ -884,6 +1012,11 @@ namespace quantum::physics
                     center.worldCenterOfGravityMeters(),
                     after->worldCenterOfGravityMeters(),
                     afterTwice->worldCenterOfGravityMeters());
+                result.centerOfGravitySecond =
+                    (center.worldCenterOfGravityMeters()
+                        - 2.0 * after->worldCenterOfGravityMeters()
+                        + afterTwice->worldCenterOfGravityMeters())
+                    / (epsilon * epsilon);
                 result.frontHitch = forward(
                     center.frontHitchWorldPositionMeters(),
                     after->frontHitchWorldPositionMeters(),
@@ -892,6 +1025,18 @@ namespace quantum::physics
                     center.rearHitchWorldPositionMeters(),
                     after->rearHitchWorldPositionMeters(),
                     afterTwice->rearHitchWorldPositionMeters());
+                const glm::dvec3 firstInterval =
+                    shortestWorldRotationVector(
+                        centerOrientation, after->bodyOrientation())
+                    / epsilon;
+                const glm::dvec3 secondInterval =
+                    shortestWorldRotationVector(
+                        after->bodyOrientation(),
+                        afterTwice->bodyOrientation()) / epsilon;
+                result.worldAngularRateJacobian = 1.5 * firstInterval
+                    - 0.5 * secondInterval;
+                result.worldAngularRateJacobianDerivative =
+                    (secondInterval - firstInterval) / epsilon;
                 const auto afterApplicationPoints =
                     localApplicationPointPositions(
                         *after, applications, applicationIndices);
@@ -922,6 +1067,11 @@ namespace quantum::physics
                     center.worldCenterOfGravityMeters(),
                     before->worldCenterOfGravityMeters(),
                     beforeTwice->worldCenterOfGravityMeters());
+                result.centerOfGravitySecond =
+                    (center.worldCenterOfGravityMeters()
+                        - 2.0 * before->worldCenterOfGravityMeters()
+                        + beforeTwice->worldCenterOfGravityMeters())
+                    / (epsilon * epsilon);
                 result.frontHitch = backward(
                     center.frontHitchWorldPositionMeters(),
                     before->frontHitchWorldPositionMeters(),
@@ -930,6 +1080,18 @@ namespace quantum::physics
                     center.rearHitchWorldPositionMeters(),
                     before->rearHitchWorldPositionMeters(),
                     beforeTwice->rearHitchWorldPositionMeters());
+                const glm::dvec3 firstInterval =
+                    shortestWorldRotationVector(
+                        beforeTwice->bodyOrientation(),
+                        before->bodyOrientation()) / epsilon;
+                const glm::dvec3 secondInterval =
+                    shortestWorldRotationVector(
+                        before->bodyOrientation(), centerOrientation)
+                    / epsilon;
+                result.worldAngularRateJacobian = 1.5 * secondInterval
+                    - 0.5 * firstInterval;
+                result.worldAngularRateJacobianDerivative =
+                    (secondInterval - firstInterval) / epsilon;
                 const auto beforeApplicationPoints =
                     localApplicationPointPositions(
                         *before, applications, applicationIndices);
@@ -953,8 +1115,11 @@ namespace quantum::physics
             }
 
             if (!finite(result.centerOfGravity)
+                || !finite(result.centerOfGravitySecond)
                 || !finite(result.frontHitch)
-                || !finite(result.rearHitch))
+                || !finite(result.rearHitch)
+                || !finite(result.worldAngularRateJacobian)
+                || !finite(result.worldAngularRateJacobianDerivative))
             {
                 throw std::domain_error(
                     "Connector-load local car derivatives are non-finite.");
@@ -1660,32 +1825,90 @@ namespace quantum::physics
 
         std::vector<TrainCarKinematics> cars;
         cars.reserve(center.carCount());
-        double effectiveMass = 0.0;
-        double effectiveMassDerivative = 0.0;
+        double translationalEffectiveMass = 0.0;
+        double rotationalEffectiveMass = 0.0;
+        double translationalEffectiveMassDerivative = 0.0;
+        double rotationalEffectiveMassDerivative = 0.0;
         double gravityForce = 0.0;
         for (std::size_t index = 0; index < center.carCount(); ++index)
         {
             const double mass = center.cars()[index].loadedMassKilograms();
             const glm::dvec3& jacobian = derivatives.first[index];
             const glm::dvec3& secondDerivative = derivatives.second[index];
-            if (!finite(jacobian) || !finite(secondDerivative))
+            const glm::dvec3& angularJacobian =
+                derivatives.angularFirst[index];
+            const glm::dvec3& angularJacobianDerivative =
+                derivatives.angularSecond[index];
+            if (!finite(jacobian) || !finite(secondDerivative)
+                || !finite(angularJacobian)
+                || !finite(angularJacobianDerivative))
             {
                 throw std::domain_error(
                     "Train kinematic derivatives are non-finite.");
             }
+            const geometry::CurveFrame& bodyFrame =
+                center.cars()[index].carPose().bodyFrame();
+            const glm::dvec3 bodyAngularJacobian = inBodyFrame(
+                angularJacobian, bodyFrame);
+            // d(R^T*Jw)/dq = R^T*Jw' because the omitted term is
+            // -Jbody cross Jbody, which is identically zero.
+            const glm::dvec3 bodyAngularJacobianDerivative = inBodyFrame(
+                angularJacobianDerivative, bodyFrame);
+            const glm::dmat3 loadedInertia =
+                loadedCarInertiaTensorBodyKgM2(
+                    definition.cars[index].car,
+                    definition.cars[index].loadout);
             const double carGravity = mass
                 * glm::dot(gravityWorld, jacobian);
-            effectiveMass += mass * glm::dot(jacobian, jacobian);
-            effectiveMassDerivative += 2.0 * mass
+            const double carTranslationalEffectiveMass = mass
+                * glm::dot(jacobian, jacobian);
+            const double carTranslationalEffectiveMassDerivative = 2.0 * mass
                 * glm::dot(jacobian, secondDerivative);
+            const double carRotationalEffectiveMass = glm::dot(
+                bodyAngularJacobian,
+                loadedInertia * bodyAngularJacobian);
+            const double carRotationalEffectiveMassDerivative = 2.0
+                * glm::dot(
+                    bodyAngularJacobian,
+                    loadedInertia * bodyAngularJacobianDerivative);
+            translationalEffectiveMass += carTranslationalEffectiveMass;
+            rotationalEffectiveMass += carRotationalEffectiveMass;
+            translationalEffectiveMassDerivative +=
+                carTranslationalEffectiveMassDerivative;
+            rotationalEffectiveMassDerivative +=
+                carRotationalEffectiveMassDerivative;
             gravityForce += carGravity;
+            if (!std::isfinite(carTranslationalEffectiveMass)
+                || !std::isfinite(carRotationalEffectiveMass)
+                || carRotationalEffectiveMass < -1.0e-12
+                || !std::isfinite(carTranslationalEffectiveMassDerivative)
+                || !std::isfinite(carRotationalEffectiveMassDerivative))
+            {
+                throw std::domain_error(
+                    "Car reduced rotational mechanics are non-finite or negative.");
+            }
             cars.push_back({
                 index,
                 jacobian,
                 secondDerivative,
+                angularJacobian,
+                angularJacobianDerivative,
+                bodyAngularJacobian,
+                bodyAngularJacobianDerivative,
+                loadedInertia,
+                carTranslationalEffectiveMass,
+                std::max(0.0, carRotationalEffectiveMass),
+                carTranslationalEffectiveMassDerivative,
+                carRotationalEffectiveMassDerivative,
                 carGravity
             });
         }
+
+        const double effectiveMass = translationalEffectiveMass
+            + rotationalEffectiveMass;
+        const double effectiveMassDerivative =
+            translationalEffectiveMassDerivative
+            + rotationalEffectiveMassDerivative;
 
         std::vector<ExternalForceApplicationEvaluation>
             externalForceEvaluations;
@@ -1726,7 +1949,11 @@ namespace quantum::physics
         return {
             std::move(center),
             std::move(cars),
+            translationalEffectiveMass,
+            rotationalEffectiveMass,
             effectiveMass,
+            translationalEffectiveMassDerivative,
+            rotationalEffectiveMassDerivative,
             effectiveMassDerivative,
             gravityForce,
             std::move(externalForceEvaluations),
@@ -1734,6 +1961,192 @@ namespace quantum::physics
             trainKinematicJacobianStepMeters,
             derivatives.kind
         };
+    }
+
+    CarAngularKinematics::CarAngularKinematics(
+        const std::size_t carIndex,
+        const CarAngularKinematicsStatus status,
+        glm::dvec3 worldAngularVelocityRadiansPerSecond,
+        glm::dvec3 worldAngularAccelerationRadiansPerSecondSquared,
+        glm::dvec3 bodyAngularVelocityRadiansPerSecond,
+        glm::dvec3 bodyAngularAccelerationRadiansPerSecondSquared,
+        glm::dvec3 worldAngularRateJacobianRadiansPerGeneralizedMeter,
+        glm::dvec3
+            worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared,
+        const double rotationalKineticEnergyJoules,
+        const double rotationalEffectiveMassKilograms,
+        const double rotationalEffectiveMassDerivativeKilogramsPerMeter)
+        : carIndex_(carIndex),
+          status_(status),
+          worldAngularVelocityRadiansPerSecond_(
+              worldAngularVelocityRadiansPerSecond),
+          worldAngularAccelerationRadiansPerSecondSquared_(
+              worldAngularAccelerationRadiansPerSecondSquared),
+          bodyAngularVelocityRadiansPerSecond_(
+              bodyAngularVelocityRadiansPerSecond),
+          bodyAngularAccelerationRadiansPerSecondSquared_(
+              bodyAngularAccelerationRadiansPerSecondSquared),
+          worldAngularRateJacobianRadiansPerGeneralizedMeter_(
+              worldAngularRateJacobianRadiansPerGeneralizedMeter),
+          worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared_(
+              worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared),
+          rotationalKineticEnergyJoules_(rotationalKineticEnergyJoules),
+          rotationalEffectiveMassKilograms_(
+              rotationalEffectiveMassKilograms),
+          rotationalEffectiveMassDerivativeKilogramsPerMeter_(
+              rotationalEffectiveMassDerivativeKilogramsPerMeter)
+    {
+    }
+
+    std::size_t CarAngularKinematics::carIndex() const noexcept
+    {
+        return carIndex_;
+    }
+
+    CarAngularKinematicsStatus CarAngularKinematics::status() const noexcept
+    {
+        return status_;
+    }
+
+    const glm::dvec3&
+    CarAngularKinematics::worldAngularVelocityRadiansPerSecond() const noexcept
+    {
+        return worldAngularVelocityRadiansPerSecond_;
+    }
+
+    const glm::dvec3& CarAngularKinematics::
+        worldAngularAccelerationRadiansPerSecondSquared() const noexcept
+    {
+        return worldAngularAccelerationRadiansPerSecondSquared_;
+    }
+
+    const glm::dvec3&
+    CarAngularKinematics::bodyAngularVelocityRadiansPerSecond() const noexcept
+    {
+        return bodyAngularVelocityRadiansPerSecond_;
+    }
+
+    const glm::dvec3& CarAngularKinematics::
+        bodyAngularAccelerationRadiansPerSecondSquared() const noexcept
+    {
+        return bodyAngularAccelerationRadiansPerSecondSquared_;
+    }
+
+    const glm::dvec3& CarAngularKinematics::
+        worldAngularRateJacobianRadiansPerGeneralizedMeter() const noexcept
+    {
+        return worldAngularRateJacobianRadiansPerGeneralizedMeter_;
+    }
+
+    const glm::dvec3& CarAngularKinematics::
+        worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared()
+            const noexcept
+    {
+        return worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared_;
+    }
+
+    double CarAngularKinematics::rotationalKineticEnergyJoules() const noexcept
+    {
+        return rotationalKineticEnergyJoules_;
+    }
+
+    double CarAngularKinematics::rotationalEffectiveMassKilograms()
+        const noexcept
+    {
+        return rotationalEffectiveMassKilograms_;
+    }
+
+    double CarAngularKinematics::
+        rotationalEffectiveMassDerivativeKilogramsPerMeter() const noexcept
+    {
+        return rotationalEffectiveMassDerivativeKilogramsPerMeter_;
+    }
+
+    bool CarAngularKinematics::available() const noexcept
+    {
+        return status_ == CarAngularKinematicsStatus::Available;
+    }
+
+    TrainAngularKinematicEvaluation evaluateTrainAngularKinematics(
+        const TrainKinematicEvaluation& kinematics,
+        const double signedVelocityMetersPerSecond,
+        const double generalizedAccelerationMetersPerSecondSquared)
+    {
+        if (!std::isfinite(signedVelocityMetersPerSecond)
+            || !std::isfinite(generalizedAccelerationMetersPerSecondSquared))
+        {
+            throw std::invalid_argument(
+                "Angular kinematics requires finite generalized velocity and acceleration.");
+        }
+        if (kinematics.cars.size() != kinematics.pose.carCount())
+        {
+            throw std::invalid_argument(
+                "Angular kinematics requires matching train pose and car derivative counts.");
+        }
+        const double velocitySquared = signedVelocityMetersPerSecond
+            * signedVelocityMetersPerSecond;
+        if (!std::isfinite(velocitySquared))
+        {
+            throw std::invalid_argument(
+                "Angular kinematics speed is too large to square as a finite value.");
+        }
+
+        TrainAngularKinematicEvaluation result;
+        result.cars.reserve(kinematics.cars.size());
+        for (std::size_t index = 0; index < kinematics.cars.size(); ++index)
+        {
+            const TrainCarKinematics& car = kinematics.cars[index];
+            const glm::dvec3 worldVelocity =
+                car.worldAngularRateJacobianRadiansPerGeneralizedMeter
+                    * signedVelocityMetersPerSecond;
+            const glm::dvec3 worldAcceleration =
+                car.worldAngularRateJacobianRadiansPerGeneralizedMeter
+                    * generalizedAccelerationMetersPerSecondSquared
+                + car.worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared
+                    * velocitySquared;
+            const geometry::CurveFrame& frame =
+                kinematics.pose.cars()[index].carPose().bodyFrame();
+            const glm::dvec3 bodyVelocity = inBodyFrame(
+                worldVelocity, frame);
+            const glm::dvec3 bodyAcceleration = inBodyFrame(
+                worldAcceleration, frame);
+            const double energy = 0.5 * glm::dot(
+                bodyVelocity,
+                car.loadedInertiaTensorBodyKgM2 * bodyVelocity);
+            if (!finite(worldVelocity) || !finite(worldAcceleration)
+                || !finite(bodyVelocity) || !finite(bodyAcceleration)
+                || !std::isfinite(energy) || energy < -1.0e-12)
+            {
+                throw std::domain_error(
+                    "Car angular kinematics or rotational energy is non-finite or negative.");
+            }
+            result.totalRotationalKineticEnergyJoules += std::max(0.0, energy);
+            result.totalRotationalEffectiveMassKilograms +=
+                car.rotationalEffectiveMassKilograms;
+            result.rotationalEffectiveMassDerivativeKilogramsPerMeter +=
+                car.rotationalEffectiveMassDerivativeKilogramsPerMeter;
+            result.cars.emplace_back(
+                car.carIndex,
+                CarAngularKinematicsStatus::Available,
+                worldVelocity,
+                worldAcceleration,
+                bodyVelocity,
+                bodyAcceleration,
+                car.worldAngularRateJacobianRadiansPerGeneralizedMeter,
+                car.worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared,
+                std::max(0.0, energy),
+                car.rotationalEffectiveMassKilograms,
+                car.rotationalEffectiveMassDerivativeKilogramsPerMeter);
+        }
+        if (!std::isfinite(result.totalRotationalKineticEnergyJoules)
+            || !std::isfinite(result.totalRotationalEffectiveMassKilograms)
+            || !std::isfinite(
+                result.rotationalEffectiveMassDerivativeKilogramsPerMeter))
+        {
+            throw std::domain_error(
+                "Train rotational diagnostics are non-finite.");
+        }
+        return result;
     }
 
     ExplicitResistanceTelemetry generateExplicitResistanceForces(
@@ -1995,13 +2408,74 @@ namespace quantum::physics
                     * state.generalizedAccelerationMetersPerSecondSquared
                 + constrained.second[index] * velocitySquared;
             const double mass = center.cars()[index].loadedMassKilograms();
+            const double localDerivativeSquared = glm::dot(
+                local[index].centerOfGravity,
+                local[index].centerOfGravity);
+            if (!std::isfinite(localDerivativeSquared)
+                || localDerivativeSquared <= 1.0e-12)
+            {
+                return unavailable(
+                    RigidConnectorLoadRecoveryStatus::IllConditioned,
+                    std::nullopt,
+                    0.0,
+                    0.0,
+                    std::move(localKinds),
+                    constrained.kind);
+            }
+            // Recover ds_i/dq and d2s_i/dq2 from the same translational pose
+            // derivatives already used by Phase 4. This maps the actual
+            // constrained train state into car i's local track coordinate.
+            const double localCoordinateJacobian = glm::dot(
+                constrained.first[index],
+                local[index].centerOfGravity) / localDerivativeSquared;
+            const double localCoordinateSecondDerivative = glm::dot(
+                constrained.second[index]
+                    - local[index].centerOfGravitySecond
+                        * localCoordinateJacobian * localCoordinateJacobian,
+                local[index].centerOfGravity) / localDerivativeSquared;
+            const double localVelocity = localCoordinateJacobian
+                * state.signedVelocityMetersPerSecond;
+            const double localAcceleration = localCoordinateJacobian
+                    * state.generalizedAccelerationMetersPerSecondSquared
+                + localCoordinateSecondDerivative * velocitySquared;
+            const geometry::CurveFrame& bodyFrame =
+                center.cars()[index].carPose().bodyFrame();
+            const glm::dvec3 localBodyAngularJacobian = inBodyFrame(
+                local[index].worldAngularRateJacobian, bodyFrame);
+            const glm::dvec3 localBodyAngularJacobianDerivative = inBodyFrame(
+                local[index].worldAngularRateJacobianDerivative, bodyFrame);
+            const glm::dmat3 loadedInertia =
+                loadedCarInertiaTensorBodyKgM2(
+                    definition.cars[index].car,
+                    definition.cars[index].loadout);
+            const double localRotationalEffectiveMass = glm::dot(
+                localBodyAngularJacobian,
+                loadedInertia * localBodyAngularJacobian);
+            const double localRotationalEffectiveMassDerivative = 2.0
+                * glm::dot(
+                    localBodyAngularJacobian,
+                    loadedInertia * localBodyAngularJacobianDerivative);
+            const double rotationalInertialGeneralizedForce =
+                localRotationalEffectiveMass * localAcceleration
+                + 0.5 * localRotationalEffectiveMassDerivative
+                    * localVelocity * localVelocity;
             // The remaining generalized force must be supplied by adjacent
-            // connector axes after gravity and each known F dot dp/ds_i term.
+            // connector axes after translation, body rotation, gravity, and
+            // each known F dot dp/ds_i term. This remains an axial-force
+            // recovery; no connector moment has been introduced.
             requiredGeneralizedForce[index] = mass * glm::dot(
                 acceleration - gravityWorld,
                 local[index].centerOfGravity)
+                + rotationalInertialGeneralizedForce
                 - knownExternalGeneralizedForce[index];
             if (!finite(acceleration)
+                || !std::isfinite(localCoordinateJacobian)
+                || !std::isfinite(localCoordinateSecondDerivative)
+                || !std::isfinite(localVelocity)
+                || !std::isfinite(localAcceleration)
+                || !std::isfinite(localRotationalEffectiveMass)
+                || !std::isfinite(localRotationalEffectiveMassDerivative)
+                || !std::isfinite(rotationalInertialGeneralizedForce)
                 || !std::isfinite(requiredGeneralizedForce[index]))
             {
                 throw std::domain_error(
@@ -2548,7 +3022,7 @@ namespace quantum::physics
             const BogieReactionRecoveryStatus bogieStatus =
                 bogieSeparation < bogieReactionMinimumSeparationMeters
                 ? BogieReactionRecoveryStatus::SingularGeometry
-                : BogieReactionRecoveryStatus::MissingRotationalModel;
+                : BogieReactionRecoveryStatus::MomentBalanceNotImplemented;
             cars.push_back({
                 carIndex,
                 CarTrackReactionRecoveryStatus::Available,
@@ -2749,16 +3223,26 @@ namespace quantum::physics
             track, definition, nextState.generalizedReferenceLocation);
         const double committedMaximumResidual =
             committedPose.maximumAbsoluteConnectorResidualMeters();
+        TrainAngularKinematicEvaluation angular =
+            evaluateTrainAngularKinematics(
+                current,
+                workingVelocity,
+                nextState.generalizedAccelerationMetersPerSecondSquared);
         TrainTelemetry telemetry{
             nextState.tick,
             simulationTime,
             nextState.generalizedReferenceLocation,
             std::move(committedPose),
             std::move(current.cars),
+            std::move(angular.cars),
             nextVelocity,
             nextState.generalizedAccelerationMetersPerSecondSquared,
             current.pose.totalLoadedMassKilograms(),
+            angular.totalRotationalKineticEnergyJoules,
+            current.translationalEffectiveGeneralizedMassKilograms,
+            current.rotationalEffectiveGeneralizedMassKilograms,
             current.effectiveGeneralizedMassKilograms,
+            current.rotationalEffectiveGeneralizedMassDerivativeKilogramsPerMeter,
             current.generalizedGravityForceNewtons,
             current.generalizedExternalForceNewtons,
             externalForces.size(),

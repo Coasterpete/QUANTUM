@@ -18,6 +18,9 @@ namespace quantum::physics
     // generalized SI distance as TrackLocation::stationMeters.
     inline constexpr double connectorLengthToleranceMeters = 1.0e-8;
     inline constexpr double trainKinematicJacobianStepMeters = 1.0e-2;
+    // A sampled relative rotation this close to pi has an ambiguous shortest
+    // logarithm axis and is rejected instead of producing unstable rates.
+    inline constexpr double angularDerivativeNearPiToleranceRadians = 1.0e-6;
     // Phase 4 local derivatives use a separate 1 cm car-reference-station
     // step. Axes shorter than 1 micrometre and projections that move less than
     // 1 micrometre along the axis per metre of local coordinate are rejected
@@ -215,7 +218,92 @@ namespace quantum::physics
         glm::dvec3
             worldCenterOfGravitySecondDerivativePerGeneralizedMeterSquared{
                 0.0};
+        // World angular velocity is Jw*qdot. Its derivative supplies the
+        // geometry term in alpha=Jw*qdd+Jw'*qdot^2.
+        glm::dvec3 worldAngularRateJacobianRadiansPerGeneralizedMeter{0.0};
+        glm::dvec3
+            worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared{
+                0.0};
+        glm::dvec3 bodyAngularRateJacobianRadiansPerGeneralizedMeter{0.0};
+        glm::dvec3
+            bodyAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared{
+                0.0};
+        glm::dmat3 loadedInertiaTensorBodyKgM2{1.0};
+        double translationalEffectiveMassKilograms = 0.0;
+        double rotationalEffectiveMassKilograms = 0.0;
+        double translationalEffectiveMassDerivativeKilogramsPerMeter = 0.0;
+        double rotationalEffectiveMassDerivativeKilogramsPerMeter = 0.0;
         double generalizedGravityForceNewtons = 0.0;
+    };
+
+    enum class CarAngularKinematicsStatus : std::uint8_t
+    {
+        Available
+    };
+
+    // Runtime angular state derived from immutable q-based car kinematics.
+    // All angular vectors are physical vectors, never Euler-angle rates.
+    class CarAngularKinematics
+    {
+    public:
+        CarAngularKinematics(
+            std::size_t carIndex,
+            CarAngularKinematicsStatus status,
+            glm::dvec3 worldAngularVelocityRadiansPerSecond,
+            glm::dvec3 worldAngularAccelerationRadiansPerSecondSquared,
+            glm::dvec3 bodyAngularVelocityRadiansPerSecond,
+            glm::dvec3 bodyAngularAccelerationRadiansPerSecondSquared,
+            glm::dvec3 worldAngularRateJacobianRadiansPerGeneralizedMeter,
+            glm::dvec3
+                worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared,
+            double rotationalKineticEnergyJoules,
+            double rotationalEffectiveMassKilograms,
+            double rotationalEffectiveMassDerivativeKilogramsPerMeter);
+
+        [[nodiscard]] std::size_t carIndex() const noexcept;
+        [[nodiscard]] CarAngularKinematicsStatus status() const noexcept;
+        [[nodiscard]] const glm::dvec3&
+            worldAngularVelocityRadiansPerSecond() const noexcept;
+        [[nodiscard]] const glm::dvec3&
+            worldAngularAccelerationRadiansPerSecondSquared() const noexcept;
+        [[nodiscard]] const glm::dvec3&
+            bodyAngularVelocityRadiansPerSecond() const noexcept;
+        [[nodiscard]] const glm::dvec3&
+            bodyAngularAccelerationRadiansPerSecondSquared() const noexcept;
+        [[nodiscard]] const glm::dvec3&
+            worldAngularRateJacobianRadiansPerGeneralizedMeter() const noexcept;
+        [[nodiscard]] const glm::dvec3&
+            worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared()
+                const noexcept;
+        [[nodiscard]] double rotationalKineticEnergyJoules() const noexcept;
+        [[nodiscard]] double rotationalEffectiveMassKilograms() const noexcept;
+        [[nodiscard]] double
+            rotationalEffectiveMassDerivativeKilogramsPerMeter() const noexcept;
+        [[nodiscard]] bool available() const noexcept;
+
+    private:
+        std::size_t carIndex_ = 0;
+        CarAngularKinematicsStatus status_ =
+            CarAngularKinematicsStatus::Available;
+        glm::dvec3 worldAngularVelocityRadiansPerSecond_{0.0};
+        glm::dvec3 worldAngularAccelerationRadiansPerSecondSquared_{0.0};
+        glm::dvec3 bodyAngularVelocityRadiansPerSecond_{0.0};
+        glm::dvec3 bodyAngularAccelerationRadiansPerSecondSquared_{0.0};
+        glm::dvec3 worldAngularRateJacobianRadiansPerGeneralizedMeter_{0.0};
+        glm::dvec3
+            worldAngularRateJacobianDerivativeRadiansPerGeneralizedMeterSquared_{
+                0.0};
+        double rotationalKineticEnergyJoules_ = 0.0;
+        double rotationalEffectiveMassKilograms_ = 0.0;
+        double rotationalEffectiveMassDerivativeKilogramsPerMeter_ = 0.0;
+    };
+
+    struct TrainAngularKinematicEvaluation
+    {
+        std::vector<CarAngularKinematics> cars;
+        double totalRotationalKineticEnergyJoules = 0.0;
+        double totalRotationalEffectiveMassKilograms = 0.0;
+        double rotationalEffectiveMassDerivativeKilogramsPerMeter = 0.0;
     };
 
     struct ExternalForceApplicationEvaluation
@@ -230,7 +318,13 @@ namespace quantum::physics
     {
         TrainPose pose;
         std::vector<TrainCarKinematics> cars;
+        double translationalEffectiveGeneralizedMassKilograms = 0.0;
+        double rotationalEffectiveGeneralizedMassKilograms = 0.0;
         double effectiveGeneralizedMassKilograms = 0.0;
+        double translationalEffectiveGeneralizedMassDerivativeKilogramsPerMeter =
+            0.0;
+        double rotationalEffectiveGeneralizedMassDerivativeKilogramsPerMeter =
+            0.0;
         double effectiveGeneralizedMassDerivativeKilogramsPerMeter = 0.0;
         double generalizedGravityForceNewtons = 0.0;
         std::vector<ExternalForceApplicationEvaluation> externalForces;
@@ -240,14 +334,23 @@ namespace quantum::physics
             TrainFiniteDifferenceKind::Central;
     };
 
-    // Only translational point motion participates. Body and bogie rotational
-    // inertia, and moments from off-origin force applications, are deferred.
+    // COG translation and body rotation both participate. Bogie rotational
+    // inertia and arbitrary applied torque sources remain deferred.
     [[nodiscard]] TrainKinematicEvaluation evaluateTrainKinematics(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
         const TrackLocation& generalizedReferenceLocation,
         std::span<const ExternalForceApplication> externalForces = {});
+
+    // Converts the q-based orientation derivatives in an existing evaluation
+    // into deterministic angular velocity, acceleration, and kinetic energy
+    // without resolving any train poses.
+    [[nodiscard]] TrainAngularKinematicEvaluation
+        evaluateTrainAngularKinematics(
+            const TrainKinematicEvaluation& kinematics,
+            double signedVelocityMetersPerSecond,
+            double generalizedAccelerationMetersPerSecondSquared);
 
     struct TrainDynamicsState
     {
@@ -448,14 +551,14 @@ namespace quantum::physics
     };
 
     // A future model may make an aggregate reaction at each bogie available.
-    // Phase 7 intentionally leaves the force optionals empty: current
-    // translational balance determines only their sum, while a defensible
-    // split needs rotational inertia and additional constraint assumptions.
+    // Phase 8 still leaves the force optionals empty. Rotational state now
+    // exists, but the actual moment-balance/contact-direction solve is a later
+    // milestone; translational balance alone determines only their sum.
     enum class BogieReactionRecoveryStatus : std::uint8_t
     {
         Available,
         AggregateCarReactionUnavailable,
-        MissingRotationalModel,
+        MomentBalanceNotImplemented,
         SingularGeometry
     };
 
@@ -468,7 +571,7 @@ namespace quantum::physics
         glm::dvec3 worldPositionMeters{0.0};
         geometry::CurveFrame trackFrame;
         BogieReactionRecoveryStatus status =
-            BogieReactionRecoveryStatus::MissingRotationalModel;
+            BogieReactionRecoveryStatus::MomentBalanceNotImplemented;
         std::optional<glm::dvec3> worldReactionNewtons;
         std::optional<double> magnitudeNewtons;
         // (x, y, z) are canonical track-frame tangent, lateral, and up
@@ -536,10 +639,16 @@ namespace quantum::physics
         TrackLocation generalizedReferenceLocation;
         TrainPose pose;
         std::vector<TrainCarKinematics> cars;
+        std::vector<CarAngularKinematics> angularKinematics;
         double signedSpeedMetersPerSecond = 0.0;
         double generalizedAccelerationMetersPerSecondSquared = 0.0;
         double totalLoadedMassKilograms = 0.0;
+        double totalRotationalKineticEnergyJoules = 0.0;
+        double translationalEffectiveGeneralizedMassKilograms = 0.0;
+        double rotationalEffectiveGeneralizedMassKilograms = 0.0;
         double effectiveGeneralizedMassKilograms = 0.0;
+        double rotationalEffectiveGeneralizedMassDerivativeKilogramsPerMeter =
+            0.0;
         double generalizedGravityForceNewtons = 0.0;
         double generalizedExternalForceNewtons = 0.0;
         std::size_t externalForceApplicationCount = 0;

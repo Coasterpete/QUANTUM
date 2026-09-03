@@ -3,6 +3,7 @@
 #include <quantum/physics/TrackFollower.hpp>
 
 #include <glm/gtc/quaternion.hpp>
+#include <glm/mat3x3.hpp>
 #include <glm/vec3.hpp>
 
 #include <array>
@@ -28,6 +29,11 @@ namespace quantum::physics
     {
         double dryMassKilograms = 1.0;
         glm::dvec3 dryCenterOfGravityMeters{0.0};
+        // Full symmetric inertia tensor about the dry COG, expressed in the
+        // physical car frame (+X forward, +Y lateral, +Z up), in kg*m^2.
+        // This is authoritative authored physics data; body dimensions do not
+        // implicitly replace it with a box approximation.
+        glm::dmat3 dryInertiaTensorBodyKgM2{1.0};
         glm::dvec3 bodyDimensionsMeters{1.0};
         glm::dvec3 frontHitchPositionMeters{0.5, 0.0, 0.0};
         glm::dvec3 rearHitchPositionMeters{-0.5, 0.0, 0.0};
@@ -58,6 +64,18 @@ namespace quantum::physics
         const CarLoadout& loadout = {});
 
     [[nodiscard]] glm::dvec3 loadedCarCenterOfGravityMeters(
+        const CarDefinition& definition,
+        const CarLoadout& loadout = {});
+
+    // Convenience approximation for authored defaults and tests only. Real
+    // vehicle inertia should be authored directly on CarDefinition.
+    [[nodiscard]] glm::dmat3 makeUniformBoxInertiaTensorBodyKgM2(
+        double massKilograms,
+        const glm::dvec3& dimensionsMeters);
+
+    // Combines dry inertia about the dry COG with CarLoadout treated as a
+    // point mass at its authored COM, returning inertia about the loaded COG.
+    [[nodiscard]] glm::dmat3 loadedCarInertiaTensorBodyKgM2(
         const CarDefinition& definition,
         const CarLoadout& loadout = {});
 
@@ -165,4 +183,9 @@ namespace quantum::physics
         const CarDefinition& definition,
         const TrackLocation& referenceLocation,
         const CarLoadout& loadout = {});
+
+    // R maps the physical body frame to world space, so I_world=R*I_body*R^T.
+    [[nodiscard]] glm::dmat3 worldCarInertiaTensorKgM2(
+        const CarPose& pose,
+        const glm::dmat3& inertiaTensorBodyKgM2);
 }

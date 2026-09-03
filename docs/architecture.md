@@ -681,8 +681,9 @@ computes each loaded car's distributed world-space center of gravity and its
 derivative with respect to the generalized coordinate. Those derivatives
 produce the distributed generalized gravity force, effective generalized mass,
 and its coordinate derivative used by the deterministic fixed-step train
-integrator. Only translational car-center-of-gravity kinetic energy participates;
-rotational kinetic energy of the car bodies and bogies is not yet included.
+integrator. Phase 3 originally included only translational car-center-of-gravity
+kinetic energy; Phase 8 adds car-body rotational energy without adding another
+degree of freedom. Bogie rotational inertia remains deferred.
 
 Train steps publish train-level telemetry together with immutable/read-only
 train, car, bogie, and connection pose diagnostics, including connector-length
@@ -702,10 +703,12 @@ front hitch and are equal and opposite on the adjacent cars.
 
 The recovery uses each car's Phase 2 reference station as an auxiliary local
 coordinate, without adding independently integrated car state. Deterministic
-local derivatives of loaded COG and authored hitch positions are combined with
-the constrained train COG acceleration, including generalized acceleration and
-velocity-squared geometric terms. Per-car translational force balance is then
-solved as a structured linear chain. One redundant car equation is retained as
+local derivatives of loaded COG, body orientation, and authored hitch positions
+are combined with the constrained train acceleration, including generalized
+acceleration and velocity-squared geometric terms. Phase 8 adds each car's exact
+one-coordinate rotational generalized-inertia demand to this auxiliary local
+balance. The resulting equations are solved as a structured linear chain. One
+redundant car equation is retained as
 a global balance residual, and undefined connector axes, ill-conditioned hitch
 projections, non-finite values, or an excessive residual make the exact result
 unavailable.
@@ -718,10 +721,12 @@ reports that case as explicitly underdetermined. Zero-length connectors remain
 supported kinematically but have no unique world-space axial direction and are
 therefore make the coupled chain recovery unavailable in this milestone.
 
-These results are axial loads consistent with the current reduced
-translational model. Connector compliance and slack, connector moments,
-car/bogie rotational dynamics, suspension, the Phase 7 front/rear reaction
-split, wheel reaction loads, and operational device forces remain deferred. A
+These results are axial loads consistent with the current reduced model. They
+include the Phase 8 car-body rotational contribution to generalized demand, but
+do not claim connector torque or a full structural load state. Connector
+compliance and slack, connector moments, bogie rotational dynamics, suspension,
+the front/rear reaction split, wheel reaction loads, and operational device
+forces remain deferred. A
 complete rigid-body or structural connector-load interpretation must not be
 inferred from this telemetry.
 
@@ -757,10 +762,12 @@ continues to report `AggregateResistanceUnderdetermined` whenever that law can
 produce force.
 
 The stored application point preserves a future seam for body moments, but
-Phase 5 does not compute or integrate torque, angular motion, body inertia,
-connector moments, compliance, independent car motion, or bogie/wheel contact
-loads. Force profiles and operational brake, launch, lift, tire, station, and
-block systems also remain deferred.
+Phase 5 does not introduce an external-torque API, connector moments,
+compliance, independent car motion, or bogie/wheel contact loads. Phase 8 later
+adds deterministic body angular motion and inertia to the same one-coordinate
+model; off-origin force applications continue to enter through their existing
+point-motion virtual work. Force profiles and operational brake, launch, lift,
+tire, station, and block systems remain deferred.
 
 ### Phase 6: explicit per-car aerodynamic resistance
 
@@ -770,8 +777,8 @@ physical coordinate system used by Phase 5 force applications. Different cars,
 including a non-passenger lead vehicle, may use different values. A zero `CdA`
 disables explicit drag for that car and causes the producer to omit its force
 application. The aerodynamic center is not assumed to be the loaded center of
-gravity; it remains an application point only, because rotational dynamics are
-still outside the reduced model.
+gravity. It remains a force application point only: no aerodynamic torque or
+rotational drag coefficient is inferred from it.
 
 `generateExplicitResistanceForces` writes into caller-owned reusable contiguous
 storage. It solves one nominal train pose and reuses the Phase 5 legal central or
@@ -879,7 +886,7 @@ Each car result also contains named front and rear `BogieReaction` metadata,
 reusing Phase 2's validated role ordering, authored definition index,
 `TrackLocation`, world position, and canonical track frame. In Phase 7 their
 force, magnitude, and track-frame component optionals remain empty. A normal
-two-bogie arrangement reports `MissingRotationalModel`; less than one
+two-bogie arrangement reports `MomentBalanceNotImplemented`; less than one
 micrometre of world bogie separation reports `SingularGeometry`. The latter is
 a reaction-conditioning threshold, distinct from the smaller Phase 2
 pose-validity threshold.
@@ -894,13 +901,12 @@ balance. A dynamic moment equation,
 sum(tau_COG) = I alpha + omega cross (I omega)
 ```
 
-would require rotational kinematics, an authored body inertia tensor, and
-explicit constraint-direction assumptions. The solved body orientation could
-support finite-differenced angular kinematics in a later model, but rotational
-kinetic energy and inertia are not part of the present train dynamics.
-`bodyDimensions + mass` is not used to fabricate an inertia tensor, and Phase 7
-does not apply a quasi-static, zero-inertia, or 50/50 split. Consequently there
-is no moment-balance residual to report.
+requires rotational kinematics, an authored body inertia tensor, and explicit
+constraint-direction assumptions. Phase 8 now supplies the first two pieces,
+but does not implement this moment-balance/contact solve. `bodyDimensions +
+mass` is not used to fabricate an authoritative inertia tensor, and no
+quasi-static, zero-inertia, or 50/50 split is applied. Consequently there is
+still no front/rear moment-balance residual to report.
 
 Before publishing an aggregate reaction, the analysis checks the reduced
 generalized equation
@@ -932,6 +938,86 @@ No wheel/rail cross-section or `TrackGeometryFamily` participates. Phase 7
 adds no running/guide/upstop split, individual-wheel distribution, contact
 engagement, suspension, steering, connector compliance, operational device,
 seat/restraint, or rider-body model.
+
+### Phase 8: car-body rotational foundation
+
+`CarDefinition::dryInertiaTensorBodyKgM2` is a full symmetric inertia tensor
+about the dry COG in the physical car frame: +X forward, +Y lateral, and +Z up.
+It is explicit authored SI data in kg*m^2. `bodyDimensionsMeters` never silently
+defines authoritative inertia; `makeUniformBoxInertiaTensorBodyKgM2` is only a
+named convenience approximation. Validation rejects non-finite or materially
+asymmetric tensors, non-positive-definite or numerically singular tensors, and
+principal moments that violate the physical triangle inequalities.
+
+`CarLoadout` still authors only aggregate mass and a point COM. Phase 8 therefore
+treats that load as having zero intrinsic inertia, rather than inventing rider
+shape. `loadedCarInertiaTensorBodyKgM2` shifts both the dry body and point load
+to the already computed loaded COG with
+
+```text
+I_shift = I_local + m (|d|^2 I3 - d d^T)
+```
+
+where every displacement is in the body frame. For a solved `CarPose`, the
+world tensor is `I_world = R I_body R^T`, with `R` mapping body vectors to world
+space.
+
+The existing shared legal train samples at `q-h`, `q`, and `q+h`, with
+`h = 0.01 m`, now also supply body orientations. Each adjacent orientation pair
+is converted to a shortest-path world rotation vector from the relative
+quaternion `Q_to conjugate(Q_from)`. Relative signs are canonicalized before the
+quaternion logarithm, so `Q` and `-Q` cannot create a circuit-seam spike. A
+relative rotation within `1e-6 rad` of pi is rejected as ill-conditioned. Open
+track boundaries reuse the existing legal forward or backward three-pose
+samples; interval angular rates are extrapolated to the endpoint instead of
+reading wrapped station differences or Euler angles.
+
+The resulting world angular-rate Jacobian and derivative define
+
+```text
+omega_i = J_omega,i qdot
+alpha_i = J_omega,i qdd + J_omega,i' qdot^2
+```
+
+`TrainCarKinematics` exposes both world/body Jacobians, loaded body inertia, and
+per-car translational and rotational effective-mass contributions.
+`evaluateTrainAngularKinematics` converts an existing evaluation plus `qdot`
+and `qdd` into contiguous `CarAngularKinematics` results with world/body angular
+velocity and acceleration, rotational kinetic energy, and derivative
+diagnostics without resolving another pose. Train step telemetry includes the
+per-car results and train rotational totals.
+
+For each car,
+
+```text
+T_rot,i = 0.5 omega_body,i^T I_body,i omega_body,i
+M_rot,i = J_body,i^T I_body,i J_body,i
+M_rot,i' = 2 J_body,i^T I_body,i J_body,i'
+```
+
+and the reduced dynamics use
+
+```text
+M_eff = M_trans + sum(M_rot,i)
+M_eff qdd = Q_gravity + Q_external + Q_resistance
+             - 0.5 M_eff' qdot^2
+```
+
+Thus total mechanical energy is translational plus rotational kinetic energy
+plus gravitational potential energy. COG motion is not counted again in the
+rotational term. A straight, unbanked constant-orientation track has exactly
+zero `J_omega`, rotational energy, and rotational effective mass, reducing to
+the Phase 7 behavior.
+
+Phase 4 axial connector recovery includes the corresponding local-coordinate
+rotational generalized-inertia demand so its redundant balance remains
+consistent with the updated train acceleration. It still publishes only axial
+forces; connector moments and compliance remain absent. Phase 7 aggregate track
+reaction recovery remains a translational resultant evaluated with the updated
+actual `qdd`. Separate front/rear bogie reactions remain unavailable with
+`MomentBalanceNotImplemented`: Phase 8 does not add moment balance, contact-role
+directions, running/guide/upstop loads, wheel loads, suspension, steering,
+restraints/riders, operational devices, or rendering/track-family dependencies.
 
 ## Planned systems
 

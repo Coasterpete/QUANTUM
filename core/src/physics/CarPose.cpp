@@ -32,6 +32,142 @@ namespace quantum::physics
                 && std::isfinite(value.z);
         }
 
+        [[nodiscard]] bool finite(const glm::dmat3& value) noexcept
+        {
+            for (glm::length_t column = 0; column < 3; ++column)
+            {
+                for (glm::length_t row = 0; row < 3; ++row)
+                {
+                    if (!std::isfinite(value[column][row]))
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        [[nodiscard]] double maximumAbsoluteElement(
+            const glm::dmat3& value) noexcept
+        {
+            double result = 0.0;
+            for (glm::length_t column = 0; column < 3; ++column)
+            {
+                for (glm::length_t row = 0; row < 3; ++row)
+                {
+                    result = std::max(result, std::abs(value[column][row]));
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] double determinant(const glm::dmat3& value) noexcept
+        {
+            return value[0][0]
+                    * (value[1][1] * value[2][2]
+                        - value[2][1] * value[1][2])
+                - value[1][0]
+                    * (value[0][1] * value[2][2]
+                        - value[2][1] * value[0][2])
+                + value[2][0]
+                    * (value[0][1] * value[1][2]
+                        - value[1][1] * value[0][2]);
+        }
+
+        void validateInertiaTensor(const glm::dmat3& inertia)
+        {
+            if (!finite(inertia))
+            {
+                throw std::invalid_argument(
+                    "Car dry inertia tensor must contain only finite kg*m^2 values.");
+            }
+
+            const double scale = maximumAbsoluteElement(inertia);
+            if (!(scale > 0.0) || !std::isfinite(scale))
+            {
+                throw std::invalid_argument(
+                    "Car dry inertia tensor must be non-singular and positive definite.");
+            }
+            constexpr double relativeTolerance = 1.0e-10;
+            const double symmetryTolerance = relativeTolerance * scale;
+            for (glm::length_t column = 0; column < 3; ++column)
+            {
+                for (glm::length_t row = column + 1; row < 3; ++row)
+                {
+                    if (std::abs(inertia[column][row]
+                            - inertia[row][column]) > symmetryTolerance)
+                    {
+                        throw std::invalid_argument(
+                            "Car dry inertia tensor must be symmetric in the body frame.");
+                    }
+                }
+            }
+
+            // Scale before testing principal minors so very large/small but
+            // otherwise valid SI tensors do not overflow or underflow.
+            const glm::dmat3 normalized = inertia / scale;
+            constexpr double positiveDefiniteTolerance = 1.0e-12;
+            const double leadingTwoByTwo = normalized[0][0]
+                    * normalized[1][1]
+                - normalized[1][0] * normalized[0][1];
+            const double normalizedDeterminant = determinant(normalized);
+            if (normalized[0][0] <= positiveDefiniteTolerance
+                || leadingTwoByTwo <= positiveDefiniteTolerance
+                || normalizedDeterminant <= positiveDefiniteTolerance)
+            {
+                throw std::invalid_argument(
+                    "Car dry inertia tensor must be symmetric positive definite and numerically non-singular.");
+            }
+
+            // Principal inertias of a physical mass distribution obey the
+            // triangle inequalities. K=trace(I)/2*I3-I has eigenvalues
+            // (Ij+Ik-Ii)/2, so positive-semidefinite principal minors of K
+            // enforce those inequalities without choosing principal axes.
+            const double halfTrace = 0.5 * (
+                normalized[0][0]
+                + normalized[1][1]
+                + normalized[2][2]);
+            glm::dmat3 physicality{-normalized};
+            physicality[0][0] += halfTrace;
+            physicality[1][1] += halfTrace;
+            physicality[2][2] += halfTrace;
+            const double p01 = physicality[0][0] * physicality[1][1]
+                - physicality[1][0] * physicality[0][1];
+            const double p02 = physicality[0][0] * physicality[2][2]
+                - physicality[2][0] * physicality[0][2];
+            const double p12 = physicality[1][1] * physicality[2][2]
+                - physicality[2][1] * physicality[1][2];
+            if (physicality[0][0] < -relativeTolerance
+                || physicality[1][1] < -relativeTolerance
+                || physicality[2][2] < -relativeTolerance
+                || p01 < -relativeTolerance
+                || p02 < -relativeTolerance
+                || p12 < -relativeTolerance
+                || determinant(physicality) < -relativeTolerance)
+            {
+                throw std::invalid_argument(
+                    "Car dry inertia tensor violates physical principal-moment triangle inequalities.");
+            }
+        }
+
+        [[nodiscard]] glm::dmat3 parallelAxisShift(
+            const double massKilograms,
+            const glm::dvec3& displacementMeters) noexcept
+        {
+            const double squaredDistance = glm::dot(
+                displacementMeters, displacementMeters);
+            glm::dmat3 result{squaredDistance};
+            for (glm::length_t column = 0; column < 3; ++column)
+            {
+                for (glm::length_t row = 0; row < 3; ++row)
+                {
+                    result[column][row] -= displacementMeters[column]
+                        * displacementMeters[row];
+                }
+            }
+            return massKilograms * result;
+        }
+
         [[nodiscard]] double magnitude(const glm::dvec3& value) noexcept
         {
             return std::hypot(value.x, value.y, value.z);
@@ -301,6 +437,7 @@ namespace quantum::physics
             throw std::invalid_argument(
                 "Car dry center of gravity must be finite.");
         }
+        validateInertiaTensor(definition.dryInertiaTensorBodyKgM2);
         if (!finite(definition.frontHitchPositionMeters)
             || !finite(definition.rearHitchPositionMeters))
         {
@@ -381,6 +518,57 @@ namespace quantum::physics
                 "Car mass properties produce a non-finite loaded center of gravity.");
         }
         return centerOfGravity;
+    }
+
+    glm::dmat3 makeUniformBoxInertiaTensorBodyKgM2(
+        const double massKilograms,
+        const glm::dvec3& dimensionsMeters)
+    {
+        if (!std::isfinite(massKilograms) || massKilograms <= 0.0
+            || !finite(dimensionsMeters)
+            || dimensionsMeters.x <= 0.0
+            || dimensionsMeters.y <= 0.0
+            || dimensionsMeters.z <= 0.0)
+        {
+            throw std::invalid_argument(
+                "Uniform-box inertia inputs must be positive finite SI values.");
+        }
+        const double factor = massKilograms / 12.0;
+        return glm::dmat3{
+            factor * (dimensionsMeters.y * dimensionsMeters.y
+                + dimensionsMeters.z * dimensionsMeters.z), 0.0, 0.0,
+            0.0, factor * (dimensionsMeters.x * dimensionsMeters.x
+                + dimensionsMeters.z * dimensionsMeters.z), 0.0,
+            0.0, 0.0, factor * (
+                dimensionsMeters.x * dimensionsMeters.x
+                + dimensionsMeters.y * dimensionsMeters.y)
+        };
+    }
+
+    glm::dmat3 loadedCarInertiaTensorBodyKgM2(
+        const CarDefinition& definition,
+        const CarLoadout& loadout)
+    {
+        validateCarDefinition(definition);
+        validateCarLoadout(loadout);
+        const glm::dvec3 loadedCenter = loadedCarCenterOfGravityMeters(
+            definition, loadout);
+        glm::dmat3 result = definition.dryInertiaTensorBodyKgM2
+            + parallelAxisShift(
+                definition.dryMassKilograms,
+                definition.dryCenterOfGravityMeters - loadedCenter);
+        if (loadout.massKilograms > 0.0)
+        {
+            result += parallelAxisShift(
+                loadout.massKilograms,
+                loadout.centerOfMassMeters - loadedCenter);
+        }
+        if (!finite(result))
+        {
+            throw std::domain_error(
+                "Loaded car inertia tensor is non-finite.");
+        }
+        return result;
     }
 
     BogiePose::BogiePose(
@@ -631,5 +819,30 @@ namespace quantum::physics
             rearHitch,
             std::move(bogiePoses)
         };
+    }
+
+    glm::dmat3 worldCarInertiaTensorKgM2(
+        const CarPose& pose,
+        const glm::dmat3& inertiaTensorBodyKgM2)
+    {
+        if (!finite(inertiaTensorBodyKgM2))
+        {
+            throw std::invalid_argument(
+                "Body inertia tensor must be finite before world transformation.");
+        }
+        const geometry::CurveFrame& frame = pose.bodyFrame();
+        const glm::dmat3 bodyToWorld{
+            frame.tangent,
+            frame.lateral,
+            frame.up
+        };
+        const glm::dmat3 result = bodyToWorld
+            * inertiaTensorBodyKgM2 * glm::transpose(bodyToWorld);
+        if (!finite(result))
+        {
+            throw std::domain_error(
+                "World inertia tensor transformation is non-finite.");
+        }
+        return result;
     }
 }

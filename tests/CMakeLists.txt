@@ -52,6 +52,13 @@ set_target_properties(QuantumCoreBogieReactionPhysicsTests PROPERTIES CXX_EXTENS
 add_test(NAME QuantumCore.BogieReactionPhysics COMMAND QuantumCoreBogieReactionPhysicsTests)
 set_tests_properties(QuantumCore.BogieReactionPhysics PROPERTIES LABELS "core;coaster;physics")
 
+add_executable(QuantumCoreRotationalPhysicsTests RotationalPhysicsTests.cpp)
+target_link_libraries(QuantumCoreRotationalPhysicsTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreRotationalPhysicsTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreRotationalPhysicsTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.RotationalPhysics COMMAND QuantumCoreRotationalPhysicsTests)
+set_tests_properties(QuantumCore.RotationalPhysics PROPERTIES LABELS "core;coaster;physics")
+
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)
