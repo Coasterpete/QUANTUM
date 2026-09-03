@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace quantum::physics
@@ -54,6 +55,16 @@ namespace quantum::physics
         std::vector<TrainCarDefinition> cars;
         std::vector<InterCarConnectionDefinition> connections;
         BasicResistance resistance;
+    };
+
+    // Runtime physical input, intentionally separate from authored vehicle
+    // configuration. The application point uses the target car's physical
+    // +X-forward, +Y-lateral, +Z-up coordinates; the force is world-space.
+    struct ExternalForceApplication
+    {
+        std::size_t carIndex = 0;
+        glm::dvec3 localApplicationPointMeters{0.0};
+        glm::dvec3 worldForceNewtons{0.0};
     };
 
     void validateInterCarConnectionDefinition(
@@ -196,6 +207,14 @@ namespace quantum::physics
         double generalizedGravityForceNewtons = 0.0;
     };
 
+    struct ExternalForceApplicationEvaluation
+    {
+        std::size_t carIndex = 0;
+        glm::dvec3 worldApplicationPointMeters{0.0};
+        glm::dvec3 worldApplicationPointDerivativePerGeneralizedMeter{0.0};
+        double generalizedForceNewtons = 0.0;
+    };
+
     struct TrainKinematicEvaluation
     {
         TrainPose pose;
@@ -203,18 +222,21 @@ namespace quantum::physics
         double effectiveGeneralizedMassKilograms = 0.0;
         double effectiveGeneralizedMassDerivativeKilogramsPerMeter = 0.0;
         double generalizedGravityForceNewtons = 0.0;
+        std::vector<ExternalForceApplicationEvaluation> externalForces;
+        double generalizedExternalForceNewtons = 0.0;
         double finiteDifferenceStepMeters = trainKinematicJacobianStepMeters;
         TrainFiniteDifferenceKind finiteDifferenceKind =
             TrainFiniteDifferenceKind::Central;
     };
 
-    // Only translational COG kinetic energy participates in Phase 3. Body and
-    // bogie rotational inertia are intentionally deferred.
+    // Only translational point motion participates. Body and bogie rotational
+    // inertia, and moments from off-origin force applications, are deferred.
     [[nodiscard]] TrainKinematicEvaluation evaluateTrainKinematics(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
-        const TrackLocation& generalizedReferenceLocation);
+        const TrackLocation& generalizedReferenceLocation,
+        std::span<const ExternalForceApplication> externalForces = {});
 
     struct TrainDynamicsState
     {
@@ -360,15 +382,16 @@ namespace quantum::physics
             TrainFiniteDifferenceKind::Central;
     };
 
-    // Recovers gravity/inertia-consistent rigid connector axial loads from an
-    // already defined train state. Aggregate resistance has no authored
-    // per-car distribution, so any force-producing aggregate resistance model
-    // makes a multi-car result explicitly unavailable.
+    // Recovers gravity/inertia/external-force-consistent rigid connector axial
+    // loads from an already defined train state. Aggregate resistance has no
+    // authored per-car distribution, so any force-producing aggregate
+    // resistance model makes a multi-car result explicitly unavailable.
     [[nodiscard]] RigidConnectorLoadAnalysis evaluateRigidConnectorLoads(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
-        const TrainDynamicsState& state);
+        const TrainDynamicsState& state,
+        std::span<const ExternalForceApplication> externalForces = {});
 
     struct TrainTelemetry
     {
@@ -382,6 +405,8 @@ namespace quantum::physics
         double totalLoadedMassKilograms = 0.0;
         double effectiveGeneralizedMassKilograms = 0.0;
         double generalizedGravityForceNewtons = 0.0;
+        double generalizedExternalForceNewtons = 0.0;
+        std::size_t externalForceApplicationCount = 0;
         double resistanceForceNewtons = 0.0;
         double kinematicMassGradientForceNewtons = 0.0;
         double constraintForceNewtons = 0.0;
@@ -409,5 +434,6 @@ namespace quantum::physics
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
         const TrainDynamicsState& currentState,
-        const FixedStepSettings& step = {});
+        const FixedStepSettings& step = {},
+        std::span<const ExternalForceApplication> externalForces = {});
 }

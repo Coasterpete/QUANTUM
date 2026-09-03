@@ -635,7 +635,7 @@ document whose visible GPU representation failed to update.
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
-single-car, and rigid multi-car train behavior through Phase 4. It remains a
+single-car, and rigid multi-car train behavior through Phase 5. It remains a
 track-constrained reduced-coordinate model for ordinary coaster motion, not a
 complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
@@ -723,6 +723,43 @@ translational model. Connector compliance and slack, connector moments,
 car/bogie rotational dynamics, suspension, bogie/wheel reaction loads, and
 operational device forces remain deferred. A complete rigid-body or structural
 connector-load interpretation must not be inferred from this telemetry.
+
+### Phase 5: explicit per-car external force applications
+
+`ExternalForceApplication` is a source-agnostic runtime value that identifies a
+target car, an application point in that car's physical local coordinates
+(+X forward, +Y lateral, +Z up, in metres), and an arbitrary world-space force
+vector in Newtons. Runtime applications are supplied as a read-only contiguous
+collection; they are not owned by `TrainDefinition` and do not add brake,
+launch, lift, transport, or other device-specific behavior.
+
+Train dynamics transforms each application point through the solved `CarPose`
+and projects its force by virtual work, `Q = F dot dp/dq`, where `q` is the
+lead-car generalized reference station. The legal central or one-sided
+full-consist finite-difference poses used for train kinematics are shared by all
+applications in an evaluation. Contributions are summed with distributed
+gravity and the existing reduced-coordinate mass-gradient term, and telemetry
+reports the total generalized external force and application count.
+
+Rigid connector-load recovery consumes the same application collection. Each
+car's already sampled auxiliary local-coordinate poses are reused to evaluate
+`F dot dp/ds_i` for every application on that car. That known per-car force is
+included directly in the existing translational balance equations; no second
+connector-only force representation exists.
+
+Aggregate `BasicResistance` remains a separate compatibility-preserving train
+law and retains its static holding behavior. Explicit applications are additive,
+so a caller representing resistance explicitly must disable the aggregate law
+to avoid supplying the same physical effect twice. Because aggregate resistance
+still has no authored per-car application, exact multi-car connector recovery
+continues to report `AggregateResistanceUnderdetermined` whenever that law can
+produce force.
+
+The stored application point preserves a future seam for body moments, but
+Phase 5 does not compute or integrate torque, angular motion, body inertia,
+connector moments, compliance, independent car motion, or bogie/wheel contact
+loads. Force profiles and operational brake, launch, lift, tire, station, and
+block systems also remain deferred.
 
 ## Planned systems
 

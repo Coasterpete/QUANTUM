@@ -549,10 +549,57 @@ namespace quantum::physics
             return result;
         }
 
+        void validateExternalForceApplications(
+            const std::span<const ExternalForceApplication> applications,
+            const std::size_t carCount)
+        {
+            for (const ExternalForceApplication& application : applications)
+            {
+                if (application.carIndex >= carCount)
+                {
+                    throw std::invalid_argument(
+                        "External force application car index is outside the train.");
+                }
+                if (!finite(application.localApplicationPointMeters))
+                {
+                    throw std::invalid_argument(
+                        "External force application point must be finite and expressed in car-local metres.");
+                }
+                if (!finite(application.worldForceNewtons))
+                {
+                    throw std::invalid_argument(
+                        "External force vector must be finite and expressed in world-space Newtons.");
+                }
+            }
+        }
+
+        [[nodiscard]] std::vector<glm::dvec3> applicationPointPositions(
+            const TrainPose& pose,
+            const std::span<const ExternalForceApplication> applications)
+        {
+            std::vector<glm::dvec3> result;
+            result.reserve(applications.size());
+            for (const ExternalForceApplication& application : applications)
+            {
+                const glm::dvec3 point = pose.cars()[application.carIndex]
+                    .carPose().transformLocalPoint(
+                        application.localApplicationPointMeters);
+                if (!finite(point))
+                {
+                    throw std::domain_error(
+                        "External force application produced a non-finite world point.");
+                }
+                result.push_back(point);
+            }
+            return result;
+        }
+
         struct DerivativeSamples
         {
             std::vector<glm::dvec3> first;
             std::vector<glm::dvec3> second;
+            std::vector<glm::dvec3> applicationPoints;
+            std::vector<glm::dvec3> applicationPointFirst;
             TrainFiniteDifferenceKind kind =
                 TrainFiniteDifferenceKind::Central;
         };
@@ -560,7 +607,8 @@ namespace quantum::physics
         [[nodiscard]] DerivativeSamples kinematicDerivatives(
             const CompiledPhysicsTrack& track,
             const TrainDefinition& definition,
-            const TrainPose& center)
+            const TrainPose& center,
+            const std::span<const ExternalForceApplication> applications)
         {
             const double epsilon = trainKinematicJacobianStepMeters;
             const TrackLocation& location =
@@ -574,11 +622,18 @@ namespace quantum::physics
             DerivativeSamples result;
             result.first.resize(center.carCount());
             result.second.resize(center.carCount());
+            result.applicationPoints = applicationPointPositions(
+                center, applications);
+            result.applicationPointFirst.resize(applications.size());
 
             if (before && after)
             {
                 const auto beforePositions = cogPositions(*before);
                 const auto afterPositions = cogPositions(*after);
+                const auto beforeApplicationPoints = applicationPointPositions(
+                    *before, applications);
+                const auto afterApplicationPoints = applicationPointPositions(
+                    *after, applications);
                 for (std::size_t index = 0;
                     index < center.carCount();
                     ++index)
@@ -591,6 +646,15 @@ namespace quantum::physics
                             - 2.0 * centerPositions[index]
                             + beforePositions[index])
                         / (epsilon * epsilon);
+                }
+                for (std::size_t index = 0;
+                    index < applications.size();
+                    ++index)
+                {
+                    result.applicationPointFirst[index] =
+                        (afterApplicationPoints[index]
+                            - beforeApplicationPoints[index])
+                        / (2.0 * epsilon);
                 }
                 return result;
             }
@@ -606,6 +670,10 @@ namespace quantum::physics
                 }
                 const auto afterPositions = cogPositions(*after);
                 const auto afterTwicePositions = cogPositions(*afterTwice);
+                const auto afterApplicationPoints = applicationPointPositions(
+                    *after, applications);
+                const auto afterTwiceApplicationPoints =
+                    applicationPointPositions(*afterTwice, applications);
                 result.kind = TrainFiniteDifferenceKind::Forward;
                 for (std::size_t index = 0;
                     index < center.carCount();
@@ -622,6 +690,16 @@ namespace quantum::physics
                             + afterTwicePositions[index])
                         / (epsilon * epsilon);
                 }
+                for (std::size_t index = 0;
+                    index < applications.size();
+                    ++index)
+                {
+                    result.applicationPointFirst[index] =
+                        (-3.0 * result.applicationPoints[index]
+                            + 4.0 * afterApplicationPoints[index]
+                            - afterTwiceApplicationPoints[index])
+                        / (2.0 * epsilon);
+                }
                 return result;
             }
 
@@ -636,6 +714,10 @@ namespace quantum::physics
                 }
                 const auto beforePositions = cogPositions(*before);
                 const auto beforeTwicePositions = cogPositions(*beforeTwice);
+                const auto beforeApplicationPoints = applicationPointPositions(
+                    *before, applications);
+                const auto beforeTwiceApplicationPoints =
+                    applicationPointPositions(*beforeTwice, applications);
                 result.kind = TrainFiniteDifferenceKind::Backward;
                 for (std::size_t index = 0;
                     index < center.carCount();
@@ -652,6 +734,16 @@ namespace quantum::physics
                             + beforeTwicePositions[index])
                         / (epsilon * epsilon);
                 }
+                for (std::size_t index = 0;
+                    index < applications.size();
+                    ++index)
+                {
+                    result.applicationPointFirst[index] =
+                        (3.0 * result.applicationPoints[index]
+                            - 4.0 * beforeApplicationPoints[index]
+                            + beforeTwiceApplicationPoints[index])
+                        / (2.0 * epsilon);
+                }
                 return result;
             }
 
@@ -664,9 +756,31 @@ namespace quantum::physics
             glm::dvec3 centerOfGravity{0.0};
             glm::dvec3 frontHitch{0.0};
             glm::dvec3 rearHitch{0.0};
+            std::vector<glm::dvec3> applicationPointDerivatives;
             TrainFiniteDifferenceKind kind =
                 TrainFiniteDifferenceKind::Central;
         };
+
+        [[nodiscard]] std::vector<glm::dvec3> localApplicationPointPositions(
+            const CarPose& pose,
+            const std::span<const ExternalForceApplication> applications,
+            const std::span<const std::size_t> applicationIndices)
+        {
+            std::vector<glm::dvec3> result;
+            result.reserve(applicationIndices.size());
+            for (const std::size_t index : applicationIndices)
+            {
+                const glm::dvec3 point = pose.transformLocalPoint(
+                    applications[index].localApplicationPointMeters);
+                if (!finite(point))
+                {
+                    throw std::domain_error(
+                        "External force application produced a non-finite local-coordinate sample.");
+                }
+                result.push_back(point);
+            }
+            return result;
+        }
 
         [[nodiscard]] std::optional<CarPose> tryDisplacedCarPose(
             const CompiledPhysicsTrack& track,
@@ -690,7 +804,9 @@ namespace quantum::physics
         [[nodiscard]] CarLocalDerivativeSamples localCarDerivatives(
             const CompiledPhysicsTrack& track,
             const TrainCarDefinition& definition,
-            const CarPose& center)
+            const CarPose& center,
+            const std::span<const ExternalForceApplication> applications,
+            const std::span<const std::size_t> applicationIndices)
         {
             const double epsilon = connectorLoadLocalDerivativeStepMeters;
             const TrackLocation& location = center.referenceLocation();
@@ -723,6 +839,11 @@ namespace quantum::physics
             };
 
             CarLocalDerivativeSamples result;
+            const auto centerApplicationPoints =
+                localApplicationPointPositions(
+                    center, applications, applicationIndices);
+            result.applicationPointDerivatives.resize(
+                applicationIndices.size());
             if (before && after)
             {
                 result.centerOfGravity = central(
@@ -734,6 +855,20 @@ namespace quantum::physics
                 result.rearHitch = central(
                     before->rearHitchWorldPositionMeters(),
                     after->rearHitchWorldPositionMeters());
+                const auto beforeApplicationPoints =
+                    localApplicationPointPositions(
+                        *before, applications, applicationIndices);
+                const auto afterApplicationPoints =
+                    localApplicationPointPositions(
+                        *after, applications, applicationIndices);
+                for (std::size_t index = 0;
+                    index < applicationIndices.size();
+                    ++index)
+                {
+                    result.applicationPointDerivatives[index] = central(
+                        beforeApplicationPoints[index],
+                        afterApplicationPoints[index]);
+                }
             }
             else if (after)
             {
@@ -757,6 +892,21 @@ namespace quantum::physics
                     center.rearHitchWorldPositionMeters(),
                     after->rearHitchWorldPositionMeters(),
                     afterTwice->rearHitchWorldPositionMeters());
+                const auto afterApplicationPoints =
+                    localApplicationPointPositions(
+                        *after, applications, applicationIndices);
+                const auto afterTwiceApplicationPoints =
+                    localApplicationPointPositions(
+                        *afterTwice, applications, applicationIndices);
+                for (std::size_t index = 0;
+                    index < applicationIndices.size();
+                    ++index)
+                {
+                    result.applicationPointDerivatives[index] = forward(
+                        centerApplicationPoints[index],
+                        afterApplicationPoints[index],
+                        afterTwiceApplicationPoints[index]);
+                }
             }
             else if (before)
             {
@@ -780,6 +930,21 @@ namespace quantum::physics
                     center.rearHitchWorldPositionMeters(),
                     before->rearHitchWorldPositionMeters(),
                     beforeTwice->rearHitchWorldPositionMeters());
+                const auto beforeApplicationPoints =
+                    localApplicationPointPositions(
+                        *before, applications, applicationIndices);
+                const auto beforeTwiceApplicationPoints =
+                    localApplicationPointPositions(
+                        *beforeTwice, applications, applicationIndices);
+                for (std::size_t index = 0;
+                    index < applicationIndices.size();
+                    ++index)
+                {
+                    result.applicationPointDerivatives[index] = backward(
+                        centerApplicationPoints[index],
+                        beforeApplicationPoints[index],
+                        beforeTwiceApplicationPoints[index]);
+                }
             }
             else
             {
@@ -793,6 +958,15 @@ namespace quantum::physics
             {
                 throw std::domain_error(
                     "Connector-load local car derivatives are non-finite.");
+            }
+            for (const glm::dvec3& derivative
+                : result.applicationPointDerivatives)
+            {
+                if (!finite(derivative))
+                {
+                    throw std::domain_error(
+                        "Connector-load external-force derivative is non-finite.");
+                }
             }
             return result;
         }
@@ -1451,13 +1625,15 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
-        const TrackLocation& generalizedReferenceLocation)
+        const TrackLocation& generalizedReferenceLocation,
+        const std::span<const ExternalForceApplication> externalForces)
     {
         validatePhysicsEnvironment(environment);
         TrainPose center = solveTrainPose(
             track, definition, generalizedReferenceLocation);
+        validateExternalForceApplications(externalForces, center.carCount());
         DerivativeSamples derivatives = kinematicDerivatives(
-            track, definition, center);
+            track, definition, center, externalForces);
         const glm::dvec3 gravityWorld{
             0.0,
             0.0,
@@ -1487,10 +1663,38 @@ namespace quantum::physics
             gravityForce += carGravity;
             cars.push_back({index, jacobian, carGravity});
         }
+
+        std::vector<ExternalForceApplicationEvaluation>
+            externalForceEvaluations;
+        externalForceEvaluations.reserve(externalForces.size());
+        double generalizedExternalForce = 0.0;
+        for (std::size_t index = 0; index < externalForces.size(); ++index)
+        {
+            const ExternalForceApplication& application =
+                externalForces[index];
+            const glm::dvec3& derivative =
+                derivatives.applicationPointFirst[index];
+            // Virtual work in the one train coordinate: Q = F dot dp/dq.
+            const double generalizedForce = glm::dot(
+                application.worldForceNewtons, derivative);
+            if (!finite(derivative) || !std::isfinite(generalizedForce))
+            {
+                throw std::domain_error(
+                    "External force generalized projection is non-finite.");
+            }
+            generalizedExternalForce += generalizedForce;
+            externalForceEvaluations.push_back({
+                application.carIndex,
+                derivatives.applicationPoints[index],
+                derivative,
+                generalizedForce
+            });
+        }
         if (!std::isfinite(effectiveMass)
             || effectiveMass <= 0.0
             || !std::isfinite(effectiveMassDerivative)
-            || !std::isfinite(gravityForce))
+            || !std::isfinite(gravityForce)
+            || !std::isfinite(generalizedExternalForce))
         {
             throw std::domain_error(
                 "Train reduced-coordinate mechanics are non-finite or degenerate.");
@@ -1502,6 +1706,8 @@ namespace quantum::physics
             effectiveMass,
             effectiveMassDerivative,
             gravityForce,
+            std::move(externalForceEvaluations),
+            generalizedExternalForce,
             trainKinematicJacobianStepMeters,
             derivatives.kind
         };
@@ -1511,7 +1717,8 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
-        const TrainDynamicsState& state)
+        const TrainDynamicsState& state,
+        const std::span<const ExternalForceApplication> externalForces)
     {
         validateTrainDefinition(definition);
         validatePhysicsEnvironment(environment);
@@ -1523,6 +1730,8 @@ namespace quantum::physics
             throw std::invalid_argument(
                 "Connector-load analysis requires a finite, valid train state.");
         }
+        validateExternalForceApplications(
+            externalForces, definition.cars.size());
 
         const TrainPose center = solveTrainPose(
             track, definition, state.generalizedReferenceLocation);
@@ -1594,7 +1803,13 @@ namespace quantum::physics
         }
 
         const DerivativeSamples constrained = kinematicDerivatives(
-            track, definition, center);
+            track, definition, center, {});
+        std::vector<std::vector<std::size_t>> forceIndicesByCar(
+            center.carCount());
+        for (std::size_t index = 0; index < externalForces.size(); ++index)
+        {
+            forceIndicesByCar[externalForces[index].carIndex].push_back(index);
+        }
         std::vector<CarLocalDerivativeSamples> local;
         std::vector<TrainFiniteDifferenceKind> localKinds;
         local.reserve(center.carCount());
@@ -1604,7 +1819,9 @@ namespace quantum::physics
             local.push_back(localCarDerivatives(
                 track,
                 definition.cars[index],
-                center.cars()[index].carPose()));
+                center.cars()[index].carPose(),
+                externalForces,
+                forceIndicesByCar[index]));
             localKinds.push_back(local.back().kind);
         }
 
@@ -1624,18 +1841,38 @@ namespace quantum::physics
 
         const std::size_t carCount = center.carCount();
         std::vector<double> requiredGeneralizedForce(carCount, 0.0);
+        std::vector<double> knownExternalGeneralizedForce(carCount, 0.0);
         std::vector<double> previousConnectorCoefficient(carCount, 0.0);
         std::vector<double> nextConnectorCoefficient(carCount, 0.0);
         for (std::size_t index = 0; index < carCount; ++index)
         {
+            for (std::size_t localIndex = 0;
+                localIndex < forceIndicesByCar[index].size();
+                ++localIndex)
+            {
+                const ExternalForceApplication& application = externalForces[
+                    forceIndicesByCar[index][localIndex]];
+                const double contribution = glm::dot(
+                    application.worldForceNewtons,
+                    local[index].applicationPointDerivatives[localIndex]);
+                if (!std::isfinite(contribution))
+                {
+                    throw std::domain_error(
+                        "Connector-load external-force projection is non-finite.");
+                }
+                knownExternalGeneralizedForce[index] += contribution;
+            }
             const glm::dvec3 acceleration =
                 constrained.first[index]
                     * state.generalizedAccelerationMetersPerSecondSquared
                 + constrained.second[index] * velocitySquared;
             const double mass = center.cars()[index].loadedMassKilograms();
+            // The remaining generalized force must be supplied by adjacent
+            // connector axes after gravity and each known F dot dp/ds_i term.
             requiredGeneralizedForce[index] = mass * glm::dot(
                 acceleration - gravityWorld,
-                local[index].centerOfGravity);
+                local[index].centerOfGravity)
+                - knownExternalGeneralizedForce[index];
             if (!finite(acceleration)
                 || !std::isfinite(requiredGeneralizedForce[index]))
             {
@@ -1891,7 +2128,8 @@ namespace quantum::physics
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
         const TrainDynamicsState& currentState,
-        const FixedStepSettings& step)
+        const FixedStepSettings& step,
+        const std::span<const ExternalForceApplication> externalForces)
     {
         validateTrainDefinition(definition);
         validatePhysicsEnvironment(environment);
@@ -1913,7 +2151,8 @@ namespace quantum::physics
             track,
             definition,
             environment,
-            currentState.generalizedReferenceLocation);
+            currentState.generalizedReferenceLocation,
+            externalForces);
         double workingVelocity = currentState.signedVelocityMetersPerSecond;
         if (std::abs(workingVelocity)
             <= followerRestSpeedToleranceMetersPerSecond)
@@ -1932,13 +2171,15 @@ namespace quantum::physics
             definition.resistance,
             current.pose.totalLoadedMassKilograms(),
             environment.gravityAccelerationMetersPerSecondSquared,
-            current.generalizedGravityForceNewtons,
+            current.generalizedGravityForceNewtons
+                + current.generalizedExternalForceNewtons,
             workingVelocity);
         const double massGradientForce = -0.5
             * current.effectiveGeneralizedMassDerivativeKilogramsPerMeter
             * workingVelocity * workingVelocity;
         const double unconstrainedForce =
             current.generalizedGravityForceNewtons
+            + current.generalizedExternalForceNewtons
             + resistanceForce
             + massGradientForce;
         const double unconstrainedAcceleration = unconstrainedForce
@@ -2059,6 +2300,8 @@ namespace quantum::physics
             current.pose.totalLoadedMassKilograms(),
             current.effectiveGeneralizedMassKilograms,
             current.generalizedGravityForceNewtons,
+            current.generalizedExternalForceNewtons,
+            externalForces.size(),
             resistanceForce,
             massGradientForce,
             constraintForce,
