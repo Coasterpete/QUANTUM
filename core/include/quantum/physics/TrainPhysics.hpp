@@ -46,6 +46,12 @@ namespace quantum::physics
         1.0e-3;
     inline constexpr double bogieReactionBalanceRelativeTolerance = 1.0e-4;
     inline constexpr double bogieReactionMinimumSeparationMeters = 1.0e-6;
+    inline constexpr double bogieReactionMomentBalanceAbsoluteToleranceNewtonMeters =
+        1.0e-3;
+    inline constexpr double bogieReactionMomentBalanceRelativeTolerance =
+        1.0e-4;
+    inline constexpr double bogieReactionRankRelativeTolerance = 1.0e-10;
+    inline constexpr double bogieReactionMaximumConditionEstimate = 1.0e5;
 
     struct TrainCarDefinition
     {
@@ -550,16 +556,23 @@ namespace quantum::physics
         KinematicsUnavailable
     };
 
-    // A future model may make an aggregate reaction at each bogie available.
-    // Phase 8 still leaves the force optionals empty. Rotational state now
-    // exists, but the actual moment-balance/contact-direction solve is a later
-    // milestone; translational balance alone determines only their sum.
+    // A bogie reaction is available only when the two ideal constraint-plane
+    // resultants are uniquely and consistently recovered from force and moment
+    // balance. MomentBalanceNotImplemented is retained for source compatibility
+    // with Phase 7/8 callers but is no longer produced by Phase 9.
     enum class BogieReactionRecoveryStatus : std::uint8_t
     {
         Available,
         AggregateCarReactionUnavailable,
         MomentBalanceNotImplemented,
-        SingularGeometry
+        SingularGeometry,
+        MissingConstraintSubspace,
+        RankDeficient,
+        IllConditioned,
+        ForceBalanceInconsistent,
+        MomentBalanceInconsistent,
+        RotationalKinematicsUnavailable,
+        NonFiniteSystem
     };
 
     struct BogieReaction
@@ -571,12 +584,20 @@ namespace quantum::physics
         glm::dvec3 worldPositionMeters{0.0};
         geometry::CurveFrame trackFrame;
         BogieReactionRecoveryStatus status =
-            BogieReactionRecoveryStatus::MomentBalanceNotImplemented;
+            BogieReactionRecoveryStatus::AggregateCarReactionUnavailable;
         std::optional<glm::dvec3> worldReactionNewtons;
         std::optional<double> magnitudeNewtons;
         // (x, y, z) are canonical track-frame tangent, lateral, and up
         // components. They are not running-, guide-, or upstop-wheel loads.
         std::optional<glm::dvec3> trackFrameComponentsNewtons;
+        // Body-frame (+X forward, +Y lateral, +Z up) projection of the same
+        // ideal aggregate bogie resultant.
+        std::optional<glm::dvec3> bodyFrameComponentsNewtons;
+        std::size_t reactionSolveRank = 0;
+        std::optional<double> reactionSolveConditionEstimate;
+        // Moment rows are multiplied by this inverse-metre scale only inside
+        // the numerical solve. Published residuals retain N and N*m units.
+        double momentRowScalePerMeter = 0.0;
     };
 
     struct CarTrackReaction
@@ -596,8 +617,15 @@ namespace quantum::physics
         std::optional<glm::dvec3> aggregateBodyFrameComponentsNewtons;
         BogieReaction frontBogie;
         BogieReaction rearBogie;
+        // R_front + R_rear + F_known - m*a_COG. When a finite conditioned
+        // split candidate exists this diagnoses that candidate; otherwise it
+        // remains the exact aggregate Phase 7 closure residual.
         std::optional<glm::dvec3> forceBalanceResidualNewtons;
         double forceBalanceToleranceNewtons = 0.0;
+        std::optional<glm::dvec3> momentBalanceResidualNewtonMeters;
+        double momentBalanceToleranceNewtonMeters = 0.0;
+        std::optional<glm::dvec3> rotationalInertialMomentNewtonMeters;
+        std::optional<glm::dvec3> knownAppliedMomentNewtonMeters;
     };
 
     struct BogieReactionAnalysis
@@ -622,9 +650,9 @@ namespace quantum::physics
         }
     };
 
-    // Recovers the exact per-car sum of the two ideal track-constraint
-    // reactions under the current translational reduced model. Separate
-    // front/rear reactions remain explicitly unavailable in Phase 7.
+    // Recovers the exact Phase 7 per-car sum and conditionally splits it into
+    // front/rear ideal constraint-plane resultants using Phase 8 rotational
+    // inertia and force/moment balance about the loaded COG.
     [[nodiscard]] BogieReactionAnalysis evaluateBogieReactions(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,

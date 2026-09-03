@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -333,12 +334,99 @@ namespace
             && car.aggregateWorldBogieReactionNewtons.has_value()
             && car.aggregateMagnitudeNewtons.has_value()
             && car.aggregateBodyFrameComponentsNewtons.has_value()
-            && car.forceBalanceResidualNewtons.has_value(),
+            && car.forceBalanceResidualNewtons.has_value()
+            && car.rotationalInertialMomentNewtonMeters.has_value()
+            && car.knownAppliedMomentNewtonMeters.has_value(),
             "available car fields");
         return car;
     }
 
-    void staticLevelAndUnavailableSplit()
+    void requireAvailableSplit(
+        const CarTrackReaction& car,
+        const std::string_view context)
+    {
+        require(car.frontBogie.status == BogieReactionRecoveryStatus::Available
+                && car.rearBogie.status
+                    == BogieReactionRecoveryStatus::Available,
+            std::string(context) + " split available (front status "
+                + std::to_string(static_cast<int>(car.frontBogie.status))
+                + ", rank "
+                + std::to_string(car.frontBogie.reactionSolveRank)
+                + ", force residual "
+                + std::to_string(car.forceBalanceResidualNewtons
+                    ? glm::length(*car.forceBalanceResidualNewtons) : -1.0)
+                + ", force tolerance "
+                + std::to_string(car.forceBalanceToleranceNewtons)
+                + ", moment residual "
+                + std::to_string(car.momentBalanceResidualNewtonMeters
+                    ? glm::length(*car.momentBalanceResidualNewtonMeters) : -1.0)
+                + ", moment tolerance "
+                + std::to_string(car.momentBalanceToleranceNewtonMeters)
+                + ")");
+        require(car.frontBogie.worldReactionNewtons.has_value()
+                && car.rearBogie.worldReactionNewtons.has_value()
+                && car.frontBogie.magnitudeNewtons.has_value()
+                && car.rearBogie.magnitudeNewtons.has_value()
+                && car.frontBogie.trackFrameComponentsNewtons.has_value()
+                && car.rearBogie.trackFrameComponentsNewtons.has_value()
+                && car.frontBogie.bodyFrameComponentsNewtons.has_value()
+                && car.rearBogie.bodyFrameComponentsNewtons.has_value()
+                && car.momentBalanceResidualNewtonMeters.has_value(),
+            std::string(context) + " split fields");
+        require(car.frontBogie.reactionSolveRank == 4
+                && car.rearBogie.reactionSolveRank == 4
+                && car.frontBogie.reactionSolveConditionEstimate.has_value()
+                && car.frontBogie.reactionSolveConditionEstimate.value()
+                    <= bogieReactionMaximumConditionEstimate
+                && car.frontBogie.momentRowScalePerMeter > 0.0,
+            std::string(context) + " conditioning diagnostics");
+        requireNear(
+            *car.frontBogie.worldReactionNewtons
+                + *car.rearBogie.worldReactionNewtons,
+            *car.aggregateWorldBogieReactionNewtons,
+            car.forceBalanceToleranceNewtons,
+            std::string(context) + " Phase 7 aggregate equality");
+        require(glm::length(*car.forceBalanceResidualNewtons)
+                    <= car.forceBalanceToleranceNewtons
+                && glm::length(*car.momentBalanceResidualNewtonMeters)
+                    <= car.momentBalanceToleranceNewtonMeters,
+            std::string(context) + " force and moment residuals");
+
+        for (const BogieReaction* bogie
+            : {&car.frontBogie, &car.rearBogie})
+        {
+            const glm::dvec3& world = *bogie->worldReactionNewtons;
+            require(std::abs(glm::dot(world, bogie->trackFrame.tangent))
+                    <= car.forceBalanceToleranceNewtons,
+                std::string(context) + " zero tangent work");
+            const glm::dvec3& components =
+                *bogie->trackFrameComponentsNewtons;
+            requireNear(
+                components,
+                {
+                    glm::dot(world, bogie->trackFrame.tangent),
+                    glm::dot(world, bogie->trackFrame.lateral),
+                    glm::dot(world, bogie->trackFrame.up)
+                },
+                1.0e-9,
+                std::string(context) + " bogie-frame projection");
+            requireNear(
+                components.x * bogie->trackFrame.tangent
+                    + components.y * bogie->trackFrame.lateral
+                    + components.z * bogie->trackFrame.up,
+                world,
+                1.0e-9,
+                std::string(context) + " world projection reconstruction");
+        }
+        requireNear(
+            *car.frontBogie.bodyFrameComponentsNewtons
+                + *car.rearBogie.bodyFrameComponentsNewtons,
+            *car.aggregateBodyFrameComponentsNewtons,
+            car.forceBalanceToleranceNewtons,
+            std::string(context) + " body-frame projection sum");
+    }
+
+    void staticLevelCenteredSplit()
     {
         constexpr double mass = 1'000.0;
         constexpr double gravity = 9.80665;
@@ -358,17 +446,13 @@ namespace
         require(car.frontBogie.bogieDefinitionIndex == 1
                 && car.rearBogie.bogieDefinitionIndex == 0,
             "Phase 2 ordering reused");
-        for (const BogieReaction* bogie
-            : {&car.frontBogie, &car.rearBogie})
-        {
-            require(bogie->status
-                    == BogieReactionRecoveryStatus::MomentBalanceNotImplemented,
-                "front/rear split explicitly unavailable");
-            require(!bogie->worldReactionNewtons
-                    && !bogie->magnitudeNewtons
-                    && !bogie->trackFrameComponentsNewtons,
-                "no fabricated bogie force");
-        }
+        requireAvailableSplit(car, "static centered");
+        requireNear(*car.frontBogie.worldReactionNewtons,
+            {0.0, 0.0, 0.5 * mass * gravity}, 1.0e-6,
+            "centered front support");
+        requireNear(*car.rearBogie.worldReactionNewtons,
+            {0.0, 0.0, 0.5 * mass * gravity}, 1.0e-6,
+            "centered rear support");
         requireNear(*car.forceBalanceResidualNewtons,
             {0.0, 0.0, 0.0}, car.forceBalanceToleranceNewtons,
             "static force closure");
@@ -378,13 +462,18 @@ namespace
             "ideal generalized constraint closure");
     }
 
-    void offCenterCogDoesNotInventSplit()
+    void staticLevelOffCenterCogAnalyticSplit()
     {
+        constexpr double mass = 1'000.0;
+        constexpr double gravity = 9.80665;
+        constexpr double halfSpacing = 1.15;
+        constexpr double centerOfGravityX = 0.7;
         const BogieReactionAnalysis centered = analyze(
             straightTrack(), singleCarTrain(), locationAt(50.0));
         const BogieReactionAnalysis shifted = analyze(
             straightTrack(),
-            singleCarTrain(carDefinition(1'000.0, 1.15, 0.7)),
+            singleCarTrain(carDefinition(
+                mass, halfSpacing, centerOfGravityX)),
             locationAt(50.0));
         const CarTrackReaction& centeredCar = availableCar(centered);
         const CarTrackReaction& shiftedCar = availableCar(shifted);
@@ -392,11 +481,17 @@ namespace
             *centeredCar.aggregateWorldBogieReactionNewtons,
             1.0e-6,
             "off-center COG preserves aggregate static reaction");
-        require(shiftedCar.frontBogie.status
-                == BogieReactionRecoveryStatus::MomentBalanceNotImplemented
-                && shiftedCar.rearBogie.status
-                    == BogieReactionRecoveryStatus::MomentBalanceNotImplemented,
-            "off-center COG load split remains unavailable");
+        requireAvailableSplit(shiftedCar, "static off-center COG");
+        const double weight = mass * gravity;
+        const double expectedFront = weight
+            * (halfSpacing + centerOfGravityX) / (2.0 * halfSpacing);
+        const double expectedRear = weight - expectedFront;
+        requireNear(shiftedCar.frontBogie.worldReactionNewtons->z,
+            expectedFront, 1.0e-6, "off-center analytic front support");
+        requireNear(shiftedCar.rearBogie.worldReactionNewtons->z,
+            expectedRear, 1.0e-6, "off-center analytic rear support");
+        require(std::abs(expectedFront - expectedRear) > 1'000.0,
+            "off-center split is not 50/50");
     }
 
     void crestValleyAndSpeedDependence()
@@ -414,6 +509,10 @@ namespace
             analyze(valleyTrack, train, locationAt(station), 0.0));
         const CarTrackReaction& valleyMoving = availableCar(
             analyze(valleyTrack, train, locationAt(station), 3.0));
+        requireAvailableSplit(crestStatic, "crest static");
+        requireAvailableSplit(crestMoving, "crest moving");
+        requireAvailableSplit(valleyStatic, "valley static");
+        requireAvailableSplit(valleyMoving, "valley moving");
         if (!(crestMoving.aggregateMagnitudeNewtons.value()
                 < crestStatic.aggregateMagnitudeNewtons.value()))
         {
@@ -438,6 +537,11 @@ namespace
         require(valleyMoving.aggregateWorldBogieReactionNewtons->z
                 > valleyStatic.aggregateWorldBogieReactionNewtons->z,
             "velocity-squared valley acceleration included");
+        require(std::abs(crestMoving.frontBogie.worldReactionNewtons->z
+                    - crestStatic.frontBogie.worldReactionNewtons->z) > 1.0
+                && std::abs(valleyMoving.rearBogie.worldReactionNewtons->z
+                    - valleyStatic.rearBogie.worldReactionNewtons->z) > 1.0,
+            "speed changes front/rear reaction distribution");
     }
 
     void invertedLoopAndBankedFrames()
@@ -453,6 +557,10 @@ namespace
             "inverted world reaction remains upward");
         require(inverted.aggregateBodyFrameComponentsNewtons->z < 0.0,
             "inverted body-up component is negative");
+        requireAvailableSplit(inverted, "inverted");
+        require(inverted.frontBogie.trackFrameComponentsNewtons->z < 0.0
+                && inverted.rearBogie.trackFrameComponentsNewtons->z < 0.0,
+            "inverted bogie up components may be negative");
 
         const CompiledPhysicsTrack loop = verticalLoopCircuit();
         const double radius = 20.0;
@@ -478,6 +586,11 @@ namespace
             singleCarTrain(),
             locationAt(std::numbers::pi * radius + 0.02),
             30.0));
+        requireAvailableSplit(bottom, "loop bottom");
+        requireAvailableSplit(side, "loop side");
+        requireAvailableSplit(top, "loop top");
+        requireAvailableSplit(beforeTop, "loop before top");
+        requireAvailableSplit(afterTop, "loop after top");
         require(bottom.aggregateWorldBogieReactionNewtons->z > 0.0,
             "loop bottom reaction points upward");
         if (!(top.aggregateWorldBogieReactionNewtons->z < 0.0))
@@ -500,9 +613,11 @@ namespace
                 < 250.0,
             "loop reaction is continuous through the top neighborhood");
 
+        CarDefinition bankedCarDefinition = carDefinition();
+        bankedCarDefinition.dryCenterOfGravityMeters.z = 0.0;
         const CarTrackReaction& banked = availableCar(analyze(
             horizontalCircuit(0.55),
-            singleCarTrain(),
+            singleCarTrain(bankedCarDefinition),
             locationAt(12.0),
             14.0));
         require(std::abs(banked.aggregateWorldBogieReactionNewtons->x) > 1.0
@@ -513,6 +628,12 @@ namespace
                 && std::abs(banked.aggregateBodyFrameComponentsNewtons->z)
                     > 1.0,
             "banked reaction has lateral and up frame components");
+        requireAvailableSplit(banked, "banked curve");
+        require(std::abs(
+                    banked.frontBogie.trackFrameComponentsNewtons->y) > 1.0
+                || std::abs(
+                    banked.rearBogie.trackFrameComponentsNewtons->y) > 1.0,
+            "banked bogie reactions include lateral components");
     }
 
     void connectorAndHeterogeneousTrainEffects()
@@ -542,6 +663,9 @@ namespace
                     == RigidConnectorLoadRecoveryStatus::Available,
             "heterogeneous per-car reaction count");
         const CarTrackReaction& lead = availableCar(reactions, 0);
+        const CarTrackReaction& following = availableCar(reactions, 1);
+        requireAvailableSplit(lead, "connector leading car");
+        requireAvailableSplit(following, "connector following car");
         const glm::dvec3 acceleration = *lead
             .worldCenterOfGravityAccelerationMetersPerSecondSquared;
         const glm::dvec3 withoutConnector =
@@ -552,6 +676,9 @@ namespace
             withoutConnector - forceOnLead,
             1.0e-6,
             "connector world force enters car reaction balance");
+        require(glm::length(*lead.knownAppliedMomentNewtonMeters) > 1.0
+                && glm::length(*following.knownAppliedMomentNewtonMeters) > 1.0,
+            "connector forces act at actual hitch points");
     }
 
     void explicitForcesAndAerodynamicPath()
@@ -566,18 +693,33 @@ namespace
         requireNear(*verticalCar.aggregateWorldBogieReactionNewtons,
             {0.0, 0.0, 9'806.65 - 2'000.0}, 1.0e-6,
             "off-center vertical external force");
-        require(verticalCar.frontBogie.status
-                == BogieReactionRecoveryStatus::MomentBalanceNotImplemented,
-            "off-center force does not invent a moment split");
+        requireAvailableSplit(verticalCar, "off-center vertical force");
+        const std::vector<ExternalForceApplication> verticalThroughCog{
+            {0, {0.0, 0.0, 0.65}, {0.0, 0.0, 2'000.0}}
+        };
+        const CarTrackReaction& verticalThroughCogCar = availableCar(analyze(
+            track, train, locationAt(50.0), 0.0, verticalThroughCog));
+        requireAvailableSplit(verticalThroughCogCar, "vertical force through COG");
+        requireNear(*verticalCar.aggregateWorldBogieReactionNewtons,
+            *verticalThroughCogCar.aggregateWorldBogieReactionNewtons,
+            1.0e-9, "same force preserves aggregate reaction");
+        require(std::abs(verticalCar.frontBogie.worldReactionNewtons->z
+                    - verticalThroughCogCar.frontBogie
+                        .worldReactionNewtons->z) > 100.0,
+            "application point changes split without changing aggregate");
 
         const std::vector<ExternalForceApplication> lateral{
-            {0, {0.0, 0.0, 0.65}, {0.0, 1'500.0, 0.0}}
+            {0, {0.8, 0.0, 0.0}, {0.0, 1'500.0, 0.0}}
         };
         const CarTrackReaction& lateralCar = availableCar(analyze(
             track, train, locationAt(50.0), 0.0, lateral));
         requireNear(*lateralCar.aggregateWorldBogieReactionNewtons,
             {0.0, -1'500.0, 9'806.65}, 1.0e-6,
             "lateral external force changes reaction direction");
+        requireAvailableSplit(lateralCar, "off-center lateral force");
+        require(std::abs(lateralCar.frontBogie.worldReactionNewtons->y
+                    - lateralCar.rearBogie.worldReactionNewtons->y) > 100.0,
+            "off-center lateral force changes front/rear split");
 
         TrainDefinition aerodynamic = singleCarTrain(
             carDefinition(1'000.0, 1.15, 0.0, 2.0));
@@ -603,12 +745,177 @@ namespace
         requireNear(*dragCar.aggregateWorldBogieReactionNewtons,
             {0.0, 0.0, 9'806.65}, 2.0e-5,
             "drag uses ordinary external-force balance path");
+        requireAvailableSplit(dragCar, "aerodynamic center");
+        require(glm::length(*dragCar.knownAppliedMomentNewtonMeters) > 1.0,
+            "aerodynamic center contributes an ordinary force moment");
+        require(std::abs(dragCar.frontBogie.worldReactionNewtons->z
+                    - dragCar.rearBogie.worldReactionNewtons->z) > 1.0,
+            "aerodynamic-center moment changes bogie split");
+    }
+
+    void longitudinalForceAndUnsupportedRollMoment()
+    {
+        const CompiledPhysicsTrack track = straightTrack();
+        const TrainDefinition train = singleCarTrain();
+        const std::vector<ExternalForceApplication> longitudinal{
+            {0, {0.0, 0.0, 0.65}, {2'500.0, 0.0, 0.0}}
+        };
+        const CarTrackReaction& driven = availableCar(analyze(
+            track, train, locationAt(50.0), 4.0, longitudinal));
+        requireAvailableSplit(driven, "longitudinal force");
+        requireNear(*driven.aggregateWorldBogieReactionNewtons,
+            {0.0, 0.0, 9'806.65}, 1.0e-6,
+            "longitudinal demand is handled by generalized motion");
+        require(std::abs(driven.frontBogie.trackFrameComponentsNewtons->x)
+                    <= driven.forceBalanceToleranceNewtons
+                && std::abs(
+                    driven.rearBogie.trackFrameComponentsNewtons->x)
+                    <= driven.forceBalanceToleranceNewtons,
+            "bogies do not absorb longitudinal force");
+
+        const std::vector<ExternalForceApplication> unsupportedLateral{
+            {0, {0.0, 0.0, 0.65}, {0.0, 1'500.0, 0.0}}
+        };
+        const CarTrackReaction& unsupported = availableCar(analyze(
+            track, train, locationAt(50.0), 0.0, unsupportedLateral));
+        require(unsupported.frontBogie.status
+                    == BogieReactionRecoveryStatus::ForceBalanceInconsistent
+                || unsupported.frontBogie.status
+                    == BogieReactionRecoveryStatus::MomentBalanceInconsistent,
+            "unsupported roll demand is explicitly inconsistent");
+        require(!unsupported.frontBogie.worldReactionNewtons
+                && !unsupported.rearBogie.worldReactionNewtons
+                && unsupported.momentBalanceResidualNewtonMeters.has_value(),
+            "inconsistent candidate is not published as authoritative");
+    }
+
+    void connectorTensionAndCompressionMoments()
+    {
+        TrainDefinition lightLead = twoCarTrain();
+        TrainDefinition heavyLead = lightLead;
+        std::swap(heavyLead.cars[0], heavyLead.cars[1]);
+        bool sawTension = false;
+        bool sawCompression = false;
+        for (const bool crest : {true, false})
+        {
+            const CompiledPhysicsTrack track = verticalArcTrack(crest);
+            for (const TrainDefinition* train : {&lightLead, &heavyLead})
+            {
+                const TrackLocation location = locationAt(24.0 * 0.9);
+                const TrainDynamicsState state = consistentState(
+                    track, *train, location, 13.0);
+                const RigidConnectorLoadAnalysis loads =
+                    evaluateRigidConnectorLoads(
+                        track, *train, PhysicsEnvironment{}, state);
+                require(loads.exactRecoveryAvailable()
+                        && loads.connectorLoads().size() == 1,
+                    "connector sign fixture is available");
+                const RigidConnectorLoadClassification classification =
+                    loads.connectorLoads()[0].classification();
+                sawTension = sawTension
+                    || classification
+                        == RigidConnectorLoadClassification::Tension;
+                sawCompression = sawCompression
+                    || classification
+                        == RigidConnectorLoadClassification::Compression;
+
+                const BogieReactionAnalysis reactions = evaluateBogieReactions(
+                    track, *train, PhysicsEnvironment{}, state);
+                for (std::size_t index = 0; index < reactions.cars.size(); ++index)
+                {
+                    const CarTrackReaction& car = availableCar(reactions, index);
+                    requireAvailableSplit(car, "signed connector load");
+                    require(glm::length(*car.knownAppliedMomentNewtonMeters)
+                            > 1.0,
+                        "signed connector force contributes hitch moment");
+                }
+            }
+        }
+        require(sawTension && sawCompression,
+            "fixtures exercise both connector tension and compression");
+    }
+
+    void accelerationInertiaAndSpacingEffects()
+    {
+        const CompiledPhysicsTrack track = verticalArcTrack(false);
+        const TrackLocation location = locationAt(24.0 * 0.9);
+        CarDefinition drivenCarDefinition = carDefinition();
+        drivenCarDefinition.dryInertiaTensorBodyKgM2 = glm::dmat3{4'000.0};
+        const TrainDefinition baselineTrain = singleCarTrain(
+            drivenCarDefinition);
+        const CarPose pose = solveCarPose(
+            track, baselineTrain.cars[0].car, location);
+        const std::vector<ExternalForceApplication> drive{
+            {0,
+                baselineTrain.cars[0].car.dryCenterOfGravityMeters,
+                3'000.0 * pose.bodyFrame().tangent}
+        };
+        const CarTrackReaction& coasting = availableCar(analyze(
+            track, baselineTrain, location, 8.0));
+        const CarTrackReaction& accelerating = availableCar(analyze(
+            track, baselineTrain, location, 8.0, drive));
+        requireAvailableSplit(coasting, "coasting qdd");
+        requireAvailableSplit(accelerating, "driven qdd");
+        require(glm::length(
+                    *accelerating.rotationalInertialMomentNewtonMeters
+                    - *coasting.rotationalInertialMomentNewtonMeters) > 1.0
+                && glm::length(
+                    *accelerating.frontBogie.worldReactionNewtons
+                    - *coasting.frontBogie.worldReactionNewtons) > 1.0,
+            "qdd changes angular demand and bogie split");
+
+        CarDefinition lowInertia = carDefinition();
+        CarDefinition highInertia = lowInertia;
+        lowInertia.dryInertiaTensorBodyKgM2 = glm::dmat3{100.0};
+        highInertia.dryInertiaTensorBodyKgM2 = glm::dmat3{4'000.0};
+        const CarTrackReaction& low = availableCar(analyze(
+            track, singleCarTrain(lowInertia), location, 8.0, drive));
+        const CarTrackReaction& high = availableCar(analyze(
+            track, singleCarTrain(highInertia), location, 8.0, drive));
+        requireAvailableSplit(low, "low inertia");
+        requireAvailableSplit(high, "high inertia");
+        require(glm::length(*low.frontBogie.worldReactionNewtons
+                    - *high.frontBogie.worldReactionNewtons) > 1.0,
+            "heterogeneous inertia changes per-car split");
+
+        const CarTrackReaction& shortSpacing = availableCar(analyze(
+            straightTrack(),
+            singleCarTrain(carDefinition(1'000.0, 0.8, 0.35)),
+            locationAt(50.0)));
+        const CarTrackReaction& longSpacing = availableCar(analyze(
+            straightTrack(),
+            singleCarTrain(carDefinition(1'000.0, 1.6, 0.35)),
+            locationAt(50.0)));
+        requireAvailableSplit(shortSpacing, "short spacing");
+        requireAvailableSplit(longSpacing, "long spacing");
+        require(std::abs(shortSpacing.frontBogie.worldReactionNewtons->z
+                    - longSpacing.frontBogie.worldReactionNewtons->z) > 100.0,
+            "bogie leverage changes load distribution");
+
+        TrainDefinition heterogeneous;
+        CarDefinition first = carDefinition(700.0, 0.8, -0.2);
+        first.dryInertiaTensorBodyKgM2 = glm::dmat3{250.0};
+        CarDefinition second = carDefinition(1'800.0, 1.6, 0.3);
+        second.dryInertiaTensorBodyKgM2 = glm::dmat3{1'500.0};
+        heterogeneous.cars.push_back({first, {120.0, {0.1, 0.0, 0.8}}});
+        heterogeneous.cars.push_back({second, {300.0, {-0.2, 0.0, 0.9}}});
+        heterogeneous.connections.push_back({0.5});
+        const BogieReactionAnalysis heterogeneousResult = analyze(
+            track, heterogeneous, location, 7.0);
+        require(heterogeneousResult.cars.size() == 2,
+            "heterogeneous car reaction count");
+        requireAvailableSplit(
+            availableCar(heterogeneousResult, 0), "heterogeneous front car");
+        requireAvailableSplit(
+            availableCar(heterogeneousResult, 1), "heterogeneous rear car");
     }
 
     void reverseSeamEndpointAndDeterminism()
     {
         const CompiledPhysicsTrack circuit = horizontalCircuit();
-        const TrainDefinition train = singleCarTrain();
+        CarDefinition circuitCar = carDefinition();
+        circuitCar.dryCenterOfGravityMeters.z = 0.0;
+        const TrainDefinition train = singleCarTrain(circuitCar);
         const BogieReactionAnalysis forward = analyze(
             circuit,
             train,
@@ -638,6 +945,17 @@ namespace
         require(finite(*forwardCar.aggregateWorldBogieReactionNewtons)
                 && finite(*reverseCar.aggregateWorldBogieReactionNewtons),
             "seam and reverse outputs finite");
+        requireAvailableSplit(forwardCar, "circuit seam forward");
+        requireAvailableSplit(repeatCar, "circuit seam repeat");
+        requireAvailableSplit(reverseCar, "circuit seam reverse");
+        require(forwardCar.frontBogie.role == BogieRole::Front
+                && reverseCar.frontBogie.role == BogieRole::Front
+                && forwardCar.frontBogie.bogieDefinitionIndex
+                    == reverseCar.frontBogie.bogieDefinitionIndex,
+            "reverse travel does not swap bogie roles");
+        requireNear(*forwardCar.frontBogie.worldReactionNewtons,
+            *repeatCar.frontBogie.worldReactionNewtons,
+            0.0, "front split deterministic");
 
         const CompiledPhysicsTrack open = straightTrack();
         const BogieReactionAnalysis atStart = analyze(
@@ -651,6 +969,8 @@ namespace
             "open endpoints use legal one-sided derivatives");
         static_cast<void>(availableCar(atStart));
         static_cast<void>(availableCar(atEnd));
+        requireAvailableSplit(availableCar(atStart), "open start");
+        requireAvailableSplit(availableCar(atEnd), "open end");
     }
 
     void explicitUnavailabilityAndConditioning()
@@ -681,6 +1001,39 @@ namespace
                 && singularCar.rearBogie.status
                     == BogieReactionRecoveryStatus::SingularGeometry,
             "sub-micrometre bogie leverage is singular");
+        require(!singularCar.frontBogie.worldReactionNewtons
+                && !singularCar.rearBogie.worldReactionNewtons,
+            "singular geometry publishes no split");
+
+        const TrainDefinition illConditioned = singleCarTrain(
+            carDefinition(1'000.0, 2.5e-6));
+        const CarTrackReaction& illConditionedCar = availableCar(analyze(
+            straightTrack(), illConditioned, locationAt(50.0)));
+        require(illConditionedCar.frontBogie.status
+                    == BogieReactionRecoveryStatus::IllConditioned
+                && illConditionedCar.frontBogie.reactionSolveRank == 4
+                && illConditionedCar.frontBogie
+                    .reactionSolveConditionEstimate.has_value()
+                && *illConditionedCar.frontBogie
+                    .reactionSolveConditionEstimate
+                    > bogieReactionMaximumConditionEstimate
+                && !illConditionedCar.frontBogie.worldReactionNewtons,
+            "near-coincident supports are ill-conditioned, not explosive");
+
+        constexpr double circuitRadius = 25.0;
+        CarDefinition rankDeficientCar = carDefinition(
+            1'000.0,
+            0.5 * std::numbers::pi * circuitRadius);
+        rankDeficientCar.dryCenterOfGravityMeters.z = 0.0;
+        const CarTrackReaction& rankDeficient = availableCar(analyze(
+            horizontalCircuit(),
+            singleCarTrain(rankDeficientCar),
+            locationAt(std::numbers::pi * circuitRadius)));
+        require(rankDeficient.frontBogie.status
+                    == BogieReactionRecoveryStatus::RankDeficient
+                && rankDeficient.frontBogie.reactionSolveRank < 4
+                && !rankDeficient.frontBogie.worldReactionNewtons,
+            "constraint-plane rank deficiency is explicit");
 
         const CompiledPhysicsTrack exactFit = straightTrack(2.3);
         const TrainDefinition exactFitTrain = singleCarTrain();
@@ -742,12 +1095,18 @@ namespace
 
 int main()
 {
-    run("static level and unavailable split", staticLevelAndUnavailableSplit);
-    run("off-center COG", offCenterCogDoesNotInventSplit);
+    run("static level centered split", staticLevelCenteredSplit);
+    run("static level off-center COG", staticLevelOffCenterCogAnalyticSplit);
     run("crest valley and speed", crestValleyAndSpeedDependence);
     run("inverted loop and banked frames", invertedLoopAndBankedFrames);
     run("heterogeneous connector effects", connectorAndHeterogeneousTrainEffects);
     run("explicit forces and aerodynamics", explicitForcesAndAerodynamicPath);
+    run("longitudinal and unsupported moment",
+        longitudinalForceAndUnsupportedRollMoment);
+    run("connector tension compression moments",
+        connectorTensionAndCompressionMoments);
+    run("acceleration inertia spacing effects",
+        accelerationInertiaAndSpacingEffects);
     run("reverse seam endpoint determinism", reverseSeamEndpointAndDeterminism);
     run("unavailability and conditioning", explicitUnavailabilityAndConditioning);
     return 0;

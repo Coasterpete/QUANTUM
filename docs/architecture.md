@@ -1019,6 +1019,95 @@ actual `qdd`. Separate front/rear bogie reactions remain unavailable with
 directions, running/guide/upstop loads, wheel loads, suspension, steering,
 restraints/riders, operational devices, or rendering/track-family dependencies.
 
+### Phase 9: conditioned front/rear aggregate bogie reactions
+
+`evaluateBogieReactions` now conditionally splits each available Phase 7 car
+resultant into one aggregate front-bogie and one aggregate rear-bogie resultant.
+The raw problem contains six force-component unknowns. Although force and moment
+balance provide six scalar rows, the separated two-point system has rank five:
+after force balance, equal-and-opposite forces parallel to the line between the
+two application points produce neither net force nor net moment. Coincident
+points are still more degenerate, so arbitrary three-dimensional resultants are
+not uniquely recoverable.
+
+The implemented ideal-constraint model removes that nullspace by requiring each
+bogie reaction to lie in the plane normal to its local admissible rolling
+direction. This is the virtual-work condition `R_bogie dot t_bogie = 0` for a
+bogie reference point constrained to move along the track. The two basis vectors
+are the existing travel-oriented `BogiePose::orientedFrame()` lateral and up
+axes; no separate frame is reconstructed. Reverse travel changes basis signs but
+not the physical plane or the authored front/rear roles. The four unknowns are
+therefore front lateral/up and rear lateral/up aggregate constraint components,
+not running-, guide-, upstop-, left/right-, or individual-wheel loads.
+
+For each car, the physical equations about its loaded COG are
+
+```text
+R_front + R_rear + F_known = m a_COG
+
+r_front cross R_front + r_rear cross R_rear + tau_known
+    = I_world alpha + omega cross (I_world omega)
+```
+
+`F_known` contains gravity, recovered connector forces, and every explicit
+`ExternalForceApplication`. Gravity acts through the loaded COG and therefore
+adds no moment. A leading car receives its connector force at its actual rear
+hitch; a following car receives the equal-and-opposite force at its actual front
+hitch. Each explicit force uses the world application point already produced by
+the shared Phase 5 transform/kinematic evaluation. Phase 6 aerodynamic drag is
+therefore handled by that ordinary path and its aerodynamic-center offset
+contributes a moment without a resistance-specific branch. The right-hand
+rotational demand uses the Phase 8 world inertia, angular acceleration, angular
+velocity, and full gyroscopic term.
+
+The reaction application points are the current Phase 2 sampled front and rear
+bogie world reference positions. They are ideal aggregate constraint points;
+they are not wheel-patch centroids, axle contact patches, or authored
+running-wheel contacts. Aggregate `BasicResistance` still has neither a per-car
+world force nor an application point, so any force-producing aggregate law keeps
+reaction recovery unavailable rather than inventing a distribution.
+
+The four minimal coordinates are solved against all three force and all three
+moment rows as a 6-by-4 least-squares system. Moment rows are multiplied by the
+inverse of `max(1 m, |r_front|, |r_rear|, bogie separation)` so metre-valued
+lever arms do not dominate force rows numerically; diagnostics report that row
+scale, while public residuals remain in N and N*m. A deterministic
+column-pivoted, twice-orthogonalized modified Gram-Schmidt QR supplies the
+solution and rank. The reported compact condition estimate is the ratio of the
+largest to smallest accepted QR diagonal pivot. Rank uses a relative `1e-10`
+pivot tolerance, condition estimates above `1e5` are rejected, and separations
+below `1e-6 m` retain the explicit `SingularGeometry` result.
+
+Least squares is not used to conceal incompatible mechanics. A finite candidate
+must close both
+
+```text
+F_residual = R_front + R_rear + F_known - m a_COG
+
+tau_residual = r_front cross R_front + r_rear cross R_rear
+               + tau_known
+               - (I_world alpha + omega cross (I_world omega))
+```
+
+The force tolerance retains Phase 7's `1 mN + 0.01%` scale-aware policy. The
+moment tolerance independently uses `1 mN*m + 0.01%` of the largest inertial,
+known, or recovered reaction-moment scale. Excessive force or moment residuals,
+missing bases/rotational state, deficient rank, poor conditioning, and non-finite
+systems have distinct per-bogie statuses, and invalid candidates are not
+published as authoritative forces. When available, the two forces sum to the
+existing Phase 7 aggregate within its force tolerance and each tangent
+projection is approximately zero. World resultants, magnitudes, canonical
+track-frame tangent/lateral/up components, body-frame components, application
+points, rank, pivot-ratio condition estimate, row scale, and force/moment
+residual diagnostics remain immutable result data.
+
+The point-resultant model intentionally remains unavailable when a valid reduced
+state demands a couple the two ideal application points cannot supply, such as
+some roll-moment configurations. Phase 9 does not add contact engagement,
+wheel-role allocation, individual wheel loads, suspension, steering, connector
+moments or compliance, external pure torques, rolling-resistance redistribution,
+restraints/riders, operational devices, or track-family/rendering dependencies.
+
 ## Planned systems
 
 The following are current roadmap areas, not implemented capabilities or fixed

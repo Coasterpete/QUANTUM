@@ -42,6 +42,194 @@ namespace quantum::physics
                 && std::isfinite(value.z);
         }
 
+        using BogieReactionMatrix = std::array<std::array<double, 4>, 6>;
+        using BogieReactionRightHandSide = std::array<double, 6>;
+
+        struct BogieReactionLeastSquaresResult
+        {
+            std::array<double, 4> solution{0.0};
+            std::size_t rank = 0;
+            double conditionEstimate =
+                std::numeric_limits<double>::infinity();
+            bool finite = false;
+        };
+
+        [[nodiscard]] BogieReactionLeastSquaresResult
+            solveBogieReactionLeastSquares(
+                const BogieReactionMatrix& matrix,
+                const BogieReactionRightHandSide& rightHandSide)
+        {
+            constexpr std::size_t rowCount = 6;
+            constexpr std::size_t columnCount = 4;
+            std::array<std::array<double, rowCount>, columnCount> columns{};
+            std::array<std::array<double, rowCount>, columnCount> orthonormal{};
+            std::array<std::array<double, columnCount>, columnCount> upper{};
+            std::array<std::size_t, columnCount> permutation{0, 1, 2, 3};
+
+            for (std::size_t row = 0; row < rowCount; ++row)
+            {
+                if (!std::isfinite(rightHandSide[row]))
+                {
+                    return {};
+                }
+                for (std::size_t column = 0; column < columnCount; ++column)
+                {
+                    const double value = matrix[row][column];
+                    if (!std::isfinite(value))
+                    {
+                        return {};
+                    }
+                    columns[column][row] = value;
+                }
+            }
+
+            double largestPivot = 0.0;
+            double smallestPivot = std::numeric_limits<double>::infinity();
+            std::size_t rank = 0;
+            for (std::size_t step = 0; step < columnCount; ++step)
+            {
+                std::size_t pivotColumn = step;
+                double pivotNormSquared = -1.0;
+                for (std::size_t column = step;
+                    column < columnCount;
+                    ++column)
+                {
+                    double normSquared = 0.0;
+                    for (const double value : columns[column])
+                    {
+                        normSquared += value * value;
+                    }
+                    if (!std::isfinite(normSquared))
+                    {
+                        return {};
+                    }
+                    if (normSquared > pivotNormSquared)
+                    {
+                        pivotNormSquared = normSquared;
+                        pivotColumn = column;
+                    }
+                }
+
+                if (pivotColumn != step)
+                {
+                    std::swap(columns[step], columns[pivotColumn]);
+                    std::swap(permutation[step], permutation[pivotColumn]);
+                    for (std::size_t previous = 0;
+                        previous < step;
+                        ++previous)
+                    {
+                        std::swap(
+                            upper[previous][step],
+                            upper[previous][pivotColumn]);
+                    }
+                }
+
+                const double pivot = std::sqrt(
+                    std::max(0.0, pivotNormSquared));
+                if (!std::isfinite(pivot))
+                {
+                    return {};
+                }
+                if (step == 0)
+                {
+                    largestPivot = pivot;
+                }
+                const double rankTolerance =
+                    bogieReactionRankRelativeTolerance
+                    * std::max(1.0, largestPivot);
+                if (pivot <= rankTolerance)
+                {
+                    break;
+                }
+
+                upper[step][step] = pivot;
+                smallestPivot = std::min(smallestPivot, pivot);
+                for (std::size_t row = 0; row < rowCount; ++row)
+                {
+                    orthonormal[step][row] = columns[step][row] / pivot;
+                }
+                ++rank;
+
+                for (std::size_t column = step + 1;
+                    column < columnCount;
+                    ++column)
+                {
+                    double projection = 0.0;
+                    for (std::size_t row = 0; row < rowCount; ++row)
+                    {
+                        projection += orthonormal[step][row]
+                            * columns[column][row];
+                    }
+                    for (std::size_t row = 0; row < rowCount; ++row)
+                    {
+                        columns[column][row] -= projection
+                            * orthonormal[step][row];
+                    }
+
+                    // A second orthogonalization pass keeps this tiny solve
+                    // deterministic and stable without introducing a matrix
+                    // dependency solely for four reaction coordinates.
+                    double correction = 0.0;
+                    for (std::size_t row = 0; row < rowCount; ++row)
+                    {
+                        correction += orthonormal[step][row]
+                            * columns[column][row];
+                    }
+                    projection += correction;
+                    for (std::size_t row = 0; row < rowCount; ++row)
+                    {
+                        columns[column][row] -= correction
+                            * orthonormal[step][row];
+                    }
+                    upper[step][column] = projection;
+                }
+            }
+
+            BogieReactionLeastSquaresResult result;
+            result.rank = rank;
+            if (rank != columnCount || largestPivot <= 0.0
+                || !std::isfinite(smallestPivot)
+                || smallestPivot <= 0.0)
+            {
+                return result;
+            }
+
+            result.conditionEstimate = largestPivot / smallestPivot;
+            std::array<double, columnCount> permutedSolution{0.0};
+            std::array<double, columnCount> projectedRightHandSide{0.0};
+            for (std::size_t column = 0; column < columnCount; ++column)
+            {
+                for (std::size_t row = 0; row < rowCount; ++row)
+                {
+                    projectedRightHandSide[column] +=
+                        orthonormal[column][row] * rightHandSide[row];
+                }
+            }
+            for (std::size_t reverse = columnCount; reverse-- > 0;)
+            {
+                double value = projectedRightHandSide[reverse];
+                for (std::size_t column = reverse + 1;
+                    column < columnCount;
+                    ++column)
+                {
+                    value -= upper[reverse][column]
+                        * permutedSolution[column];
+                }
+                permutedSolution[reverse] = value / upper[reverse][reverse];
+                if (!std::isfinite(permutedSolution[reverse]))
+                {
+                    return result;
+                }
+            }
+            for (std::size_t column = 0; column < columnCount; ++column)
+            {
+                result.solution[permutation[column]] =
+                    permutedSolution[column];
+            }
+            result.finite = std::isfinite(result.conditionEstimate);
+            return result;
+        }
+
         [[nodiscard]] double directionSign(const TravelDirection direction)
         {
             switch (direction)
@@ -2926,6 +3114,8 @@ namespace quantum::physics
 
         std::vector<glm::dvec3> connectorForces(
             definition.cars.size(), glm::dvec3{0.0});
+        std::vector<glm::dvec3> connectorMoments(
+            definition.cars.size(), glm::dvec3{0.0});
         for (const RigidConnectorLoad& load
             : connectorLoads.connectorLoads())
         {
@@ -2941,15 +3131,48 @@ namespace quantum::physics
                 *load.worldForceOnLeadingCarNewtons();
             connectorForces[load.followingCarIndex()] +=
                 *load.worldForceOnFollowingCarNewtons();
+
+            const CarPose& leadingPose = kinematics->pose
+                .cars()[load.leadingCarIndex()].carPose();
+            const CarPose& followingPose = kinematics->pose
+                .cars()[load.followingCarIndex()].carPose();
+            connectorMoments[load.leadingCarIndex()] += glm::cross(
+                leadingPose.rearHitchWorldPositionMeters()
+                    - leadingPose.worldCenterOfGravityMeters(),
+                *load.worldForceOnLeadingCarNewtons());
+            connectorMoments[load.followingCarIndex()] += glm::cross(
+                followingPose.frontHitchWorldPositionMeters()
+                    - followingPose.worldCenterOfGravityMeters(),
+                *load.worldForceOnFollowingCarNewtons());
         }
 
         std::vector<glm::dvec3> appliedForces(
             definition.cars.size(), glm::dvec3{0.0});
-        for (const ExternalForceApplication& application : externalForces)
+        std::vector<glm::dvec3> appliedMoments(
+            definition.cars.size(), glm::dvec3{0.0});
+        for (std::size_t applicationIndex = 0;
+            applicationIndex < externalForces.size();
+            ++applicationIndex)
         {
+            const ExternalForceApplication& application =
+                externalForces[applicationIndex];
             appliedForces[application.carIndex] +=
                 application.worldForceNewtons;
+            const glm::dvec3& worldPoint = kinematics->externalForces[
+                applicationIndex].worldApplicationPointMeters;
+            const glm::dvec3& centerOfGravity = kinematics->pose
+                .cars()[application.carIndex]
+                .carPose().worldCenterOfGravityMeters();
+            appliedMoments[application.carIndex] += glm::cross(
+                worldPoint - centerOfGravity,
+                application.worldForceNewtons);
         }
+
+        const TrainAngularKinematicEvaluation angularKinematics =
+            evaluateTrainAngularKinematics(
+                *kinematics,
+                state.signedVelocityMetersPerSecond,
+                state.generalizedAccelerationMetersPerSecondSquared);
 
         const glm::dvec3 gravityAcceleration{
             0.0,
@@ -2977,15 +3200,13 @@ namespace quantum::physics
             const double mass = trainCar.loadedMassKilograms();
             const glm::dvec3 gravityForce = mass * gravityAcceleration;
             const glm::dvec3 inertialForce = mass * acceleration;
+            const glm::dvec3 knownForce = gravityForce
+                + appliedForces[carIndex]
+                + connectorForces[carIndex];
             const glm::dvec3 reaction = inertialForce
-                - gravityForce
-                - appliedForces[carIndex]
-                - connectorForces[carIndex];
-            const glm::dvec3 forceBalanceResidual = inertialForce
-                - (gravityForce
-                    + appliedForces[carIndex]
-                    + connectorForces[carIndex]
-                    + reaction);
+                - knownForce;
+            const glm::dvec3 forceBalanceResidual = reaction
+                + knownForce - inertialForce;
             const double forceBalanceScale = std::max({
                 1.0,
                 glm::length(inertialForce),
@@ -3007,10 +3228,31 @@ namespace quantum::physics
             const double bogieSeparation = glm::length(
                 carPose.frontBogie().worldPositionMeters()
                 - carPose.rearBogie().worldPositionMeters());
+            const CarAngularKinematics& carAngular =
+                angularKinematics.cars[carIndex];
+            const glm::dmat3 worldInertia = worldCarInertiaTensorKgM2(
+                carPose, carKinematics.loadedInertiaTensorBodyKgM2);
+            const glm::dvec3 angularMomentum = worldInertia
+                * carAngular.worldAngularVelocityRadiansPerSecond();
+            const glm::dvec3 rotationalInertialMoment = worldInertia
+                    * carAngular
+                        .worldAngularAccelerationRadiansPerSecondSquared()
+                + glm::cross(
+                    carAngular.worldAngularVelocityRadiansPerSecond(),
+                    angularMomentum);
+            const glm::dvec3 knownMoment = connectorMoments[carIndex]
+                + appliedMoments[carIndex];
+            const glm::dvec3 requiredReactionMoment =
+                rotationalInertialMoment - knownMoment;
             if (!finite(acceleration)
                 || !finite(reaction)
                 || !finite(forceBalanceResidual)
                 || !finite(bodyComponents)
+                || !finite(connectorMoments[carIndex])
+                || !finite(appliedMoments[carIndex])
+                || !finite(rotationalInertialMoment)
+                || !finite(knownMoment)
+                || !finite(requiredReactionMoment)
                 || !std::isfinite(forceBalanceScale)
                 || !std::isfinite(forceBalanceTolerance)
                 || !std::isfinite(bogieSeparation))
@@ -3019,11 +3261,216 @@ namespace quantum::physics
                     "Bogie-reaction car balance is non-finite.");
             }
 
-            const BogieReactionRecoveryStatus bogieStatus =
-                bogieSeparation < bogieReactionMinimumSeparationMeters
-                ? BogieReactionRecoveryStatus::SingularGeometry
-                : BogieReactionRecoveryStatus::MomentBalanceNotImplemented;
-            cars.push_back({
+            const BogiePose& frontPose = carPose.frontBogie();
+            const BogiePose& rearPose = carPose.rearBogie();
+            const glm::dvec3 frontArm = frontPose.worldPositionMeters()
+                - carPose.worldCenterOfGravityMeters();
+            const glm::dvec3 rearArm = rearPose.worldPositionMeters()
+                - carPose.worldCenterOfGravityMeters();
+            const double momentLengthScale = std::max({
+                1.0,
+                glm::length(frontArm),
+                glm::length(rearArm),
+                bogieSeparation
+            });
+            const double momentRowScale = 1.0 / momentLengthScale;
+
+            BogieReactionRecoveryStatus bogieStatus =
+                BogieReactionRecoveryStatus::Available;
+            std::size_t solveRank = 0;
+            std::optional<double> conditionEstimate;
+            std::optional<glm::dvec3> frontReaction;
+            std::optional<glm::dvec3> rearReaction;
+            glm::dvec3 reactionSplitForceResidual = forceBalanceResidual;
+            std::optional<glm::dvec3> momentBalanceResidual;
+            double momentBalanceTolerance = 0.0;
+
+            const geometry::CurveFrame& frontFrame =
+                frontPose.orientedFrame();
+            const geometry::CurveFrame& rearFrame = rearPose.orientedFrame();
+            const bool validConstraintBases =
+                finite(frontFrame.tangent)
+                && finite(frontFrame.lateral)
+                && finite(frontFrame.up)
+                && finite(rearFrame.tangent)
+                && finite(rearFrame.lateral)
+                && finite(rearFrame.up)
+                && std::abs(glm::length(frontFrame.tangent) - 1.0)
+                    <= 1.0e-10
+                && std::abs(glm::length(frontFrame.lateral) - 1.0)
+                    <= 1.0e-10
+                && std::abs(glm::length(frontFrame.up) - 1.0)
+                    <= 1.0e-10
+                && std::abs(glm::length(rearFrame.tangent) - 1.0)
+                    <= 1.0e-10
+                && std::abs(glm::length(rearFrame.lateral) - 1.0)
+                    <= 1.0e-10
+                && std::abs(glm::length(rearFrame.up) - 1.0)
+                    <= 1.0e-10
+                && std::abs(glm::dot(
+                    frontFrame.tangent, frontFrame.lateral)) <= 1.0e-10
+                && std::abs(glm::dot(
+                    frontFrame.tangent, frontFrame.up)) <= 1.0e-10
+                && std::abs(glm::dot(
+                    frontFrame.lateral, frontFrame.up)) <= 1.0e-10
+                && std::abs(glm::dot(
+                    rearFrame.tangent, rearFrame.lateral)) <= 1.0e-10
+                && std::abs(glm::dot(
+                    rearFrame.tangent, rearFrame.up)) <= 1.0e-10
+                && std::abs(glm::dot(
+                    rearFrame.lateral, rearFrame.up)) <= 1.0e-10;
+
+            if (bogieSeparation < bogieReactionMinimumSeparationMeters)
+            {
+                bogieStatus = BogieReactionRecoveryStatus::SingularGeometry;
+            }
+            else if (!carAngular.available())
+            {
+                bogieStatus = BogieReactionRecoveryStatus::
+                    RotationalKinematicsUnavailable;
+            }
+            else if (!validConstraintBases
+                || !std::isfinite(momentRowScale)
+                || momentRowScale <= 0.0)
+            {
+                bogieStatus = BogieReactionRecoveryStatus::
+                    MissingConstraintSubspace;
+            }
+            else
+            {
+                const std::array<glm::dvec3, 4> bases{
+                    frontFrame.lateral,
+                    frontFrame.up,
+                    rearFrame.lateral,
+                    rearFrame.up
+                };
+                const std::array<glm::dvec3, 4> momentCoefficients{
+                    glm::cross(frontArm, bases[0]),
+                    glm::cross(frontArm, bases[1]),
+                    glm::cross(rearArm, bases[2]),
+                    glm::cross(rearArm, bases[3])
+                };
+                BogieReactionMatrix matrix{};
+                for (std::size_t column = 0; column < bases.size(); ++column)
+                {
+                    matrix[0][column] = bases[column].x;
+                    matrix[1][column] = bases[column].y;
+                    matrix[2][column] = bases[column].z;
+                    matrix[3][column] = momentRowScale
+                        * momentCoefficients[column].x;
+                    matrix[4][column] = momentRowScale
+                        * momentCoefficients[column].y;
+                    matrix[5][column] = momentRowScale
+                        * momentCoefficients[column].z;
+                }
+                const BogieReactionRightHandSide rightHandSide{
+                    reaction.x,
+                    reaction.y,
+                    reaction.z,
+                    momentRowScale * requiredReactionMoment.x,
+                    momentRowScale * requiredReactionMoment.y,
+                    momentRowScale * requiredReactionMoment.z
+                };
+                const BogieReactionLeastSquaresResult solve =
+                    solveBogieReactionLeastSquares(matrix, rightHandSide);
+                solveRank = solve.rank;
+                if (std::isfinite(solve.conditionEstimate))
+                {
+                    conditionEstimate = solve.conditionEstimate;
+                }
+
+                if (!solve.finite)
+                {
+                    bogieStatus = solve.rank < 4
+                        ? BogieReactionRecoveryStatus::RankDeficient
+                        : BogieReactionRecoveryStatus::NonFiniteSystem;
+                }
+                else if (solve.conditionEstimate
+                    > bogieReactionMaximumConditionEstimate)
+                {
+                    bogieStatus = BogieReactionRecoveryStatus::IllConditioned;
+                }
+                else
+                {
+                    frontReaction = solve.solution[0] * bases[0]
+                        + solve.solution[1] * bases[1];
+                    rearReaction = solve.solution[2] * bases[2]
+                        + solve.solution[3] * bases[3];
+                    reactionSplitForceResidual = *frontReaction
+                        + *rearReaction + knownForce - inertialForce;
+                    momentBalanceResidual = glm::cross(
+                            frontArm, *frontReaction)
+                        + glm::cross(rearArm, *rearReaction)
+                        + knownMoment - rotationalInertialMoment;
+                    const double momentBalanceScale = std::max({
+                        1.0,
+                        glm::length(rotationalInertialMoment),
+                        glm::length(knownMoment),
+                        glm::length(glm::cross(frontArm, *frontReaction)),
+                        glm::length(glm::cross(rearArm, *rearReaction))
+                    });
+                    momentBalanceTolerance =
+                        bogieReactionMomentBalanceAbsoluteToleranceNewtonMeters
+                        + bogieReactionMomentBalanceRelativeTolerance
+                            * momentBalanceScale;
+                    if (!finite(*frontReaction)
+                        || !finite(*rearReaction)
+                        || !finite(reactionSplitForceResidual)
+                        || !finite(*momentBalanceResidual)
+                        || !std::isfinite(momentBalanceTolerance))
+                    {
+                        bogieStatus = BogieReactionRecoveryStatus::
+                            NonFiniteSystem;
+                    }
+                    else if (glm::length(reactionSplitForceResidual)
+                        > forceBalanceTolerance)
+                    {
+                        bogieStatus = BogieReactionRecoveryStatus::
+                            ForceBalanceInconsistent;
+                    }
+                    else if (glm::length(*momentBalanceResidual)
+                        > momentBalanceTolerance)
+                    {
+                        bogieStatus = BogieReactionRecoveryStatus::
+                            MomentBalanceInconsistent;
+                    }
+                }
+            }
+
+            BogieReaction frontBogie = makeBogie(
+                carIndex, frontPose, BogieRole::Front, bogieStatus);
+            BogieReaction rearBogie = makeBogie(
+                carIndex, rearPose, BogieRole::Rear, bogieStatus);
+            for (BogieReaction* bogie : {&frontBogie, &rearBogie})
+            {
+                bogie->reactionSolveRank = solveRank;
+                bogie->reactionSolveConditionEstimate = conditionEstimate;
+                bogie->momentRowScalePerMeter = momentRowScale;
+            }
+            if (bogieStatus == BogieReactionRecoveryStatus::Available)
+            {
+                const auto publishReaction = [&bodyFrame](
+                    BogieReaction& output,
+                    const BogiePose& pose,
+                    const glm::dvec3& value)
+                {
+                    output.worldReactionNewtons = value;
+                    output.magnitudeNewtons = glm::length(value);
+                    output.trackFrameComponentsNewtons = inBodyFrame(
+                        value, pose.trackFrame());
+                    output.bodyFrameComponentsNewtons = inBodyFrame(
+                        value, bodyFrame);
+                };
+                publishReaction(frontBogie, frontPose, *frontReaction);
+                publishReaction(rearBogie, rearPose, *rearReaction);
+            }
+            else
+            {
+                frontReaction.reset();
+                rearReaction.reset();
+            }
+
+            CarTrackReaction carResult{
                 carIndex,
                 CarTrackReactionRecoveryStatus::Available,
                 carPose.worldCenterOfGravityMeters(),
@@ -3031,19 +3478,19 @@ namespace quantum::physics
                 reaction,
                 glm::length(reaction),
                 bodyComponents,
-                makeBogie(
-                    carIndex,
-                    carPose.frontBogie(),
-                    BogieRole::Front,
-                    bogieStatus),
-                makeBogie(
-                    carIndex,
-                    carPose.rearBogie(),
-                    BogieRole::Rear,
-                    bogieStatus),
-                forceBalanceResidual,
+                std::move(frontBogie),
+                std::move(rearBogie),
+                reactionSplitForceResidual,
                 forceBalanceTolerance
-            });
+            };
+            carResult.momentBalanceResidualNewtonMeters =
+                momentBalanceResidual;
+            carResult.momentBalanceToleranceNewtonMeters =
+                momentBalanceTolerance;
+            carResult.rotationalInertialMomentNewtonMeters =
+                rotationalInertialMoment;
+            carResult.knownAppliedMomentNewtonMeters = knownMoment;
+            cars.push_back(std::move(carResult));
         }
 
         return {
