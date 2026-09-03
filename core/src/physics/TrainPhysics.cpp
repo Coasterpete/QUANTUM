@@ -251,6 +251,388 @@ namespace quantum::physics
             return result;
         }
 
+        // Deterministic Lawson-Hanson active/passive-set NNLS for the small
+        // Phase 11 wrench systems. The coefficient array always remains in
+        // source-contact order; only temporary passive subproblems are pivoted.
+        struct NNLSSolution
+        {
+            std::array<double, maximumBogieContactCount> coefficients{0.0};
+            std::size_t passiveSetRank = 0;
+            std::optional<double> passiveSetConditionEstimate;
+            std::size_t iterationCount = 0;
+            double nonnegativeTolerance = 0.0;
+            bool converged = false;
+        };
+
+        [[nodiscard]] NNLSSolution solveSmallNNLS(
+            const std::span<const SmallSystemColumn> inputColumns,
+            const std::span<const double> rightHandSide,
+            const double relativeRankTolerance)
+        {
+            const std::size_t rowCount = rightHandSide.size();
+            const std::size_t columnCount = inputColumns.size();
+            NNLSSolution result;
+
+            if (rowCount == 0 || rowCount > maximumSmallSystemRowCount
+                || columnCount == 0
+                || columnCount > maximumBogieContactCount
+                || !std::isfinite(relativeRankTolerance)
+                || relativeRankTolerance < 0.0)
+            {
+                return result;
+            }
+
+            double rightHandSideScale = 1.0;
+            double maximumColumnNorm = 0.0;
+            for (const double value : rightHandSide)
+            {
+                if (!std::isfinite(value))
+                {
+                    return result;
+                }
+                rightHandSideScale = std::max(
+                    rightHandSideScale, std::abs(value));
+            }
+            for (std::size_t column = 0;
+                column < columnCount;
+                ++column)
+            {
+                double normSquared = 0.0;
+                for (std::size_t row = 0; row < rowCount; ++row)
+                {
+                    const double value = inputColumns[column][row];
+                    if (!std::isfinite(value))
+                    {
+                        return result;
+                    }
+                    normSquared += value * value;
+                }
+                maximumColumnNorm = std::max(
+                    maximumColumnNorm, std::sqrt(normSquared));
+            }
+
+            result.nonnegativeTolerance =
+                bogieContactCoefficientAbsoluteToleranceNewtons
+                + bogieContactCoefficientRelativeTolerance
+                    * rightHandSideScale;
+            const double gradientTolerance =
+                bogieContactCoefficientAbsoluteToleranceNewtons
+                + bogieContactCoefficientRelativeTolerance
+                    * rightHandSideScale
+                    * std::max(1.0, maximumColumnNorm);
+            std::array<bool, maximumBogieContactCount> passive{};
+            const std::size_t maximumIterations =
+                4 * columnCount * columnCount;
+
+            while (result.iterationCount < maximumIterations)
+            {
+                std::array<double, maximumSmallSystemRowCount> residual{};
+                for (std::size_t row = 0; row < rowCount; ++row)
+                {
+                    residual[row] = rightHandSide[row];
+                    for (std::size_t column = 0;
+                        column < columnCount;
+                        ++column)
+                    {
+                        residual[row] -= inputColumns[column][row]
+                            * result.coefficients[column];
+                    }
+                }
+
+                // With r = b - A*x, w = A^T*r is the negative objective
+                // gradient. KKT therefore requires w <= 0 on the zero set.
+                double enteringGradient = gradientTolerance;
+                std::size_t enteringIndex = columnCount;
+                for (std::size_t column = 0;
+                    column < columnCount;
+                    ++column)
+                {
+                    if (passive[column])
+                    {
+                        continue;
+                    }
+                    double gradient = 0.0;
+                    for (std::size_t row = 0; row < rowCount; ++row)
+                    {
+                        gradient += inputColumns[column][row]
+                            * residual[row];
+                    }
+                    if (gradient > enteringGradient + gradientTolerance
+                        || (gradient > gradientTolerance
+                            && std::abs(gradient - enteringGradient)
+                                <= gradientTolerance
+                            && (enteringIndex == columnCount
+                                || column < enteringIndex)))
+                    {
+                        enteringGradient = gradient;
+                        enteringIndex = column;
+                    }
+                }
+
+                if (enteringIndex == columnCount)
+                {
+                    result.converged = true;
+                    break;
+                }
+
+                passive[enteringIndex] = true;
+                while (result.iterationCount < maximumIterations)
+                {
+                    std::array<SmallSystemColumn,
+                        maximumBogieContactCount> passiveColumns{};
+                    std::array<std::size_t,
+                        maximumBogieContactCount> passiveIndices{};
+                    std::size_t passiveCount = 0;
+                    for (std::size_t column = 0;
+                        column < columnCount;
+                        ++column)
+                    {
+                        if (passive[column])
+                        {
+                            passiveColumns[passiveCount] =
+                                inputColumns[column];
+                            passiveIndices[passiveCount] = column;
+                            ++passiveCount;
+                        }
+                    }
+                    if (passiveCount == 0)
+                    {
+                        break;
+                    }
+
+                    ++result.iterationCount;
+                    const SmallLeastSquaresResult passiveSolve =
+                        solveSmallLeastSquares(
+                            std::span<const SmallSystemColumn>{
+                                passiveColumns.data(), passiveCount},
+                            rightHandSide,
+                            relativeRankTolerance);
+                    if (!passiveSolve.finite)
+                    {
+                        return result;
+                    }
+
+                    std::array<double, maximumBogieContactCount> candidate{};
+                    bool strictlyPositive = true;
+                    for (std::size_t passiveIndex = 0;
+                        passiveIndex < passiveCount;
+                        ++passiveIndex)
+                    {
+                        const double value =
+                            passiveSolve.solution[passiveIndex];
+                        candidate[passiveIndices[passiveIndex]] = value;
+                        strictlyPositive = strictlyPositive
+                            && value > result.nonnegativeTolerance;
+                    }
+                    if (strictlyPositive)
+                    {
+                        result.coefficients = candidate;
+                        break;
+                    }
+
+                    double alpha = 1.0;
+                    bool hasBoundary = false;
+                    for (std::size_t passiveIndex = 0;
+                        passiveIndex < passiveCount;
+                        ++passiveIndex)
+                    {
+                        const std::size_t column =
+                            passiveIndices[passiveIndex];
+                        const double candidateValue = candidate[column];
+                        if (candidateValue
+                            <= result.nonnegativeTolerance)
+                        {
+                            hasBoundary = true;
+                            const double oldValue =
+                                result.coefficients[column];
+                            double step = 0.0;
+                            if (oldValue > result.nonnegativeTolerance)
+                            {
+                                const double denominator =
+                                    oldValue - candidateValue;
+                                if (denominator > 0.0)
+                                {
+                                    step = oldValue / denominator;
+                                }
+                            }
+                            alpha = std::min(alpha, step);
+                        }
+                    }
+                    if (!hasBoundary || !std::isfinite(alpha)
+                        || alpha < 0.0 || alpha > 1.0)
+                    {
+                        return result;
+                    }
+
+                    for (std::size_t passiveIndex = 0;
+                        passiveIndex < passiveCount;
+                        ++passiveIndex)
+                    {
+                        const std::size_t column =
+                            passiveIndices[passiveIndex];
+                        const double oldValue = result.coefficients[column];
+                        result.coefficients[column] = oldValue
+                            + alpha * (candidate[column] - oldValue);
+                    }
+
+                    // All boundary coefficients return to the zero set before
+                    // the reduced passive problem is solved again.
+                    for (std::size_t column = 0;
+                        column < columnCount;
+                        ++column)
+                    {
+                        if (passive[column]
+                            && result.coefficients[column]
+                                <= result.nonnegativeTolerance)
+                        {
+                            result.coefficients[column] = 0.0;
+                            passive[column] = false;
+                        }
+                    }
+                }
+            }
+
+            if (!result.converged)
+            {
+                return result;
+            }
+
+            std::array<SmallSystemColumn, maximumBogieContactCount>
+                finalPassiveColumns{};
+            std::size_t finalPassiveCount = 0;
+            for (std::size_t column = 0;
+                column < columnCount;
+                ++column)
+            {
+                if (result.coefficients[column]
+                    > result.nonnegativeTolerance)
+                {
+                    finalPassiveColumns[finalPassiveCount] =
+                        inputColumns[column];
+                    ++finalPassiveCount;
+                }
+            }
+            if (finalPassiveCount > 0)
+            {
+                const SmallLeastSquaresResult finalPassiveSolve =
+                    solveSmallLeastSquares(
+                        std::span<const SmallSystemColumn>{
+                            finalPassiveColumns.data(), finalPassiveCount},
+                        rightHandSide,
+                        relativeRankTolerance);
+                if (!finalPassiveSolve.finite)
+                {
+                    result.converged = false;
+                    return result;
+                }
+                result.passiveSetRank = finalPassiveSolve.rank;
+                result.passiveSetConditionEstimate =
+                    finalPassiveSolve.conditionEstimate;
+            }
+            return result;
+        }
+
+        [[nodiscard]] BogieContactAllocationUniqueness
+            classifyAllocationUniqueness(
+                const std::span<const SmallSystemColumn> columns,
+                const std::span<const double> coefficients,
+                const double nonnegativeTolerance,
+                const std::size_t fullSystemRank,
+                const double relativeRankTolerance)
+        {
+            if (fullSystemRank == columns.size())
+            {
+                return BogieContactAllocationUniqueness::Unique;
+            }
+
+            std::array<SmallSystemColumn, maximumBogieContactCount>
+                positiveColumns{};
+            std::size_t positiveCount = 0;
+            for (std::size_t column = 0; column < columns.size(); ++column)
+            {
+                if (coefficients[column] > nonnegativeTolerance)
+                {
+                    positiveColumns[positiveCount] = columns[column];
+                    ++positiveCount;
+                }
+            }
+            if (positiveCount == 0)
+            {
+                return BogieContactAllocationUniqueness::Undetermined;
+            }
+
+            std::array<double, maximumSmallSystemRowCount> zeroRightHandSide{};
+            const SmallLeastSquaresResult positiveRank = solveSmallLeastSquares(
+                std::span<const SmallSystemColumn>{
+                    positiveColumns.data(), positiveCount},
+                std::span<const double>{
+                    zeroRightHandSide.data(), maximumSmallSystemRowCount},
+                relativeRankTolerance);
+            if (!positiveRank.finite)
+            {
+                return BogieContactAllocationUniqueness::Undetermined;
+            }
+            if (positiveRank.rank < positiveCount)
+            {
+                return BogieContactAllocationUniqueness::NonUnique;
+            }
+
+            // An inactive column in the positive-column span gives an
+            // immediately constructible alternate nonnegative allocation.
+            // More involved boundary nullspaces remain explicitly
+            // Undetermined instead of being overclaimed as unique.
+            for (std::size_t candidateIndex = 0;
+                candidateIndex < columns.size();
+                ++candidateIndex)
+            {
+                if (coefficients[candidateIndex] > nonnegativeTolerance)
+                {
+                    continue;
+                }
+                const SmallLeastSquaresResult spanSolve =
+                    solveSmallLeastSquares(
+                        std::span<const SmallSystemColumn>{
+                            positiveColumns.data(), positiveCount},
+                        std::span<const double>{
+                            columns[candidateIndex].data(),
+                            maximumSmallSystemRowCount},
+                        relativeRankTolerance);
+                if (!spanSolve.finite)
+                {
+                    return BogieContactAllocationUniqueness::Undetermined;
+                }
+
+                double residualNormSquared = 0.0;
+                double candidateNormSquared = 0.0;
+                for (std::size_t row = 0;
+                    row < maximumSmallSystemRowCount;
+                    ++row)
+                {
+                    double recovered = 0.0;
+                    for (std::size_t positiveIndex = 0;
+                        positiveIndex < positiveCount;
+                        ++positiveIndex)
+                    {
+                        recovered += spanSolve.solution[positiveIndex]
+                            * positiveColumns[positiveIndex][row];
+                    }
+                    const double residual = recovered
+                        - columns[candidateIndex][row];
+                    residualNormSquared += residual * residual;
+                    candidateNormSquared += columns[candidateIndex][row]
+                        * columns[candidateIndex][row];
+                }
+                const double spanTolerance = relativeRankTolerance
+                    * std::max(1.0, std::sqrt(candidateNormSquared));
+                if (std::sqrt(residualNormSquared) <= spanTolerance)
+                {
+                    return BogieContactAllocationUniqueness::NonUnique;
+                }
+            }
+
+            return BogieContactAllocationUniqueness::Undetermined;
+        }
+
         [[nodiscard]] double directionSign(const TravelDirection direction)
         {
             switch (direction)
@@ -3826,9 +4208,165 @@ namespace quantum::physics
         {
             result.status = BogieContactFeasibilityStatus::Available;
         }
+
+        // A wrench outside the unconstrained span is necessarily outside its
+        // nonnegative cone. Other non-Available Phase 10 results leave Phase 11
+        // unavailable because no stable full-wrench allocation can be claimed.
+        if (!result.forceSpanFeasible || !result.wrenchSpanFeasible)
+        {
+            result.allocation.status =
+                BogieContactAllocationStatus::UnilaterallyInfeasible;
+            return result;
+        }
+        if (result.status != BogieContactFeasibilityStatus::Available
+            || !result.requiredWorldReactionNewtons)
+        {
+            return result;
+        }
+
+        const std::array<double, 6> nnlsRightHandSide{
+            result.requiredWorldReactionNewtons->x,
+            result.requiredWorldReactionNewtons->y,
+            result.requiredWorldReactionNewtons->z,
+            0.0,
+            0.0,
+            0.0
+        };
+        const NNLSSolution nnls = solveSmallNNLS(
+            std::span<const SmallSystemColumn>{
+                wrenchColumns.data(), contactCount},
+            nnlsRightHandSide,
+            bogieContactRankRelativeTolerance);
+
+        result.allocation.solverIterationCount = nnls.iterationCount;
+        result.allocation.passiveSetRank = nnls.passiveSetRank;
+        result.allocation.passiveSetConditionEstimate =
+            nnls.passiveSetConditionEstimate;
+        result.allocation.nonnegativeToleranceNewtons =
+            nnls.nonnegativeTolerance;
+        const double reportingScale = std::max(
+            1.0, glm::length(*result.requiredWorldReactionNewtons));
+        result.allocation.reportingActiveToleranceNewtons =
+            bogieContactReportingActiveAbsoluteToleranceNewtons
+            + bogieContactReportingActiveRelativeTolerance
+                * reportingScale;
+
+        if (!nnls.converged)
+        {
+            result.allocation.status =
+                BogieContactAllocationStatus::NonConverged;
+            return result;
+        }
+        if (nnls.passiveSetConditionEstimate
+            && *nnls.passiveSetConditionEstimate
+                > bogieContactMaximumConditionEstimate)
+        {
+            result.allocation.status =
+                BogieContactAllocationStatus::IllConditioned;
+            return result;
+        }
+
+        glm::dvec3 reconstructedForce{0.0};
+        glm::dvec3 reconstructedMoment{0.0};
+        for (std::size_t contactIndex = 0;
+            contactIndex < contactCount;
+            ++contactIndex)
+        {
+            const double coefficient = nnls.coefficients[contactIndex];
+            if (!std::isfinite(coefficient) || coefficient < 0.0)
+            {
+                result.allocation.status =
+                    BogieContactAllocationStatus::NonConverged;
+                return result;
+            }
+            const glm::dvec3 worldForce = coefficient
+                * result.contacts[contactIndex].worldNormal;
+            reconstructedForce += worldForce;
+            reconstructedMoment += glm::cross(
+                contactArmsWorld[contactIndex], worldForce);
+        }
+
+        const glm::dvec3 forceResidual = reconstructedForce
+            - *result.requiredWorldReactionNewtons;
+        const glm::dvec3 momentResidual = reconstructedMoment;
+        if (!finite(reconstructedForce)
+            || !finite(reconstructedMoment)
+            || !finite(forceResidual)
+            || !finite(momentResidual))
+        {
+            result.allocation.status =
+                BogieContactAllocationStatus::NonConverged;
+            return result;
+        }
+        if (glm::length(forceResidual) > result.forceToleranceNewtons
+            || glm::length(momentResidual)
+                > result.momentToleranceNewtonMeters)
+        {
+            // The converged NNLS point is only a best fit. It is not exposed
+            // as an allocation when physical equilibrium does not close.
+            result.allocation.status =
+                BogieContactAllocationStatus::UnilaterallyInfeasible;
+            return result;
+        }
+
+        result.allocation.status = BogieContactAllocationStatus::Available;
+        result.allocation.uniqueness = classifyAllocationUniqueness(
+            std::span<const SmallSystemColumn>{
+                wrenchColumns.data(), contactCount},
+            std::span<const double>{
+                nnls.coefficients.data(), contactCount},
+            nnls.nonnegativeTolerance,
+            result.wrenchRank,
+            bogieContactRankRelativeTolerance);
+        result.allocation.reconstructedForceNewtons = reconstructedForce;
+        result.allocation.reconstructedMomentNewtonMeters =
+            reconstructedMoment;
+        result.allocation.forceResidualNewtons = forceResidual;
+        result.allocation.momentResidualNewtonMeters = momentResidual;
+        result.allocation.representativeContacts.reserve(contactCount);
+
+        for (std::size_t contactIndex = 0;
+            contactIndex < contactCount;
+            ++contactIndex)
+        {
+            const double coefficient = nnls.coefficients[contactIndex];
+            const WorldBogieContact& worldContact =
+                result.contacts[contactIndex];
+            ContactAllocation contactAllocation;
+            contactAllocation.sourceContactIndex =
+                worldContact.sourceContactIndex;
+            contactAllocation.role = worldContact.role;
+            contactAllocation.normalForceNewtons = coefficient;
+            contactAllocation.worldForceNewtons = coefficient
+                * worldContact.worldNormal;
+            contactAllocation.reportingActive = coefficient
+                > result.allocation.reportingActiveToleranceNewtons;
+            if (contactAllocation.reportingActive)
+            {
+                ++result.allocation.reportingActiveContactCount;
+            }
+
+            // Roles classify authored contacts only; their normals determine
+            // force direction. Totals therefore sum the scalar representative
+            // coefficients without hardcoded role-axis projections.
+            switch (worldContact.role)
+            {
+            case BogieContactRole::Running:
+                result.allocation.runningTotalNewtons += coefficient;
+                break;
+            case BogieContactRole::Guide:
+                result.allocation.guideTotalNewtons += coefficient;
+                break;
+            case BogieContactRole::Upstop:
+                result.allocation.upstopTotalNewtons += coefficient;
+                break;
+            }
+            result.allocation.representativeContacts.push_back(
+                std::move(contactAllocation));
+        }
+
         return result;
     }
-
     BogieContactFeasibilityAnalysis evaluateBogieContactFeasibility(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,

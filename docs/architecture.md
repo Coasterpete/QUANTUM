@@ -635,7 +635,7 @@ document whose visible GPU representation failed to update.
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
-single-car, and rigid multi-car train behavior through Phase 10. It remains a
+single-car, and rigid multi-car train behavior through Phase 11. It remains a
 track-constrained reduced-coordinate model for ordinary coaster motion, not a
 complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
@@ -1170,12 +1170,77 @@ loads, contact loads, or engagement decisions.
 
 Rigid wheel/rail normal contact is mechanically unilateral, but Phase 10 tests
 only unconstrained linear-span representability. A negative diagnostic
-coefficient is never interpreted as reverse engagement. Nonnegative feasibility,
-active-set engagement, running/guide/upstop load allocation, individual wheel
-loads, gaps, preload, hysteresis, suspension/compliance, friction/slip, contact
-patches, and derailment behavior remain deferred to Phase 11 or later. An empty
-authored contact set reports `NoContacts`; it never falls back to the Phase 9
-ideal reaction plane as fabricated contact geometry.
+coefficient is never interpreted as reverse engagement. An empty authored
+contact set reports `NoContacts`; it never falls back to the Phase 9 ideal
+reaction plane as fabricated contact geometry. Phase 11 extends this analysis
+without changing any of these Phase 10 status or diagnostic semantics.
+
+### Phase 11: unilateral rigid-contact allocation
+
+For a Phase 10 `Available` wrench system, Phase 11 solves
+
+```text
+minimize ||A lambda - W_required||^2
+subject to lambda >= 0
+```
+
+using a deterministic Lawson-Hanson active/passive-set NNLS method. `A` is the
+same full scaled 6-by-N wrench matrix used by Phase 10, including force and
+contact-arm moment rows; no force-only coefficient vector is reused. At each
+outer step, the zero-set column with the largest positive dual value enters the
+passive set, with source-contact index breaking numerical ties. The passive
+least-squares system is solved with the existing rank-revealing QR. If a
+candidate crosses the nonnegative boundary, the solver steps to the first
+blocking coefficient, returns every zero coefficient to the zero set, and
+re-solves the reduced passive problem before selecting another entering column.
+It does not solve once and clamp negative coefficients.
+
+With residual `r = W_required - A lambda`, the implementation uses
+`w = A^T r`, the negative gradient of the half-squared residual objective. The
+zero-set KKT condition is therefore `w_i <= 0`, within the solver's numerical
+tolerance. Coefficients stay in source-contact order independently of the QR
+pivot order. The nonnegative cleanup tolerance is
+`1e-12 N + 1.5e-14` times the larger of 1 N and the maximum absolute required
+force component; it is only a machine-scale boundary tolerance.
+
+NNLS convergence alone does not establish physical feasibility. Every final
+coefficient contributes to an unscaled world-force and world-moment
+reconstruction. The result is `Available` only when those SI residuals close
+within the existing Phase 10 force and moment tolerances and the passive
+representative is not ill-conditioned. A converged NNLS best fit that misses
+either physical tolerance reports `UnilaterallyInfeasible` and publishes no
+representative contact coefficients, reconstructed wrench, or role totals.
+`NonConverged`, `IllConditioned`, and `Unavailable` remain distinguishable.
+An unconstrained force or wrench span failure implies unilateral infeasibility;
+other non-`Available` Phase 10 results leave allocation unavailable, with the
+Phase 10 status carrying the reason.
+
+`BogieContactFeasibilityResult::status` remains exclusively the Phase 10
+linear-span status. `BogieContactAllocation::status` independently reports the
+Phase 11 cone/allocation result. Thus a Phase 10 `Available` result can correctly
+have a Phase 11 `UnilaterallyInfeasible` allocation. Phase 10 ranks, condition
+estimates, residuals, and signed diagnostic coefficient vectors are preserved.
+
+Available allocations expose one deterministic nonnegative mathematical
+representative. Full column rank proves `Unique`. A positive passive-set
+nullspace or an inactive contact wrench already in the positive-column span
+proves `NonUnique`; remaining rank-deficient boundary cases report
+`Undetermined` rather than overclaiming uniqueness. In a nonunique or
+undetermined rigid system, per-contact coefficients are representative
+allocations, not true individual wheel loads.
+
+Contact `reportingActive` telemetry uses the separate threshold
+`1e-6 N + 1e-6 * max(1 N, ||R_required||)`. This threshold never changes the
+mathematical coefficients, reconstruction, or role totals. Running, Guide, and
+Upstop totals sum every representative scalar coefficient by authored role;
+the authored normals, not hardcoded role directions, determine world force.
+Front and rear bogies are allocated independently and retain their Phase 9
+identity and load split.
+
+Phase 11 remains a frictionless rigid-contact feasibility/allocation model. It
+does not add gaps, preload, hysteresis, suspension or wheel/rail deformation,
+friction/slip, wheel rotational dynamics, steering, derailment, connector
+compliance, operational devices, rendering, or track-family dependencies.
 
 ## Planned systems
 
@@ -1188,8 +1253,8 @@ architectural commitments:
 - supports, foundations, and track/support attachment hardware (the Support Workspace remains an
   unfinished disabled shell);
 - connector compliance, slack, springs, damping, and train whip;
-- unilateral wheel/rail engagement, running/guide/upstop wheel reactions,
-  suspension, and full bogie load distribution;
+- suspension/compliance, gaps/preload, friction/slip, and physically resolved
+  individual-wheel load sharing beyond the rigid representative allocation;
 - operational lifts, transport tires, brakes, launches, and stations;
 - storage, blocks, occupancy/reservations, dispatch, switches, transfer tables,
   and topology-aware operations;

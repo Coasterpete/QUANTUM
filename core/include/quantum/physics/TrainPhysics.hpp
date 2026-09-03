@@ -60,6 +60,17 @@ namespace quantum::physics
     inline constexpr double bogieContactMomentRelativeTolerance = 1.0e-4;
     inline constexpr double bogieContactRankRelativeTolerance = 1.0e-10;
     inline constexpr double bogieContactMaximumConditionEstimate = 1.0e5;
+    // Phase 11 uses a machine-scale tolerance only to clean up coefficients
+    // at the nonnegative boundary. Contact activity is separately reported at
+    // a physical telemetry scale and does not alter the mathematical solve.
+    inline constexpr double
+        bogieContactCoefficientAbsoluteToleranceNewtons = 1.0e-12;
+    inline constexpr double
+        bogieContactCoefficientRelativeTolerance = 1.5e-14;
+    inline constexpr double
+        bogieContactReportingActiveAbsoluteToleranceNewtons = 1.0e-6;
+    inline constexpr double
+        bogieContactReportingActiveRelativeTolerance = 1.0e-6;
 
     struct TrainCarDefinition
     {
@@ -692,6 +703,67 @@ namespace quantum::physics
         glm::dvec3 worldNormal{0.0};
     };
 
+    struct ContactAllocation
+    {
+        std::size_t sourceContactIndex = 0;
+        BogieContactRole role = BogieContactRole::Running;
+        // This is one deterministic mathematical representative. When the
+        // allocation is nonunique it is not a recovered individual wheel load.
+        double normalForceNewtons = 0.0;
+        glm::dvec3 worldForceNewtons{0.0};
+        bool reportingActive = false;
+    };
+
+    enum class BogieContactAllocationStatus : std::uint8_t
+    {
+        Unavailable,
+        Available,
+        UnilaterallyInfeasible,
+        IllConditioned,
+        NonConverged
+    };
+
+    enum class BogieContactAllocationUniqueness : std::uint8_t
+    {
+        NotApplicable,
+        Unique,
+        NonUnique,
+        Undetermined
+    };
+
+    struct BogieContactAllocation
+    {
+        BogieContactAllocationStatus status =
+            BogieContactAllocationStatus::Unavailable;
+        BogieContactAllocationUniqueness uniqueness =
+            BogieContactAllocationUniqueness::NotApplicable;
+        std::size_t reportingActiveContactCount = 0;
+        // Published only for a physically closed Available allocation.
+        std::vector<ContactAllocation> representativeContacts;
+        std::optional<glm::dvec3> reconstructedForceNewtons;
+        std::optional<glm::dvec3> reconstructedMomentNewtonMeters;
+        std::optional<glm::dvec3> forceResidualNewtons;
+        std::optional<glm::dvec3> momentResidualNewtonMeters;
+        double runningTotalNewtons = 0.0;
+        double guideTotalNewtons = 0.0;
+        double upstopTotalNewtons = 0.0;
+        std::size_t solverIterationCount = 0;
+        std::size_t passiveSetRank = 0;
+        std::optional<double> passiveSetConditionEstimate;
+        double nonnegativeToleranceNewtons = 0.0;
+        double reportingActiveToleranceNewtons = 0.0;
+
+        [[nodiscard]] bool unilateralFeasible() const noexcept
+        {
+            return status == BogieContactAllocationStatus::Available;
+        }
+
+        [[nodiscard]] bool representativeUnique() const noexcept
+        {
+            return uniqueness == BogieContactAllocationUniqueness::Unique;
+        }
+    };
+
     struct BogieContactFeasibilityResult
     {
         std::size_t carIndex = 0;
@@ -729,7 +801,10 @@ namespace quantum::physics
             diagnosticForceSpanCoefficients;
         std::optional<std::vector<double>>
             diagnosticWrenchSpanCoefficients;
-        bool unilateralFeasibilityDeferred = true;
+
+        // Phase 11 result. The Phase 10 status and unconstrained diagnostics
+        // above retain their original linear-span meanings.
+        BogieContactAllocation allocation;
 
         [[nodiscard]] std::size_t contactCount() const noexcept
         {
