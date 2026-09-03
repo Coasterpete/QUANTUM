@@ -414,7 +414,10 @@ namespace quantum::physics
         const coaster::TrackPhysicalSettings& settings)
     {
         coaster::validateTrackPhysicalSettings(settings);
-        return {settings.gravityAcceleration};
+        PhysicsEnvironment environment;
+        environment.gravityAccelerationMetersPerSecondSquared =
+            settings.gravityAcceleration;
+        return environment;
     }
 
     void validateSingleFollowerDefinition(
@@ -523,10 +526,13 @@ namespace quantum::physics
     {
         if (!std::isfinite(
                 environment.gravityAccelerationMetersPerSecondSquared)
-            || environment.gravityAccelerationMetersPerSecondSquared <= 0.0)
+            || environment.gravityAccelerationMetersPerSecondSquared <= 0.0
+            || !std::isfinite(environment.airDensityKilogramsPerCubicMeter)
+            || environment.airDensityKilogramsPerCubicMeter < 0.0
+            || !finite(environment.windVelocityMetersPerSecond))
         {
             throw std::invalid_argument(
-                "Physics gravity must be positive and finite.");
+                "Physics environment gravity must be positive and finite; air density and wind must be finite, with non-negative density.");
         }
     }
 

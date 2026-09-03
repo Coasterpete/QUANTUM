@@ -32,6 +32,12 @@ namespace quantum::physics
         glm::dvec3 frontHitchPositionMeters{0.5, 0.0, 0.0};
         glm::dvec3 rearHitchPositionMeters{-0.5, 0.0, 0.0};
         std::vector<BogieDefinition> bogies;
+
+        // Effective drag area CdA for this complete car. The aerodynamic
+        // center is a car-local physical point (+X forward, +Y lateral,
+        // +Z up); it is not assumed to coincide with the loaded COG.
+        double aerodynamicDragAreaSquareMeters = 0.0;
+        glm::dvec3 aerodynamicCenterLocalMeters{0.0};
     };
 
     // Scenario load is intentionally separate from reusable authored car

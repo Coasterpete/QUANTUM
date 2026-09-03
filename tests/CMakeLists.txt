@@ -38,6 +38,13 @@ set_target_properties(QuantumCoreExternalForcePhysicsTests PROPERTIES CXX_EXTENS
 add_test(NAME QuantumCore.ExternalForcePhysics COMMAND QuantumCoreExternalForcePhysicsTests)
 set_tests_properties(QuantumCore.ExternalForcePhysics PROPERTIES LABELS "core;coaster;physics")
 
+add_executable(QuantumCoreResistancePhysicsTests ResistancePhysicsTests.cpp)
+target_link_libraries(QuantumCoreResistancePhysicsTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreResistancePhysicsTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreResistancePhysicsTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.ResistancePhysics COMMAND QuantumCoreResistancePhysicsTests)
+set_tests_properties(QuantumCore.ResistancePhysics PROPERTIES LABELS "core;coaster;physics")
+
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)

@@ -635,7 +635,7 @@ document whose visible GPU representation failed to update.
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
-single-car, and rigid multi-car train behavior through Phase 5. It remains a
+single-car, and rigid multi-car train behavior through Phase 6. It remains a
 track-constrained reduced-coordinate model for ordinary coaster motion, not a
 complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
@@ -760,6 +760,75 @@ Phase 5 does not compute or integrate torque, angular motion, body inertia,
 connector moments, compliance, independent car motion, or bogie/wheel contact
 loads. Force profiles and operational brake, launch, lift, tire, station, and
 block systems also remain deferred.
+
+### Phase 6: explicit per-car aerodynamic resistance
+
+`CarDefinition` may author an effective per-car aerodynamic drag area, `CdA`,
+and a car-local aerodynamic center in the same +X-forward, +Y-lateral, +Z-up
+physical coordinate system used by Phase 5 force applications. Different cars,
+including a non-passenger lead vehicle, may use different values. A zero `CdA`
+disables explicit drag for that car and causes the producer to omit its force
+application. The aerodynamic center is not assumed to be the loaded center of
+gravity; it remains an application point only, because rotational dynamics are
+still outside the reduced model.
+
+`generateExplicitResistanceForces` writes into caller-owned reusable contiguous
+storage. It solves one nominal train pose and reuses the Phase 5 legal central or
+one-sided full-consist finite-difference poses for all configured aerodynamic
+centers. For generalized train coordinate `q` and speed `qdot`, each center's
+world velocity is
+
+```text
+v_point = (dp_center / dq) qdot
+```
+
+The uniform Phase 6 atmospheric state is `PhysicsEnvironment` air density and
+world-space wind velocity. With relative airflow
+
+```text
+v_relative = v_point - wind_world
+```
+
+the generated world force is
+
+```text
+F_drag = -0.5 rho CdA |v_relative| v_relative
+```
+
+Zero relative speed produces an exact zero vector without normalization. In
+still air the force therefore performs non-positive work at its application
+point. Reverse motion, curved-track point motion, circuit seams, and open-track
+one-sided derivatives use the existing kinematic policies rather than scalar
+speed sign branches or wrapped-station differentiation.
+
+Each result is an ordinary `ExternalForceApplication`. The caller supplies that
+same generated collection to `stepTrain` and `evaluateRigidConnectorLoads`, so
+train acceleration and connector axial-load recovery use the existing Phase 5
+virtual-work paths without resistance-specific connector equations. Producer
+telemetry reports generated/aerodynamic application counts and the total
+generalized explicit aerodynamic contribution; train telemetry continues to
+report aggregate legacy resistance separately from all explicit external-force
+contributions.
+
+Per-car aerodynamic `CdA` and the aggregate `BasicResistance` aerodynamic
+coefficient are mutually exclusive in one `TrainDefinition`; validation rejects
+the overlap instead of silently double-counting it. Existing definitions with
+zero per-car `CdA` retain the Phase 1 aggregate behavior. The air-density field
+inside `BasicResistance` remains scoped to that legacy aggregate aerodynamic
+term for source and behavior compatibility, while explicit per-car drag uses
+the environment density and optional steady world-space wind.
+
+The aggregate constant mechanical/bearing and linear terms remain compatibility
+laws because their physical per-car ownership and application locations are not
+currently defined. Aggregate static holding also remains unchanged because the
+contact supplying that holding force is unknown. Rolling resistance remains the
+explicitly provisional `Crr * total-loaded-mass * gravity` supported-load
+approximation in `BasicResistance`; it has not been promoted to a per-car
+wheel/rail model. Any force-producing aggregate component therefore continues
+to make exact multi-car connector-load recovery
+`AggregateResistanceUnderdetermined`. Actual supported/contact load,
+running/guide/upstop wheel reactions, bearing allocation, and replacement of
+the provisional rolling law remain deferred until bogie/contact physics exists.
 
 ## Planned systems
 

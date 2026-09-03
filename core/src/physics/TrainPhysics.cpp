@@ -982,6 +982,18 @@ namespace quantum::physics
                     && resistance.dragAreaSquareMeters > 0.0);
         }
 
+        [[nodiscard]] bool explicitAerodynamicsConfigured(
+            const TrainDefinition& definition) noexcept
+        {
+            return std::any_of(
+                definition.cars.begin(),
+                definition.cars.end(),
+                [](const TrainCarDefinition& car)
+                {
+                    return car.car.aerodynamicDragAreaSquareMeters > 0.0;
+                });
+        }
+
         [[nodiscard]] std::vector<RigidConnectorLoad> unavailableLoads(
             const TrainPose& pose)
         {
@@ -1064,6 +1076,12 @@ namespace quantum::physics
             validateInterCarConnectionDefinition(connection);
         }
         validateBasicResistance(definition.resistance);
+        if (explicitAerodynamicsConfigured(definition)
+            && definition.resistance.dragAreaSquareMeters > 0.0)
+        {
+            throw std::invalid_argument(
+                "Per-car aerodynamic CdA cannot be combined with the aggregate BasicResistance aerodynamic coefficient.");
+        }
     }
 
     TrainCarPose::TrainCarPose(
@@ -1708,6 +1726,111 @@ namespace quantum::physics
             gravityForce,
             std::move(externalForceEvaluations),
             generalizedExternalForce,
+            trainKinematicJacobianStepMeters,
+            derivatives.kind
+        };
+    }
+
+    ExplicitResistanceTelemetry generateExplicitResistanceForces(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrainDynamicsState& state,
+        std::vector<ExternalForceApplication>& outputForces)
+    {
+        validateTrainDefinition(definition);
+        validatePhysicsEnvironment(environment);
+        if (!std::isfinite(state.signedVelocityMetersPerSecond))
+        {
+            throw std::invalid_argument(
+                "Explicit resistance generation requires a finite generalized velocity.");
+        }
+
+        outputForces.clear();
+        outputForces.reserve(definition.cars.size());
+        for (std::size_t carIndex = 0;
+            carIndex < definition.cars.size();
+            ++carIndex)
+        {
+            const CarDefinition& car = definition.cars[carIndex].car;
+            if (car.aerodynamicDragAreaSquareMeters == 0.0)
+            {
+                continue;
+            }
+            outputForces.push_back({
+                carIndex,
+                car.aerodynamicCenterLocalMeters,
+                glm::dvec3{0.0}
+            });
+        }
+
+        if (outputForces.empty())
+        {
+            return {};
+        }
+
+        const TrainPose center = solveTrainPose(
+            track, definition, state.generalizedReferenceLocation);
+        DerivativeSamples derivatives = kinematicDerivatives(
+            track, definition, center, outputForces);
+        double generalizedAerodynamicForce = 0.0;
+        for (std::size_t index = 0; index < outputForces.size(); ++index)
+        {
+            ExternalForceApplication& application = outputForces[index];
+            const glm::dvec3 pointVelocity =
+                derivatives.applicationPointFirst[index]
+                * state.signedVelocityMetersPerSecond;
+            const glm::dvec3 relativeAirVelocity = pointVelocity
+                - environment.windVelocityMetersPerSecond;
+            const double relativeSpeedSquared = glm::dot(
+                relativeAirVelocity, relativeAirVelocity);
+            if (!finite(pointVelocity)
+                || !finite(relativeAirVelocity)
+                || !std::isfinite(relativeSpeedSquared)
+                || relativeSpeedSquared < 0.0)
+            {
+                throw std::domain_error(
+                    "Aerodynamic resistance velocity is non-finite.");
+            }
+
+            if (relativeSpeedSquared == 0.0)
+            {
+                application.worldForceNewtons = glm::dvec3{0.0};
+            }
+            else
+            {
+                const double relativeSpeed = std::sqrt(relativeSpeedSquared);
+                const double dragScale = -0.5
+                    * environment.airDensityKilogramsPerCubicMeter
+                    * definition.cars[application.carIndex].car
+                        .aerodynamicDragAreaSquareMeters
+                    * relativeSpeed;
+                application.worldForceNewtons =
+                    dragScale * relativeAirVelocity;
+            }
+
+            const double generalizedForce = glm::dot(
+                application.worldForceNewtons,
+                derivatives.applicationPointFirst[index]);
+            if (!finite(application.worldForceNewtons)
+                || !std::isfinite(generalizedForce))
+            {
+                throw std::domain_error(
+                    "Aerodynamic resistance produced a non-finite force.");
+            }
+            generalizedAerodynamicForce += generalizedForce;
+        }
+        if (!std::isfinite(generalizedAerodynamicForce))
+        {
+            throw std::domain_error(
+                "Aerodynamic resistance generalized force is non-finite.");
+        }
+
+        return {
+            outputForces.size(),
+            outputForces.size(),
+            generalizedAerodynamicForce,
+            generalizedAerodynamicForce,
             trainKinematicJacobianStepMeters,
             derivatives.kind
         };

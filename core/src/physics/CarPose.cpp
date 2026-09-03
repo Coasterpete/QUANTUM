@@ -307,6 +307,17 @@ namespace quantum::physics
             throw std::invalid_argument(
                 "Car hitch positions must be finite.");
         }
+        if (!std::isfinite(definition.aerodynamicDragAreaSquareMeters)
+            || definition.aerodynamicDragAreaSquareMeters < 0.0)
+        {
+            throw std::invalid_argument(
+                "Car aerodynamic CdA must be finite and non-negative.");
+        }
+        if (!finite(definition.aerodynamicCenterLocalMeters))
+        {
+            throw std::invalid_argument(
+                "Car aerodynamic center must be finite and expressed in car-local metres.");
+        }
         if (definition.bogies.empty())
         {
             throw std::invalid_argument(

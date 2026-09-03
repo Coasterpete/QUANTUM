@@ -159,6 +159,12 @@ namespace quantum::physics
     {
         double gravityAccelerationMetersPerSecondSquared =
             coaster::standardGravityAcceleration;
+
+        // Phase 6 atmospheric inputs are uniform world-space values. The
+        // density in BasicResistance remains specific to its legacy aggregate
+        // aerodynamic term for source compatibility.
+        double airDensityKilogramsPerCubicMeter = 1.225;
+        glm::dvec3 windVelocityMetersPerSecond{0.0};
     };
 
     [[nodiscard]] PhysicsEnvironment physicsEnvironmentFrom(

@@ -247,6 +247,30 @@ namespace quantum::physics
         FollowerRunState runState = FollowerRunState::Resting;
     };
 
+    struct ExplicitResistanceTelemetry
+    {
+        std::size_t generatedApplicationCount = 0;
+        std::size_t aerodynamicApplicationCount = 0;
+        double generalizedAerodynamicForceNewtons = 0.0;
+        double totalGeneralizedExplicitResistanceForceNewtons = 0.0;
+        double finiteDifferenceStepMeters = trainKinematicJacobianStepMeters;
+        TrainFiniteDifferenceKind finiteDifferenceKind =
+            TrainFiniteDifferenceKind::Central;
+    };
+
+    // Generates one ordinary ExternalForceApplication for each car with
+    // nonzero authored CdA. Zero-CdA cars are omitted. outputForces is cleared
+    // but retains its capacity so callers can reuse storage each physics tick.
+    // The application-point velocity is (dp/dq) * qdot, using the same legal
+    // full-consist finite-difference poses as Phase 5 virtual work.
+    [[nodiscard]] ExplicitResistanceTelemetry
+        generateExplicitResistanceForces(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const PhysicsEnvironment& environment,
+            const TrainDynamicsState& state,
+            std::vector<ExternalForceApplication>& outputForces);
+
     enum class RigidConnectorLoadClassification : std::uint8_t
     {
         Tension,
