@@ -635,7 +635,7 @@ document whose visible GPU representation failed to update.
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
-single-car, and rigid multi-car train behavior through Phase 3. It remains a
+single-car, and rigid multi-car train behavior through Phase 4. It remains a
 track-constrained reduced-coordinate model for ordinary coaster motion, not a
 complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
@@ -675,8 +675,8 @@ and reverse travel preserve consist order, while an open track admits motion
 only while the complete consist envelope remains on the track.
 
 Individual cars do not have independently integrated longitudinal degrees of
-freedom. The inter-car connectors are currently kinematic constraints, and
-connector tension or compression forces are not solved or recovered. Phase 3
+freedom. Phase 3 introduced the inter-car connectors as kinematic constraints;
+Phase 4 recovers their supported axial loads as described below. Phase 3
 computes each loaded car's distributed world-space center of gravity and its
 derivative with respect to the generalized coordinate. Those derivatives
 produce the distributed generalized gravity force, effective generalized mass,
@@ -691,6 +691,39 @@ aggregate resistance, distributed gravity, effective mass, and generalized
 motion are observable without making the physics layer depend on the Editor or
 renderer.
 
+### Phase 4: rigid connector axial-load recovery
+
+`evaluateRigidConnectorLoads` recovers signed draft/buff force for each
+non-zero-length rigid inter-car connector as derived telemetry; the recovered
+internal forces are not fed back into the Phase 3 integrator. Positive force is
+tension/draft and negative force is compression/buff. World force vectors use
+the solved connector direction from the leading rear hitch to the following
+front hitch and are equal and opposite on the adjacent cars.
+
+The recovery uses each car's Phase 2 reference station as an auxiliary local
+coordinate, without adding independently integrated car state. Deterministic
+local derivatives of loaded COG and authored hitch positions are combined with
+the constrained train COG acceleration, including generalized acceleration and
+velocity-squared geometric terms. Per-car translational force balance is then
+solved as a structured linear chain. One redundant car equation is retained as
+a global balance residual, and undefined connector axes, ill-conditioned hitch
+projections, non-finite values, or an excessive residual make the exact result
+unavailable.
+
+Gravity is currently the only known per-car external force. The shared
+`BasicResistance` law is authored only for the aggregate train, so a multi-car
+definition with force-producing aggregate resistance cannot have exact
+per-connector loads recovered without inventing a per-car allocation; the API
+reports that case as explicitly underdetermined. Zero-length connectors remain
+supported kinematically but have no unique world-space axial direction and are
+therefore make the coupled chain recovery unavailable in this milestone.
+
+These results are axial loads consistent with the current reduced
+translational model. Connector compliance and slack, connector moments,
+car/bogie rotational dynamics, suspension, bogie/wheel reaction loads, and
+operational device forces remain deferred. A complete rigid-body or structural
+connector-load interpretation must not be inferred from this telemetry.
+
 ## Planned systems
 
 The following are current roadmap areas, not implemented capabilities or fixed
@@ -701,8 +734,7 @@ architectural commitments:
 - direct deformation or control-point editing in the 3D viewport;
 - supports, foundations, and track/support attachment hardware (the Support Workspace remains an
   unfinished disabled shell);
-- connector tension/compression force recovery, plus connector compliance,
-  slack, springs, damping, and train whip;
+- connector compliance, slack, springs, damping, and train whip;
 - wheel/rail contact geometry, running/guide/upstop wheel reactions,
   suspension, and full bogie load distribution;
 - operational lifts, transport tires, brakes, launches, and stations;

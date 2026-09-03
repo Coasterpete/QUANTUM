@@ -659,6 +659,178 @@ namespace quantum::physics
                 "No valid neighboring train pose exists for a kinematic derivative.");
         }
 
+        struct CarLocalDerivativeSamples
+        {
+            glm::dvec3 centerOfGravity{0.0};
+            glm::dvec3 frontHitch{0.0};
+            glm::dvec3 rearHitch{0.0};
+            TrainFiniteDifferenceKind kind =
+                TrainFiniteDifferenceKind::Central;
+        };
+
+        [[nodiscard]] std::optional<CarPose> tryDisplacedCarPose(
+            const CompiledPhysicsTrack& track,
+            const TrainCarDefinition& definition,
+            const TrackLocation& location,
+            const double distanceMeters)
+        {
+            try
+            {
+                return solveLegalCarPose(
+                    track,
+                    definition,
+                    displacedLocation(track, location, distanceMeters));
+            }
+            catch (const OpenConsistBoundaryError&)
+            {
+                return std::nullopt;
+            }
+        }
+
+        [[nodiscard]] CarLocalDerivativeSamples localCarDerivatives(
+            const CompiledPhysicsTrack& track,
+            const TrainCarDefinition& definition,
+            const CarPose& center)
+        {
+            const double epsilon = connectorLoadLocalDerivativeStepMeters;
+            const TrackLocation& location = center.referenceLocation();
+            const std::optional<CarPose> before = tryDisplacedCarPose(
+                track, definition, location, -epsilon);
+            const std::optional<CarPose> after = tryDisplacedCarPose(
+                track, definition, location, epsilon);
+
+            const auto central = [epsilon](
+                const glm::dvec3& lower,
+                const glm::dvec3& upper)
+            {
+                return (upper - lower) / (2.0 * epsilon);
+            };
+            const auto forward = [epsilon](
+                const glm::dvec3& centerValue,
+                const glm::dvec3& first,
+                const glm::dvec3& second)
+            {
+                return (-3.0 * centerValue + 4.0 * first - second)
+                    / (2.0 * epsilon);
+            };
+            const auto backward = [epsilon](
+                const glm::dvec3& centerValue,
+                const glm::dvec3& first,
+                const glm::dvec3& second)
+            {
+                return (3.0 * centerValue - 4.0 * first + second)
+                    / (2.0 * epsilon);
+            };
+
+            CarLocalDerivativeSamples result;
+            if (before && after)
+            {
+                result.centerOfGravity = central(
+                    before->worldCenterOfGravityMeters(),
+                    after->worldCenterOfGravityMeters());
+                result.frontHitch = central(
+                    before->frontHitchWorldPositionMeters(),
+                    after->frontHitchWorldPositionMeters());
+                result.rearHitch = central(
+                    before->rearHitchWorldPositionMeters(),
+                    after->rearHitchWorldPositionMeters());
+            }
+            else if (after)
+            {
+                const std::optional<CarPose> afterTwice = tryDisplacedCarPose(
+                    track, definition, location, 2.0 * epsilon);
+                if (!afterTwice)
+                {
+                    throw OpenConsistBoundaryError(
+                        "The valid car envelope is too narrow for a forward connector-load derivative.");
+                }
+                result.kind = TrainFiniteDifferenceKind::Forward;
+                result.centerOfGravity = forward(
+                    center.worldCenterOfGravityMeters(),
+                    after->worldCenterOfGravityMeters(),
+                    afterTwice->worldCenterOfGravityMeters());
+                result.frontHitch = forward(
+                    center.frontHitchWorldPositionMeters(),
+                    after->frontHitchWorldPositionMeters(),
+                    afterTwice->frontHitchWorldPositionMeters());
+                result.rearHitch = forward(
+                    center.rearHitchWorldPositionMeters(),
+                    after->rearHitchWorldPositionMeters(),
+                    afterTwice->rearHitchWorldPositionMeters());
+            }
+            else if (before)
+            {
+                const std::optional<CarPose> beforeTwice = tryDisplacedCarPose(
+                    track, definition, location, -2.0 * epsilon);
+                if (!beforeTwice)
+                {
+                    throw OpenConsistBoundaryError(
+                        "The valid car envelope is too narrow for a backward connector-load derivative.");
+                }
+                result.kind = TrainFiniteDifferenceKind::Backward;
+                result.centerOfGravity = backward(
+                    center.worldCenterOfGravityMeters(),
+                    before->worldCenterOfGravityMeters(),
+                    beforeTwice->worldCenterOfGravityMeters());
+                result.frontHitch = backward(
+                    center.frontHitchWorldPositionMeters(),
+                    before->frontHitchWorldPositionMeters(),
+                    beforeTwice->frontHitchWorldPositionMeters());
+                result.rearHitch = backward(
+                    center.rearHitchWorldPositionMeters(),
+                    before->rearHitchWorldPositionMeters(),
+                    beforeTwice->rearHitchWorldPositionMeters());
+            }
+            else
+            {
+                throw OpenConsistBoundaryError(
+                    "No valid neighboring car pose exists for a connector-load derivative.");
+            }
+
+            if (!finite(result.centerOfGravity)
+                || !finite(result.frontHitch)
+                || !finite(result.rearHitch))
+            {
+                throw std::domain_error(
+                    "Connector-load local car derivatives are non-finite.");
+            }
+            return result;
+        }
+
+        [[nodiscard]] bool aggregateResistanceNeedsDistribution(
+            const BasicResistance& resistance) noexcept
+        {
+            return resistance.constantMechanicalForceNewtons > 0.0
+                || resistance.linearResistanceCoefficientNewtonSecondsPerMeter
+                    > 0.0
+                || resistance.rollingResistanceCoefficient > 0.0
+                || (resistance.airDensityKilogramsPerCubicMeter > 0.0
+                    && resistance.dragAreaSquareMeters > 0.0);
+        }
+
+        [[nodiscard]] std::vector<RigidConnectorLoad> unavailableLoads(
+            const TrainPose& pose)
+        {
+            std::vector<RigidConnectorLoad> result;
+            result.reserve(pose.connectionCount());
+            for (const InterCarConnectionPose& connection
+                : pose.connections())
+            {
+                result.emplace_back(
+                    connection.connectionIndex(),
+                    connection.leadingCarIndex(),
+                    connection.followingCarIndex(),
+                    RigidConnectorLoadClassification::Unavailable,
+                    std::nullopt,
+                    std::nullopt,
+                    connection.worldDirection(),
+                    std::nullopt,
+                    std::nullopt,
+                    connection.signedLengthResidualMeters());
+            }
+            return result;
+        }
+
         [[nodiscard]] bool legalTrainPose(
             const CompiledPhysicsTrack& track,
             const TrainDefinition& definition,
@@ -945,6 +1117,210 @@ namespace quantum::physics
         return maximumAbsoluteConnectorResidualMeters_;
     }
 
+    RigidConnectorLoad::RigidConnectorLoad(
+        const std::size_t connectionIndex,
+        const std::size_t leadingCarIndex,
+        const std::size_t followingCarIndex,
+        const RigidConnectorLoadClassification classification,
+        std::optional<double> axialForceNewtons,
+        std::optional<double> absoluteAxialLoadNewtons,
+        std::optional<glm::dvec3> worldDirection,
+        std::optional<glm::dvec3> worldForceOnLeadingCarNewtons,
+        std::optional<glm::dvec3> worldForceOnFollowingCarNewtons,
+        const double connectorClosureResidualMeters)
+        : connectionIndex_(connectionIndex),
+          leadingCarIndex_(leadingCarIndex),
+          followingCarIndex_(followingCarIndex),
+          classification_(classification),
+          axialForceNewtons_(axialForceNewtons),
+          absoluteAxialLoadNewtons_(absoluteAxialLoadNewtons),
+          worldDirection_(std::move(worldDirection)),
+          worldForceOnLeadingCarNewtons_(
+              std::move(worldForceOnLeadingCarNewtons)),
+          worldForceOnFollowingCarNewtons_(
+              std::move(worldForceOnFollowingCarNewtons)),
+          connectorClosureResidualMeters_(connectorClosureResidualMeters)
+    {
+    }
+
+    std::size_t RigidConnectorLoad::connectionIndex() const noexcept
+    {
+        return connectionIndex_;
+    }
+
+    std::size_t RigidConnectorLoad::leadingCarIndex() const noexcept
+    {
+        return leadingCarIndex_;
+    }
+
+    std::size_t RigidConnectorLoad::followingCarIndex() const noexcept
+    {
+        return followingCarIndex_;
+    }
+
+    RigidConnectorLoadClassification
+    RigidConnectorLoad::classification() const noexcept
+    {
+        return classification_;
+    }
+
+    const std::optional<double>& RigidConnectorLoad::axialForceNewtons()
+        const noexcept
+    {
+        return axialForceNewtons_;
+    }
+
+    const std::optional<double>&
+    RigidConnectorLoad::absoluteAxialLoadNewtons() const noexcept
+    {
+        return absoluteAxialLoadNewtons_;
+    }
+
+    const std::optional<glm::dvec3>& RigidConnectorLoad::worldDirection()
+        const noexcept
+    {
+        return worldDirection_;
+    }
+
+    const std::optional<glm::dvec3>&
+    RigidConnectorLoad::worldForceOnLeadingCarNewtons() const noexcept
+    {
+        return worldForceOnLeadingCarNewtons_;
+    }
+
+    const std::optional<glm::dvec3>&
+    RigidConnectorLoad::worldForceOnFollowingCarNewtons() const noexcept
+    {
+        return worldForceOnFollowingCarNewtons_;
+    }
+
+    double RigidConnectorLoad::connectorClosureResidualMeters() const noexcept
+    {
+        return connectorClosureResidualMeters_;
+    }
+
+    RigidConnectorLoadAnalysis::RigidConnectorLoadAnalysis(
+        std::vector<RigidConnectorLoad> connectorLoads,
+        const RigidConnectorLoadRecoveryStatus status,
+        std::optional<double> maximumAbsoluteLoadNewtons,
+        std::optional<std::size_t> maximumAbsoluteLoadConnectionIndex,
+        const double maximumTensionNewtons,
+        std::optional<std::size_t> maximumTensionConnectionIndex,
+        const double maximumCompressionMagnitudeNewtons,
+        std::optional<std::size_t> maximumCompressionConnectionIndex,
+        std::optional<double> balanceResidualNewtons,
+        const double balanceToleranceNewtons,
+        const double minimumUsedAxialProjection,
+        const double localDerivativeStepMeters,
+        std::vector<TrainFiniteDifferenceKind> localDerivativeKinds,
+        const TrainFiniteDifferenceKind constrainedDerivativeKind)
+        : connectorLoads_(std::move(connectorLoads)),
+          status_(status),
+          maximumAbsoluteLoadNewtons_(maximumAbsoluteLoadNewtons),
+          maximumAbsoluteLoadConnectionIndex_(
+              maximumAbsoluteLoadConnectionIndex),
+          maximumTensionNewtons_(maximumTensionNewtons),
+          maximumTensionConnectionIndex_(maximumTensionConnectionIndex),
+          maximumCompressionMagnitudeNewtons_(
+              maximumCompressionMagnitudeNewtons),
+          maximumCompressionConnectionIndex_(
+              maximumCompressionConnectionIndex),
+          balanceResidualNewtons_(balanceResidualNewtons),
+          balanceToleranceNewtons_(balanceToleranceNewtons),
+          minimumUsedAxialProjection_(minimumUsedAxialProjection),
+          localDerivativeStepMeters_(localDerivativeStepMeters),
+          localDerivativeKinds_(std::move(localDerivativeKinds)),
+          constrainedDerivativeKind_(constrainedDerivativeKind)
+    {
+    }
+
+    const std::vector<RigidConnectorLoad>&
+    RigidConnectorLoadAnalysis::connectorLoads() const noexcept
+    {
+        return connectorLoads_;
+    }
+
+    bool RigidConnectorLoadAnalysis::exactRecoveryAvailable() const noexcept
+    {
+        return status_ == RigidConnectorLoadRecoveryStatus::Available;
+    }
+
+    RigidConnectorLoadRecoveryStatus RigidConnectorLoadAnalysis::status()
+        const noexcept
+    {
+        return status_;
+    }
+
+    const std::optional<double>&
+    RigidConnectorLoadAnalysis::maximumAbsoluteLoadNewtons() const noexcept
+    {
+        return maximumAbsoluteLoadNewtons_;
+    }
+
+    const std::optional<std::size_t>& RigidConnectorLoadAnalysis::
+        maximumAbsoluteLoadConnectionIndex() const noexcept
+    {
+        return maximumAbsoluteLoadConnectionIndex_;
+    }
+
+    double RigidConnectorLoadAnalysis::maximumTensionNewtons() const noexcept
+    {
+        return maximumTensionNewtons_;
+    }
+
+    const std::optional<std::size_t>& RigidConnectorLoadAnalysis::
+        maximumTensionConnectionIndex() const noexcept
+    {
+        return maximumTensionConnectionIndex_;
+    }
+
+    double RigidConnectorLoadAnalysis::maximumCompressionMagnitudeNewtons()
+        const noexcept
+    {
+        return maximumCompressionMagnitudeNewtons_;
+    }
+
+    const std::optional<std::size_t>& RigidConnectorLoadAnalysis::
+        maximumCompressionConnectionIndex() const noexcept
+    {
+        return maximumCompressionConnectionIndex_;
+    }
+
+    const std::optional<double>&
+    RigidConnectorLoadAnalysis::balanceResidualNewtons() const noexcept
+    {
+        return balanceResidualNewtons_;
+    }
+
+    double RigidConnectorLoadAnalysis::balanceToleranceNewtons() const noexcept
+    {
+        return balanceToleranceNewtons_;
+    }
+
+    double RigidConnectorLoadAnalysis::minimumUsedAxialProjection()
+        const noexcept
+    {
+        return minimumUsedAxialProjection_;
+    }
+
+    double RigidConnectorLoadAnalysis::localDerivativeStepMeters()
+        const noexcept
+    {
+        return localDerivativeStepMeters_;
+    }
+
+    const std::vector<TrainFiniteDifferenceKind>&
+    RigidConnectorLoadAnalysis::localDerivativeKinds() const noexcept
+    {
+        return localDerivativeKinds_;
+    }
+
+    TrainFiniteDifferenceKind
+    RigidConnectorLoadAnalysis::constrainedDerivativeKind() const noexcept
+    {
+        return constrainedDerivativeKind_;
+    }
+
     TrainPose solveTrainPose(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
@@ -1128,6 +1504,385 @@ namespace quantum::physics
             gravityForce,
             trainKinematicJacobianStepMeters,
             derivatives.kind
+        };
+    }
+
+    RigidConnectorLoadAnalysis evaluateRigidConnectorLoads(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrainDynamicsState& state)
+    {
+        validateTrainDefinition(definition);
+        validatePhysicsEnvironment(environment);
+        if (!std::isfinite(state.signedVelocityMetersPerSecond)
+            || !std::isfinite(
+                state.generalizedAccelerationMetersPerSecondSquared)
+            || !validRunState(state.runState))
+        {
+            throw std::invalid_argument(
+                "Connector-load analysis requires a finite, valid train state.");
+        }
+
+        const TrainPose center = solveTrainPose(
+            track, definition, state.generalizedReferenceLocation);
+        const auto unavailable = [&center](
+            const RigidConnectorLoadRecoveryStatus status,
+            std::optional<double> residual = std::nullopt,
+            const double tolerance = 0.0,
+            const double minimumProjection = 0.0,
+            std::vector<TrainFiniteDifferenceKind> localKinds = {},
+            const TrainFiniteDifferenceKind constrainedKind =
+                TrainFiniteDifferenceKind::Central)
+        {
+            return RigidConnectorLoadAnalysis{
+                unavailableLoads(center),
+                status,
+                std::nullopt,
+                std::nullopt,
+                0.0,
+                std::nullopt,
+                0.0,
+                std::nullopt,
+                residual,
+                tolerance,
+                minimumProjection,
+                connectorLoadLocalDerivativeStepMeters,
+                std::move(localKinds),
+                constrainedKind
+            };
+        };
+
+        if (center.connectionCount() == 0)
+        {
+            return {
+                {},
+                RigidConnectorLoadRecoveryStatus::Available,
+                std::nullopt,
+                std::nullopt,
+                0.0,
+                std::nullopt,
+                0.0,
+                std::nullopt,
+                std::nullopt,
+                0.0,
+                0.0,
+                connectorLoadLocalDerivativeStepMeters,
+                {},
+                TrainFiniteDifferenceKind::Central
+            };
+        }
+
+        if (aggregateResistanceNeedsDistribution(definition.resistance))
+        {
+            return unavailable(
+                RigidConnectorLoadRecoveryStatus::
+                    AggregateResistanceUnderdetermined);
+        }
+
+        for (const InterCarConnectionPose& connection
+            : center.connections())
+        {
+            if (connection.authoredRigidLengthMeters()
+                    < connectorLoadMinimumDirectionalLengthMeters
+                || !connection.worldDirection()
+                || !finite(*connection.worldDirection()))
+            {
+                return unavailable(
+                    RigidConnectorLoadRecoveryStatus::UndefinedConnectorAxis);
+            }
+        }
+
+        const DerivativeSamples constrained = kinematicDerivatives(
+            track, definition, center);
+        std::vector<CarLocalDerivativeSamples> local;
+        std::vector<TrainFiniteDifferenceKind> localKinds;
+        local.reserve(center.carCount());
+        localKinds.reserve(center.carCount());
+        for (std::size_t index = 0; index < center.carCount(); ++index)
+        {
+            local.push_back(localCarDerivatives(
+                track,
+                definition.cars[index],
+                center.cars()[index].carPose()));
+            localKinds.push_back(local.back().kind);
+        }
+
+        const double velocitySquared =
+            state.signedVelocityMetersPerSecond
+            * state.signedVelocityMetersPerSecond;
+        if (!std::isfinite(velocitySquared))
+        {
+            throw std::invalid_argument(
+                "Connector-load speed is too large to square as a finite value.");
+        }
+        const glm::dvec3 gravityWorld{
+            0.0,
+            0.0,
+            -environment.gravityAccelerationMetersPerSecondSquared
+        };
+
+        const std::size_t carCount = center.carCount();
+        std::vector<double> requiredGeneralizedForce(carCount, 0.0);
+        std::vector<double> previousConnectorCoefficient(carCount, 0.0);
+        std::vector<double> nextConnectorCoefficient(carCount, 0.0);
+        for (std::size_t index = 0; index < carCount; ++index)
+        {
+            const glm::dvec3 acceleration =
+                constrained.first[index]
+                    * state.generalizedAccelerationMetersPerSecondSquared
+                + constrained.second[index] * velocitySquared;
+            const double mass = center.cars()[index].loadedMassKilograms();
+            requiredGeneralizedForce[index] = mass * glm::dot(
+                acceleration - gravityWorld,
+                local[index].centerOfGravity);
+            if (!finite(acceleration)
+                || !std::isfinite(requiredGeneralizedForce[index]))
+            {
+                throw std::domain_error(
+                    "Connector-load car force balance is non-finite.");
+            }
+        }
+
+        for (std::size_t connectionIndex = 0;
+            connectionIndex < center.connectionCount();
+            ++connectionIndex)
+        {
+            const glm::dvec3& direction =
+                *center.connections()[connectionIndex].worldDirection();
+            nextConnectorCoefficient[connectionIndex] = glm::dot(
+                direction, local[connectionIndex].rearHitch);
+            previousConnectorCoefficient[connectionIndex + 1] = -glm::dot(
+                direction, local[connectionIndex + 1].frontHitch);
+            if (!std::isfinite(nextConnectorCoefficient[connectionIndex])
+                || !std::isfinite(
+                    previousConnectorCoefficient[connectionIndex + 1]))
+            {
+                throw std::domain_error(
+                    "Connector-load hitch projection is non-finite.");
+            }
+        }
+
+        std::size_t omittedRow = 0;
+        double bestMinimumProjection = -1.0;
+        for (std::size_t candidate = 0; candidate < carCount; ++candidate)
+        {
+            double minimumProjection =
+                std::numeric_limits<double>::infinity();
+            for (std::size_t connectionIndex = 0;
+                connectionIndex < candidate;
+                ++connectionIndex)
+            {
+                minimumProjection = std::min(
+                    minimumProjection,
+                    std::abs(nextConnectorCoefficient[connectionIndex]));
+            }
+            for (std::size_t connectionIndex = candidate;
+                connectionIndex < center.connectionCount();
+                ++connectionIndex)
+            {
+                minimumProjection = std::min(
+                    minimumProjection,
+                    std::abs(previousConnectorCoefficient[
+                        connectionIndex + 1]));
+            }
+            if (minimumProjection > bestMinimumProjection)
+            {
+                bestMinimumProjection = minimumProjection;
+                omittedRow = candidate;
+            }
+        }
+
+        if (!std::isfinite(bestMinimumProjection)
+            || bestMinimumProjection < connectorLoadMinimumAxialProjection)
+        {
+            return unavailable(
+                RigidConnectorLoadRecoveryStatus::IllConditioned,
+                std::nullopt,
+                0.0,
+                std::max(0.0, bestMinimumProjection),
+                std::move(localKinds),
+                constrained.kind);
+        }
+
+        std::vector<double> axialForces(center.connectionCount(), 0.0);
+        for (std::size_t carIndex = 0;
+            carIndex < omittedRow;
+            ++carIndex)
+        {
+            const double previousContribution = carIndex == 0
+                ? 0.0
+                : previousConnectorCoefficient[carIndex]
+                    * axialForces[carIndex - 1];
+            axialForces[carIndex] =
+                (requiredGeneralizedForce[carIndex]
+                    - previousContribution)
+                / nextConnectorCoefficient[carIndex];
+        }
+        for (std::size_t carIndex = carCount - 1;
+            carIndex > omittedRow;
+            --carIndex)
+        {
+            const double nextContribution = carIndex + 1 == carCount
+                ? 0.0
+                : nextConnectorCoefficient[carIndex]
+                    * axialForces[carIndex];
+            axialForces[carIndex - 1] =
+                (requiredGeneralizedForce[carIndex] - nextContribution)
+                / previousConnectorCoefficient[carIndex];
+        }
+
+        double recoveredContribution = 0.0;
+        if (omittedRow > 0)
+        {
+            recoveredContribution += previousConnectorCoefficient[omittedRow]
+                * axialForces[omittedRow - 1];
+        }
+        if (omittedRow < center.connectionCount())
+        {
+            recoveredContribution += nextConnectorCoefficient[omittedRow]
+                * axialForces[omittedRow];
+        }
+        const double balanceResidual =
+            requiredGeneralizedForce[omittedRow] - recoveredContribution;
+
+        double balanceScale = 1.0;
+        for (const double value : requiredGeneralizedForce)
+        {
+            balanceScale = std::max(balanceScale, std::abs(value));
+        }
+        for (const double value : axialForces)
+        {
+            if (!std::isfinite(value))
+            {
+                return unavailable(
+                    RigidConnectorLoadRecoveryStatus::IllConditioned,
+                    std::nullopt,
+                    0.0,
+                    bestMinimumProjection,
+                    std::move(localKinds),
+                    constrained.kind);
+            }
+        }
+        for (std::size_t carIndex = 0; carIndex < carCount; ++carIndex)
+        {
+            double connectorScale = 0.0;
+            if (carIndex > 0)
+            {
+                connectorScale += std::abs(
+                    previousConnectorCoefficient[carIndex]
+                    * axialForces[carIndex - 1]);
+            }
+            if (carIndex < center.connectionCount())
+            {
+                connectorScale += std::abs(
+                    nextConnectorCoefficient[carIndex]
+                    * axialForces[carIndex]);
+            }
+            balanceScale = std::max(balanceScale, connectorScale);
+        }
+        const double balanceTolerance =
+            connectorLoadBalanceAbsoluteToleranceNewtons
+            + connectorLoadBalanceRelativeTolerance * balanceScale;
+        if (!std::isfinite(balanceResidual)
+            || !std::isfinite(balanceTolerance))
+        {
+            throw std::domain_error(
+                "Connector-load balance diagnostics are non-finite.");
+        }
+        if (std::abs(balanceResidual) > balanceTolerance)
+        {
+            return unavailable(
+                RigidConnectorLoadRecoveryStatus::InconsistentBalance,
+                balanceResidual,
+                balanceTolerance,
+                bestMinimumProjection,
+                std::move(localKinds),
+                constrained.kind);
+        }
+
+        std::vector<RigidConnectorLoad> loads;
+        loads.reserve(center.connectionCount());
+        double maximumAbsolute = 0.0;
+        std::size_t maximumAbsoluteIndex = 0;
+        double maximumTension = 0.0;
+        std::optional<std::size_t> maximumTensionIndex;
+        double maximumCompression = 0.0;
+        std::optional<std::size_t> maximumCompressionIndex;
+        for (std::size_t connectionIndex = 0;
+            connectionIndex < center.connectionCount();
+            ++connectionIndex)
+        {
+            const double axialForce = axialForces[connectionIndex];
+            const double absoluteLoad = std::abs(axialForce);
+            RigidConnectorLoadClassification classification =
+                RigidConnectorLoadClassification::NearZero;
+            if (axialForce > connectorLoadClassificationToleranceNewtons)
+            {
+                classification = RigidConnectorLoadClassification::Tension;
+            }
+            else if (axialForce
+                < -connectorLoadClassificationToleranceNewtons)
+            {
+                classification =
+                    RigidConnectorLoadClassification::Compression;
+            }
+
+            const glm::dvec3& direction =
+                *center.connections()[connectionIndex].worldDirection();
+            const glm::dvec3 forceOnLeading = axialForce * direction;
+            const glm::dvec3 forceOnFollowing = -forceOnLeading;
+            if (!finite(forceOnLeading) || !finite(forceOnFollowing))
+            {
+                throw std::domain_error(
+                    "Connector-load world force vector is non-finite.");
+            }
+
+            loads.emplace_back(
+                connectionIndex,
+                connectionIndex,
+                connectionIndex + 1,
+                classification,
+                axialForce,
+                absoluteLoad,
+                direction,
+                forceOnLeading,
+                forceOnFollowing,
+                center.connections()[connectionIndex]
+                    .signedLengthResidualMeters());
+
+            if (connectionIndex == 0 || absoluteLoad > maximumAbsolute)
+            {
+                maximumAbsolute = absoluteLoad;
+                maximumAbsoluteIndex = connectionIndex;
+            }
+            if (axialForce > maximumTension)
+            {
+                maximumTension = axialForce;
+                maximumTensionIndex = connectionIndex;
+            }
+            if (-axialForce > maximumCompression)
+            {
+                maximumCompression = -axialForce;
+                maximumCompressionIndex = connectionIndex;
+            }
+        }
+
+        return {
+            std::move(loads),
+            RigidConnectorLoadRecoveryStatus::Available,
+            maximumAbsolute,
+            maximumAbsoluteIndex,
+            maximumTension,
+            maximumTensionIndex,
+            maximumCompression,
+            maximumCompressionIndex,
+            balanceResidual,
+            balanceTolerance,
+            bestMinimumProjection,
+            connectorLoadLocalDerivativeStepMeters,
+            std::move(localKinds),
+            constrained.kind
         };
     }
 

@@ -17,6 +17,23 @@ namespace quantum::physics
     // generalized SI distance as TrackLocation::stationMeters.
     inline constexpr double connectorLengthToleranceMeters = 1.0e-8;
     inline constexpr double trainKinematicJacobianStepMeters = 1.0e-2;
+    // Phase 4 local derivatives use a separate 1 cm car-reference-station
+    // step. Axes shorter than 1 micrometre and projections that move less than
+    // 1 micrometre along the axis per metre of local coordinate are rejected
+    // instead of amplifying closure/finite-difference error into huge loads.
+    inline constexpr double connectorLoadLocalDerivativeStepMeters = 1.0e-2;
+    inline constexpr double connectorLoadMinimumDirectionalLengthMeters =
+        1.0e-6;
+    inline constexpr double connectorLoadMinimumAxialProjection = 1.0e-6;
+    inline constexpr double connectorLoadClassificationToleranceNewtons =
+        1.0e-6;
+    // The redundant balance row allows 1 mN absolute error plus 0.01% of the
+    // largest projected force-balance scale. This accommodates the canonical
+    // sampled track and connector-root finite differences while rejecting a
+    // materially inconsistent generalized acceleration.
+    inline constexpr double connectorLoadBalanceAbsoluteToleranceNewtons =
+        1.0e-3;
+    inline constexpr double connectorLoadBalanceRelativeTolerance = 1.0e-4;
 
     struct TrainCarDefinition
     {
@@ -207,6 +224,151 @@ namespace quantum::physics
         std::uint64_t tick = 0;
         FollowerRunState runState = FollowerRunState::Resting;
     };
+
+    enum class RigidConnectorLoadClassification : std::uint8_t
+    {
+        Tension,
+        Compression,
+        NearZero,
+        Unavailable
+    };
+
+    enum class RigidConnectorLoadRecoveryStatus : std::uint8_t
+    {
+        Available,
+        AggregateResistanceUnderdetermined,
+        UndefinedConnectorAxis,
+        IllConditioned,
+        InconsistentBalance
+    };
+
+    // Positive axial force is tension/draft. For connection direction n from
+    // the leading rear hitch to the following front hitch, the force on the
+    // leading car is +T*n and the force on the following car is -T*n.
+    // This is a translational reduced-model load, not a connector moment or a
+    // complete rigid-body/bogie structural solution.
+    class RigidConnectorLoad
+    {
+    public:
+        RigidConnectorLoad(
+            std::size_t connectionIndex,
+            std::size_t leadingCarIndex,
+            std::size_t followingCarIndex,
+            RigidConnectorLoadClassification classification,
+            std::optional<double> axialForceNewtons,
+            std::optional<double> absoluteAxialLoadNewtons,
+            std::optional<glm::dvec3> worldDirection,
+            std::optional<glm::dvec3> worldForceOnLeadingCarNewtons,
+            std::optional<glm::dvec3> worldForceOnFollowingCarNewtons,
+            double connectorClosureResidualMeters);
+
+        [[nodiscard]] std::size_t connectionIndex() const noexcept;
+        [[nodiscard]] std::size_t leadingCarIndex() const noexcept;
+        [[nodiscard]] std::size_t followingCarIndex() const noexcept;
+        [[nodiscard]] RigidConnectorLoadClassification classification()
+            const noexcept;
+        [[nodiscard]] const std::optional<double>& axialForceNewtons()
+            const noexcept;
+        [[nodiscard]] const std::optional<double>& absoluteAxialLoadNewtons()
+            const noexcept;
+        [[nodiscard]] const std::optional<glm::dvec3>& worldDirection()
+            const noexcept;
+        [[nodiscard]] const std::optional<glm::dvec3>&
+            worldForceOnLeadingCarNewtons() const noexcept;
+        [[nodiscard]] const std::optional<glm::dvec3>&
+            worldForceOnFollowingCarNewtons() const noexcept;
+        [[nodiscard]] double connectorClosureResidualMeters() const noexcept;
+
+    private:
+        std::size_t connectionIndex_ = 0;
+        std::size_t leadingCarIndex_ = 0;
+        std::size_t followingCarIndex_ = 0;
+        RigidConnectorLoadClassification classification_ =
+            RigidConnectorLoadClassification::Unavailable;
+        std::optional<double> axialForceNewtons_;
+        std::optional<double> absoluteAxialLoadNewtons_;
+        std::optional<glm::dvec3> worldDirection_;
+        std::optional<glm::dvec3> worldForceOnLeadingCarNewtons_;
+        std::optional<glm::dvec3> worldForceOnFollowingCarNewtons_;
+        double connectorClosureResidualMeters_ = 0.0;
+    };
+
+    class RigidConnectorLoadAnalysis
+    {
+    public:
+        RigidConnectorLoadAnalysis(
+            std::vector<RigidConnectorLoad> connectorLoads,
+            RigidConnectorLoadRecoveryStatus status,
+            std::optional<double> maximumAbsoluteLoadNewtons,
+            std::optional<std::size_t> maximumAbsoluteLoadConnectionIndex,
+            double maximumTensionNewtons,
+            std::optional<std::size_t> maximumTensionConnectionIndex,
+            double maximumCompressionMagnitudeNewtons,
+            std::optional<std::size_t> maximumCompressionConnectionIndex,
+            std::optional<double> balanceResidualNewtons,
+            double balanceToleranceNewtons,
+            double minimumUsedAxialProjection,
+            double localDerivativeStepMeters,
+            std::vector<TrainFiniteDifferenceKind> localDerivativeKinds,
+            TrainFiniteDifferenceKind constrainedDerivativeKind);
+
+        [[nodiscard]] const std::vector<RigidConnectorLoad>& connectorLoads()
+            const noexcept;
+        [[nodiscard]] bool exactRecoveryAvailable() const noexcept;
+        [[nodiscard]] RigidConnectorLoadRecoveryStatus status() const noexcept;
+        [[nodiscard]] const std::optional<double>& maximumAbsoluteLoadNewtons()
+            const noexcept;
+        [[nodiscard]] const std::optional<std::size_t>&
+            maximumAbsoluteLoadConnectionIndex() const noexcept;
+        [[nodiscard]] double maximumTensionNewtons() const noexcept;
+        [[nodiscard]] const std::optional<std::size_t>&
+            maximumTensionConnectionIndex() const noexcept;
+        [[nodiscard]] double maximumCompressionMagnitudeNewtons()
+            const noexcept;
+        [[nodiscard]] const std::optional<std::size_t>&
+            maximumCompressionConnectionIndex() const noexcept;
+        // Residual of the one omitted/redundant car equation, expressed as
+        // inertial-minus-known-external generalized force minus connector
+        // generalized force. A valid recovery keeps it within tolerance.
+        [[nodiscard]] const std::optional<double>& balanceResidualNewtons()
+            const noexcept;
+        [[nodiscard]] double balanceToleranceNewtons() const noexcept;
+        [[nodiscard]] double minimumUsedAxialProjection() const noexcept;
+        [[nodiscard]] double localDerivativeStepMeters() const noexcept;
+        [[nodiscard]] const std::vector<TrainFiniteDifferenceKind>&
+            localDerivativeKinds() const noexcept;
+        [[nodiscard]] TrainFiniteDifferenceKind constrainedDerivativeKind()
+            const noexcept;
+
+    private:
+        std::vector<RigidConnectorLoad> connectorLoads_;
+        RigidConnectorLoadRecoveryStatus status_ =
+            RigidConnectorLoadRecoveryStatus::Available;
+        std::optional<double> maximumAbsoluteLoadNewtons_;
+        std::optional<std::size_t> maximumAbsoluteLoadConnectionIndex_;
+        double maximumTensionNewtons_ = 0.0;
+        std::optional<std::size_t> maximumTensionConnectionIndex_;
+        double maximumCompressionMagnitudeNewtons_ = 0.0;
+        std::optional<std::size_t> maximumCompressionConnectionIndex_;
+        std::optional<double> balanceResidualNewtons_;
+        double balanceToleranceNewtons_ = 0.0;
+        double minimumUsedAxialProjection_ = 0.0;
+        double localDerivativeStepMeters_ =
+            connectorLoadLocalDerivativeStepMeters;
+        std::vector<TrainFiniteDifferenceKind> localDerivativeKinds_;
+        TrainFiniteDifferenceKind constrainedDerivativeKind_ =
+            TrainFiniteDifferenceKind::Central;
+    };
+
+    // Recovers gravity/inertia-consistent rigid connector axial loads from an
+    // already defined train state. Aggregate resistance has no authored
+    // per-car distribution, so any force-producing aggregate resistance model
+    // makes a multi-car result explicitly unavailable.
+    [[nodiscard]] RigidConnectorLoadAnalysis evaluateRigidConnectorLoads(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrainDynamicsState& state);
 
     struct TrainTelemetry
     {
