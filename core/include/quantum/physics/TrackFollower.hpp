@@ -138,6 +138,17 @@ namespace quantum::physics
         double rollingResistanceCoefficient = 0.0;
     };
 
+    void validateBasicResistance(const BasicResistance& resistance);
+
+    // Shared Phase 1/3 aggregate resistance law. impendingForceNewtons is the
+    // non-resistance generalized force that dry resistance opposes at rest.
+    [[nodiscard]] double evaluateBasicResistanceForceNewtons(
+        const BasicResistance& resistance,
+        double supportedMassKilograms,
+        double gravityAccelerationMetersPerSecondSquared,
+        double impendingForceNewtons,
+        double velocityMetersPerSecond);
+
     struct SingleFollowerDefinition
     {
         double massKilograms = 1.0;

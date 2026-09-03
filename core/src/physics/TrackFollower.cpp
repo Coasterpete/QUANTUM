@@ -108,57 +108,18 @@ namespace quantum::physics
             const double gravityForce =
                 definition.massKilograms * gravityAcceleration;
 
-            const BasicResistance& resistance = definition.resistance;
-            const double rollingForceMagnitude =
-                resistance.rollingResistanceCoefficient
-                * definition.massKilograms
-                * environment.gravityAccelerationMetersPerSecondSquared;
-            const double dryForceMagnitude =
-                resistance.constantMechanicalForceNewtons
-                + rollingForceMagnitude;
-
-            if (!std::isfinite(gravityForce)
-                || !std::isfinite(rollingForceMagnitude)
-                || !std::isfinite(dryForceMagnitude))
+            if (!std::isfinite(gravityForce))
             {
                 throw std::invalid_argument(
                     "Follower force inputs produce a non-finite force.");
             }
-
-            double resistanceForce = 0.0;
-            if (std::abs(velocityMetersPerSecond)
-                <= followerRestSpeedToleranceMetersPerSecond)
-            {
-                // Dry resistance opposes impending gravity-driven motion and
-                // statically balances it when the available capacity permits.
-                resistanceForce = std::abs(gravityForce) <= dryForceMagnitude
-                    ? -gravityForce
-                    : -std::copysign(dryForceMagnitude, gravityForce);
-            }
-            else
-            {
-                const double motionSign =
-                    std::copysign(1.0, velocityMetersPerSecond);
-                const double linearForce =
-                    -resistance.linearResistanceCoefficientNewtonSecondsPerMeter
-                    * velocityMetersPerSecond;
-                const double aerodynamicForce =
-                    -0.5
-                    * resistance.airDensityKilogramsPerCubicMeter
-                    * resistance.dragAreaSquareMeters
-                    * velocityMetersPerSecond
-                    * std::abs(velocityMetersPerSecond);
-                resistanceForce =
-                    -motionSign * dryForceMagnitude
-                    + linearForce
-                    + aerodynamicForce;
-            }
-
-            if (!std::isfinite(resistanceForce))
-            {
-                throw std::invalid_argument(
-                    "Follower resistance inputs produce a non-finite force.");
-            }
+            const double resistanceForce =
+                evaluateBasicResistanceForceNewtons(
+                    definition.resistance,
+                    definition.massKilograms,
+                    environment.gravityAccelerationMetersPerSecondSquared,
+                    gravityForce,
+                    velocityMetersPerSecond);
 
             return {gravityForce, resistanceForce};
         }
@@ -466,7 +427,11 @@ namespace quantum::physics
                 "Follower mass must be positive and finite.");
         }
 
-        const BasicResistance& resistance = definition.resistance;
+        validateBasicResistance(definition.resistance);
+    }
+
+    void validateBasicResistance(const BasicResistance& resistance)
+    {
         if (!std::isfinite(resistance.constantMechanicalForceNewtons)
             || resistance.constantMechanicalForceNewtons < 0.0
             || !std::isfinite(
@@ -482,6 +447,76 @@ namespace quantum::physics
             throw std::invalid_argument(
                 "Follower resistance values must be finite and non-negative.");
         }
+    }
+
+    double evaluateBasicResistanceForceNewtons(
+        const BasicResistance& resistance,
+        const double supportedMassKilograms,
+        const double gravityAccelerationMetersPerSecondSquared,
+        const double impendingForceNewtons,
+        const double velocityMetersPerSecond)
+    {
+        validateBasicResistance(resistance);
+        if (!std::isfinite(supportedMassKilograms)
+            || supportedMassKilograms <= 0.0
+            || !std::isfinite(gravityAccelerationMetersPerSecondSquared)
+            || gravityAccelerationMetersPerSecondSquared <= 0.0
+            || !std::isfinite(impendingForceNewtons)
+            || !std::isfinite(velocityMetersPerSecond))
+        {
+            throw std::invalid_argument(
+                "Basic resistance evaluation inputs must be finite and physically valid.");
+        }
+
+        const double rollingForceMagnitude =
+            resistance.rollingResistanceCoefficient
+            * supportedMassKilograms
+            * gravityAccelerationMetersPerSecondSquared;
+        const double dryForceMagnitude =
+            resistance.constantMechanicalForceNewtons
+            + rollingForceMagnitude;
+        if (!std::isfinite(rollingForceMagnitude)
+            || !std::isfinite(dryForceMagnitude))
+        {
+            throw std::invalid_argument(
+                "Basic resistance inputs produce a non-finite force.");
+        }
+
+        double resistanceForce = 0.0;
+        if (std::abs(velocityMetersPerSecond)
+            <= followerRestSpeedToleranceMetersPerSecond)
+        {
+            // Dry resistance opposes impending non-resistance motion and
+            // statically balances it when the available capacity permits.
+            resistanceForce = std::abs(impendingForceNewtons)
+                    <= dryForceMagnitude
+                ? -impendingForceNewtons
+                : -std::copysign(dryForceMagnitude, impendingForceNewtons);
+        }
+        else
+        {
+            const double motionSign =
+                std::copysign(1.0, velocityMetersPerSecond);
+            const double linearForce =
+                -resistance.linearResistanceCoefficientNewtonSecondsPerMeter
+                * velocityMetersPerSecond;
+            const double aerodynamicForce =
+                -0.5
+                * resistance.airDensityKilogramsPerCubicMeter
+                * resistance.dragAreaSquareMeters
+                * velocityMetersPerSecond
+                * std::abs(velocityMetersPerSecond);
+            resistanceForce =
+                -motionSign * dryForceMagnitude
+                + linearForce
+                + aerodynamicForce;
+        }
+        if (!std::isfinite(resistanceForce))
+        {
+            throw std::invalid_argument(
+                "Basic resistance inputs produce a non-finite force.");
+        }
+        return resistanceForce;
     }
 
     void validatePhysicsEnvironment(const PhysicsEnvironment& environment)

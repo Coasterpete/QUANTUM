@@ -17,6 +17,13 @@ set_target_properties(QuantumCoreCarPosePhysicsTests PROPERTIES CXX_EXTENSIONS O
 add_test(NAME QuantumCore.CarPosePhysics COMMAND QuantumCoreCarPosePhysicsTests)
 set_tests_properties(QuantumCore.CarPosePhysics PROPERTIES LABELS "core;coaster;physics")
 
+add_executable(QuantumCoreTrainPhysicsTests TrainPhysicsTests.cpp)
+target_link_libraries(QuantumCoreTrainPhysicsTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreTrainPhysicsTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreTrainPhysicsTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.TrainPhysics COMMAND QuantumCoreTrainPhysicsTests)
+set_tests_properties(QuantumCore.TrainPhysics PROPERTIES LABELS "core;coaster;physics")
+
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)

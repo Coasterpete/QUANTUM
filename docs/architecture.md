@@ -11,10 +11,10 @@ The repository currently builds three primary targets plus Core tests.
 
 `QuantumCore` is a static library containing the current curve mathematics,
 analytic transition profiles, authored-track document structures and editing
-operations, document serialization, topology operations, and rider-local
-geometry integration. Its third-party target dependencies are GLM and
-nlohmann JSON. It is independent of Vulkan, SDL3, VMA, Dear ImGui, and Editor
-code.
+operations, document serialization, topology operations, rider-local geometry
+integration, and native track-constrained physics. Its third-party target
+dependencies are GLM and nlohmann JSON. It is independent of Vulkan, SDL3,
+VMA, Dear ImGui, and Editor code.
 
 ### `QuantumEngine`
 
@@ -408,8 +408,9 @@ provides the explicit conversion to SI. The first speed model is point-mass,
 gravity-only energy propagation from one initial speed at track distance zero.
 Loads are mass-independent specific force projected onto `(U, L, T)` and
 reported in standard G. Materially negative speed squared terminates the
-history with an explicit unreachable state; launches, losses, brakes, lifts,
-and train-length effects are not part of this milestone.
+history with an explicit unreachable state. Launches, losses, brakes, lifts,
+and train-length effects are not part of this diagnostic evaluator; the native
+track-constrained train dynamics are described below.
 
 The Editor evaluates that Core pipeline once for the committed whole authored
 track, then `RiderLoadDiagnosticsModel` maps the returned cumulative distances
@@ -631,18 +632,85 @@ continuity and ids, Planar Arc constraints, and generated geometry. Renderer
 acceptance is part of the commit gate because the Editor must not publish a
 document whose visible GPU representation failed to update.
 
+## Native physics foundation
+
+The implemented native physics foundation covers deterministic track-follower,
+single-car, and rigid multi-car train behavior through Phase 3. It remains a
+track-constrained reduced-coordinate model for ordinary coaster motion, not a
+complete coaster operations simulation. Physics consumes the canonical
+`TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
+does not depend on rendered `TrackGeometryFamily` or `TrackStylePreset` rail,
+mesh, tube, or hardware details.
+
+### Phase 1: track follower
+
+`TrackLocation` identifies the current path, station, and travel direction.
+`stepTrackFollower` advances one longitudinal follower deterministically with a
+fixed timestep, gravity, and the shared aggregate resistance law. Circuit paths
+wrap in either direction; open paths, including authored shuttle layouts, clamp
+at their endpoints and report the intervention. Each step returns the committed
+state and physics telemetry for motion, force contributions, curvature, run
+state, and boundary behavior.
+
+### Phase 2: authored car and bogie geometry
+
+`CarDefinition` separates reusable dry mass and dry center of gravity from the
+scenario-specific mass and center of mass in `CarLoadout`. It also authors body
+dimensions, explicit front and rear hitch positions, and `BogieDefinition`
+reference positions. The current deterministic `solveCarPose` path accepts
+exactly two bogies, places them on the compiled track, and derives the rigid car
+body pose, loaded center of gravity, hitch positions, and geometric bogie
+articulation. These poses are kinematic results; wheel/rail contact and bogie
+load reactions are not inferred from rendered track geometry.
+
+### Phase 3: rigid heterogeneous train dynamics
+
+`TrainDefinition` is an ordered lead-to-rear consist of heterogeneous
+`CarDefinition` and `CarLoadout` values. Adjacent cars are joined by explicit
+`InterCarConnectionDefinition` fixed lengths. `solveTrainPose` uses the Phase 2
+reference location of the lead car as one generalized longitudinal train
+coordinate and solves each following car sequentially so its hitch-to-hitch
+distance satisfies the authored rigid connector length. Circuit seam crossing
+and reverse travel preserve consist order, while an open track admits motion
+only while the complete consist envelope remains on the track.
+
+Individual cars do not have independently integrated longitudinal degrees of
+freedom. The inter-car connectors are currently kinematic constraints, and
+connector tension or compression forces are not solved or recovered. Phase 3
+computes each loaded car's distributed world-space center of gravity and its
+derivative with respect to the generalized coordinate. Those derivatives
+produce the distributed generalized gravity force, effective generalized mass,
+and its coordinate derivative used by the deterministic fixed-step train
+integrator. Only translational car-center-of-gravity kinetic energy participates;
+rotational kinetic energy of the car bodies and bogies is not yet included.
+
+Train steps publish train-level telemetry together with immutable/read-only
+train, car, bogie, and connection pose diagnostics, including connector-length
+residuals and solver information. Boundary interventions, circuit wrapping,
+aggregate resistance, distributed gravity, effective mass, and generalized
+motion are observable without making the physics layer depend on the Editor or
+renderer.
+
 ## Planned systems
 
 The following are current roadmap areas, not implemented capabilities or fixed
 architectural commitments:
 
 - editable force-target profiles and endpoint-constrained force solving;
-- launches, brakes, and lift systems;
-- authored track-style, rail, heartline-offset, and final rail meshing systems;
+- expanded authored track-style geometry families, configurable rail/heartline geometry, and final rail meshing systems;
 - direct deformation or control-point editing in the 3D viewport;
-- supports, foundations, and rail connectors (the Support Workspace remains an
-  unfinished disabled shell); and
-- train and ride simulation.
+- supports, foundations, and track/support attachment hardware (the Support Workspace remains an
+  unfinished disabled shell);
+- connector tension/compression force recovery, plus connector compliance,
+  slack, springs, damping, and train whip;
+- wheel/rail contact geometry, running/guide/upstop wheel reactions,
+  suspension, and full bogie load distribution;
+- operational lifts, transport tires, brakes, launches, and stations;
+- storage, blocks, occupancy/reservations, dispatch, switches, transfer tables,
+  and topology-aware operations;
+- multiple simultaneously simulated trains;
+- persistence and Editor UI for train definitions; and
+- train and connector rendering.
 
 No compatibility with another coaster-design application's file formats,
 source code, or architecture is claimed.
@@ -650,9 +718,10 @@ source code, or architecture is claimed.
 ## Verification
 
 `tests/` contains CTest-registered coverage for the curve and rider-local
-mathematics, authored document structure and persistence, channel-profile
-editing, mixed-region authoring and generation, transaction rejection,
-Transition Editor model semantics, centerline visualization, viewport picking,
-and selection mapping described above. The tests are designed to run in both
-Debug and Release configurations. Exact historical assertion or test-group
-counts are intentionally omitted because they change as the Core develops.
+mathematics, native track-follower, car-pose, and train physics, authored
+document structure and persistence, channel-profile editing, mixed-region
+authoring and generation, transaction rejection, Transition Editor model
+semantics, centerline visualization, viewport picking, and selection mapping
+described above. The tests are designed to run in both Debug and Release
+configurations. Exact historical assertion or test-group counts are
+intentionally omitted because they change as the Core develops.
