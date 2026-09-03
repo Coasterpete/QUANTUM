@@ -635,7 +635,7 @@ document whose visible GPU representation failed to update.
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
-single-car, and rigid multi-car train behavior through Phase 6. It remains a
+single-car, and rigid multi-car train behavior through Phase 7. It remains a
 track-constrained reduced-coordinate model for ordinary coaster motion, not a
 complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
@@ -720,9 +720,10 @@ therefore make the coupled chain recovery unavailable in this milestone.
 
 These results are axial loads consistent with the current reduced
 translational model. Connector compliance and slack, connector moments,
-car/bogie rotational dynamics, suspension, bogie/wheel reaction loads, and
-operational device forces remain deferred. A complete rigid-body or structural
-connector-load interpretation must not be inferred from this telemetry.
+car/bogie rotational dynamics, suspension, the Phase 7 front/rear reaction
+split, wheel reaction loads, and operational device forces remain deferred. A
+complete rigid-body or structural connector-load interpretation must not be
+inferred from this telemetry.
 
 ### Phase 5: explicit per-car external force applications
 
@@ -826,9 +827,111 @@ explicitly provisional `Crr * total-loaded-mass * gravity` supported-load
 approximation in `BasicResistance`; it has not been promoted to a per-car
 wheel/rail model. Any force-producing aggregate component therefore continues
 to make exact multi-car connector-load recovery
-`AggregateResistanceUnderdetermined`. Actual supported/contact load,
-running/guide/upstop wheel reactions, bearing allocation, and replacement of
-the provisional rolling law remain deferred until bogie/contact physics exists.
+`AggregateResistanceUnderdetermined`. Per-bogie and contact-resolved supported
+load, running/guide/upstop wheel reactions, bearing allocation, and replacement
+of the provisional rolling law remain deferred until later bogie/contact
+physics.
+
+### Phase 7: aggregate bogie-reaction audit and car-level recovery
+
+`evaluateBogieReactions` performs inverse translational balance at an already
+defined `TrainDynamicsState`. The audit found that the current model uniquely
+determines only the sum of the front and rear track-constraint reactions on
+each car. For car `i`, the implemented free-vector resultant is
+
+```text
+R_aggregate,i = R_front,i + R_rear,i
+              = m_i a_COG,i
+                - (m_i g + F_external,i + F_connector,i)
+```
+
+Gravity is the uniform world vector `(0, 0, -g)`. Explicit Phase 5 forces,
+including generated Phase 6 aerodynamic drag, enter as their actual world
+vectors on their authored target cars. Recovered Phase 4 connector forces enter
+as the actual equal/opposite world vectors at the adjacent cars; no scalar
+generalized connector value replaces them. Force application points remain
+available to the existing virtual-work and connector-recovery paths, but they
+do not affect a purely translational resultant balance through a fabricated
+moment model.
+
+The COG acceleration uses the Phase 3 full-consist derivatives now exposed in
+`TrainCarKinematics`:
+
+```text
+a_COG,i = (dr_i/dq) qdd + (d2r_i/dq2) qdot^2
+```
+
+The velocity-squared configuration term is retained on crests, valleys, loops,
+banked curves, in reverse motion, across circuit seams, and at legal one-sided
+open-track derivative locations. The complete consist is sampled once per
+finite-difference displacement, not independently for each bogie.
+
+`BogieReactionAnalysis` reports one `CarTrackReaction` per car. An available
+car result contains its world COG acceleration, aggregate world reaction,
+magnitude, car-body `(tangent/forward, lateral, up)` components, and a world
+force-balance residual. The aggregate is a free-vector resultant for
+translational balance; the API does not invent an application point for it.
+The local components are coordinate projections only. In particular, their
+lateral and up values are not guide-wheel, running-wheel, or upstop-wheel
+loads.
+
+Each car result also contains named front and rear `BogieReaction` metadata,
+reusing Phase 2's validated role ordering, authored definition index,
+`TrackLocation`, world position, and canonical track frame. In Phase 7 their
+force, magnitude, and track-frame component optionals remain empty. A normal
+two-bogie arrangement reports `MissingRotationalModel`; less than one
+micrometre of world bogie separation reports `SingularGeometry`. The latter is
+a reaction-conditioning threshold, distinct from the smaller Phase 2
+pose-validity threshold.
+
+The split is unavailable because two arbitrary bogie resultants contain six
+unknown force components while translational equilibrium supplies only three
+equations. Restricting both resultants to their ideal track-normal planes still
+leaves four scalar unknowns and generally one unresolved scalar after force
+balance. A dynamic moment equation,
+
+```text
+sum(tau_COG) = I alpha + omega cross (I omega)
+```
+
+would require rotational kinematics, an authored body inertia tensor, and
+explicit constraint-direction assumptions. The solved body orientation could
+support finite-differenced angular kinematics in a later model, but rotational
+kinetic energy and inertia are not part of the present train dynamics.
+`bodyDimensions + mass` is not used to fabricate an inertia tensor, and Phase 7
+does not apply a quasi-static, zero-inertia, or 50/50 split. Consequently there
+is no moment-balance residual to report.
+
+Before publishing an aggregate reaction, the analysis checks the reduced
+generalized equation
+
+```text
+residual_Q = M_eff qdd + 0.5 M_eff' qdot^2
+             - (Q_gravity + Q_external)
+```
+
+against `1 mN + 0.01%` of the generalized force scale. With aggregate
+resistance disabled, this is the ideal-constraint consistency check that keeps
+the ordinary track reaction from becoming hidden propulsion or braking. Each
+world force balance uses the same tolerance policy. Invalid authored/runtime
+inputs retain the established validation exceptions. Otherwise the explicit
+aggregate availability states are `Available`,
+`AggregateResistanceUnderdetermined`, `ConnectorLoadRecoveryUnavailable`,
+`InconsistentGeneralizedBalance`, and `KinematicsUnavailable`; the underlying
+Phase 4 connector status is retained.
+
+Any configured force-producing `BasicResistance` law makes aggregate recovery
+conservatively unavailable because neither its per-car allocation nor its
+world application is authored. This applies to a single car as well: a scalar
+generalized resistance is not silently turned into a world force. Explicit
+aerodynamic drag needs no special branch because it is already an
+`ExternalForceApplication`. Rolling resistance remains the unchanged
+provisional aggregate approximation and does not consume Phase 7 telemetry.
+
+No wheel/rail cross-section or `TrackGeometryFamily` participates. Phase 7
+adds no running/guide/upstop split, individual-wheel distribution, contact
+engagement, suspension, steering, connector compliance, operational device,
+seat/restraint, or rider-body model.
 
 ## Planned systems
 

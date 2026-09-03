@@ -35,6 +35,14 @@ namespace quantum::physics
     inline constexpr double connectorLoadBalanceAbsoluteToleranceNewtons =
         1.0e-3;
     inline constexpr double connectorLoadBalanceRelativeTolerance = 1.0e-4;
+    // Phase 7 uses the same balance tolerance policy as connector recovery.
+    // Bogie separations below one micrometre are reported as singular for a
+    // future moment-based split instead of implying numerically useful load
+    // leverage from the much smaller Phase 2 pose-only threshold.
+    inline constexpr double bogieReactionBalanceAbsoluteToleranceNewtons =
+        1.0e-3;
+    inline constexpr double bogieReactionBalanceRelativeTolerance = 1.0e-4;
+    inline constexpr double bogieReactionMinimumSeparationMeters = 1.0e-6;
 
     struct TrainCarDefinition
     {
@@ -204,6 +212,9 @@ namespace quantum::physics
     {
         std::size_t carIndex = 0;
         glm::dvec3 worldCenterOfGravityDerivativePerGeneralizedMeter{0.0};
+        glm::dvec3
+            worldCenterOfGravitySecondDerivativePerGeneralizedMeterSquared{
+                0.0};
         double generalizedGravityForceNewtons = 0.0;
     };
 
@@ -411,6 +422,107 @@ namespace quantum::physics
     // authored per-car distribution, so any force-producing aggregate
     // resistance model makes a multi-car result explicitly unavailable.
     [[nodiscard]] RigidConnectorLoadAnalysis evaluateRigidConnectorLoads(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrainDynamicsState& state,
+        std::span<const ExternalForceApplication> externalForces = {});
+
+    enum class BogieRole : std::uint8_t
+    {
+        Front,
+        Rear
+    };
+
+    // This status applies to the uniquely recoverable sum of a car's two
+    // track reactions. Invalid authored/runtime input continues to use the
+    // existing validation exceptions; unavailable statuses describe valid
+    // inputs whose current reduced mechanics do not determine a result.
+    enum class CarTrackReactionRecoveryStatus : std::uint8_t
+    {
+        Available,
+        AggregateResistanceUnderdetermined,
+        ConnectorLoadRecoveryUnavailable,
+        InconsistentGeneralizedBalance,
+        KinematicsUnavailable
+    };
+
+    // A future model may make an aggregate reaction at each bogie available.
+    // Phase 7 intentionally leaves the force optionals empty: current
+    // translational balance determines only their sum, while a defensible
+    // split needs rotational inertia and additional constraint assumptions.
+    enum class BogieReactionRecoveryStatus : std::uint8_t
+    {
+        Available,
+        AggregateCarReactionUnavailable,
+        MissingRotationalModel,
+        SingularGeometry
+    };
+
+    struct BogieReaction
+    {
+        std::size_t carIndex = 0;
+        std::size_t bogieDefinitionIndex = 0;
+        BogieRole role = BogieRole::Front;
+        TrackLocation location;
+        glm::dvec3 worldPositionMeters{0.0};
+        geometry::CurveFrame trackFrame;
+        BogieReactionRecoveryStatus status =
+            BogieReactionRecoveryStatus::MissingRotationalModel;
+        std::optional<glm::dvec3> worldReactionNewtons;
+        std::optional<double> magnitudeNewtons;
+        // (x, y, z) are canonical track-frame tangent, lateral, and up
+        // components. They are not running-, guide-, or upstop-wheel loads.
+        std::optional<glm::dvec3> trackFrameComponentsNewtons;
+    };
+
+    struct CarTrackReaction
+    {
+        std::size_t carIndex = 0;
+        CarTrackReactionRecoveryStatus status =
+            CarTrackReactionRecoveryStatus::KinematicsUnavailable;
+        glm::dvec3 worldCenterOfGravityMeters{0.0};
+        std::optional<glm::dvec3>
+            worldCenterOfGravityAccelerationMetersPerSecondSquared;
+        // This is R_front + R_rear. It is a free-vector resultant for
+        // translational balance and has no inferred application point.
+        std::optional<glm::dvec3> aggregateWorldBogieReactionNewtons;
+        std::optional<double> aggregateMagnitudeNewtons;
+        // (x, y, z) are car-body tangent/forward, lateral, and up components.
+        // They do not identify which physical wheel contacts carry the force.
+        std::optional<glm::dvec3> aggregateBodyFrameComponentsNewtons;
+        BogieReaction frontBogie;
+        BogieReaction rearBogie;
+        std::optional<glm::dvec3> forceBalanceResidualNewtons;
+        double forceBalanceToleranceNewtons = 0.0;
+    };
+
+    struct BogieReactionAnalysis
+    {
+        CarTrackReactionRecoveryStatus status =
+            CarTrackReactionRecoveryStatus::KinematicsUnavailable;
+        RigidConnectorLoadRecoveryStatus connectorLoadStatus =
+            RigidConnectorLoadRecoveryStatus::Available;
+        std::vector<CarTrackReaction> cars;
+        // M_eff*qdd + 0.5*M_eff'*qdot^2 - (Q_gravity + Q_external).
+        // With aggregate resistance disabled, an ideal ordinary track
+        // constraint requires this to close within the reported tolerance.
+        std::optional<double> generalizedBalanceResidualNewtons;
+        double generalizedBalanceToleranceNewtons = 0.0;
+        double finiteDifferenceStepMeters = trainKinematicJacobianStepMeters;
+        TrainFiniteDifferenceKind finiteDifferenceKind =
+            TrainFiniteDifferenceKind::Central;
+
+        [[nodiscard]] bool exactAggregateRecoveryAvailable() const noexcept
+        {
+            return status == CarTrackReactionRecoveryStatus::Available;
+        }
+    };
+
+    // Recovers the exact per-car sum of the two ideal track-constraint
+    // reactions under the current translational reduced model. Separate
+    // front/rear reactions remain explicitly unavailable in Phase 7.
+    [[nodiscard]] BogieReactionAnalysis evaluateBogieReactions(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,

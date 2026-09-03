@@ -1679,7 +1679,12 @@ namespace quantum::physics
             effectiveMassDerivative += 2.0 * mass
                 * glm::dot(jacobian, secondDerivative);
             gravityForce += carGravity;
-            cars.push_back({index, jacobian, carGravity});
+            cars.push_back({
+                index,
+                jacobian,
+                secondDerivative,
+                carGravity
+            });
         }
 
         std::vector<ExternalForceApplicationEvaluation>
@@ -2243,6 +2248,338 @@ namespace quantum::physics
             connectorLoadLocalDerivativeStepMeters,
             std::move(localKinds),
             constrained.kind
+        };
+    }
+
+    BogieReactionAnalysis evaluateBogieReactions(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrainDynamicsState& state,
+        const std::span<const ExternalForceApplication> externalForces)
+    {
+        validateTrainDefinition(definition);
+        validatePhysicsEnvironment(environment);
+        if (!std::isfinite(state.signedVelocityMetersPerSecond)
+            || !std::isfinite(
+                state.generalizedAccelerationMetersPerSecondSquared)
+            || !validRunState(state.runState))
+        {
+            throw std::invalid_argument(
+                "Bogie-reaction analysis requires a finite, valid train state.");
+        }
+        validateExternalForceApplications(
+            externalForces, definition.cars.size());
+
+        const auto makeBogie = [](
+            const std::size_t carIndex,
+            const BogiePose& pose,
+            const BogieRole role,
+            const BogieReactionRecoveryStatus status)
+        {
+            return BogieReaction{
+                carIndex,
+                pose.definitionIndex(),
+                role,
+                pose.location(),
+                pose.worldPositionMeters(),
+                pose.trackFrame(),
+                status,
+                std::nullopt,
+                std::nullopt,
+                std::nullopt
+            };
+        };
+
+        const auto unavailableCars = [&makeBogie](
+            const TrainPose& pose,
+            const CarTrackReactionRecoveryStatus status)
+        {
+            std::vector<CarTrackReaction> result;
+            result.reserve(pose.carCount());
+            for (const TrainCarPose& trainCar : pose.cars())
+            {
+                const std::size_t carIndex = trainCar.carIndex();
+                const CarPose& carPose = trainCar.carPose();
+                result.push_back({
+                    carIndex,
+                    status,
+                    carPose.worldCenterOfGravityMeters(),
+                    std::nullopt,
+                    std::nullopt,
+                    std::nullopt,
+                    std::nullopt,
+                    makeBogie(
+                        carIndex,
+                        carPose.frontBogie(),
+                        BogieRole::Front,
+                        BogieReactionRecoveryStatus::
+                            AggregateCarReactionUnavailable),
+                    makeBogie(
+                        carIndex,
+                        carPose.rearBogie(),
+                        BogieRole::Rear,
+                        BogieReactionRecoveryStatus::
+                            AggregateCarReactionUnavailable),
+                    std::nullopt,
+                    0.0
+                });
+            }
+            return result;
+        };
+
+        std::optional<TrainKinematicEvaluation> kinematics;
+        try
+        {
+            kinematics.emplace(evaluateTrainKinematics(
+                track,
+                definition,
+                environment,
+                state.generalizedReferenceLocation,
+                externalForces));
+        }
+        catch (const OpenConsistBoundaryError&)
+        {
+            const TrainPose pose = solveTrainPose(
+                track, definition, state.generalizedReferenceLocation);
+            return {
+                CarTrackReactionRecoveryStatus::KinematicsUnavailable,
+                RigidConnectorLoadRecoveryStatus::Available,
+                unavailableCars(
+                    pose,
+                    CarTrackReactionRecoveryStatus::KinematicsUnavailable),
+                std::nullopt,
+                0.0,
+                trainKinematicJacobianStepMeters,
+                TrainFiniteDifferenceKind::Central
+            };
+        }
+
+        const double velocitySquared =
+            state.signedVelocityMetersPerSecond
+            * state.signedVelocityMetersPerSecond;
+        if (!std::isfinite(velocitySquared))
+        {
+            throw std::invalid_argument(
+                "Bogie-reaction speed is too large to square as a finite value.");
+        }
+
+        const double generalizedRequiredForce =
+            kinematics->effectiveGeneralizedMassKilograms
+                * state.generalizedAccelerationMetersPerSecondSquared
+            + 0.5
+                * kinematics->effectiveGeneralizedMassDerivativeKilogramsPerMeter
+                * velocitySquared;
+        const double generalizedKnownForce =
+            kinematics->generalizedGravityForceNewtons
+            + kinematics->generalizedExternalForceNewtons;
+        const double generalizedBalanceResidual =
+            generalizedRequiredForce - generalizedKnownForce;
+        const double generalizedBalanceScale = std::max({
+            1.0,
+            std::abs(generalizedRequiredForce),
+            std::abs(generalizedKnownForce)
+        });
+        const double generalizedBalanceTolerance =
+            bogieReactionBalanceAbsoluteToleranceNewtons
+            + bogieReactionBalanceRelativeTolerance
+                * generalizedBalanceScale;
+        if (!std::isfinite(generalizedRequiredForce)
+            || !std::isfinite(generalizedKnownForce)
+            || !std::isfinite(generalizedBalanceResidual)
+            || !std::isfinite(generalizedBalanceTolerance))
+        {
+            throw std::domain_error(
+                "Bogie-reaction generalized balance is non-finite.");
+        }
+
+        const auto unavailable = [&kinematics, &unavailableCars,
+                                  generalizedBalanceResidual,
+                                  generalizedBalanceTolerance](
+            const CarTrackReactionRecoveryStatus status,
+            const RigidConnectorLoadRecoveryStatus connectorStatus)
+        {
+            return BogieReactionAnalysis{
+                status,
+                connectorStatus,
+                unavailableCars(kinematics->pose, status),
+                generalizedBalanceResidual,
+                generalizedBalanceTolerance,
+                kinematics->finiteDifferenceStepMeters,
+                kinematics->finiteDifferenceKind
+            };
+        };
+
+        // Aggregate BasicResistance has neither a per-car allocation nor a
+        // world-space application point. Treat any configured force-producing
+        // law conservatively, matching Phase 4 connector-load recovery.
+        if (aggregateResistanceNeedsDistribution(definition.resistance))
+        {
+            const RigidConnectorLoadRecoveryStatus connectorStatus =
+                definition.connections.empty()
+                ? RigidConnectorLoadRecoveryStatus::Available
+                : RigidConnectorLoadRecoveryStatus::
+                    AggregateResistanceUnderdetermined;
+            return unavailable(
+                CarTrackReactionRecoveryStatus::
+                    AggregateResistanceUnderdetermined,
+                connectorStatus);
+        }
+
+        if (std::abs(generalizedBalanceResidual)
+            > generalizedBalanceTolerance)
+        {
+            return unavailable(
+                CarTrackReactionRecoveryStatus::
+                    InconsistentGeneralizedBalance,
+                RigidConnectorLoadRecoveryStatus::InconsistentBalance);
+        }
+
+        const RigidConnectorLoadAnalysis connectorLoads =
+            evaluateRigidConnectorLoads(
+                track,
+                definition,
+                environment,
+                state,
+                externalForces);
+        if (!connectorLoads.exactRecoveryAvailable())
+        {
+            return unavailable(
+                CarTrackReactionRecoveryStatus::
+                    ConnectorLoadRecoveryUnavailable,
+                connectorLoads.status());
+        }
+
+        std::vector<glm::dvec3> connectorForces(
+            definition.cars.size(), glm::dvec3{0.0});
+        for (const RigidConnectorLoad& load
+            : connectorLoads.connectorLoads())
+        {
+            if (!load.worldForceOnLeadingCarNewtons()
+                || !load.worldForceOnFollowingCarNewtons())
+            {
+                return unavailable(
+                    CarTrackReactionRecoveryStatus::
+                        ConnectorLoadRecoveryUnavailable,
+                    connectorLoads.status());
+            }
+            connectorForces[load.leadingCarIndex()] +=
+                *load.worldForceOnLeadingCarNewtons();
+            connectorForces[load.followingCarIndex()] +=
+                *load.worldForceOnFollowingCarNewtons();
+        }
+
+        std::vector<glm::dvec3> appliedForces(
+            definition.cars.size(), glm::dvec3{0.0});
+        for (const ExternalForceApplication& application : externalForces)
+        {
+            appliedForces[application.carIndex] +=
+                application.worldForceNewtons;
+        }
+
+        const glm::dvec3 gravityAcceleration{
+            0.0,
+            0.0,
+            -environment.gravityAccelerationMetersPerSecondSquared
+        };
+        std::vector<CarTrackReaction> cars;
+        cars.reserve(definition.cars.size());
+        for (std::size_t carIndex = 0;
+            carIndex < definition.cars.size();
+            ++carIndex)
+        {
+            const TrainCarPose& trainCar =
+                kinematics->pose.cars()[carIndex];
+            const CarPose& carPose = trainCar.carPose();
+            const TrainCarKinematics& carKinematics =
+                kinematics->cars[carIndex];
+            const glm::dvec3 acceleration =
+                carKinematics
+                    .worldCenterOfGravityDerivativePerGeneralizedMeter
+                    * state.generalizedAccelerationMetersPerSecondSquared
+                + carKinematics
+                    .worldCenterOfGravitySecondDerivativePerGeneralizedMeterSquared
+                    * velocitySquared;
+            const double mass = trainCar.loadedMassKilograms();
+            const glm::dvec3 gravityForce = mass * gravityAcceleration;
+            const glm::dvec3 inertialForce = mass * acceleration;
+            const glm::dvec3 reaction = inertialForce
+                - gravityForce
+                - appliedForces[carIndex]
+                - connectorForces[carIndex];
+            const glm::dvec3 forceBalanceResidual = inertialForce
+                - (gravityForce
+                    + appliedForces[carIndex]
+                    + connectorForces[carIndex]
+                    + reaction);
+            const double forceBalanceScale = std::max({
+                1.0,
+                glm::length(inertialForce),
+                glm::length(gravityForce),
+                glm::length(appliedForces[carIndex]),
+                glm::length(connectorForces[carIndex]),
+                glm::length(reaction)
+            });
+            const double forceBalanceTolerance =
+                bogieReactionBalanceAbsoluteToleranceNewtons
+                + bogieReactionBalanceRelativeTolerance
+                    * forceBalanceScale;
+            const geometry::CurveFrame& bodyFrame = carPose.bodyFrame();
+            const glm::dvec3 bodyComponents{
+                glm::dot(reaction, bodyFrame.tangent),
+                glm::dot(reaction, bodyFrame.lateral),
+                glm::dot(reaction, bodyFrame.up)
+            };
+            const double bogieSeparation = glm::length(
+                carPose.frontBogie().worldPositionMeters()
+                - carPose.rearBogie().worldPositionMeters());
+            if (!finite(acceleration)
+                || !finite(reaction)
+                || !finite(forceBalanceResidual)
+                || !finite(bodyComponents)
+                || !std::isfinite(forceBalanceScale)
+                || !std::isfinite(forceBalanceTolerance)
+                || !std::isfinite(bogieSeparation))
+            {
+                throw std::domain_error(
+                    "Bogie-reaction car balance is non-finite.");
+            }
+
+            const BogieReactionRecoveryStatus bogieStatus =
+                bogieSeparation < bogieReactionMinimumSeparationMeters
+                ? BogieReactionRecoveryStatus::SingularGeometry
+                : BogieReactionRecoveryStatus::MissingRotationalModel;
+            cars.push_back({
+                carIndex,
+                CarTrackReactionRecoveryStatus::Available,
+                carPose.worldCenterOfGravityMeters(),
+                acceleration,
+                reaction,
+                glm::length(reaction),
+                bodyComponents,
+                makeBogie(
+                    carIndex,
+                    carPose.frontBogie(),
+                    BogieRole::Front,
+                    bogieStatus),
+                makeBogie(
+                    carIndex,
+                    carPose.rearBogie(),
+                    BogieRole::Rear,
+                    bogieStatus),
+                forceBalanceResidual,
+                forceBalanceTolerance
+            });
+        }
+
+        return {
+            CarTrackReactionRecoveryStatus::Available,
+            connectorLoads.status(),
+            std::move(cars),
+            generalizedBalanceResidual,
+            generalizedBalanceTolerance,
+            kinematics->finiteDifferenceStepMeters,
+            kinematics->finiteDifferenceKind
         };
     }
 
