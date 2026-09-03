@@ -635,7 +635,7 @@ document whose visible GPU representation failed to update.
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
-single-car, and rigid multi-car train behavior through Phase 7. It remains a
+single-car, and rigid multi-car train behavior through Phase 10. It remains a
 track-constrained reduced-coordinate model for ordinary coaster motion, not a
 complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
@@ -1108,6 +1108,75 @@ wheel-role allocation, individual wheel loads, suspension, steering, connector
 moments or compliance, external pure torques, rolling-resistance redistribution,
 restraints/riders, operational devices, or track-family/rendering dependencies.
 
+### Phase 10: rigid bogie contact geometry and wrench feasibility
+
+`BogieDefinition::contacts` now owns abstract physics contact geometry for its
+rigid wheel/bogie assembly. This data is independent of rail mesh vertices,
+`TrackStylePreset`, `TrackGeometryFamily`, visual wheel assets, and materials.
+The same representation can describe tubular, central-spine/SingleRail-like,
+planar, formed-steel, wood, and hybrid layouts without a family-specific solver
+or geometric closest-point search against rendered rails.
+
+Each `BogieContactDefinition` contains a descriptive `BogieContactRole`
+(`Running`, `Guide`, or `Upstop`), a contact point in metres, and a unit contact
+normal. Both vectors use the existing travel-oriented Phase 2 bogie frame whose
+origin is the sampled bogie reference point and whose axes are +X forward and
+along the admissible rolling tangent, +Y lateral, and +Z up. A positive scalar
+`lambda_i` means the rail applies
+
+```text
+F_i = lambda_i n_i
+```
+
+to the bogie. The role never selects the normal or implies engagement; the
+authored normal is authoritative. Validation requires finite points, finite
+nonzero unit normals, valid roles, a bounded contact count, and negligible
+local-X normal components. The latter enforces Phase 10's frictionless,
+tangent-free normal-force assumption rather than silently introducing traction,
+drive, or braking force. Directions are validated once as authored data and are
+not repeatedly normalized during evaluation.
+
+World contact points and normals are transformed only through the Phase 2
+travel-oriented bogie frame. For contact arm
+`r_i = p_contact,i - p_bogie_reference`, one scalar contact contribution has the
+world-space wrench basis
+
+```text
+w_i = [ n_i ; r_i cross n_i ]
+```
+
+Phase 9 supplies an aggregate resultant at that same bogie reference point, not
+a couple. The required Phase 10 wrench is therefore exactly
+`[R_bogie ; 0]`. `analyzeBogieContactFeasibility` separately tests the 3-by-N
+force system and the 6-by-N wrench system. This distinction detects geometry
+such as one offset contact that can reproduce a force but necessarily produces
+an unbalanced moment, while a symmetric pair can reproduce the centered force
+with zero net moment.
+
+The Phase 9 column-pivoted, twice-orthogonalized modified Gram-Schmidt QR is
+shared with these small systems. It reports numerical rank and a compact ratio
+of largest to smallest accepted pivot. Redundant contact columns and deficient
+column rank are allowed when the required force or wrench still lies in the
+span; those cases are feasible but their representative coefficient vectors are
+explicitly nonunique. Condition estimates above `1e5` report
+`IllConditioned`, and unstable representative coefficients are withheld.
+
+For the wrench solve, moment rows are scaled by the inverse of
+`max(1 m, maximum contact radius from the bogie reference)`. Published force and
+moment residuals remain in N and N*m. Independent tolerances use `1 mN + 0.01%`
+of their respective force and recovered-moment scales. The optional coefficient
+vectors are least-squares diagnostics only: they are not authoritative wheel
+loads, contact loads, or engagement decisions.
+
+Rigid wheel/rail normal contact is mechanically unilateral, but Phase 10 tests
+only unconstrained linear-span representability. A negative diagnostic
+coefficient is never interpreted as reverse engagement. Nonnegative feasibility,
+active-set engagement, running/guide/upstop load allocation, individual wheel
+loads, gaps, preload, hysteresis, suspension/compliance, friction/slip, contact
+patches, and derailment behavior remain deferred to Phase 11 or later. An empty
+authored contact set reports `NoContacts`; it never falls back to the Phase 9
+ideal reaction plane as fabricated contact geometry.
+
 ## Planned systems
 
 The following are current roadmap areas, not implemented capabilities or fixed
@@ -1119,7 +1188,7 @@ architectural commitments:
 - supports, foundations, and track/support attachment hardware (the Support Workspace remains an
   unfinished disabled shell);
 - connector compliance, slack, springs, damping, and train whip;
-- wheel/rail contact geometry, running/guide/upstop wheel reactions,
+- unilateral wheel/rail engagement, running/guide/upstop wheel reactions,
   suspension, and full bogie load distribution;
 - operational lifts, transport tires, brakes, launches, and stations;
 - storage, blocks, occupancy/reservations, dispatch, switches, transfer tables,

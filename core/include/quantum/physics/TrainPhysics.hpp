@@ -52,6 +52,14 @@ namespace quantum::physics
         1.0e-4;
     inline constexpr double bogieReactionRankRelativeTolerance = 1.0e-10;
     inline constexpr double bogieReactionMaximumConditionEstimate = 1.0e5;
+    inline constexpr double bogieContactForceAbsoluteToleranceNewtons =
+        1.0e-3;
+    inline constexpr double bogieContactForceRelativeTolerance = 1.0e-4;
+    inline constexpr double bogieContactMomentAbsoluteToleranceNewtonMeters =
+        1.0e-3;
+    inline constexpr double bogieContactMomentRelativeTolerance = 1.0e-4;
+    inline constexpr double bogieContactRankRelativeTolerance = 1.0e-10;
+    inline constexpr double bogieContactMaximumConditionEstimate = 1.0e5;
 
     struct TrainCarDefinition
     {
@@ -583,6 +591,9 @@ namespace quantum::physics
         TrackLocation location;
         glm::dvec3 worldPositionMeters{0.0};
         geometry::CurveFrame trackFrame;
+        // Travel-oriented Phase 2 bogie frame used by authored contact
+        // geometry: +X forward/tangent, +Y lateral, +Z up.
+        geometry::CurveFrame bogieFrame;
         BogieReactionRecoveryStatus status =
             BogieReactionRecoveryStatus::AggregateCarReactionUnavailable;
         std::optional<glm::dvec3> worldReactionNewtons;
@@ -659,6 +670,97 @@ namespace quantum::physics
         const PhysicsEnvironment& environment,
         const TrainDynamicsState& state,
         std::span<const ExternalForceApplication> externalForces = {});
+
+    enum class BogieContactFeasibilityStatus : std::uint8_t
+    {
+        Available,
+        NoContacts,
+        InvalidContactGeometry,
+        Phase9ReactionUnavailable,
+        ForceNotRepresentable,
+        WrenchNotRepresentable,
+        IllConditioned,
+        NonFiniteSystem
+    };
+
+    struct WorldBogieContact
+    {
+        std::size_t sourceContactIndex = 0;
+        BogieContactRole role = BogieContactRole::Running;
+        glm::dvec3 worldPositionMeters{0.0};
+        // Unit direction of positive rail-on-bogie force in world space.
+        glm::dvec3 worldNormal{0.0};
+    };
+
+    struct BogieContactFeasibilityResult
+    {
+        std::size_t carIndex = 0;
+        std::size_t bogieDefinitionIndex = 0;
+        BogieRole role = BogieRole::Front;
+        BogieReactionRecoveryStatus phase9ReactionStatus =
+            BogieReactionRecoveryStatus::AggregateCarReactionUnavailable;
+        BogieContactFeasibilityStatus status =
+            BogieContactFeasibilityStatus::Phase9ReactionUnavailable;
+        glm::dvec3 bogieReferenceWorldPositionMeters{0.0};
+        std::optional<glm::dvec3> requiredWorldReactionNewtons;
+        // Phase 9 supplies a point resultant, so the required moment about
+        // bogieReferenceWorldPositionMeters is exactly zero.
+        glm::dvec3 requiredMomentNewtonMeters{0.0};
+        std::vector<WorldBogieContact> contacts;
+
+        bool forceSpanFeasible = false;
+        bool wrenchSpanFeasible = false;
+        std::size_t forceRank = 0;
+        std::size_t wrenchRank = 0;
+        std::optional<double> forceConditionEstimate;
+        std::optional<double> wrenchConditionEstimate;
+        bool forceRepresentativeUnique = false;
+        bool wrenchRepresentativeUnique = false;
+        double momentRowScalePerMeter = 0.0;
+        std::optional<glm::dvec3> forceSpanResidualNewtons;
+        std::optional<glm::dvec3> wrenchForceResidualNewtons;
+        std::optional<glm::dvec3> wrenchMomentResidualNewtonMeters;
+        double forceToleranceNewtons = 0.0;
+        double momentToleranceNewtonMeters = 0.0;
+
+        // Least-squares diagnostics only. They are not engagement decisions,
+        // wheel loads, or authoritative contact-force allocations.
+        std::optional<std::vector<double>>
+            diagnosticForceSpanCoefficients;
+        std::optional<std::vector<double>>
+            diagnosticWrenchSpanCoefficients;
+        bool unilateralFeasibilityDeferred = true;
+
+        [[nodiscard]] std::size_t contactCount() const noexcept
+        {
+            return contacts.size();
+        }
+    };
+
+    struct BogieContactFeasibilityAnalysis
+    {
+        BogieReactionAnalysis phase9Reactions;
+        // Front then rear for each car, matching named Phase 9 role order.
+        std::vector<BogieContactFeasibilityResult> bogies;
+    };
+
+    // Analyzes one already recovered Phase 9 point resultant against its
+    // authored bogie contacts. Invalid authored contact definitions throw via
+    // the ordinary definition-validation policy.
+    [[nodiscard]] BogieContactFeasibilityResult
+        analyzeBogieContactFeasibility(
+            const BogieDefinition& definition,
+            const BogieReaction& phase9Reaction);
+
+    // Runs Phase 9 and then analyzes every front/rear bogie without adding
+    // engagement state or publishing contact loads.
+    [[nodiscard]] BogieContactFeasibilityAnalysis
+        evaluateBogieContactFeasibility(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const PhysicsEnvironment& environment,
+            const TrainDynamicsState& state,
+            std::span<const ExternalForceApplication> externalForces = {});
 
     struct TrainTelemetry
     {

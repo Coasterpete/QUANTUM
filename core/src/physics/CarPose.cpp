@@ -47,6 +47,19 @@ namespace quantum::physics
             return true;
         }
 
+        [[nodiscard]] bool validContactRole(
+            const BogieContactRole role) noexcept
+        {
+            switch (role)
+            {
+            case BogieContactRole::Running:
+            case BogieContactRole::Guide:
+            case BogieContactRole::Upstop:
+                return true;
+            }
+            return false;
+        }
+
         [[nodiscard]] double maximumAbsoluteElement(
             const glm::dmat3& value) noexcept
         {
@@ -414,6 +427,48 @@ namespace quantum::physics
             throw std::invalid_argument(
                 "Bogie reference position must be finite and expressed in metres.");
         }
+        if (definition.contacts.size() > maximumBogieContactCount)
+        {
+            throw std::invalid_argument(
+                "A bogie physics definition contains too many contacts.");
+        }
+        for (const BogieContactDefinition& contact : definition.contacts)
+        {
+            if (!validContactRole(contact.role))
+            {
+                throw std::invalid_argument(
+                    "Bogie contact role is invalid.");
+            }
+            if (!finite(contact.localPositionMeters))
+            {
+                throw std::invalid_argument(
+                    "Bogie contact position must be finite and expressed in bogie-local metres.");
+            }
+            if (!finite(contact.contactNormalLocal))
+            {
+                throw std::invalid_argument(
+                    "Bogie contact normal must be finite.");
+            }
+            const double normalLength = glm::length(
+                contact.contactNormalLocal);
+            if (!std::isfinite(normalLength) || normalLength <= directionalResolution)
+            {
+                throw std::invalid_argument(
+                    "Bogie contact normal must be nonzero.");
+            }
+            if (std::abs(normalLength - 1.0)
+                > bogieContactNormalUnitTolerance)
+            {
+                throw std::invalid_argument(
+                    "Bogie contact normal must be unit length.");
+            }
+            if (std::abs(contact.contactNormalLocal.x)
+                > bogieContactTangentComponentTolerance)
+            {
+                throw std::invalid_argument(
+                    "Frictionless bogie contact normals cannot contain a rolling-tangent component.");
+            }
+        }
     }
 
     void validateCarDefinition(const CarDefinition& definition)
@@ -622,6 +677,21 @@ namespace quantum::physics
     double BogiePose::bodyRelativeYawRadians() const noexcept
     {
         return bodyRelativeYawRadians_;
+    }
+
+    glm::dvec3 BogiePose::transformLocalPoint(
+        const glm::dvec3& localPointMeters) const noexcept
+    {
+        return transformPoint(
+            worldPositionMeters_, orientedFrame_, localPointMeters);
+    }
+
+    glm::dvec3 BogiePose::transformLocalDirection(
+        const glm::dvec3& localDirection) const noexcept
+    {
+        return localDirection.x * orientedFrame_.tangent
+            + localDirection.y * orientedFrame_.lateral
+            + localDirection.z * orientedFrame_.up;
     }
 
     CarPose::CarPose(

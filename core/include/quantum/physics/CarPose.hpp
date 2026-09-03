@@ -8,10 +8,35 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace quantum::physics
 {
+    inline constexpr std::size_t maximumBogieContactCount = 32;
+    inline constexpr double bogieContactNormalUnitTolerance = 1.0e-10;
+    inline constexpr double bogieContactTangentComponentTolerance = 1.0e-10;
+
+    // Contact roles describe intended mechanical function only. The authored
+    // normal remains authoritative; roles do not imply direction or engagement.
+    enum class BogieContactRole : std::uint8_t
+    {
+        Running,
+        Guide,
+        Upstop
+    };
+
+    // Rigid physics contact geometry in the travel-oriented bogie frame:
+    // +X forward/rolling tangent, +Y lateral, +Z up. A positive scalar lambda
+    // applies lambda * contactNormalLocal from the rail to the bogie. Contacts
+    // are intrinsically unilateral, but engagement and lambda >= 0 are deferred.
+    struct BogieContactDefinition
+    {
+        BogieContactRole role = BogieContactRole::Running;
+        glm::dvec3 localPositionMeters{0.0};
+        glm::dvec3 contactNormalLocal{0.0};
+    };
+
     // Car-local physical coordinates use +X forward, +Y lateral, and +Z up.
     // A bogie's X coordinate selects its nominal station offset. Its complete
     // position identifies the corresponding body reference point, allowing
@@ -20,6 +45,7 @@ namespace quantum::physics
     struct BogieDefinition
     {
         glm::dvec3 referencePositionMeters{0.0};
+        std::vector<BogieContactDefinition> contacts;
     };
 
     // Reusable authored vehicle data. Bogies use contiguous variable-length
@@ -95,6 +121,10 @@ namespace quantum::physics
         [[nodiscard]] const geometry::CurveFrame& orientedFrame() const noexcept;
         [[nodiscard]] const glm::dquat& bodyRelativeOrientation() const noexcept;
         [[nodiscard]] double bodyRelativeYawRadians() const noexcept;
+        [[nodiscard]] glm::dvec3 transformLocalPoint(
+            const glm::dvec3& localPointMeters) const noexcept;
+        [[nodiscard]] glm::dvec3 transformLocalDirection(
+            const glm::dvec3& localDirection) const noexcept;
 
     private:
         BogiePose(

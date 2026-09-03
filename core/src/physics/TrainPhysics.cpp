@@ -42,39 +42,51 @@ namespace quantum::physics
                 && std::isfinite(value.z);
         }
 
-        using BogieReactionMatrix = std::array<std::array<double, 4>, 6>;
-        using BogieReactionRightHandSide = std::array<double, 6>;
+        inline constexpr std::size_t maximumSmallSystemRowCount = 6;
+        using SmallSystemColumn =
+            std::array<double, maximumSmallSystemRowCount>;
 
-        struct BogieReactionLeastSquaresResult
+        struct SmallLeastSquaresResult
         {
-            std::array<double, 4> solution{0.0};
+            std::array<double, maximumBogieContactCount> solution{0.0};
             std::size_t rank = 0;
             double conditionEstimate =
                 std::numeric_limits<double>::infinity();
             bool finite = false;
         };
 
-        [[nodiscard]] BogieReactionLeastSquaresResult
-            solveBogieReactionLeastSquares(
-                const BogieReactionMatrix& matrix,
-                const BogieReactionRightHandSide& rightHandSide)
+        // Shared deterministic rank-revealing QR for the Phase 9 6x4 solve
+        // and the Phase 10 3xN/6xN contact diagnostics. Redundant columns are
+        // allowed: a basic representative sets non-pivot coordinates to zero.
+        [[nodiscard]] SmallLeastSquaresResult solveSmallLeastSquares(
+            const std::span<const SmallSystemColumn> inputColumns,
+            const std::span<const double> rightHandSide,
+            const double relativeRankTolerance)
         {
-            constexpr std::size_t rowCount = 6;
-            constexpr std::size_t columnCount = 4;
-            std::array<std::array<double, rowCount>, columnCount> columns{};
-            std::array<std::array<double, rowCount>, columnCount> orthonormal{};
-            std::array<std::array<double, columnCount>, columnCount> upper{};
-            std::array<std::size_t, columnCount> permutation{0, 1, 2, 3};
-
-            for (std::size_t row = 0; row < rowCount; ++row)
+            const std::size_t rowCount = rightHandSide.size();
+            const std::size_t columnCount = inputColumns.size();
+            if (rowCount == 0 || rowCount > maximumSmallSystemRowCount
+                || columnCount == 0
+                || columnCount > maximumBogieContactCount
+                || !std::isfinite(relativeRankTolerance)
+                || relativeRankTolerance < 0.0)
             {
-                if (!std::isfinite(rightHandSide[row]))
+                return {};
+            }
+
+            std::array<SmallSystemColumn, maximumBogieContactCount> columns{};
+            std::array<SmallSystemColumn, maximumSmallSystemRowCount>
+                orthonormal{};
+            std::array<
+                std::array<double, maximumBogieContactCount>,
+                maximumSmallSystemRowCount> upper{};
+            std::array<std::size_t, maximumBogieContactCount> permutation{};
+            for (std::size_t column = 0; column < columnCount; ++column)
+            {
+                permutation[column] = column;
+                for (std::size_t row = 0; row < rowCount; ++row)
                 {
-                    return {};
-                }
-                for (std::size_t column = 0; column < columnCount; ++column)
-                {
-                    const double value = matrix[row][column];
+                    const double value = inputColumns[column][row];
                     if (!std::isfinite(value))
                     {
                         return {};
@@ -82,11 +94,19 @@ namespace quantum::physics
                     columns[column][row] = value;
                 }
             }
+            for (const double value : rightHandSide)
+            {
+                if (!std::isfinite(value))
+                {
+                    return {};
+                }
+            }
 
             double largestPivot = 0.0;
             double smallestPivot = std::numeric_limits<double>::infinity();
             std::size_t rank = 0;
-            for (std::size_t step = 0; step < columnCount; ++step)
+            const std::size_t maximumRank = std::min(rowCount, columnCount);
+            for (std::size_t step = 0; step < maximumRank; ++step)
             {
                 std::size_t pivotColumn = step;
                 double pivotNormSquared = -1.0;
@@ -95,9 +115,10 @@ namespace quantum::physics
                     ++column)
                 {
                     double normSquared = 0.0;
-                    for (const double value : columns[column])
+                    for (std::size_t row = 0; row < rowCount; ++row)
                     {
-                        normSquared += value * value;
+                        normSquared += columns[column][row]
+                            * columns[column][row];
                     }
                     if (!std::isfinite(normSquared))
                     {
@@ -134,8 +155,7 @@ namespace quantum::physics
                 {
                     largestPivot = pivot;
                 }
-                const double rankTolerance =
-                    bogieReactionRankRelativeTolerance
+                const double rankTolerance = relativeRankTolerance
                     * std::max(1.0, largestPivot);
                 if (pivot <= rankTolerance)
                 {
@@ -166,9 +186,8 @@ namespace quantum::physics
                             * orthonormal[step][row];
                     }
 
-                    // A second orthogonalization pass keeps this tiny solve
-                    // deterministic and stable without introducing a matrix
-                    // dependency solely for four reaction coordinates.
+                    // Reorthogonalization keeps these tiny systems stable and
+                    // deterministic without adding another matrix dependency.
                     double correction = 0.0;
                     for (std::size_t row = 0; row < rowCount; ++row)
                     {
@@ -185,9 +204,9 @@ namespace quantum::physics
                 }
             }
 
-            BogieReactionLeastSquaresResult result;
+            SmallLeastSquaresResult result;
             result.rank = rank;
-            if (rank != columnCount || largestPivot <= 0.0
+            if (rank == 0 || largestPivot <= 0.0
                 || !std::isfinite(smallestPivot)
                 || smallestPivot <= 0.0)
             {
@@ -195,9 +214,11 @@ namespace quantum::physics
             }
 
             result.conditionEstimate = largestPivot / smallestPivot;
-            std::array<double, columnCount> permutedSolution{0.0};
-            std::array<double, columnCount> projectedRightHandSide{0.0};
-            for (std::size_t column = 0; column < columnCount; ++column)
+            std::array<double, maximumSmallSystemRowCount>
+                permutedSolution{};
+            std::array<double, maximumSmallSystemRowCount>
+                projectedRightHandSide{};
+            for (std::size_t column = 0; column < rank; ++column)
             {
                 for (std::size_t row = 0; row < rowCount; ++row)
                 {
@@ -205,11 +226,11 @@ namespace quantum::physics
                         orthonormal[column][row] * rightHandSide[row];
                 }
             }
-            for (std::size_t reverse = columnCount; reverse-- > 0;)
+            for (std::size_t reverse = rank; reverse-- > 0;)
             {
                 double value = projectedRightHandSide[reverse];
                 for (std::size_t column = reverse + 1;
-                    column < columnCount;
+                    column < rank;
                     ++column)
                 {
                     value -= upper[reverse][column]
@@ -221,7 +242,7 @@ namespace quantum::physics
                     return result;
                 }
             }
-            for (std::size_t column = 0; column < columnCount; ++column)
+            for (std::size_t column = 0; column < rank; ++column)
             {
                 result.solution[permutation[column]] =
                     permutedSolution[column];
@@ -2946,6 +2967,7 @@ namespace quantum::physics
                 pose.location(),
                 pose.worldPositionMeters(),
                 pose.trackFrame(),
+                pose.orientedFrame(),
                 status,
                 std::nullopt,
                 std::nullopt,
@@ -3350,20 +3372,20 @@ namespace quantum::physics
                     glm::cross(rearArm, bases[2]),
                     glm::cross(rearArm, bases[3])
                 };
-                BogieReactionMatrix matrix{};
+                std::array<SmallSystemColumn, 4> matrixColumns{};
                 for (std::size_t column = 0; column < bases.size(); ++column)
                 {
-                    matrix[0][column] = bases[column].x;
-                    matrix[1][column] = bases[column].y;
-                    matrix[2][column] = bases[column].z;
-                    matrix[3][column] = momentRowScale
+                    matrixColumns[column][0] = bases[column].x;
+                    matrixColumns[column][1] = bases[column].y;
+                    matrixColumns[column][2] = bases[column].z;
+                    matrixColumns[column][3] = momentRowScale
                         * momentCoefficients[column].x;
-                    matrix[4][column] = momentRowScale
+                    matrixColumns[column][4] = momentRowScale
                         * momentCoefficients[column].y;
-                    matrix[5][column] = momentRowScale
+                    matrixColumns[column][5] = momentRowScale
                         * momentCoefficients[column].z;
                 }
-                const BogieReactionRightHandSide rightHandSide{
+                const std::array<double, 6> rightHandSide{
                     reaction.x,
                     reaction.y,
                     reaction.z,
@@ -3371,15 +3393,17 @@ namespace quantum::physics
                     momentRowScale * requiredReactionMoment.y,
                     momentRowScale * requiredReactionMoment.z
                 };
-                const BogieReactionLeastSquaresResult solve =
-                    solveBogieReactionLeastSquares(matrix, rightHandSide);
+                const SmallLeastSquaresResult solve = solveSmallLeastSquares(
+                    matrixColumns,
+                    rightHandSide,
+                    bogieReactionRankRelativeTolerance);
                 solveRank = solve.rank;
                 if (std::isfinite(solve.conditionEstimate))
                 {
                     conditionEstimate = solve.conditionEstimate;
                 }
 
-                if (!solve.finite)
+                if (!solve.finite || solve.rank < 4)
                 {
                     bogieStatus = solve.rank < 4
                         ? BogieReactionRecoveryStatus::RankDeficient
@@ -3502,6 +3526,335 @@ namespace quantum::physics
             kinematics->finiteDifferenceStepMeters,
             kinematics->finiteDifferenceKind
         };
+    }
+
+    BogieContactFeasibilityResult analyzeBogieContactFeasibility(
+        const BogieDefinition& definition,
+        const BogieReaction& phase9Reaction)
+    {
+        validateBogieDefinition(definition);
+
+        BogieContactFeasibilityResult result;
+        result.carIndex = phase9Reaction.carIndex;
+        result.bogieDefinitionIndex = phase9Reaction.bogieDefinitionIndex;
+        result.role = phase9Reaction.role;
+        result.phase9ReactionStatus = phase9Reaction.status;
+        result.bogieReferenceWorldPositionMeters =
+            phase9Reaction.worldPositionMeters;
+        result.requiredWorldReactionNewtons =
+            phase9Reaction.worldReactionNewtons;
+        result.contacts.reserve(definition.contacts.size());
+
+        const geometry::CurveFrame& frame = phase9Reaction.bogieFrame;
+        const bool validFrame = finite(phase9Reaction.worldPositionMeters)
+            && finite(frame.tangent)
+            && finite(frame.lateral)
+            && finite(frame.up)
+            && std::abs(glm::length(frame.tangent) - 1.0) <= 1.0e-10
+            && std::abs(glm::length(frame.lateral) - 1.0) <= 1.0e-10
+            && std::abs(glm::length(frame.up) - 1.0) <= 1.0e-10
+            && std::abs(glm::dot(frame.tangent, frame.lateral)) <= 1.0e-10
+            && std::abs(glm::dot(frame.tangent, frame.up)) <= 1.0e-10
+            && std::abs(glm::dot(frame.lateral, frame.up)) <= 1.0e-10;
+        if (!validFrame)
+        {
+            result.status =
+                BogieContactFeasibilityStatus::InvalidContactGeometry;
+            return result;
+        }
+
+        const auto transformDirection = [&frame](
+            const glm::dvec3& local) noexcept
+        {
+            return local.x * frame.tangent
+                + local.y * frame.lateral
+                + local.z * frame.up;
+        };
+        std::array<glm::dvec3, maximumBogieContactCount>
+            contactArmsWorld{};
+        for (std::size_t contactIndex = 0;
+            contactIndex < definition.contacts.size();
+            ++contactIndex)
+        {
+            const BogieContactDefinition& contact =
+                definition.contacts[contactIndex];
+            const glm::dvec3 worldOffset = transformDirection(
+                contact.localPositionMeters);
+            contactArmsWorld[contactIndex] = worldOffset;
+            const glm::dvec3 worldPosition =
+                phase9Reaction.worldPositionMeters + worldOffset;
+            const glm::dvec3 worldNormal = transformDirection(
+                contact.contactNormalLocal);
+            if (!finite(worldOffset)
+                || !finite(worldPosition)
+                || !finite(worldNormal)
+                || std::abs(glm::length(worldNormal) - 1.0) > 1.0e-9
+                || std::abs(glm::dot(worldNormal, frame.tangent))
+                    > 1.0e-9)
+            {
+                result.status =
+                    BogieContactFeasibilityStatus::InvalidContactGeometry;
+                result.contacts.clear();
+                return result;
+            }
+            result.contacts.push_back({
+                contactIndex,
+                contact.role,
+                worldPosition,
+                worldNormal
+            });
+        }
+
+        if (result.contacts.empty())
+        {
+            result.status = BogieContactFeasibilityStatus::NoContacts;
+            return result;
+        }
+        if (phase9Reaction.status != BogieReactionRecoveryStatus::Available
+            || !phase9Reaction.worldReactionNewtons)
+        {
+            result.status =
+                BogieContactFeasibilityStatus::Phase9ReactionUnavailable;
+            return result;
+        }
+
+        const glm::dvec3 requiredReaction =
+            *phase9Reaction.worldReactionNewtons;
+        if (!finite(requiredReaction))
+        {
+            result.status = BogieContactFeasibilityStatus::NonFiniteSystem;
+            return result;
+        }
+
+        const std::size_t contactCount = result.contacts.size();
+        std::array<SmallSystemColumn, maximumBogieContactCount>
+            forceColumns{};
+        std::array<SmallSystemColumn, maximumBogieContactCount>
+            wrenchColumns{};
+        double characteristicLengthMeters = 1.0;
+        for (std::size_t contactIndex = 0;
+            contactIndex < contactCount;
+            ++contactIndex)
+        {
+            const WorldBogieContact& contact = result.contacts[contactIndex];
+            characteristicLengthMeters = std::max(
+                characteristicLengthMeters,
+                glm::length(contactArmsWorld[contactIndex]));
+            forceColumns[contactIndex][0] = contact.worldNormal.x;
+            forceColumns[contactIndex][1] = contact.worldNormal.y;
+            forceColumns[contactIndex][2] = contact.worldNormal.z;
+        }
+        if (!std::isfinite(characteristicLengthMeters)
+            || characteristicLengthMeters <= 0.0)
+        {
+            result.status = BogieContactFeasibilityStatus::NonFiniteSystem;
+            return result;
+        }
+        result.momentRowScalePerMeter = 1.0
+            / characteristicLengthMeters;
+
+        for (std::size_t contactIndex = 0;
+            contactIndex < contactCount;
+            ++contactIndex)
+        {
+            const WorldBogieContact& contact = result.contacts[contactIndex];
+            const glm::dvec3 moment = glm::cross(
+                contactArmsWorld[contactIndex], contact.worldNormal);
+            if (!finite(moment))
+            {
+                result.status =
+                    BogieContactFeasibilityStatus::NonFiniteSystem;
+                return result;
+            }
+            wrenchColumns[contactIndex] = forceColumns[contactIndex];
+            wrenchColumns[contactIndex][3] =
+                result.momentRowScalePerMeter * moment.x;
+            wrenchColumns[contactIndex][4] =
+                result.momentRowScalePerMeter * moment.y;
+            wrenchColumns[contactIndex][5] =
+                result.momentRowScalePerMeter * moment.z;
+        }
+
+        const std::array<double, 3> forceRightHandSide{
+            requiredReaction.x,
+            requiredReaction.y,
+            requiredReaction.z
+        };
+        const std::array<double, 6> wrenchRightHandSide{
+            requiredReaction.x,
+            requiredReaction.y,
+            requiredReaction.z,
+            0.0,
+            0.0,
+            0.0
+        };
+        const SmallLeastSquaresResult forceSolve = solveSmallLeastSquares(
+            std::span<const SmallSystemColumn>{
+                forceColumns.data(), contactCount},
+            forceRightHandSide,
+            bogieContactRankRelativeTolerance);
+        const SmallLeastSquaresResult wrenchSolve = solveSmallLeastSquares(
+            std::span<const SmallSystemColumn>{
+                wrenchColumns.data(), contactCount},
+            wrenchRightHandSide,
+            bogieContactRankRelativeTolerance);
+        result.forceRank = forceSolve.rank;
+        result.wrenchRank = wrenchSolve.rank;
+        if (std::isfinite(forceSolve.conditionEstimate))
+        {
+            result.forceConditionEstimate = forceSolve.conditionEstimate;
+        }
+        if (std::isfinite(wrenchSolve.conditionEstimate))
+        {
+            result.wrenchConditionEstimate = wrenchSolve.conditionEstimate;
+        }
+        if (!forceSolve.finite || !wrenchSolve.finite)
+        {
+            result.status = BogieContactFeasibilityStatus::NonFiniteSystem;
+            return result;
+        }
+
+        glm::dvec3 forceOnlyRecovered{0.0};
+        glm::dvec3 wrenchRecoveredForce{0.0};
+        glm::dvec3 wrenchRecoveredMoment{0.0};
+        double maximumMomentContribution = 0.0;
+        std::vector<double> forceCoefficients(contactCount, 0.0);
+        std::vector<double> wrenchCoefficients(contactCount, 0.0);
+        for (std::size_t contactIndex = 0;
+            contactIndex < contactCount;
+            ++contactIndex)
+        {
+            const double forceCoefficient =
+                forceSolve.solution[contactIndex];
+            const double wrenchCoefficient =
+                wrenchSolve.solution[contactIndex];
+            forceCoefficients[contactIndex] = forceCoefficient;
+            wrenchCoefficients[contactIndex] = wrenchCoefficient;
+            forceOnlyRecovered += forceCoefficient
+                * result.contacts[contactIndex].worldNormal;
+            const glm::dvec3 wrenchForce = wrenchCoefficient
+                * result.contacts[contactIndex].worldNormal;
+            wrenchRecoveredForce += wrenchForce;
+            const glm::dvec3 moment = glm::cross(
+                contactArmsWorld[contactIndex],
+                wrenchForce);
+            wrenchRecoveredMoment += moment;
+            maximumMomentContribution = std::max(
+                maximumMomentContribution, glm::length(moment));
+        }
+
+        const glm::dvec3 forceSpanResidual = forceOnlyRecovered
+            - requiredReaction;
+        const glm::dvec3 wrenchForceResidual = wrenchRecoveredForce
+            - requiredReaction;
+        const glm::dvec3 wrenchMomentResidual = wrenchRecoveredMoment;
+        const double forceScale = std::max({
+            1.0,
+            glm::length(requiredReaction),
+            glm::length(forceOnlyRecovered),
+            glm::length(wrenchRecoveredForce)
+        });
+        const double momentScale = std::max(
+            1.0, maximumMomentContribution);
+        result.forceToleranceNewtons =
+            bogieContactForceAbsoluteToleranceNewtons
+            + bogieContactForceRelativeTolerance * forceScale;
+        result.momentToleranceNewtonMeters =
+            bogieContactMomentAbsoluteToleranceNewtonMeters
+            + bogieContactMomentRelativeTolerance * momentScale;
+        if (!finite(forceOnlyRecovered)
+            || !finite(wrenchRecoveredForce)
+            || !finite(wrenchRecoveredMoment)
+            || !finite(forceSpanResidual)
+            || !finite(wrenchForceResidual)
+            || !finite(wrenchMomentResidual)
+            || !std::isfinite(forceScale)
+            || !std::isfinite(momentScale)
+            || !std::isfinite(result.forceToleranceNewtons)
+            || !std::isfinite(result.momentToleranceNewtonMeters))
+        {
+            result.status = BogieContactFeasibilityStatus::NonFiniteSystem;
+            return result;
+        }
+
+        result.forceSpanResidualNewtons = forceSpanResidual;
+        result.wrenchForceResidualNewtons = wrenchForceResidual;
+        result.wrenchMomentResidualNewtonMeters = wrenchMomentResidual;
+        result.forceSpanFeasible = glm::length(forceSpanResidual)
+            <= result.forceToleranceNewtons;
+        result.wrenchSpanFeasible =
+            glm::length(wrenchForceResidual)
+                <= result.forceToleranceNewtons
+            && glm::length(wrenchMomentResidual)
+                <= result.momentToleranceNewtonMeters;
+        result.forceRepresentativeUnique = result.forceSpanFeasible
+            && forceSolve.rank == contactCount;
+        result.wrenchRepresentativeUnique = result.wrenchSpanFeasible
+            && wrenchSolve.rank == contactCount;
+
+        if (forceSolve.conditionEstimate
+                <= bogieContactMaximumConditionEstimate)
+        {
+            result.diagnosticForceSpanCoefficients =
+                std::move(forceCoefficients);
+        }
+        if (wrenchSolve.conditionEstimate
+                <= bogieContactMaximumConditionEstimate)
+        {
+            result.diagnosticWrenchSpanCoefficients =
+                std::move(wrenchCoefficients);
+        }
+
+        if (!result.forceSpanFeasible)
+        {
+            result.status =
+                BogieContactFeasibilityStatus::ForceNotRepresentable;
+        }
+        else if (!result.wrenchSpanFeasible)
+        {
+            result.status =
+                BogieContactFeasibilityStatus::WrenchNotRepresentable;
+        }
+        else if (forceSolve.conditionEstimate
+                    > bogieContactMaximumConditionEstimate
+            || wrenchSolve.conditionEstimate
+                    > bogieContactMaximumConditionEstimate)
+        {
+            result.status = BogieContactFeasibilityStatus::IllConditioned;
+        }
+        else
+        {
+            result.status = BogieContactFeasibilityStatus::Available;
+        }
+        return result;
+    }
+
+    BogieContactFeasibilityAnalysis evaluateBogieContactFeasibility(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrainDynamicsState& state,
+        const std::span<const ExternalForceApplication> externalForces)
+    {
+        BogieReactionAnalysis phase9 = evaluateBogieReactions(
+            track, definition, environment, state, externalForces);
+        std::vector<BogieContactFeasibilityResult> bogies;
+        bogies.reserve(phase9.cars.size() * 2);
+        for (const CarTrackReaction& car : phase9.cars)
+        {
+            const CarDefinition& carDefinition =
+                definition.cars.at(car.carIndex).car;
+            const auto append = [&bogies, &carDefinition](
+                const BogieReaction& reaction)
+            {
+                bogies.push_back(analyzeBogieContactFeasibility(
+                    carDefinition.bogies.at(reaction.bogieDefinitionIndex),
+                    reaction));
+            };
+            append(car.frontBogie);
+            append(car.rearBogie);
+        }
+        return {std::move(phase9), std::move(bogies)};
     }
 
     TrainStepResult stepTrain(
