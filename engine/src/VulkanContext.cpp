@@ -2613,6 +2613,63 @@ namespace quantum::renderer
         trackVerticesPerCurve_ = trackVerticesPerCurve;
     }
 
+    void VulkanContext::updateTrainPreviewVertices(
+        const std::span<const LineVertex> vertices)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update train preview vertices before initialization."
+            );
+        }
+
+        if (vertices.empty())
+        {
+            trainPreviewVertexCount_ = 0;
+            return;
+        }
+
+        const VkDeviceSize size = sizeof(LineVertex) * vertices.size();
+        if (trainPreviewVertexBuffer_ != VK_NULL_HANDLE && size <= trainPreviewVertexCapacity_)
+        {
+            waitForFrameCompletion();
+            writeHostVisibleVertexBuffer(
+                allocator_,
+                trainPreviewVertexAllocation_,
+                trainPreviewVertexMappedData_,
+                trainPreviewVertexCapacity_,
+                vertices
+            );
+            trainPreviewVertexCount_ = static_cast<std::uint32_t>(vertices.size());
+            return;
+        }
+
+        const CreatedVertexBuffer created =
+            createHostVisibleVertexBuffer(allocator_, vertices);
+        try
+        {
+            waitForFrameCompletion();
+        }
+        catch (...)
+        {
+            vmaDestroyBuffer(
+                allocator_, created.buffer, created.allocation);
+            throw;
+        }
+        if (trainPreviewVertexBuffer_ != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(
+                allocator_,
+                trainPreviewVertexBuffer_,
+                trainPreviewVertexAllocation_);
+        }
+        trainPreviewVertexBuffer_ = created.buffer;
+        trainPreviewVertexAllocation_ = created.allocation;
+        trainPreviewVertexMappedData_ = created.mappedData;
+        trainPreviewVertexCapacity_ = created.capacity;
+        trainPreviewVertexCount_ = created.vertexCount;
+    }
+
     StaticMeshGpuHandle VulkanContext::uploadStaticMeshOnce(
         const StaticMeshAsset& asset)
     {
@@ -3343,6 +3400,35 @@ namespace quantum::renderer
                 }
             }
 
+            if (trainPreviewVertexCount_ > 0)
+            {
+                constexpr std::array<float, 4> noHighlight{
+                    1.0F, 0.82F, 0.12F, 0.0F
+                };
+                vkCmdPushConstants(
+                    commandBuffer_,
+                    pipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT,
+                    sizeof(viewportViewProjection_),
+                    sizeof(noHighlight),
+                    noHighlight.data()
+                );
+                vkCmdBindVertexBuffers(
+                    commandBuffer_,
+                    0,
+                    1,
+                    &trainPreviewVertexBuffer_,
+                    &vertexOffset
+                );
+                vkCmdDraw(
+                    commandBuffer_,
+                    trainPreviewVertexCount_,
+                    1,
+                    0,
+                    0
+                );
+            }
+
             vkCmdEndRendering(commandBuffer_);
 
             VkImageMemoryBarrier toShaderReadBarrier{};
@@ -3934,6 +4020,19 @@ namespace quantum::renderer
             trackCurveVertexMappedData_ = nullptr;
             trackCurveVertexCapacity_ = 0;
             trackCurveVertexCount_ = 0;
+
+            if (trainPreviewVertexBuffer_ != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(
+                    allocator_,
+                    trainPreviewVertexBuffer_,
+                    trainPreviewVertexAllocation_);
+                trainPreviewVertexBuffer_ = VK_NULL_HANDLE;
+                trainPreviewVertexAllocation_ = VK_NULL_HANDLE;
+            }
+            trainPreviewVertexMappedData_ = nullptr;
+            trainPreviewVertexCapacity_ = 0;
+            trainPreviewVertexCount_ = 0;
 
             if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE)
             {

@@ -107,6 +107,25 @@ namespace quantum::physics
 
     class CarPose;
 
+    namespace detail
+    {
+        // Internal seam for train solvers that have already validated the
+        // complete immutable TrainDefinition before evaluating candidates.
+        [[nodiscard]] CarPose solveCarPoseForValidatedDefinition(
+            const CompiledPhysicsTrack& track,
+            const CarDefinition& definition,
+            const TrackLocation& referenceLocation,
+            const CarLoadout& loadout);
+
+        // Connector root searches need only this point for each candidate;
+        // constructing complete diagnostic poses there is redundant.
+        [[nodiscard]] glm::dvec3
+        solveFrontHitchPositionForValidatedDefinition(
+            const CompiledPhysicsTrack& track,
+            const CarDefinition& definition,
+            const TrackLocation& referenceLocation);
+    }
+
     // Read-only solved bogie state. trackFrame() is the canonical increasing-
     // station frame returned by CompiledPhysicsTrack. orientedFrame() faces
     // the car's travel direction; on reverse travel its tangent and lateral
@@ -145,6 +164,11 @@ namespace quantum::physics
         double bodyRelativeYawRadians_ = 0.0;
 
         friend CarPose solveCarPose(
+            const CompiledPhysicsTrack&,
+            const CarDefinition&,
+            const TrackLocation&,
+            const CarLoadout&);
+        friend CarPose detail::solveCarPoseForValidatedDefinition(
             const CompiledPhysicsTrack&,
             const CarDefinition&,
             const TrackLocation&,
@@ -199,6 +223,11 @@ namespace quantum::physics
         std::array<BogiePose, 2> bogies_;
 
         friend CarPose solveCarPose(
+            const CompiledPhysicsTrack&,
+            const CarDefinition&,
+            const TrackLocation&,
+            const CarLoadout&);
+        friend CarPose detail::solveCarPoseForValidatedDefinition(
             const CompiledPhysicsTrack&,
             const CarDefinition&,
             const TrackLocation&,
