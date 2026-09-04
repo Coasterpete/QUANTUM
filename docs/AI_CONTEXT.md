@@ -36,9 +36,10 @@ retains architectural and product direction.
 
 Current major focus:
 
-Native track-constrained roller-coaster vehicle physics.
+Application integration of the completed Phase 1–11 native
+track-constrained roller-coaster vehicle physics.
 
-The physics system is being developed incrementally in numbered phases.
+Simulation Preview 1 now exposes that physics through a small editor preview.
 
 Do not skip ahead into later systems unless explicitly requested.
 
@@ -173,20 +174,33 @@ Implemented:
 Phase 11 representative coefficients are not claimed to be true individual
 wheel loads when rigid contact makes the allocation nonunique or undetermined.
 
+### Simulation Preview 1 — Visible train playback
+
+Implemented:
+- editor-owned preview state with a temporary four-car train
+- authored-track compilation through the existing Core physics path
+- deterministic fixed-step Play / Pause / Reset behavior
+- diagnostic car, bogie, and connector geometry from `TrainPose`
+- compact playback-state and speed telemetry
+- safe reset/rebuild on accepted track or document changes
+- open-track endpoint pause and circuit wrapping through Core semantics
+
 ---
 
 ## Current Verified Baseline
 
 Current physics baseline:
 
-Phase 11 complete.
+Phase 11 and Simulation Preview 1 complete.
 
-At the completion of Phase 11:
+At the completion of Simulation Preview 1:
 
-- focused Phase 1–11 regression: 9/9 passed
-- complete Debug build: passed
-- full CTest: 61/61 passed
+- focused Phase 1–11 plus preview regression: 10/10 passed
+- QuantumCore, QuantumEngine, and QUANTUM Debug builds: passed
+- full CTest: 62/62 passed
 - `git diff --check`: passed
+- GUI launch/liveness smoke: passed; interactive input verification requires a
+  native-window-capable session
 
 Do not treat these counts as permanently authoritative after subsequent
 changes. Run the current test suite.
@@ -195,17 +209,11 @@ changes. Run the current test suite.
 
 ## Recommended Next Milestone
 
-Pause additional invisible contact-physics work and expose the existing
-simulation in a small application preview:
+Simulation Preview 2: add an optional, compact diagnostic overlay for the
+existing aggregate bogie-reaction and contact-allocation results.
 
-- visible multi-car train using current car and bogie poses
-- Play / Pause / Reset
-- train speed and basic physics telemetry
-- optional aggregate reaction/contact-allocation debugging
-
-Keep this preview incremental. Do not add suspension, friction, detailed wheel
-load sharing, operations, or a new rendering/track-family dependency as part of
-the preview milestone.
+Keep it read-only and incremental. Do not add suspension, friction, detailed
+wheel-load sharing, operations, or a new rendering/track-family dependency.
 
 ---
 
@@ -335,10 +343,9 @@ Rendering:
 - optional per-car appearance overrides
 
 Simulation UI:
-- visible train playback
-- Play/Pause/Reset
-- physics telemetry
-- force/contact debug overlays
+- force/contact debug overlays beyond the basic preview
+- production vehicle assets and appearance authoring
+- POV/chase/cinematic cameras
 
 ---
 

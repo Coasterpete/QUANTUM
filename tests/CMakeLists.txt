@@ -66,6 +66,32 @@ set_target_properties(QuantumCoreRotationalPhysicsTests PROPERTIES CXX_EXTENSION
 add_test(NAME QuantumCore.RotationalPhysics COMMAND QuantumCoreRotationalPhysicsTests)
 set_tests_properties(QuantumCore.RotationalPhysics PROPERTIES LABELS "core;coaster;physics")
 
+add_executable(
+    QuantumEditorSimulationPreviewTests
+    SimulationPreviewTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+)
+target_include_directories(
+    QuantumEditorSimulationPreviewTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/include
+)
+target_link_libraries(
+    QuantumEditorSimulationPreviewTests
+    PRIVATE Quantum::Engine Quantum::Core
+)
+target_compile_features(
+    QuantumEditorSimulationPreviewTests PRIVATE cxx_std_23)
+set_target_properties(
+    QuantumEditorSimulationPreviewTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(
+    NAME QuantumEditor.SimulationPreview
+    COMMAND QuantumEditorSimulationPreviewTests
+)
+set_tests_properties(
+    QuantumEditor.SimulationPreview
+    PROPERTIES LABELS "editor;physics;simulation-preview"
+)
+
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)

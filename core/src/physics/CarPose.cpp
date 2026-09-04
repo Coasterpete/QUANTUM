@@ -398,6 +398,86 @@ namespace quantum::physics
             };
         }
 
+        struct SolvedCarGeometry
+        {
+            SampledBogie front;
+            SampledBogie rear;
+            geometry::CurveFrame bodyFrame;
+            glm::dvec3 bodyPositionMeters{0.0};
+            glm::dvec3 frontHitchPositionMeters{0.0};
+            glm::dvec3 rearHitchPositionMeters{0.0};
+        };
+
+        void requireFinitePoseValue(
+            const glm::dvec3& value,
+            const char* errorMessage);
+
+        [[nodiscard]] SolvedCarGeometry solveCarGeometry(
+            const CompiledPhysicsTrack& track,
+            const CarDefinition& definition,
+            const TrackLocation& referenceLocation)
+        {
+            if (definition.bogies.size() != 2)
+            {
+                throw std::invalid_argument(
+                    "The Phase 2 car pose solver supports exactly two bogies.");
+            }
+
+            const BogieDefinition* const bogies = definition.bogies.data();
+            const double firstX = bogies[0].referencePositionMeters.x;
+            const double secondX = bogies[1].referencePositionMeters.x;
+            if (std::abs(firstX - secondX) <= minimumBogieSeparationMeters)
+            {
+                throw std::invalid_argument(
+                    "The two bogies must have distinct longitudinal reference positions.");
+            }
+
+            const std::size_t frontIndex = firstX > secondX ? 0 : 1;
+            const std::size_t rearIndex = frontIndex == 0 ? 1 : 0;
+            const BogieDefinition& frontDefinition = bogies[frontIndex];
+            const BogieDefinition& rearDefinition = bogies[rearIndex];
+            const double travelSign = directionSign(referenceLocation.direction);
+
+            SolvedCarGeometry result;
+            result.front = sampleBogie(track,
+                referenceLocation, frontDefinition, frontIndex, travelSign);
+            result.rear = sampleBogie(track,
+                referenceLocation, rearDefinition, rearIndex, travelSign);
+            result.bodyFrame = bodyFrameFromBogies(
+                result.rear.positionMeters,
+                result.front.positionMeters,
+                result.rear.orientedFrame,
+                result.front.orientedFrame);
+
+            const glm::dvec3 localBogieMidpoint = 0.5
+                * (frontDefinition.referencePositionMeters
+                    + rearDefinition.referencePositionMeters);
+            const glm::dvec3 worldBogieMidpoint = 0.5
+                * (result.front.positionMeters + result.rear.positionMeters);
+            result.bodyPositionMeters = worldBogieMidpoint
+                - localBogieMidpoint.x * result.bodyFrame.tangent
+                - localBogieMidpoint.y * result.bodyFrame.lateral
+                - localBogieMidpoint.z * result.bodyFrame.up;
+            result.frontHitchPositionMeters = transformPoint(
+                result.bodyPositionMeters,
+                result.bodyFrame,
+                definition.frontHitchPositionMeters);
+            result.rearHitchPositionMeters = transformPoint(
+                result.bodyPositionMeters,
+                result.bodyFrame,
+                definition.rearHitchPositionMeters);
+            requireFinitePoseValue(
+                result.bodyPositionMeters,
+                "Car body position is non-finite.");
+            requireFinitePoseValue(
+                result.frontHitchPositionMeters,
+                "Car front hitch world position is non-finite.");
+            requireFinitePoseValue(
+                result.rearHitchPositionMeters,
+                "Car rear hitch world position is non-finite.");
+            return result;
+        }
+
         [[nodiscard]] double relativeYaw(
             const geometry::CurveFrame& bodyFrame,
             const geometry::CurveFrame& bogieFrame) noexcept
@@ -417,6 +497,44 @@ namespace quantum::physics
             {
                 throw std::domain_error(errorMessage);
             }
+        }
+
+        [[nodiscard]] double totalCarMassKilogramsUnchecked(
+            const CarDefinition& definition,
+            const CarLoadout& loadout)
+        {
+            const double total = definition.dryMassKilograms
+                + loadout.massKilograms;
+            if (!std::isfinite(total) || total <= 0.0)
+            {
+                throw std::invalid_argument(
+                    "Car dry and load masses must produce a positive finite total mass.");
+            }
+            return total;
+        }
+
+        [[nodiscard]] glm::dvec3 loadedCarCenterOfGravityMetersUnchecked(
+            const CarDefinition& definition,
+            const CarLoadout& loadout)
+        {
+            const double totalMass = totalCarMassKilogramsUnchecked(
+                definition, loadout);
+            if (loadout.massKilograms == 0.0)
+            {
+                return definition.dryCenterOfGravityMeters;
+            }
+
+            const glm::dvec3 centerOfGravity =
+                (definition.dryMassKilograms
+                    * definition.dryCenterOfGravityMeters
+                 + loadout.massKilograms * loadout.centerOfMassMeters)
+                / totalMass;
+            if (!finite(centerOfGravity))
+            {
+                throw std::invalid_argument(
+                    "Car mass properties produce a non-finite loaded center of gravity.");
+            }
+            return centerOfGravity;
         }
     }
 
@@ -542,37 +660,16 @@ namespace quantum::physics
     {
         validateCarDefinition(definition);
         validateCarLoadout(loadout);
-        const double total = definition.dryMassKilograms
-            + loadout.massKilograms;
-        if (!std::isfinite(total) || total <= 0.0)
-        {
-            throw std::invalid_argument(
-                "Car dry and load masses must produce a positive finite total mass.");
-        }
-        return total;
+        return totalCarMassKilogramsUnchecked(definition, loadout);
     }
 
     glm::dvec3 loadedCarCenterOfGravityMeters(
         const CarDefinition& definition,
         const CarLoadout& loadout)
     {
-        const double totalMass = totalCarMassKilograms(definition, loadout);
-        if (loadout.massKilograms == 0.0)
-        {
-            return definition.dryCenterOfGravityMeters;
-        }
-
-        const glm::dvec3 centerOfGravity =
-            (definition.dryMassKilograms
-                * definition.dryCenterOfGravityMeters
-             + loadout.massKilograms * loadout.centerOfMassMeters)
-            / totalMass;
-        if (!finite(centerOfGravity))
-        {
-            throw std::invalid_argument(
-                "Car mass properties produce a non-finite loaded center of gravity.");
-        }
-        return centerOfGravity;
+        validateCarDefinition(definition);
+        validateCarLoadout(loadout);
+        return loadedCarCenterOfGravityMetersUnchecked(definition, loadout);
     }
 
     glm::dmat3 makeUniformBoxInertiaTensorBodyKgM2(
@@ -606,7 +703,7 @@ namespace quantum::physics
     {
         validateCarDefinition(definition);
         validateCarLoadout(loadout);
-        const glm::dvec3 loadedCenter = loadedCarCenterOfGravityMeters(
+        const glm::dvec3 loadedCenter = loadedCarCenterOfGravityMetersUnchecked(
             definition, loadout);
         glm::dmat3 result = definition.dryInertiaTensorBodyKgM2
             + parallelAxisShift(
@@ -780,83 +877,37 @@ namespace quantum::physics
             bodyWorldPositionMeters_, bodyFrame_, localPointMeters);
     }
 
-    CarPose solveCarPose(
+    CarPose detail::solveCarPoseForValidatedDefinition(
         const CompiledPhysicsTrack& track,
         const CarDefinition& definition,
         const TrackLocation& referenceLocation,
         const CarLoadout& loadout)
     {
-        validateCarDefinition(definition);
-        validateCarLoadout(loadout);
-        if (definition.bogies.size() != 2)
-        {
-            throw std::invalid_argument(
-                "The Phase 2 car pose solver supports exactly two bogies.");
-        }
+        const SolvedCarGeometry geometry = solveCarGeometry(
+            track, definition, referenceLocation);
+        const glm::dquat bodyOrientation = orientationFromFrame(
+            geometry.bodyFrame);
 
-        const double firstX = definition.bogies[0].referencePositionMeters.x;
-        const double secondX = definition.bogies[1].referencePositionMeters.x;
-        if (std::abs(firstX - secondX) <= minimumBogieSeparationMeters)
-        {
-            throw std::invalid_argument(
-                "The two bogies must have distinct longitudinal reference positions.");
-        }
-
-        const std::size_t frontIndex = firstX > secondX ? 0 : 1;
-        const std::size_t rearIndex = frontIndex == 0 ? 1 : 0;
-        const BogieDefinition& frontDefinition =
-            definition.bogies[frontIndex];
-        const BogieDefinition& rearDefinition =
-            definition.bogies[rearIndex];
-        const double travelSign = directionSign(referenceLocation.direction);
-
-        const SampledBogie front = sampleBogie(
-            track, referenceLocation, frontDefinition, frontIndex, travelSign);
-        const SampledBogie rear = sampleBogie(
-            track, referenceLocation, rearDefinition, rearIndex, travelSign);
-        const geometry::CurveFrame bodyFrame = bodyFrameFromBogies(
-            rear.positionMeters,
-            front.positionMeters,
-            rear.orientedFrame,
-            front.orientedFrame);
-        const glm::dquat bodyOrientation = orientationFromFrame(bodyFrame);
-
-        const glm::dvec3 localBogieMidpoint = 0.5
-            * (frontDefinition.referencePositionMeters
-                + rearDefinition.referencePositionMeters);
-        const glm::dvec3 worldBogieMidpoint = 0.5
-            * (front.positionMeters + rear.positionMeters);
-        const glm::dvec3 bodyPosition = worldBogieMidpoint
-            - localBogieMidpoint.x * bodyFrame.tangent
-            - localBogieMidpoint.y * bodyFrame.lateral
-            - localBogieMidpoint.z * bodyFrame.up;
-        requireFinitePoseValue(
-            bodyPosition, "Car body position is non-finite.");
-
-        const double totalMass = totalCarMassKilograms(definition, loadout);
+        const double totalMass = totalCarMassKilogramsUnchecked(
+            definition, loadout);
         const glm::dvec3 localCenterOfGravity =
-            loadedCarCenterOfGravityMeters(definition, loadout);
+            loadedCarCenterOfGravityMetersUnchecked(definition, loadout);
         const glm::dvec3 worldCenterOfGravity = transformPoint(
-            bodyPosition, bodyFrame, localCenterOfGravity);
-        const glm::dvec3 frontHitch = transformPoint(
-            bodyPosition, bodyFrame, definition.frontHitchPositionMeters);
-        const glm::dvec3 rearHitch = transformPoint(
-            bodyPosition, bodyFrame, definition.rearHitchPositionMeters);
+            geometry.bodyPositionMeters,
+            geometry.bodyFrame,
+            localCenterOfGravity);
         requireFinitePoseValue(
             worldCenterOfGravity,
             "Car world center of gravity is non-finite.");
-        requireFinitePoseValue(
-            frontHitch, "Car front hitch world position is non-finite.");
-        requireFinitePoseValue(
-            rearHitch, "Car rear hitch world position is non-finite.");
 
-        const auto makePose = [&bodyFrame, &bodyOrientation](
+        const auto makePose = [&geometry, &bodyOrientation](
             const SampledBogie& sampled)
         {
             const glm::dquat relativeOrientation = canonicalized(
                 glm::conjugate(bodyOrientation)
                     * orientationFromFrame(sampled.orientedFrame));
-            const double yaw = relativeYaw(bodyFrame, sampled.orientedFrame);
+            const double yaw = relativeYaw(
+                geometry.bodyFrame, sampled.orientedFrame);
             if (!std::isfinite(yaw))
             {
                 throw std::domain_error(
@@ -874,21 +925,42 @@ namespace quantum::physics
         };
 
         std::array<BogiePose, 2> bogiePoses{
-            makePose(front),
-            makePose(rear)
+            makePose(geometry.front),
+            makePose(geometry.rear)
         };
         return CarPose{
             referenceLocation,
-            bodyPosition,
-            bodyFrame,
+            geometry.bodyPositionMeters,
+            geometry.bodyFrame,
             bodyOrientation,
             localCenterOfGravity,
             worldCenterOfGravity,
             totalMass,
-            frontHitch,
-            rearHitch,
+            geometry.frontHitchPositionMeters,
+            geometry.rearHitchPositionMeters,
             std::move(bogiePoses)
         };
+    }
+
+    glm::dvec3 detail::solveFrontHitchPositionForValidatedDefinition(
+        const CompiledPhysicsTrack& track,
+        const CarDefinition& definition,
+        const TrackLocation& referenceLocation)
+    {
+        return solveCarGeometry(track, definition, referenceLocation)
+            .frontHitchPositionMeters;
+    }
+
+    CarPose solveCarPose(
+        const CompiledPhysicsTrack& track,
+        const CarDefinition& definition,
+        const TrackLocation& referenceLocation,
+        const CarLoadout& loadout)
+    {
+        validateCarDefinition(definition);
+        validateCarLoadout(loadout);
+        return detail::solveCarPoseForValidatedDefinition(
+            track, definition, referenceLocation, loadout);
     }
 
     glm::dmat3 worldCarInertiaTensorKgM2(

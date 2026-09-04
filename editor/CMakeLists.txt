@@ -12,6 +12,7 @@ add_executable(
     src/ReadmeCapture.cpp
     src/ReadmeCaptureRunner.cpp
     src/RiderLoadDiagnostics.cpp
+    src/SimulationPreview.cpp
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
     src/ViewportPicking.cpp
@@ -28,6 +29,7 @@ add_executable(
     include/quantum/editor/ReadmeCapture.hpp
     include/quantum/editor/RegionSelection.hpp
     include/quantum/editor/RiderLoadDiagnostics.hpp
+    include/quantum/editor/SimulationPreview.hpp
     include/quantum/editor/TransitionEditorModel.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp

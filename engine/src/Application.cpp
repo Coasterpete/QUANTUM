@@ -11,6 +11,7 @@
 #include <quantum/editor/PlatformDialogs.hpp>
 #include <quantum/editor/RegionSelection.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
+#include <quantum/editor/SimulationPreview.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
@@ -19,9 +20,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -234,6 +237,72 @@ namespace quantum::engine
                 editorUi.setHistoryAvailability(
                     documentHistory.canUndo(),
                     documentHistory.canRedo());
+
+                quantum::editor::SimulationPreview simulationPreview;
+                std::uint64_t simulationTrackGeneration =
+                    centerlineCache.generation();
+                quantum::coaster::LayoutMode simulationLayoutMode =
+                    authoredTrack.layoutMode();
+                std::uint64_t uploadedSimulationVertexGeneration =
+                    std::numeric_limits<std::uint64_t>::max();
+
+                const auto rebuildSimulationPreview = [&]
+                {
+                    if (simulationPreview.rebuild(authoredTrack))
+                    {
+                        quantum::logging::logMessagef(
+                            quantum::logging::LogLevel::Info,
+                            "SIM",
+                            "Four-car preview initialized at %.3f m and "
+                            "%.3f m/s",
+                            simulationPreview.dynamicsState()
+                                ->generalizedReferenceLocation.stationMeters,
+                            simulationPreview.speedMetersPerSecond());
+                    }
+                    else
+                    {
+                        quantum::logging::logMessagef(
+                            quantum::logging::LogLevel::Warning,
+                            "SIM",
+                            "%s",
+                            simulationPreview.error().c_str());
+                    }
+                };
+
+                const auto publishSimulationStatus = [&]
+                {
+                    if (!simulationPreview.isAvailable())
+                    {
+                        editorUi.setSimulationUnavailable(
+                            simulationPreview.error());
+                        return;
+                    }
+
+                    quantum::editor::SimulationPlaybackState uiState =
+                        quantum::editor::SimulationPlaybackState::Stopped;
+                    switch (simulationPreview.playbackState())
+                    {
+                    case quantum::editor::SimulationPreview::PlaybackState::
+                        Stopped:
+                        break;
+                    case quantum::editor::SimulationPreview::PlaybackState::
+                        Playing:
+                        uiState = quantum::editor::
+                            SimulationPlaybackState::Playing;
+                        break;
+                    case quantum::editor::SimulationPreview::PlaybackState::
+                        Paused:
+                        uiState = quantum::editor::
+                            SimulationPlaybackState::Paused;
+                        break;
+                    }
+                    editorUi.setSimulationStatus(
+                        uiState,
+                        simulationPreview.speedMetersPerSecond());
+                };
+
+                rebuildSimulationPreview();
+                publishSimulationStatus();
 
                 const auto synchronizeDirtyState = [&]
                 {
@@ -2022,18 +2091,67 @@ namespace quantum::engine
                                 window);
                         }
 
+                        // Any accepted geometry/document replacement advances
+                        // the cache generation. Layout mode is also tracked
+                        // because it changes open/circuit physics semantics
+                        // without regenerating visible geometry.
+                        if (simulationTrackGeneration
+                                != centerlineCache.generation()
+                            || simulationLayoutMode
+                                != authoredTrack.layoutMode())
+                        {
+                            simulationTrackGeneration =
+                                centerlineCache.generation();
+                            simulationLayoutMode =
+                                authoredTrack.layoutMode();
+                            rebuildSimulationPreview();
+                        }
+
+                        publishSimulationStatus();
                         editorUi.setHistoryAvailability(
                             documentHistory.canUndo(),
                             documentHistory.canRedo());
                         editorUi.beginFrame(vulkan);
-                        vulkan.drawFrame(
-                            [](VkCommandBuffer commandBuffer, void* userData)
+
+                        if (const auto control =
+                                editorUi.takeSimulationControl())
+                        {
+                            using quantum::editor::SimulationControlType;
+                            switch (*control)
                             {
-                                static_cast<quantum::editor::EditorUi*>(
-                                    userData
-                                )->render(commandBuffer);
-                            },
-                            &editorUi
+                            case SimulationControlType::Play:
+                                simulationPreview.play();
+                                break;
+                            case SimulationControlType::Pause:
+                                simulationPreview.pause();
+                                break;
+                            case SimulationControlType::Reset:
+                                simulationPreview.reset();
+                                break;
+                            }
+                        }
+
+                        simulationPreview.update(
+                            editorUi.frameDeltaSeconds());
+                        publishSimulationStatus();
+
+                        if (uploadedSimulationVertexGeneration
+                            != simulationPreview.vertexGeneration())
+                        {
+                            vulkan.updateTrainPreviewVertices(
+                                simulationPreview.vertices());
+                            uploadedSimulationVertexGeneration =
+                                simulationPreview.vertexGeneration();
+                        }
+
+                        vulkan.drawFrame(
+                    [](VkCommandBuffer commandBuffer, void* userData)
+                    {
+                        static_cast<quantum::editor::EditorUi*>(
+                            userData
+                        )->render(commandBuffer);
+                    },
+                    &editorUi
                         );
                     }
                 }

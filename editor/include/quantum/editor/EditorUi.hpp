@@ -237,6 +237,21 @@ namespace quantum::editor
         Redo
     };
 
+    // Simulation Preview 1 playback controls.
+    enum class SimulationControlType : std::uint8_t
+    {
+        Play,
+        Pause,
+        Reset
+    };
+
+    enum class SimulationPlaybackState : std::uint8_t
+    {
+        Stopped,
+        Playing,
+        Paused
+    };
+
     // Authoritative viewport display configuration. The editor owns these
     // values and pushes them into the camera and renderer every frame.
     struct ViewportSettings
@@ -393,6 +408,22 @@ namespace quantum::editor
         // Updates the SDL window title bar.
         void updateWindowTitle(const std::string& title);
 
+        // Simulation Preview 1: returns any pending simulation control request.
+        [[nodiscard]] std::optional<SimulationControlType>
+        takeSimulationControl() noexcept;
+
+        // Updates the compact viewport playback telemetry. Physics state and
+        // render geometry remain owned by the application-side preview.
+        void setSimulationStatus(
+            SimulationPlaybackState playbackState,
+            double speedMetersPerSecond) noexcept;
+
+        // Called when simulation is unavailable (e.g., track too short).
+        void setSimulationUnavailable(const std::string& error);
+
+        // Uses the same ImGui/SDL frame timing already used by camera movement.
+        [[nodiscard]] double frameDeltaSeconds() const noexcept;
+
     private:
         enum class CameraGesture
         {
@@ -433,6 +464,7 @@ namespace quantum::editor
             float logicalWidth,
             float logicalHeight
         );
+        void drawSimulationTelemetry();
         void drawViewportTrackAnchors();
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
@@ -557,5 +589,12 @@ namespace quantum::editor
         bool canRedo_ = false;
         std::optional<coaster::LayoutMode> pendingLayoutModeChange_;
         bool pendingCircuitCompletion_ = false;
+
+        // Simulation Preview 1 state.
+        std::optional<SimulationControlType> pendingSimulationControl_;
+        SimulationPlaybackState simulationPlaybackState_ = SimulationPlaybackState::Stopped;
+        double simulationSpeedMps_ = 0.0;
+        bool simulationAvailable_ = false;
+        std::string simulationError_;
     };
 }

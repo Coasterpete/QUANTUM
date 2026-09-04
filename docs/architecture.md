@@ -632,6 +632,44 @@ continuity and ids, Planar Arc constraints, and generated geometry. Renderer
 acceptance is part of the commit gate because the Editor must not publish a
 document whose visible GPU representation failed to update.
 
+### Simulation preview
+
+The Editor composition root owns one `SimulationPreview` for diagnostic
+playback of a temporary four-car train. Rebuilding starts from the committed
+`AuthoredTrack`, calls `integrateAuthoredTrackKinematics`, and constructs an
+owned immutable `CompiledPhysicsTrack` using the document's physical scale,
+layout intent, and derived topology. Accepted geometry/document replacements
+invalidate the preview through the centerline-cache generation; layout changes
+are tracked separately because they change physics topology without changing
+visible geometry. Rebuild always stops and resets playback, so no compiled
+track or train state survives an authored-track change.
+
+The preview owns its `TrainDefinition`, initial and current
+`TrainDynamicsState`, initial and current `TrainPose`, playback state, and one
+fixed-step accumulator. Play starts or resumes, Pause preserves the current
+state and pose, and Reset restores the deterministic increasing-station initial
+placement and the document's authored initial speed before returning to
+Stopped. Open tracks try a deterministic 14.75 m lead-reference station and
+then later 0.5 m candidates until `solveTrainPose` accepts the complete
+consist; an open-track consist boundary intervention pauses playback. Circuit
+wrapping and reverse-travel orientation remain Core behavior.
+
+Rendering consumes the `TrainPose` directly. Each wireframe car box transforms
+its authored body dimensions through `CarPose::transformLocalPoint`; bogie
+markers use `BogiePose::transformLocalPoint`; connector lines use the solved
+`InterCarConnectionPose` endpoints. SI pose positions are converted back to the
+document's coordinate units before upload. A single renderer-owned dynamic line
+buffer reuses the viewport line pipeline; it is updated only when the preview
+pose changes and is destroyed with the other VMA buffers. The viewport overlay
+shows Stopped/Playing/Paused and speed in m/s and mph.
+
+Frame time comes from the existing ImGui SDL backend timing used by viewport
+navigation. The accumulator advances Core only in
+`defaultFixedTimeStepSeconds` increments. At most 60 steps (0.25 seconds) are
+retained per rendered frame; excess wall-clock backlog from a stall is dropped,
+but the physics step size is never stretched or replaced with variable-delta
+motion.
+
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
@@ -1260,7 +1298,7 @@ architectural commitments:
   and topology-aware operations;
 - multiple simultaneously simulated trains;
 - persistence and Editor UI for train definitions; and
-- train and connector rendering.
+- authored/final train and connector rendering beyond the diagnostic preview.
 
 No compatibility with another coaster-design application's file formats,
 source code, or architecture is claimed.

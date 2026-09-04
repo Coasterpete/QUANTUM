@@ -98,6 +98,10 @@ namespace quantum::renderer
         );
         void setTrackPresentationMode(TrackPresentationMode mode);
 
+        // Replaces the Editor's dynamic diagnostic train line stream.
+        void updateTrainPreviewVertices(
+            std::span<const LineVertex> vertices);
+
         // Host-side draw skipping for the viewport reference elements.
         // Idempotent; intended to be pushed every frame from the editor's
         // authoritative settings like the view-projection matrix.
@@ -252,6 +256,13 @@ namespace quantum::renderer
         VmaAllocation spareTrackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* spareTrackCurveVertexMappedData_ = nullptr;
         VkDeviceSize spareTrackCurveVertexCapacity_ = 0;
+
+        // One small dynamic line stream for the diagnostic train preview.
+        VkBuffer trainPreviewVertexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation trainPreviewVertexAllocation_ = VK_NULL_HANDLE;
+        void* trainPreviewVertexMappedData_ = nullptr;
+        VkDeviceSize trainPreviewVertexCapacity_ = 0;
+        std::uint32_t trainPreviewVertexCount_ = 0;
 
         VkBuffer trackMeshVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackMeshVertexAllocation_ = VK_NULL_HANDLE;
