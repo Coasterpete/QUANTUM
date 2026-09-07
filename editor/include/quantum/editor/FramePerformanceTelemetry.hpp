@@ -1,5 +1,6 @@
 #pragma once
 
+#include <quantum/physics/CarPose.hpp>
 #include <quantum/renderer/FrameSynchronizationTelemetry.hpp>
 
 #include <cstddef>
@@ -58,5 +59,6 @@ namespace quantum::editor
         bool synchronousReadback = false;
         FrameBlockingEvents blockingEvents;
         renderer::FrameSynchronizationTelemetry synchronization;
+        physics::TrainSolveCounters solverCounters;
     };
 }

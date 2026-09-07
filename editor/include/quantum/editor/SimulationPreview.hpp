@@ -34,6 +34,7 @@ namespace quantum::editor
         std::size_t renderPoseSolveCount = 0;
         std::size_t renderPoseFailureCount = 0;
         double vertexPreparationMilliseconds = 0.0;
+        physics::TrainSolveCounters solveCounters;
     };
 
     // Presentation only: alpha=0 is previous, alpha=1 is current. Between

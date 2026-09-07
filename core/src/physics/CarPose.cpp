@@ -424,7 +424,8 @@ namespace quantum::physics
             const TrackLocation& referenceLocation,
             const double longitudinalOffsetMeters,
             const std::size_t definitionIndex,
-            const double travelSign)
+            const double travelSign,
+            TrainSolveCounters* const counters = nullptr)
         {
             const TrackAdvanceResult advancement = track.advance(
                 referenceLocation, travelSign * longitudinalOffsetMeters);
@@ -433,6 +434,10 @@ namespace quantum::physics
             // advance() records the direction of its signed displacement. A
             // pose offset is not motion, so retain the car's travel direction.
             location.direction = referenceLocation.direction;
+            if (counters)
+            {
+                ++counters->trackSampleCalls;
+            }
             const PhysicsTrackSample sample = track.sample(location);
             return {
                 definitionIndex,
@@ -472,8 +477,13 @@ namespace quantum::physics
             const BogieDefinition& rearDefinition,
             const std::size_t frontIndex,
             const std::size_t rearIndex,
-            const double travelSign)
+            const double travelSign,
+            TrainSolveCounters* const counters = nullptr)
         {
+            if (counters)
+            {
+                ++counters->rigidBogieSolveCalls;
+            }
             const double frontX = frontDefinition.referencePositionMeters.x;
             const double rearX = rearDefinition.referencePositionMeters.x;
             const double nominalStationSeparation = frontX - rearX;
@@ -486,10 +496,10 @@ namespace quantum::physics
                 return SolvedBogieStations{
                     sampleBogie(track, referenceLocation,
                         frontX + 0.5 * addedStationSeparation,
-                        frontIndex, travelSign),
+                        frontIndex, travelSign, counters),
                     sampleBogie(track, referenceLocation,
                         rearX - 0.5 * addedStationSeparation,
-                        rearIndex, travelSign)
+                        rearIndex, travelSign, counters)
                 };
             };
             const auto residual = [pivotSeparation](
@@ -569,6 +579,10 @@ namespace quantum::physics
                 iteration < bogieStationRefinementIterationCount;
                 ++iteration)
             {
+                if (counters)
+                {
+                    ++counters->rigidBogieRefinementIterations;
+                }
                 const double bracketWidth =
                     upperAdjustment - lowerAdjustment;
                 const double secantFraction = -lowerResidual
@@ -633,8 +647,13 @@ namespace quantum::physics
         [[nodiscard]] SolvedCarGeometry solveCarGeometry(
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
-            const TrackLocation& referenceLocation)
+            const TrackLocation& referenceLocation,
+            TrainSolveCounters* const counters = nullptr)
         {
+            if (counters)
+            {
+                ++counters->solveCarGeometryCalls;
+            }
             if (definition.bogies.size() != 2)
             {
                 throw std::invalid_argument(
@@ -664,7 +683,8 @@ namespace quantum::physics
                 rearDefinition,
                 frontIndex,
                 rearIndex,
-                travelSign);
+                travelSign,
+                counters);
             result.front = std::move(stations.front);
             result.rear = std::move(stations.rear);
             result.bodyFrame = bodyFrameFromBogies(
@@ -1126,10 +1146,11 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const CarDefinition& definition,
         const TrackLocation& referenceLocation,
-        const CarLoadout& loadout)
+        const CarLoadout& loadout,
+        TrainSolveCounters* const counters)
     {
         const SolvedCarGeometry geometry = solveCarGeometry(
-            track, definition, referenceLocation);
+            track, definition, referenceLocation, counters);
         const glm::dquat bodyOrientation = orientationFromFrame(
             geometry.bodyFrame);
 
@@ -1190,9 +1211,10 @@ namespace quantum::physics
     glm::dvec3 detail::solveFrontHitchPositionForValidatedDefinition(
         const CompiledPhysicsTrack& track,
         const CarDefinition& definition,
-        const TrackLocation& referenceLocation)
+        const TrackLocation& referenceLocation,
+        TrainSolveCounters* const counters)
     {
-        return solveCarGeometry(track, definition, referenceLocation)
+        return solveCarGeometry(track, definition, referenceLocation, counters)
             .frontHitchPositionMeters;
     }
 

@@ -17,6 +17,21 @@ namespace quantum::physics
     inline constexpr double bogieContactNormalUnitTolerance = 1.0e-10;
     inline constexpr double bogieContactTangentComponentTolerance = 1.0e-10;
 
+    // Observations for the pose-solve hot path. Callers pass a pointer through
+    // solveTrainPose/stepTrain to accumulate one run's counters; a null
+    // pointer leaves every path measuring nothing. Counters never alter solver
+    // behavior, outcomes, or iteration budgets.
+    struct TrainSolveCounters
+    {
+        std::uint64_t solveTrainPoseCalls = 0;
+        std::uint64_t solveCarGeometryCalls = 0;
+        std::uint64_t rigidBogieSolveCalls = 0;
+        std::uint64_t rigidBogieRefinementIterations = 0;
+        std::uint64_t connectionCandidateEvaluations = 0;
+        std::uint64_t connectorFallbackUses = 0;
+        std::uint64_t trackSampleCalls = 0;
+    };
+
     // Contact roles describe intended mechanical function only. The authored
     // normal remains authoritative; roles do not imply direction or engagement.
     enum class BogieContactRole : std::uint8_t
@@ -117,7 +132,8 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
             const TrackLocation& referenceLocation,
-            const CarLoadout& loadout);
+            const CarLoadout& loadout,
+            TrainSolveCounters* counters = nullptr);
 
         // Connector root searches need only this point for each candidate;
         // constructing complete diagnostic poses there is redundant.
@@ -125,7 +141,8 @@ namespace quantum::physics
         solveFrontHitchPositionForValidatedDefinition(
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
-            const TrackLocation& referenceLocation);
+            const TrackLocation& referenceLocation,
+            TrainSolveCounters* counters = nullptr);
     }
 
     // Read-only solved bogie state. trackFrame() is the canonical increasing-
@@ -174,7 +191,8 @@ namespace quantum::physics
             const CompiledPhysicsTrack&,
             const CarDefinition&,
             const TrackLocation&,
-            const CarLoadout&);
+            const CarLoadout&,
+            TrainSolveCounters*);
     };
 
     // Immutable/read-only result for one physical car. The two solved bogies
@@ -233,7 +251,8 @@ namespace quantum::physics
             const CompiledPhysicsTrack&,
             const CarDefinition&,
             const TrackLocation&,
-            const CarLoadout&);
+            const CarLoadout&,
+            TrainSolveCounters*);
     };
 
     // The reference location corresponds nominally to car-local X = 0. Bogie

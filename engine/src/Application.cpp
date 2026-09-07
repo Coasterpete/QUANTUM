@@ -2322,7 +2322,8 @@ editorUi.selectSection(restoredSelection, true);
                                 .synchronousReadback =
                                     draw.synchronousReadback,
                                 .blockingEvents = frameBlockingEvents,
-                                .synchronization = draw.synchronization
+                                .synchronization = draw.synchronization,
+                                .solverCounters = preview.solveCounters
                         };
                         editorUi.recordFramePerformance(performanceSample);
                         if (previewSmokeCollector.has_value())
