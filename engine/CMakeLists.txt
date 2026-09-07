@@ -1,3 +1,5 @@
+add_subdirectory(audio)
+
 add_library(QuantumEngine STATIC)
 
 add_library(Quantum::Engine ALIAS QuantumEngine)
@@ -140,3 +142,4 @@ set_target_properties(
     PROPERTIES
         CXX_EXTENSIONS OFF
 )
+
