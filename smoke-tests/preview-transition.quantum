@@ -1,0 +1,147 @@
+{
+    "formatVersion": 1,
+    "layoutMode": "Circuit",
+    "physicalSettings": {
+        "gravityAcceleration": 9.80665,
+        "initialSpeed": 20.0,
+        "metersPerCoordinateUnit": 1.0
+    },
+    "sections": [
+        {
+            "kind": "RateProfiles",
+            "length": 60.0,
+            "rateProfiles": {
+                "pitch": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 60.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                },
+                "roll": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 60.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                },
+                "yaw": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 60.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "startPose": {
+        "orientation": {
+            "w": 1.0,
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        },
+        "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        }
+    },
+    "trackStyle": {
+        "geometryFamily": "DualRailTubular",
+        "name": "StandardDualRail",
+        "railCount": 2,
+        "railMaterial": {
+            "baseColor": {
+                "a": 1.0,
+                "b": 0.47999998927116394,
+                "g": 0.3400000035762787,
+                "r": 0.20000000298023224
+            }
+        },
+        "railOffsets": [
+            {
+                "lateral": -0.6,
+                "vertical": 0.0
+            },
+            {
+                "lateral": 0.6,
+                "vertical": 0.0
+            }
+        ],
+        "railRadialSegments": 12,
+        "railRadius": 0.065,
+        "repeatingHardware": [
+            {
+                "asset": {
+                    "id": "assets://track/test-crosstie-placeholder.glb",
+                    "placeholder": true
+                },
+                "enabled": true,
+                "frameFollow": "TrackFrame",
+                "localPosition": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": -0.11
+                },
+                "localRotationRadians": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "localScale": {
+                    "x": 1.0,
+                    "y": 1.0,
+                    "z": 1.0
+                },
+                "materialOverride": {
+                    "baseColor": {
+                        "a": 1.0,
+                        "b": 0.3199999928474426,
+                        "g": 0.30000001192092896,
+                        "r": 0.2800000011920929
+                    }
+                },
+                "spacing": 1.5,
+                "startOffset": 0.0
+            }
+        ],
+        "spine": {
+            "dimensions": {
+                "x": 0.0,
+                "y": 0.0
+            },
+            "enabled": false,
+            "offset": {
+                "lateral": 0.0,
+                "vertical": 0.0
+            },
+            "type": "None"
+        }
+    }
+}

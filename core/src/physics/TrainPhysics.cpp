@@ -773,6 +773,7 @@ namespace quantum::physics
             CarPose pose;
             std::size_t iterationCount = 0;
             double finalBracketSizeMeters = 0.0;
+            bool usedExhaustiveSearchFallback = false;
         };
 
         [[nodiscard]] SolvedFollowingCar solveFollowingCar(
@@ -907,19 +908,20 @@ namespace quantum::physics
             // The grid interval containing the expected adjacent-car offset
             // has the closest possible midpoint to that offset. If it brackets
             // a root, the exhaustive scan below would select the same interval.
-            // Common playback therefore avoids constructing the other 159
-            // candidates while unusual geometry retains the existing fallback.
+            // Expand through adjacent grid intervals in midpoint-distance order
+            // so no nearer candidate root is skipped. Keeping the original grid
+            // also preserves the exhaustive search's refinement and tie-breaking.
             if (sampleSpacing > 0.0
                 && expectedOffset >= searchBegin
                 && expectedOffset <= searchEnd)
             {
                 const double gridPosition =
                     (expectedOffset - searchBegin) / sampleSpacing;
-                const std::size_t upperIndex = std::clamp(
+                std::size_t upperIndex = std::clamp(
                     static_cast<std::size_t>(std::ceil(gridPosition)),
                     std::size_t{1},
                     connectorSearchSampleCount);
-                const std::size_t lowerIndex = upperIndex - 1;
+                std::size_t lowerIndex = upperIndex - 1;
                 const auto offsetAt = [&](const std::size_t index)
                 {
                     return index == connectorSearchSampleCount
@@ -952,6 +954,60 @@ namespace quantum::physics
                                 {std::move(lower), std::move(upper)}))
                         {
                             return std::move(*solved);
+                        }
+                    }
+
+                    // At most sixteen extra exact geometry evaluations. Each
+                    // step grows one edge by one grid cell and reuses its old
+                    // endpoint; a wide bracket could conceal multiple roots.
+                    constexpr std::size_t maximumLocalExpansionCount = 16;
+                    for (std::size_t expansion = 0;
+                        expansion < maximumLocalExpansionCount
+                            && std::signbit(lower.residualMeters)
+                                == std::signbit(upper.residualMeters);
+                        ++expansion)
+                    {
+                        if (lowerIndex == 0
+                            && upperIndex == connectorSearchSampleCount)
+                        {
+                            break;
+                        }
+                        const double lowerDistance = lowerIndex == 0
+                            ? std::numeric_limits<double>::infinity()
+                            : std::abs(0.5 * (offsetAt(lowerIndex - 1)
+                                + offsetAt(lowerIndex)) - expectedOffset);
+                        const double upperDistance =
+                            upperIndex == connectorSearchSampleCount
+                            ? std::numeric_limits<double>::infinity()
+                            : std::abs(0.5 * (offsetAt(upperIndex)
+                                + offsetAt(upperIndex + 1)) - expectedOffset);
+                        Bracket adjacent;
+                        if (lowerDistance <= upperDistance)
+                        {
+                            ConnectionCandidate next = connectionCandidate(
+                                track, followingDefinition, leadingPose,
+                                connection.rigidLengthMeters,
+                                offsetAt(--lowerIndex));
+                            adjacent = {next, lower};
+                            lower = next;
+                        }
+                        else
+                        {
+                            ConnectionCandidate next = connectionCandidate(
+                                track, followingDefinition, leadingPose,
+                                connection.rigidLengthMeters,
+                                offsetAt(++upperIndex));
+                            adjacent = {upper, next};
+                            upper = next;
+                        }
+                        if (std::signbit(adjacent.lower.residualMeters)
+                            != std::signbit(adjacent.upper.residualMeters))
+                        {
+                            if (auto solved = refineBracket(adjacent))
+                            {
+                                return std::move(*solved);
+                            }
+                            break;
                         }
                     }
                 }
@@ -1030,6 +1086,7 @@ namespace quantum::physics
                 if (auto solved = refineBracket(
                         std::move(*selectedBracket)))
                 {
+                    solved->usedExhaustiveSearchFallback = true;
                     return std::move(*solved);
                 }
             }
@@ -1046,7 +1103,8 @@ namespace quantum::physics
                             leadingPose,
                             bestCandidate->backwardOffsetMeters)),
                     0,
-                    sampleSpacing
+                    sampleSpacing,
+                    true
                 };
             }
 
@@ -1122,7 +1180,8 @@ namespace quantum::physics
                             leadingPose,
                             solved.backwardOffsetMeters)),
                     iterations,
-                    upperOffset - lowerOffset
+                    upperOffset - lowerOffset,
+                    true
                 };
             }
 
@@ -1988,7 +2047,8 @@ namespace quantum::physics
         glm::dquat followingBodyRelativeOrientation,
         glm::dvec3 relativeYawPitchRollRadians,
         const std::size_t solverIterationCount,
-        const double finalBracketSizeMeters)
+        const double finalBracketSizeMeters,
+        const bool usedExhaustiveSearchFallback)
         : connectionIndex_(connectionIndex),
           leadingCarIndex_(leadingCarIndex),
           followingCarIndex_(followingCarIndex),
@@ -2006,7 +2066,8 @@ namespace quantum::physics
               followingBodyRelativeOrientation),
           relativeYawPitchRollRadians_(relativeYawPitchRollRadians),
           solverIterationCount_(solverIterationCount),
-          finalBracketSizeMeters_(finalBracketSizeMeters)
+          finalBracketSizeMeters_(finalBracketSizeMeters),
+          usedExhaustiveSearchFallback_(usedExhaustiveSearchFallback)
     {
     }
 
@@ -2095,6 +2156,11 @@ namespace quantum::physics
     double InterCarConnectionPose::finalBracketSizeMeters() const noexcept
     {
         return finalBracketSizeMeters_;
+    }
+
+    bool InterCarConnectionPose::usedExhaustiveSearchFallback() const noexcept
+    {
+        return usedExhaustiveSearchFallback_;
     }
 
     TrainPose::TrainPose(
@@ -2456,7 +2522,8 @@ namespace quantum::physics
                 relativeOrientation,
                 articulation,
                 solved.iterationCount,
-                solved.finalBracketSizeMeters);
+                solved.finalBracketSizeMeters,
+                solved.usedExhaustiveSearchFallback);
             maximumResidual = std::max(maximumResidual, absoluteResidual);
             cars.emplace_back(followingIndex, std::move(solved.pose));
         }
@@ -4574,6 +4641,11 @@ namespace quantum::physics
         TrackAdvanceResult advancement = track.advance(
             currentState.generalizedReferenceLocation,
             requestedDistance);
+        // TrackLocation::direction defines the consist's physical forward
+        // orientation for pose solving. A shuttle rollback changes signed
+        // station velocity, not which end of the authored train is the lead.
+        advancement.location.direction =
+            currentState.generalizedReferenceLocation.direction;
         bool boundaryIntervention = false;
         TrackBoundary consistBoundary = advancement.boundary;
         std::optional<TrainPose> committedPose;
@@ -4599,8 +4671,11 @@ namespace quantum::physics
                     const TrackLocation candidate = track.advance(
                         currentState.generalizedReferenceLocation,
                         requestedDistance * midpoint).location;
+                    TrackLocation orientedCandidate = candidate;
+                    orientedCandidate.direction =
+                        currentState.generalizedReferenceLocation.direction;
                     if (auto candidatePose = trySolveTrainPose(
-                            track, definition, candidate))
+                            track, definition, orientedCandidate))
                     {
                         legalFraction = midpoint;
                         committedPose = std::move(candidatePose);
@@ -4613,6 +4688,8 @@ namespace quantum::physics
                 advancement = track.advance(
                     currentState.generalizedReferenceLocation,
                     requestedDistance * legalFraction);
+                advancement.location.direction =
+                    currentState.generalizedReferenceLocation.direction;
                 nextVelocity = 0.0;
             }
         }

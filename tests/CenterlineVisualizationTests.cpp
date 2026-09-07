@@ -577,6 +577,62 @@ namespace
         }
     }
 
+    void heartlineSetupControlsOnlyReferenceCurve()
+    {
+        AuthoredTrack track;
+        track.appendSection();
+        setSectionLength(track.section(0), 6.0);
+
+        auto physicalSettings = track.physicalSettings();
+        physicalSettings.metersPerCoordinateUnit = 2.0;
+        track.setPhysicalSettings(physicalSettings);
+
+        auto setup = track.coasterSetup();
+        setup.heartline.enabled = true;
+        setup.heartline.offsetMeters = 3.0;
+        track.setCoasterSetup(setup);
+
+        const auto enabled = createCenterlineVisualization(track);
+        const glm::dvec3 enabledCenter = curvePoint(
+            enabled, quantum::renderer::viewportCenterlineCurve, 0);
+        const glm::dvec3 enabledHeartline = curvePoint(
+            enabled, quantum::renderer::viewportHeartlineCurve, 0);
+        requireNear(
+            glm::length(enabledHeartline - enabledCenter),
+            1.5,
+            positionTolerance,
+            "heartline metres convert to document coordinate units");
+        requireNearVec(
+            glm::normalize(enabledHeartline - enabledCenter),
+            enabled.samples.front().frame.up,
+            positionTolerance,
+            "positive heartline offset follows local +up");
+
+        setup.heartline.enabled = false;
+        track.setCoasterSetup(setup);
+        const auto disabled = createCenterlineVisualization(track);
+        requireNearVec(
+            curvePoint(disabled,
+                quantum::renderer::viewportHeartlineCurve, 0),
+            curvePoint(disabled,
+                quantum::renderer::viewportCenterlineCurve, 0),
+            positionTolerance,
+            "disabled heartline has zero reference-curve displacement");
+
+        requireNearVec(
+            disabled.samples.front().position,
+            enabled.samples.front().position,
+            positionTolerance,
+            "heartline configuration does not alter solved centerline samples");
+        require(disabled.renderableTrack.continuousMesh.vertices.size()
+                == enabled.renderableTrack.continuousMesh.vertices.size()
+            && disabled.renderableTrack.continuousMesh.triangleIndices.size()
+                == enabled.renderableTrack.continuousMesh.triangleIndices.size()
+            && disabled.renderableTrack.hardwareBatches.size()
+                == enabled.renderableTrack.hardwareBatches.size(),
+            "heartline configuration does not alter renderable track topology");
+    }
+
     void visualizationCacheInvalidatesOnlyForGeometry()
     {
         AuthoredTrack track = createMultiRegionFixture();
@@ -719,6 +775,8 @@ int main()
         semanticAnchorsDoNotExpandCameraBounds);
     run("multiRegionVisualizationMatchesCoreAndBoundaries",
         multiRegionVisualizationMatchesCoreAndBoundaries);
+    run("heartlineSetupControlsOnlyReferenceCurve",
+        heartlineSetupControlsOnlyReferenceCurve);
     run("visualizationCacheInvalidatesOnlyForGeometry",
         visualizationCacheInvalidatesOnlyForGeometry);
 

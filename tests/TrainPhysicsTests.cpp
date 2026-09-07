@@ -4,6 +4,7 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -94,6 +95,31 @@ namespace
             && std::isfinite(value.x)
             && std::isfinite(value.y)
             && std::isfinite(value.z);
+    }
+
+    void requireRigidBogiePivots(
+        const TrainPose& pose,
+        const TrainDefinition& definition,
+        const std::string_view message)
+    {
+        constexpr double toleranceMeters = 1.0e-8;
+        for (const TrainCarPose& trainCar : pose.cars())
+        {
+            const CarPose& carPose = trainCar.carPose();
+            const CarDefinition& carDefinition =
+                definition.cars[trainCar.carIndex()].car;
+            for (const BogiePose* bogie : {
+                &carPose.frontBogie(), &carPose.rearBogie()})
+            {
+                requireNear(
+                    carPose.transformLocalPoint(
+                        carDefinition.bogies[bogie->definitionIndex()]
+                            .referencePositionMeters),
+                    bogie->worldPositionMeters(),
+                    toleranceMeters,
+                    message);
+            }
+        }
     }
 
     [[nodiscard]] TrackLocation locationAt(
@@ -226,6 +252,71 @@ namespace
                 {0.0, 0.0, 0.0}
             });
         }
+        return {samples, 1.0, TopologyKind::OpenLinear};
+    }
+
+    [[nodiscard]] CompiledPhysicsTrack shuttleSpikeTrack()
+    {
+        constexpr double runInLength = 40.0;
+        constexpr double transitionRadius = 15.0;
+        constexpr double transitionAngle = 1.2;
+        constexpr double spikeLength = 80.0;
+        constexpr int transitionSampleCount = 180;
+
+        std::vector<TrackKinematicState> samples;
+        samples.reserve(transitionSampleCount + 3);
+        samples.push_back({
+            0.0,
+            {0.0, 0.0, 0.0},
+            frameForTangent({1.0, 0.0, 0.0}),
+            {0.0, 0.0, 0.0}
+        });
+        samples.push_back({
+            runInLength,
+            {runInLength, 0.0, 0.0},
+            frameForTangent({1.0, 0.0, 0.0}),
+            {0.0, 0.0, 1.0 / transitionRadius}
+        });
+
+        for (int index = 1; index <= transitionSampleCount; ++index)
+        {
+            const double angle = transitionAngle
+                * static_cast<double>(index) / transitionSampleCount;
+            const double station = runInLength
+                + transitionRadius * angle;
+            const glm::dvec3 tangent{
+                std::cos(angle), 0.0, std::sin(angle)};
+            samples.push_back({
+                station,
+                {
+                    runInLength + transitionRadius * std::sin(angle),
+                    0.0,
+                    transitionRadius * (1.0 - std::cos(angle))
+                },
+                frameForTangent(tangent),
+                {
+                    -std::sin(angle) / transitionRadius,
+                    0.0,
+                    std::cos(angle) / transitionRadius
+                }
+            });
+        }
+
+        const double transitionEndStation = runInLength
+            + transitionRadius * transitionAngle;
+        const glm::dvec3 spikeTangent{
+            std::cos(transitionAngle), 0.0, std::sin(transitionAngle)};
+        const glm::dvec3 transitionEnd{
+            runInLength + transitionRadius * std::sin(transitionAngle),
+            0.0,
+            transitionRadius * (1.0 - std::cos(transitionAngle))
+        };
+        samples.push_back({
+            transitionEndStation + spikeLength,
+            transitionEnd + spikeLength * spikeTangent,
+            frameForTangent(spikeTangent),
+            {0.0, 0.0, 0.0}
+        });
         return {samples, 1.0, TopologyKind::OpenLinear};
     }
 
@@ -414,14 +505,18 @@ namespace
 
     void curvedTrackClosesConnector()
     {
+        const CompiledPhysicsTrack track = horizontalCircleTrack();
+        const TrainDefinition definition = trainOf(3);
         const TrainPose pose = solveTrainPose(
-            horizontalCircleTrack(), trainOf(3), locationAt(30.0));
+            track, definition, locationAt(30.0));
         require(pose.maximumAbsoluteConnectorResidualMeters()
                 <= connectorLengthToleranceMeters,
             "curved connector closure");
         require(std::abs(pose.connections()[0]
                 .relativeYawPitchRollRadians().x) > 0.05,
             "curved articulation yaw");
+        requireRigidBogiePivots(
+            pose, definition, "curved multi-car rigid bogie pivots");
     }
 
     void crestAndValleyArticulate()
@@ -453,12 +548,16 @@ namespace
 
     void sixCarClosureDoesNotAccumulate()
     {
+        const CompiledPhysicsTrack track = horizontalCircleTrack(35.0);
+        const TrainDefinition definition = trainOf(6, 0.35);
         const TrainPose pose = solveTrainPose(
-            horizontalCircleTrack(35.0), trainOf(6, 0.35), locationAt(55.0));
+            track, definition, locationAt(55.0));
         require(pose.connectionCount() == 5, "six-car connection count");
         require(pose.maximumAbsoluteConnectorResidualMeters()
                 <= connectorLengthToleranceMeters,
             "six-car maximum closure error");
+        requireRigidBogiePivots(
+            pose, definition, "six-car rigid bogie pivots");
     }
 
     void connectorDirectionIsFiniteAndNormalized()
@@ -503,21 +602,25 @@ namespace
     void consistCrossesCircuitSeamContinuously()
     {
         const auto track = horizontalCircleTrack();
+        const TrainDefinition definition = trainOf(3);
         const TrainPose pose = solveTrainPose(
-            track, trainOf(3), locationAt(1.0));
+            track, definition, locationAt(1.0));
         require(pose.cars()[1].referenceLocation().stationMeters
                 > track.lengthMeters() - 10.0,
             "following car wraps behind seam");
         require(pose.maximumAbsoluteConnectorResidualMeters()
                 <= connectorLengthToleranceMeters,
             "seam connector closure");
+        requireRigidBogiePivots(
+            pose, definition, "seam-crossing rigid bogie pivots");
     }
 
     void reverseTravelPreservesConsistOrder()
     {
+        const TrainDefinition definition = trainOf(3);
         const TrainPose pose = solveTrainPose(
             straightTrack(),
-            trainOf(3),
+            definition,
             locationAt(50.0, TravelDirection::DecreasingStation));
         require(pose.cars()[0].carIndex() == 0
             && pose.cars()[1].carIndex() == 1
@@ -528,6 +631,8 @@ namespace
         require(pose.maximumAbsoluteConnectorResidualMeters()
                 <= connectorLengthToleranceMeters,
             "reverse connector closure");
+        requireRigidBogiePivots(
+            pose, definition, "reverse multi-car rigid bogie pivots");
     }
 
     void openTrackRejectsIncompleteEnvelope()
@@ -906,6 +1011,316 @@ namespace
             && connection.finalBracketSizeMeters() >= 0.0,
             "connector bracket diagnostics");
     }
+
+    void fourCarTrainNaturallyRollsBackFromSpike()
+    {
+        constexpr double fixedStepSeconds = 1.0 / 240.0;
+        constexpr double initialStationMeters = 25.0;
+        constexpr double initialVelocityMetersPerSecond = 24.0;
+        constexpr double transitionBeginStationMeters = 40.0;
+        constexpr double transitionEndStationMeters = 58.0;
+        constexpr int maximumStepCount = 2'400;
+        constexpr double maximumContinuousDisplacementMeters = 0.2;
+        constexpr double minimumContinuousOrientationDot = 0.999;
+
+        const CompiledPhysicsTrack track = shuttleSpikeTrack();
+        const TrainDefinition train = trainOf(4, 0.5);
+        TrainDynamicsState state = dynamicsState(
+            initialStationMeters,
+            initialVelocityMetersPerSecond,
+            TravelDirection::IncreasingStation);
+        TrainPose previousPose = solveTrainPose(
+            track, train, state.generalizedReferenceLocation);
+        double previousStation = initialStationMeters;
+        double minimumAbsoluteVelocity = std::abs(
+            initialVelocityMetersPerSecond);
+        double maximumRigidPivotResidual = 0.0;
+        double maximumConnectorResidual = 0.0;
+        int reversalStep = -1;
+        bool observedZeroNeighborhood = false;
+        bool observedPositiveVelocity = false;
+        bool observedNegativeVelocity = false;
+        bool crossedTransitionForward = false;
+        bool crossedTransitionEndBackward = false;
+        bool crossedTransitionBeginBackward = false;
+        bool usedExhaustiveConnectorFallback = false;
+
+        const auto started = std::chrono::steady_clock::now();
+        int completedSteps = 0;
+        for (; completedSteps < maximumStepCount; ++completedSteps)
+        {
+            const double velocityBefore = state.signedVelocityMetersPerSecond;
+            TrainStepResult result = stepTrain(
+                track,
+                train,
+                PhysicsEnvironment{},
+                state,
+                FixedStepSettings{fixedStepSeconds});
+            const TrainPose& pose = result.telemetry.pose;
+            const double station = result.state.generalizedReferenceLocation
+                .stationMeters;
+            const double stationDelta = station - previousStation;
+
+            require(result.state.generalizedReferenceLocation.direction
+                    == TravelDirection::IncreasingStation,
+                "rollback must not reverse the physical train orientation");
+            require(!result.telemetry.boundaryIntervention
+                    && result.telemetry.boundary == TrackBoundary::None,
+                "rollback must remain inside the open-track envelope");
+            require(std::isfinite(station)
+                    && std::isfinite(
+                        result.state.signedVelocityMetersPerSecond)
+                    && std::isfinite(result.telemetry
+                        .generalizedAccelerationMetersPerSecondSquared),
+                "rollback dynamics must remain finite");
+            if (result.state.signedVelocityMetersPerSecond > 0.0)
+            {
+                observedPositiveVelocity = true;
+                require(stationDelta > 0.0,
+                    "positive velocity must advance reference station");
+            }
+            else if (result.state.signedVelocityMetersPerSecond < 0.0)
+            {
+                observedNegativeVelocity = true;
+                require(stationDelta < 0.0,
+                    "negative velocity must reduce reference station");
+                if (reversalStep < 0)
+                {
+                    reversalStep = completedSteps + 1;
+                }
+            }
+            else
+            {
+                observedZeroNeighborhood = true;
+                requireNear(stationDelta, 0.0, 0.0,
+                    "zero-speed step must not move the train");
+            }
+            minimumAbsoluteVelocity = std::min(
+                minimumAbsoluteVelocity,
+                std::abs(result.state.signedVelocityMetersPerSecond));
+
+            require(pose.carCount() == train.cars.size()
+                    && pose.connectionCount() == train.connections.size(),
+                "rollback committed pose shape");
+            require(pose.maximumAbsoluteConnectorResidualMeters()
+                    <= connectorLengthToleranceMeters,
+                "rollback connector closure");
+            maximumConnectorResidual = std::max(
+                maximumConnectorResidual,
+                pose.maximumAbsoluteConnectorResidualMeters());
+            for (const InterCarConnectionPose& connection
+                : pose.connections())
+            {
+                usedExhaustiveConnectorFallback |=
+                    connection.usedExhaustiveSearchFallback();
+            }
+
+            for (std::size_t carIndex = 0;
+                carIndex < pose.cars().size(); ++carIndex)
+            {
+                const TrainCarPose& car = pose.cars()[carIndex];
+                const CarPose& carPose = car.carPose();
+                const CarPose& previousCarPose =
+                    previousPose.cars()[carIndex].carPose();
+                require(car.carIndex() == carIndex,
+                    "rollback must preserve authored car order");
+                if (carIndex != 0)
+                {
+                    require(car.referenceLocation().stationMeters
+                            < pose.cars()[carIndex - 1]
+                                .referenceLocation().stationMeters,
+                        "following car must remain behind its leading car");
+                }
+                require(glm::length(carPose.bodyWorldPositionMeters()
+                            - previousCarPose.bodyWorldPositionMeters())
+                        <= maximumContinuousDisplacementMeters,
+                    "rollback car body position discontinuity");
+                require(std::abs(glm::dot(
+                            carPose.bodyOrientation(),
+                            previousCarPose.bodyOrientation()))
+                        >= minimumContinuousOrientationDot,
+                    "rollback car body orientation discontinuity");
+                require(finite(carPose.bodyWorldPositionMeters())
+                        && finite(carPose.bodyOrientation()),
+                    "rollback car pose must remain finite");
+
+                const CarDefinition& carDefinition =
+                    train.cars[carIndex].car;
+                for (const BogiePose* bogie : {
+                    &carPose.frontBogie(), &carPose.rearBogie()})
+                {
+                    const double pivotResidual = glm::length(
+                        carPose.transformLocalPoint(
+                            carDefinition.bogies[bogie->definitionIndex()]
+                                .referencePositionMeters)
+                        - bogie->worldPositionMeters());
+                    maximumRigidPivotResidual = std::max(
+                        maximumRigidPivotResidual, pivotResidual);
+                    require(std::isfinite(pivotResidual)
+                            && pivotResidual <= 1.0e-8,
+                        "rollback rigid bogie pivot closure");
+                    const double previousBogieStation =
+                        bogie->definitionIndex()
+                            == previousCarPose.frontBogie().definitionIndex()
+                        ? previousCarPose.frontBogie().location().stationMeters
+                        : previousCarPose.rearBogie().location().stationMeters;
+                    require(std::abs(bogie->location().stationMeters
+                                - previousBogieStation)
+                            <= maximumContinuousDisplacementMeters,
+                        "rollback bogie local-root discontinuity");
+                    require(bogie->location().stationMeters > 0.0
+                            && bogie->location().stationMeters
+                                < track.lengthMeters(),
+                        "rollback bogie must not clamp to an open endpoint");
+                }
+            }
+
+            crossedTransitionForward |= previousStation
+                < transitionEndStationMeters
+                && station >= transitionEndStationMeters;
+            crossedTransitionEndBackward |= observedNegativeVelocity
+                && previousStation > transitionEndStationMeters
+                && station <= transitionEndStationMeters;
+            crossedTransitionBeginBackward |= observedNegativeVelocity
+                && previousStation > transitionBeginStationMeters
+                && station <= transitionBeginStationMeters;
+
+            previousPose = pose;
+            previousStation = station;
+            state = result.state;
+            if (crossedTransitionBeginBackward)
+            {
+                ++completedSteps;
+                break;
+            }
+            require(!(velocityBefore == 0.0
+                    && result.state.signedVelocityMetersPerSecond == 0.0),
+                "gravity must restart the train backward after the zero step");
+        }
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        const double elapsedMilliseconds = std::chrono::duration<double,
+            std::milli>(elapsed).count();
+
+        require(completedSteps < maximumStepCount,
+            "rollback must complete within the deterministic step budget");
+        require(observedPositiveVelocity && observedZeroNeighborhood
+                && observedNegativeVelocity && reversalStep > 0,
+            "rollback must naturally cross from positive through zero to negative velocity");
+        require(crossedTransitionForward && crossedTransitionEndBackward
+                && crossedTransitionBeginBackward,
+            "rollback must traverse the complete transition in both directions");
+
+        std::fprintf(stdout,
+            "        spike metrics: steps=%d reversal_step=%d min_abs_velocity=%.12g "
+            "max_pivot_residual=%.12g max_connector_residual=%.12g "
+            "physics_ms=%.3f exhaustive_fallback=%s\n",
+            completedSteps,
+            reversalStep,
+            minimumAbsoluteVelocity,
+            maximumRigidPivotResidual,
+            maximumConnectorResidual,
+            elapsedMilliseconds,
+            usedExhaustiveConnectorFallback ? "yes" : "no");
+    }
+
+    // Independent exact-pose evaluation of the original exhaustive grid. This
+    // checks which root is selected, rather than only checking hitch closure.
+    void adaptiveSearchMatchesExhaustiveCircuitRoot()
+    {
+        const TrainDefinition train = trainOf(2);
+        constexpr double expectedOffset = 4.5;
+        constexpr double searchHalfExtent = 1.1 * 4.0;
+        constexpr double searchBegin = expectedOffset - searchHalfExtent;
+        constexpr double searchEnd = expectedOffset + searchHalfExtent;
+        // 3 m and 6 m need expansion; 2 m exceeds the local budget and must
+        // still find the same adjacent root using the safety fallback.
+        for (const double radius : {2.0, 3.0, 6.0, 12.0, 25.0})
+        {
+            const auto track = horizontalCircleTrack(radius);
+            for (const auto direction : {
+                TravelDirection::IncreasingStation,
+                TravelDirection::DecreasingStation})
+            {
+                for (const double station : {0.1, track.lengthMeters() - 0.1})
+                {
+                    const TrackLocation location = locationAt(station, direction);
+                    const CarPose lead = solveCarPose(
+                        track, train.cars[0].car, location,
+                        train.cars[0].loadout);
+                    const double sign = direction
+                        == TravelDirection::IncreasingStation ? 1.0 : -1.0;
+                    const auto residual = [&](const double offset)
+                    {
+                        auto following = track.advance(
+                            location, -sign * offset).location;
+                        following.direction = direction;
+                        const CarPose car = solveCarPose(
+                            track, train.cars[1].car, following,
+                            train.cars[1].loadout);
+                        return glm::length(car.frontHitchWorldPositionMeters()
+                            - lead.rearHitchWorldPositionMeters()) - 0.5;
+                    };
+                    const auto offsetAt = [](const std::size_t index)
+                    {
+                        return index == 160 ? searchEnd
+                            : std::lerp(searchBegin, searchEnd,
+                                static_cast<double>(index) / 160.0);
+                    };
+                    double lower = 0.0;
+                    double upper = 0.0;
+                    double nearest = std::numeric_limits<double>::infinity();
+                    double previous = residual(offsetAt(0));
+                    for (std::size_t index = 1; index <= 160; ++index)
+                    {
+                        const double current = residual(offsetAt(index));
+                        const double distance = std::abs(0.5
+                            * (offsetAt(index - 1) + offsetAt(index))
+                            - expectedOffset);
+                        if (std::signbit(previous) != std::signbit(current)
+                            && distance < nearest)
+                        {
+                            lower = offsetAt(index - 1);
+                            upper = offsetAt(index);
+                            nearest = distance;
+                        }
+                        previous = current;
+                    }
+                    require(std::isfinite(nearest), "reference root exists");
+                    double lowerResidual = residual(lower);
+                    double upperResidual = residual(upper);
+                    for (int iteration = 0; iteration < 80
+                        && std::abs(lowerResidual) > connectorLengthToleranceMeters
+                        && std::abs(upperResidual) > connectorLengthToleranceMeters;
+                        ++iteration)
+                    {
+                        const double middle = 0.5 * (lower + upper);
+                        const double middleResidual = residual(middle);
+                        if (std::signbit(lowerResidual) == std::signbit(middleResidual))
+                        {
+                            lower = middle;
+                            lowerResidual = middleResidual;
+                        }
+                        else
+                        {
+                            upper = middle;
+                            upperResidual = middleResidual;
+                        }
+                    }
+                    const double expected = std::abs(lowerResidual)
+                        <= std::abs(upperResidual) ? lower : upper;
+                    const TrainPose pose = solveTrainPose(track, train, location);
+                    const auto expectedLocation = track.advance(
+                        location, -sign * expected).location;
+                    requireNear(pose.cars()[1].referenceLocation().stationMeters,
+                        expectedLocation.stationMeters, 1.0e-12,
+                        "adaptive/fallback selects exhaustive adjacent root");
+                    require(pose.maximumAbsoluteConnectorResidualMeters()
+                        <= connectorLengthToleranceMeters, "adaptive closure");
+                    requireRigidBogiePivots(pose, train, "adaptive rigid pivots");
+                }
+            }
+        }
+    }
 }
 
 int main()
@@ -928,6 +1343,7 @@ int main()
     };
 
     std::fprintf(stdout, "Train Physics Tests\n");
+    run("adaptive/exhaustive root parity", adaptiveSearchMatchesExhaustiveCircuitRoot);
     run("one-car Phase 2 parity", oneCarConsistMatchesPhaseTwo);
     run("two cars straight", twoCarsCloseOnStraightTrack);
     run("non-zero connector", nonZeroConnectorEndpointsRemainDistinct);
@@ -964,6 +1380,7 @@ int main()
     run("track-family independence", canonicalTrackQueriesAreTheOnlyGeometryDependency);
     run("invalid dynamics state", invalidDynamicsStateIsRejected);
     run("solver diagnostics", solverDiagnosticsArePopulated);
+    run("four-car spike rollback", fourCarTrainNaturallyRollsBackFromSpike);
 
     std::fprintf(stdout, "%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;

@@ -15,11 +15,6 @@ namespace quantum::editor
 {
     namespace
     {
-        // The heartline remains an engineering reference rather than track-
-        // style geometry. Its future vehicle/rider offset is still outside
-        // the scope of the visual track preset.
-        inline constexpr double temporaryHeartlineOffset = 1.4;
-
         inline constexpr std::array<float, 4> leftRailColor{
             1.00F, 0.45F, 0.15F, 1.0F};
         inline constexpr std::array<float, 4> rightRailColor{
@@ -323,14 +318,26 @@ namespace quantum::editor
                 return state.position;
             });
 
+        // Coaster Setup stores SI metres while solved positions use document
+        // coordinate units. This affects only the viewport reference curve;
+        // centerline integration, rail meshing, and TrainPhysics retain their
+        // existing authoritative inputs.
+        const coaster::HeartlineSettings& heartline =
+            track.coasterSetup().heartline;
+        const double heartlineOffsetCoordinateUnits = heartline.enabled
+            ? heartline.offsetMeters
+                / track.physicalSettings().metersPerCoordinateUnit
+            : 0.0;
+
         appendReferenceCurveSegments(
             visualization.vertices,
             states,
             heartlineColor,
-            [](const coaster::RiderLocalGeometryState& state)
+            [heartlineOffsetCoordinateUnits](
+                const coaster::RiderLocalGeometryState& state)
             {
                 return state.position + state.frame.up
-                    * temporaryHeartlineOffset;
+                    * heartlineOffsetCoordinateUnits;
             });
 
         return visualization;

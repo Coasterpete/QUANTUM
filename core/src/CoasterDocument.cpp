@@ -358,6 +358,62 @@ namespace quantum::coaster
                 {"repeatingHardware", std::move(repeatingHardware)}};
         }
 
+        json serializeCoasterSetup(const CoasterSetup& setup)
+        {
+            validateCoasterSetup(setup);
+
+            const CoasterStyleDefinition* style =
+                findCoasterStyle(setup.styleId);
+            if (style == nullptr)
+            {
+                throw std::runtime_error(
+                    "Cannot serialize an unknown coaster style '"
+                    + setup.styleId + "'.");
+            }
+
+            json optionsJson = json::array();
+            for (const CoasterOptionDefinition* option :
+                applicableOptionsForStyle(*style))
+            {
+                const CoasterOptionValue* value = nullptr;
+                for (const CoasterOptionValue& candidate : setup.options)
+                {
+                    if (candidate.optionId == option->id)
+                    {
+                        value = &candidate;
+                        break;
+                    }
+                }
+                if (value == nullptr)
+                {
+                    throw std::runtime_error(
+                        "Coaster setup is missing option '"
+                        + std::string(option->id) + "'.");
+                }
+
+                if (option->kind == CoasterOptionKind::Boolean)
+                {
+                    optionsJson.push_back({
+                        {"optionId", value->optionId},
+                        {"boolean", value->booleanValue}});
+                }
+                else
+                {
+                    optionsJson.push_back({
+                        {"optionId", value->optionId},
+                        {"choice", value->choiceValue}});
+                }
+            }
+
+            return {
+                {"styleId", setup.styleId},
+                {"carsPerTrain", setup.carsPerTrain},
+                {"options", std::move(optionsJson)},
+                {"heartline", {
+                    {"enabled", setup.heartline.enabled},
+                    {"offsetMeters", setup.heartline.offsetMeters}}}};
+        }
+
         json serializeSection(const AuthoredTrackSection& section)
         {
             json result;
@@ -693,7 +749,7 @@ namespace quantum::coaster
                 object["z"].get<double>()};
         }
 
-        TrackStylePreset deserializeTrackStyle(
+TrackStylePreset deserializeTrackStyle(
             const json& object,
             const std::string& path)
         {
@@ -842,6 +898,102 @@ namespace quantum::coaster
             return style;
         }
 
+        CoasterSetup deserializeCoasterSetup(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(object, {
+                "styleId", "carsPerTrain", "options", "heartline"}, path);
+            requireString(object, "styleId", path);
+            requireInteger(object, "carsPerTrain", path);
+            requireArray(object, "options", path);
+            requireObject(object, "heartline", path);
+
+            if (object["carsPerTrain"] < minimumCarsPerTrain
+                || object["carsPerTrain"] > maximumCarsPerTrain)
+            {
+                throw std::runtime_error(
+                    path + ".carsPerTrain: out of range ["
+                    + std::to_string(minimumCarsPerTrain) + ", "
+                    + std::to_string(maximumCarsPerTrain) + "]");
+            }
+
+            CoasterSetup setup;
+            setup.styleId = object["styleId"].get<std::string>();
+            setup.carsPerTrain = object["carsPerTrain"].get<std::uint32_t>();
+
+            const json& optionsJson = object["options"];
+            for (std::size_t index = 0; index < optionsJson.size(); ++index)
+            {
+                const json& item = optionsJson[index];
+                const std::string itemPath = path + ".options["
+                    + std::to_string(index) + "]";
+                if (!item.is_object())
+                {
+                    throw std::runtime_error(
+                        itemPath + ": expected an object");
+                }
+                requireNoUnknownFields(item,
+                    {"optionId", "boolean", "choice"}, itemPath);
+                requireString(item, "optionId", itemPath);
+
+                const std::string optionId =
+                    item["optionId"].get<std::string>();
+                const CoasterOptionDefinition* option =
+                    findCoasterOption(optionId);
+                if (option == nullptr)
+                {
+                    throw std::runtime_error(
+                        itemPath + ".optionId: unknown coaster option '"
+                        + optionId + "'");
+                }
+
+                CoasterOptionValue value;
+                value.optionId = optionId;
+
+                if (option->kind == CoasterOptionKind::Boolean)
+                {
+                    requireBoolean(item, "boolean", itemPath);
+                    if (item.contains("choice"))
+                    {
+                        throw std::runtime_error(
+                            itemPath + ".choice: unexpected for boolean "
+                            "coaster option '" + optionId + "'");
+                    }
+                    value.booleanValue = item["boolean"].get<bool>();
+                }
+                else
+                {
+                    requireString(item, "choice", itemPath);
+                    if (item.contains("boolean"))
+                    {
+                        throw std::runtime_error(
+                            itemPath + ".boolean: unexpected for choice "
+                            "coaster option '" + optionId + "'");
+                    }
+                    value.choiceValue = item["choice"].get<std::string>();
+                }
+
+                setup.options.push_back(std::move(value));
+            }
+
+            const json& heartline = object["heartline"];
+            const std::string heartlinePath = path + ".heartline";
+            requireNoUnknownFields(heartline, {"enabled", "offsetMeters"},
+                heartlinePath);
+            requireBoolean(heartline, "enabled", heartlinePath);
+            requireNumber(heartline, "offsetMeters", heartlinePath);
+            setup.heartline.enabled = heartline["enabled"].get<bool>();
+            setup.heartline.offsetMeters =
+                heartline["offsetMeters"].get<double>();
+
+            // Full Core validation: unknown options already rejected above;
+            // this also covers duplicates, style applicability, missing
+            // values, choice validity, and the heartline range/finiteness.
+            validateCoasterSetup(setup);
+            return setup;
+        }
+
         // ----------------------------------------------------------------
         // nextSegmentId consistency
         // ----------------------------------------------------------------
@@ -899,6 +1051,7 @@ namespace quantum::coaster
             {"metersPerCoordinateUnit", physical.metersPerCoordinateUnit},
             {"gravityAcceleration", physical.gravityAcceleration}};
         root["trackStyle"] = serializeTrackStyle(track.trackStyle());
+        root["coasterSetup"] = serializeCoasterSetup(track.coasterSetup());
 
         json sectionsJson = json::array();
 
@@ -930,7 +1083,7 @@ namespace quantum::coaster
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
-                "physicalSettings", "trackStyle"
+                "physicalSettings", "trackStyle", "coasterSetup"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -1099,6 +1252,15 @@ namespace quantum::coaster
                 requireObject(root, "trackStyle", "root");
                 track.setTrackStyle(deserializeTrackStyle(
                     root["trackStyle"], "trackStyle"));
+            }
+
+            // Documents written before the Coaster Setup system keep the
+            // canonical placeholder setup defaults.
+            if (root.contains("coasterSetup"))
+            {
+                requireObject(root, "coasterSetup", "root");
+                track.setCoasterSetup(deserializeCoasterSetup(
+                    root["coasterSetup"], "coasterSetup"));
             }
 
             return track;

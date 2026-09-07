@@ -1,9 +1,11 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/EditorIcons.hpp>
 #include <quantum/editor/EditorStyle.hpp>
+#include <quantum/editor/FramePerformanceTelemetry.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
@@ -396,6 +398,12 @@ namespace quantum::editor
         [[nodiscard]] std::optional<coaster::LayoutMode>
         takePendingLayoutModeChange() noexcept;
 
+        // Coaster Setup: returns any pending complete coaster configuration
+        // requested by the Coaster Setup window. Application validates the
+        // candidate, applies it to the document, and records history.
+        [[nodiscard]] std::optional<coaster::CoasterSetup>
+        takePendingCoasterSetupEdit() noexcept;
+
         // Circuit completion: returns true once when the user clicks
         // Complete Circuit....  Application processes the actual
         // completion attempt.
@@ -420,6 +428,15 @@ namespace quantum::editor
 
         // Called when simulation is unavailable (e.g., track too short).
         void setSimulationUnavailable(const std::string& error);
+
+        // Adds one completed rendered-frame sample to the optional compact
+        // performance panel. Recording is fixed-capacity and allocation-free.
+        void recordFramePerformance(
+            const FramePerformanceSample& sample) noexcept;
+
+        // Returns and clears low-frequency UI/window events observed since
+        // the preceding rendered frame.
+        [[nodiscard]] FrameBlockingEvents takeFrameBlockingEvents() noexcept;
 
         // Uses the same ImGui/SDL frame timing already used by camera movement.
         [[nodiscard]] double frameDeltaSeconds() const noexcept;
@@ -464,7 +481,8 @@ namespace quantum::editor
             float logicalWidth,
             float logicalHeight
         );
-        void drawSimulationTelemetry();
+void drawSimulationTelemetry();
+        void drawPerformanceTelemetry();
         void drawViewportTrackAnchors();
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
@@ -585,9 +603,11 @@ namespace quantum::editor
         SDL_Window* window_ = nullptr;
         std::optional<FileOperationType> pendingFileOperation_;
         std::optional<HistoryOperationType> pendingHistoryOperation_;
-        bool canUndo_ = false;
+bool canUndo_ = false;
         bool canRedo_ = false;
         std::optional<coaster::LayoutMode> pendingLayoutModeChange_;
+        std::optional<coaster::CoasterSetup> pendingCoasterSetupEdit_;
+        bool coasterSetupWindowOpen_ = true;
         bool pendingCircuitCompletion_ = false;
 
         // Simulation Preview 1 state.
@@ -596,5 +616,13 @@ namespace quantum::editor
         double simulationSpeedMps_ = 0.0;
         bool simulationAvailable_ = false;
         std::string simulationError_;
+
+        static constexpr std::size_t performanceHistoryCapacity = 720;
+        std::array<FramePerformanceSample, performanceHistoryCapacity>
+            performanceHistory_{};
+        std::size_t performanceHistoryNext_ = 0;
+        std::size_t performanceHistoryCount_ = 0;
+        bool performanceTelemetryWindowOpen_ = false;
+        FrameBlockingEvents frameBlockingEvents_;
     };
 }

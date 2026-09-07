@@ -2,6 +2,7 @@
 
 #include <glm/geometric.hpp>
 #include <glm/mat3x3.hpp>
+#include <glm/matrix.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,8 @@ namespace quantum::physics
     namespace
     {
         inline constexpr double minimumBogieSeparationMeters = 1.0e-9;
+        inline constexpr double rigidBogieConstraintToleranceMeters = 1.0e-10;
+        inline constexpr std::size_t bogieStationRefinementIterationCount = 64;
         inline constexpr double directionalResolution =
             128.0 * std::numeric_limits<double>::epsilon();
 
@@ -303,7 +306,9 @@ namespace quantum::physics
             const glm::dvec3& rearPosition,
             const glm::dvec3& frontPosition,
             const geometry::CurveFrame& rearFrame,
-            const geometry::CurveFrame& frontFrame)
+            const geometry::CurveFrame& frontFrame,
+            const glm::dvec3& rearReferencePosition,
+            const glm::dvec3& frontReferencePosition)
         {
             const glm::dvec3 chord = frontPosition - rearPosition;
             const double chordLength = magnitude(chord);
@@ -318,37 +323,77 @@ namespace quantum::physics
                 throw std::domain_error(
                     "The sampled front and rear bogie positions cannot define a car body direction.");
             }
-            const glm::dvec3 forward = chord / chordLength;
+            const glm::dvec3 worldForward = chord / chordLength;
+
+            const glm::dvec3 localSeparation =
+                frontReferencePosition - rearReferencePosition;
+            const glm::dvec3 localForward = normalized(
+                localSeparation,
+                "The authored bogie pivots cannot define a car body direction.");
 
             // Average both track-up axes before projection so pitch, yaw, and
             // bank at both bogies influence the body. Ordered fallbacks retain
             // one sampled up direction before choosing a world axis.
             glm::dvec3 projectedUp = projectedPerpendicular(
-                rearFrame.up + frontFrame.up, forward);
+                rearFrame.up + frontFrame.up, worldForward);
             if (!usableDirection(projectedUp))
             {
-                projectedUp = projectedPerpendicular(frontFrame.up, forward);
+                projectedUp = projectedPerpendicular(
+                    frontFrame.up, worldForward);
             }
             if (!usableDirection(projectedUp))
             {
-                projectedUp = projectedPerpendicular(rearFrame.up, forward);
+                projectedUp = projectedPerpendicular(
+                    rearFrame.up, worldForward);
             }
             if (!usableDirection(projectedUp))
             {
-                projectedUp = fallbackWorldUp(forward);
+                projectedUp = fallbackWorldUp(worldForward);
             }
 
-            glm::dvec3 up = normalized(
+            glm::dvec3 worldUp = normalized(
                 projectedUp,
                 "The bogie track frames cannot define a car body up direction.");
-            const glm::dvec3 lateral = normalized(
-                glm::cross(up, forward),
+            const glm::dvec3 worldLateral = normalized(
+                glm::cross(worldUp, worldForward),
                 "The car body lateral direction could not be constructed.");
-            up = normalized(
-                glm::cross(forward, lateral),
+            worldUp = normalized(
+                glm::cross(worldForward, worldLateral),
                 "The car body up direction could not be reconstructed.");
 
-            const geometry::CurveFrame frame{forward, lateral, up};
+            // Choose the least-twist body-space basis around the authored
+            // pivot axis. For the usual common Y/Z bogie offsets this basis is
+            // exactly the car's +X/+Y/+Z frame and preserves existing roll.
+            glm::dvec3 localProjectedUp = projectedPerpendicular(
+                glm::dvec3{0.0, 0.0, 1.0}, localForward);
+            if (!usableDirection(localProjectedUp))
+            {
+                localProjectedUp = projectedPerpendicular(
+                    glm::dvec3{0.0, 1.0, 0.0}, localForward);
+            }
+            if (!usableDirection(localProjectedUp))
+            {
+                localProjectedUp = fallbackWorldUp(localForward);
+            }
+            glm::dvec3 localUp = normalized(
+                localProjectedUp,
+                "The authored bogie pivots cannot define a body-space up direction.");
+            const glm::dvec3 localLateral = normalized(
+                glm::cross(localUp, localForward),
+                "The authored bogie pivots cannot define a body-space lateral direction.");
+            localUp = normalized(
+                glm::cross(localForward, localLateral),
+                "The authored bogie pivots cannot reconstruct a body-space up direction.");
+
+            const glm::dmat3 rotation = glm::dmat3{
+                worldForward, worldLateral, worldUp}
+                * glm::transpose(glm::dmat3{
+                    localForward, localLateral, localUp});
+            const geometry::CurveFrame frame{
+                rotation * glm::dvec3{1.0, 0.0, 0.0},
+                rotation * glm::dvec3{0.0, 1.0, 0.0},
+                rotation * glm::dvec3{0.0, 0.0, 1.0}
+            };
             geometry::detail::validateCurveFrameForRotation(
                 frame, "car body pose construction");
             return frame;
@@ -377,13 +422,13 @@ namespace quantum::physics
         [[nodiscard]] SampledBogie sampleBogie(
             const CompiledPhysicsTrack& track,
             const TrackLocation& referenceLocation,
-            const BogieDefinition& bogie,
+            const double longitudinalOffsetMeters,
             const std::size_t definitionIndex,
             const double travelSign)
         {
-            TrackLocation location = track.advance(
-                referenceLocation,
-                travelSign * bogie.referencePositionMeters.x).location;
+            const TrackAdvanceResult advancement = track.advance(
+                referenceLocation, travelSign * longitudinalOffsetMeters);
+            TrackLocation location = advancement.location;
 
             // advance() records the direction of its signed displacement. A
             // pose offset is not motion, so retain the car's travel direction.
@@ -396,6 +441,179 @@ namespace quantum::physics
                 sample.frame,
                 orientedTrackFrame(sample.frame, referenceLocation.direction)
             };
+        }
+
+        struct SolvedBogieStations
+        {
+            SampledBogie front;
+            SampledBogie rear;
+        };
+
+        [[nodiscard]] double rigidBogieTolerance(
+            const SampledBogie& front,
+            const SampledBogie& rear,
+            const double pivotSeparationMeters) noexcept
+        {
+            const double scale = std::max({
+                1.0,
+                pivotSeparationMeters,
+                magnitude(front.positionMeters),
+                magnitude(rear.positionMeters)
+            });
+            return std::max(
+                rigidBogieConstraintToleranceMeters,
+                512.0 * std::numeric_limits<double>::epsilon() * scale);
+        }
+
+        [[nodiscard]] SolvedBogieStations solveBogieStations(
+            const CompiledPhysicsTrack& track,
+            const TrackLocation& referenceLocation,
+            const BogieDefinition& frontDefinition,
+            const BogieDefinition& rearDefinition,
+            const std::size_t frontIndex,
+            const std::size_t rearIndex,
+            const double travelSign)
+        {
+            const double frontX = frontDefinition.referencePositionMeters.x;
+            const double rearX = rearDefinition.referencePositionMeters.x;
+            const double nominalStationSeparation = frontX - rearX;
+            const double pivotSeparation = magnitude(
+                frontDefinition.referencePositionMeters
+                    - rearDefinition.referencePositionMeters);
+
+            const auto sampleAt = [&](const double addedStationSeparation)
+            {
+                return SolvedBogieStations{
+                    sampleBogie(track, referenceLocation,
+                        frontX + 0.5 * addedStationSeparation,
+                        frontIndex, travelSign),
+                    sampleBogie(track, referenceLocation,
+                        rearX - 0.5 * addedStationSeparation,
+                        rearIndex, travelSign)
+                };
+            };
+            const auto residual = [pivotSeparation](
+                const SolvedBogieStations& stations)
+            {
+                return magnitude(stations.front.positionMeters
+                    - stations.rear.positionMeters) - pivotSeparation;
+            };
+
+            SolvedBogieStations lowerStations = sampleAt(0.0);
+            double lowerResidual = residual(lowerStations);
+            double tolerance = rigidBogieTolerance(
+                lowerStations.front, lowerStations.rear, pivotSeparation);
+            if (std::abs(lowerResidual) <= tolerance)
+            {
+                return lowerStations;
+            }
+            if (lowerResidual > 0.0)
+            {
+                throw std::domain_error(
+                    "The nominal bogie stations already exceed the authored rigid pivot separation.");
+            }
+
+            double maximumAddedSeparation = 2.0 * pivotSeparation;
+            if (track.topology() == coaster::TopologyKind::ClosedCircuit)
+            {
+                // The nearest pair is reached before half a circuit. Keeping
+                // the unwrapped station separation below that point prevents
+                // a solve from selecting the corresponding root on another lap.
+                maximumAddedSeparation = std::min(
+                    maximumAddedSeparation,
+                    0.5 * track.lengthMeters() - nominalStationSeparation);
+            }
+            if (!(maximumAddedSeparation > 0.0))
+            {
+                throw std::domain_error(
+                    "A local rigid-bogie station interval could not be established.");
+            }
+
+            double lowerAdjustment = 0.0;
+            double upperAdjustment = std::min(
+                maximumAddedSeparation,
+                std::max(
+                    2.0 * -lowerResidual,
+                    1.0e-8 * std::max(1.0, pivotSeparation)));
+            SolvedBogieStations upperStations = sampleAt(upperAdjustment);
+            double upperResidual = residual(upperStations);
+            tolerance = rigidBogieTolerance(
+                upperStations.front, upperStations.rear, pivotSeparation);
+
+            while (upperResidual < -tolerance
+                && upperAdjustment < maximumAddedSeparation)
+            {
+                lowerAdjustment = upperAdjustment;
+                lowerResidual = upperResidual;
+                lowerStations = std::move(upperStations);
+                upperAdjustment = std::min(
+                    maximumAddedSeparation, 2.0 * upperAdjustment);
+                upperStations = sampleAt(upperAdjustment);
+                upperResidual = residual(upperStations);
+                tolerance = rigidBogieTolerance(
+                    upperStations.front,
+                    upperStations.rear,
+                    pivotSeparation);
+            }
+            if (std::abs(upperResidual) <= tolerance)
+            {
+                return upperStations;
+            }
+            if (upperResidual < 0.0)
+            {
+                throw std::domain_error(
+                    "The authored rigid bogie pivots cannot be placed within the local track interval.");
+            }
+
+            for (std::size_t iteration = 0;
+                iteration < bogieStationRefinementIterationCount;
+                ++iteration)
+            {
+                const double bracketWidth =
+                    upperAdjustment - lowerAdjustment;
+                const double secantFraction = -lowerResidual
+                    / (upperResidual - lowerResidual);
+                const double adjustment =
+                    std::isfinite(secantFraction)
+                        && secantFraction >= 0.01
+                        && secantFraction <= 0.99
+                    ? std::lerp(
+                        lowerAdjustment,
+                        upperAdjustment,
+                        secantFraction)
+                    : lowerAdjustment + 0.5 * bracketWidth;
+                SolvedBogieStations candidate = sampleAt(adjustment);
+                const double candidateResidual = residual(candidate);
+                tolerance = rigidBogieTolerance(
+                    candidate.front, candidate.rear, pivotSeparation);
+                if (std::abs(candidateResidual) <= tolerance)
+                {
+                    return candidate;
+                }
+                if (candidateResidual < 0.0)
+                {
+                    lowerAdjustment = adjustment;
+                    lowerResidual = candidateResidual;
+                    lowerStations = std::move(candidate);
+                }
+                else
+                {
+                    upperAdjustment = adjustment;
+                    upperResidual = candidateResidual;
+                    upperStations = std::move(candidate);
+                }
+            }
+
+            const SolvedBogieStations& best =
+                std::abs(lowerResidual) < std::abs(upperResidual)
+                ? lowerStations : upperStations;
+            if (std::abs(residual(best)) <= rigidBogieTolerance(
+                    best.front, best.rear, pivotSeparation))
+            {
+                return best;
+            }
+            throw std::domain_error(
+                "The rigid-bogie station solve did not converge within tolerance.");
         }
 
         struct SolvedCarGeometry
@@ -439,25 +657,52 @@ namespace quantum::physics
             const double travelSign = directionSign(referenceLocation.direction);
 
             SolvedCarGeometry result;
-            result.front = sampleBogie(track,
-                referenceLocation, frontDefinition, frontIndex, travelSign);
-            result.rear = sampleBogie(track,
-                referenceLocation, rearDefinition, rearIndex, travelSign);
+            SolvedBogieStations stations = solveBogieStations(
+                track,
+                referenceLocation,
+                frontDefinition,
+                rearDefinition,
+                frontIndex,
+                rearIndex,
+                travelSign);
+            result.front = std::move(stations.front);
+            result.rear = std::move(stations.rear);
             result.bodyFrame = bodyFrameFromBogies(
                 result.rear.positionMeters,
                 result.front.positionMeters,
                 result.rear.orientedFrame,
-                result.front.orientedFrame);
+                result.front.orientedFrame,
+                rearDefinition.referencePositionMeters,
+                frontDefinition.referencePositionMeters);
 
             const glm::dvec3 localBogieMidpoint = 0.5
                 * (frontDefinition.referencePositionMeters
                     + rearDefinition.referencePositionMeters);
             const glm::dvec3 worldBogieMidpoint = 0.5
                 * (result.front.positionMeters + result.rear.positionMeters);
-            result.bodyPositionMeters = worldBogieMidpoint
-                - localBogieMidpoint.x * result.bodyFrame.tangent
-                - localBogieMidpoint.y * result.bodyFrame.lateral
-                - localBogieMidpoint.z * result.bodyFrame.up;
+            result.bodyPositionMeters = transformPoint(
+                worldBogieMidpoint,
+                result.bodyFrame,
+                -localBogieMidpoint);
+            const double pivotTolerance = rigidBogieTolerance(
+                result.front,
+                result.rear,
+                magnitude(frontDefinition.referencePositionMeters
+                    - rearDefinition.referencePositionMeters));
+            if (magnitude(transformPoint(
+                        result.bodyPositionMeters,
+                        result.bodyFrame,
+                        frontDefinition.referencePositionMeters)
+                    - result.front.positionMeters) > pivotTolerance
+                || magnitude(transformPoint(
+                        result.bodyPositionMeters,
+                        result.bodyFrame,
+                        rearDefinition.referencePositionMeters)
+                    - result.rear.positionMeters) > pivotTolerance)
+            {
+                throw std::domain_error(
+                    "The solved car transform does not preserve its rigid bogie pivots.");
+            }
             result.frontHitchPositionMeters = transformPoint(
                 result.bodyPositionMeters,
                 result.bodyFrame,

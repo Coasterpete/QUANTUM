@@ -3,6 +3,35 @@ add_executable(
     LoggingTests.cpp
 )
 
+add_executable(
+    QuantumEditorPreviewSmokeTests
+    PreviewSmokeTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/PreviewSmoke.cpp
+)
+target_include_directories(
+    QuantumEditorPreviewSmokeTests
+    PRIVATE ${PROJECT_SOURCE_DIR}/editor/include
+        ${PROJECT_SOURCE_DIR}/engine/include
+)
+target_link_libraries(
+    QuantumEditorPreviewSmokeTests
+    PRIVATE Quantum::Core
+)
+target_compile_features(
+    QuantumEditorPreviewSmokeTests PRIVATE cxx_std_23
+)
+set_target_properties(
+    QuantumEditorPreviewSmokeTests PROPERTIES CXX_EXTENSIONS OFF
+)
+add_test(
+    NAME QuantumEditor.PreviewSmoke
+    COMMAND QuantumEditorPreviewSmokeTests
+)
+set_tests_properties(
+    QuantumEditor.PreviewSmoke
+    PROPERTIES LABELS "editor;diagnostics;preview-smoke"
+)
+
 add_executable(QuantumCoreTrackFollowerPhysicsTests TrackFollowerPhysicsTests.cpp)
 target_link_libraries(QuantumCoreTrackFollowerPhysicsTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackFollowerPhysicsTests PRIVATE cxx_std_23)
@@ -1510,6 +1539,47 @@ set_tests_properties(
     QuantumCore.CoasterDocument
     PROPERTIES
         LABELS "core;coaster;serialization"
+)
+
+add_executable(
+    QuantumEditorCoasterSetupTests
+    CoasterSetupTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+)
+
+target_include_directories(
+    QuantumEditorCoasterSetupTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorCoasterSetupTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumEditorCoasterSetupTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorCoasterSetupTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.CoasterSetup
+    COMMAND QuantumEditorCoasterSetupTests
+)
+
+set_tests_properties(
+    QuantumEditor.CoasterSetup
+    PROPERTIES
+        LABELS "editor;coaster;setup;serialization;document"
 )
 
 add_executable(

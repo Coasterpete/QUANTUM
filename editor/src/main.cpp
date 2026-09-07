@@ -1,5 +1,6 @@
 #include <quantum/engine/Application.hpp>
 #include <quantum/engine/Logging.hpp>
+#include <quantum/editor/PreviewSmoke.hpp>
 #include <quantum/editor/ReadmeCapture.hpp>
 
 #include <SDL3/SDL_main.h>
@@ -71,6 +72,42 @@ int main(int argc, char* argv[])
         std::vector<std::string_view> arguments;
         for (int index = 1; index < argc; ++index)
             arguments.emplace_back(argv[index]);
+        const auto previewSmoke =
+            quantum::editor::parsePreviewSmokeArguments(arguments);
+        if (!previewSmoke)
+            throw std::invalid_argument(previewSmoke.error());
+        if (previewSmoke->has_value())
+        {
+            try
+            {
+                quantum::engine::Application application;
+                return application.run(**previewSmoke);
+            }
+            catch (const std::exception& error)
+            {
+                // Initialization/load failures happen before the application
+                // loop can own a collector, but smoke invocations still get
+                // an on-disk failure report when the destination is writable.
+                try
+                {
+                    quantum::editor::PreviewSmokeCollector collector{
+                        **previewSmoke};
+                    const auto report = collector.finish(
+                        0.0, false, true, error.what());
+                    static_cast<void>(
+                        quantum::editor::writePreviewSmokeReports(
+                            report, **previewSmoke));
+                }
+                catch (const std::exception& reportError)
+                {
+                    throw std::runtime_error(
+                        std::string(error.what())
+                        + "; failure report could not be written: "
+                        + reportError.what());
+                }
+                throw;
+            }
+        }
         if (const auto manifest = quantum::editor::parseReadmeCaptureArguments(arguments))
             return quantum::editor::runReadmeCapture(
                 quantum::editor::loadReadmeCaptureManifest(*manifest));

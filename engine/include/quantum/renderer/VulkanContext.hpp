@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/renderer/StaticMeshAssets.hpp>
+#include <quantum/renderer/FrameSynchronizationTelemetry.hpp>
 #include <quantum/renderer/ViewportTrackPresentation.hpp>
 
 #include <SDL3/SDL.h>
@@ -37,12 +38,30 @@ namespace quantum::renderer
     inline constexpr std::uint32_t viewportCurveCount = 4;
     inline constexpr std::uint32_t viewportAllCurvesVisibleMask = 0xFu;
 
+    // Number of frames the CPU may run ahead of the GPU before drawFrame
+    // blocks on the oldest in-flight submission. Must never exceed the
+    // swapchain image count.
+    inline constexpr std::uint32_t maxFramesInFlight = 2;
+
     // Tightly packed, top-to-bottom RGBA8 pixels of the complete client area.
     struct FrameImage
     {
         std::uint32_t width = 0;
         std::uint32_t height = 0;
         std::vector<std::uint8_t> pixels;
+    };
+
+    struct DrawFrameCpuTelemetry
+    {
+        FrameSynchronizationTelemetry synchronization;
+        double frameSlotWaitMilliseconds = 0.0;
+        double previewFrameSlotUpdateMilliseconds = 0.0;
+        double acquireCallMilliseconds = 0.0;
+        double presentCallMilliseconds = 0.0;
+        double totalMilliseconds = 0.0;
+        bool previewStreamUpdated = false;
+        bool swapchainRecreated = false;
+        bool synchronousReadback = false;
     };
 
     class VulkanContext
@@ -140,6 +159,8 @@ namespace quantum::renderer
         [[nodiscard]] VkExtent2D viewportExtent() const noexcept;
         [[nodiscard]] VkImageView viewportImageView() const noexcept;
         [[nodiscard]] bool fillModeNonSolidSupported() const noexcept;
+        [[nodiscard]] const DrawFrameCpuTelemetry& lastDrawFrameCpuTelemetry()
+            const noexcept;
         [[nodiscard]] const std::filesystem::path& runtimeAssetRoot() const noexcept;
         [[nodiscard]] std::optional<HardwareAssetLoadStatus>
         hardwareAssetLoadStatus(std::string_view identifier) const;
@@ -158,9 +179,13 @@ namespace quantum::renderer
         void createViewportTarget(std::uint32_t width, std::uint32_t height);
         void createCommandResources();
         void createSynchronizationResources();
+        [[nodiscard]] std::uint32_t currentFrameSlot() const noexcept;
         void waitForFrameCompletion();
+        void waitForFrameSlot(std::uint32_t frameSlot);
+        void updateTrainPreviewFrameBuffer(std::uint32_t frameSlot);
         void recreateSwapchain();
         void recordDrawCommands(
+            std::uint32_t frameSlot,
             std::uint32_t imageIndex,
             FrameRenderCallback renderCallback,
             void* userData,
@@ -257,12 +282,21 @@ namespace quantum::renderer
         void* spareTrackCurveVertexMappedData_ = nullptr;
         VkDeviceSize spareTrackCurveVertexCapacity_ = 0;
 
-        // One small dynamic line stream for the diagnostic train preview.
-        VkBuffer trainPreviewVertexBuffer_ = VK_NULL_HANDLE;
-        VmaAllocation trainPreviewVertexAllocation_ = VK_NULL_HANDLE;
-        void* trainPreviewVertexMappedData_ = nullptr;
-        VkDeviceSize trainPreviewVertexCapacity_ = 0;
-        std::uint32_t trainPreviewVertexCount_ = 0;
+        struct TrainPreviewFrameBuffer
+        {
+            VkBuffer vertexBuffer = VK_NULL_HANDLE;
+            VmaAllocation vertexAllocation = VK_NULL_HANDLE;
+            void* vertexMappedData = nullptr;
+            VkDeviceSize vertexCapacity = 0;
+            std::uint32_t vertexCount = 0;
+            bool requiresUpdate = false;
+        };
+
+        // Each in-flight frame owns the preview allocation it records. The
+        // retained CPU vertices let a slot catch up after a one-shot update.
+        std::array<TrainPreviewFrameBuffer, maxFramesInFlight>
+            trainPreviewFrameBuffers_{};
+        std::vector<LineVertex> trainPreviewVertices_;
 
         VkBuffer trackMeshVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackMeshVertexAllocation_ = VK_NULL_HANDLE;
@@ -317,10 +351,14 @@ namespace quantum::renderer
         std::vector<HardwareDrawBatch> hardwareDrawBatches_;
 
         VkCommandPool commandPool_ = VK_NULL_HANDLE;
-        VkCommandBuffer commandBuffer_ = VK_NULL_HANDLE;
+        std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers_{};
 
-        VkSemaphore imageAvailableSemaphore_ = VK_NULL_HANDLE;
+        std::array<VkSemaphore, maxFramesInFlight> imageAvailableSemaphores_{};
         std::vector<VkSemaphore> renderFinishedSemaphores_;
-        VkFence frameFence_ = VK_NULL_HANDLE;
+        std::array<VkFence, maxFramesInFlight> frameFences_{};
+        std::uint32_t frameIndex_ = 0;
+        DrawFrameCpuTelemetry lastDrawFrameCpuTelemetry_;
+        std::array<FrameSubmissionTelemetry, maxFramesInFlight> frameSubmissions_{};
+        std::uint64_t drawAttemptId_ = 0;
     };
 }

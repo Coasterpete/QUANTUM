@@ -8,7 +8,9 @@
 #include <quantum/editor/DocumentHistory.hpp>
 #include <quantum/editor/DocumentState.hpp>
 #include <quantum/editor/EditorUi.hpp>
+#include <quantum/editor/FramePerformanceTelemetry.hpp>
 #include <quantum/editor/PlatformDialogs.hpp>
+#include <quantum/editor/PreviewSmoke.hpp>
 #include <quantum/editor/RegionSelection.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/SimulationPreview.hpp>
@@ -20,10 +22,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <expected>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -137,11 +142,68 @@ namespace
 
         return track;
     }
+
+    struct PreparedDocument
+    {
+        quantum::coaster::AuthoredTrack track;
+        quantum::editor::CenterlineVisualization centerline;
+        quantum::coaster::RiderLoadHistory riderLoads;
+    };
+
+    // Both interactive Open and developer smoke startup use this complete
+    // read/parse/generate/accept path before publishing a document.
+    [[nodiscard]] std::expected<PreparedDocument, std::string>
+    prepareDocument(const std::filesystem::path& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            return std::unexpected(
+                "Could not open document: " + path.string());
+        const std::string json{
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()};
+        auto track = quantum::coaster::deserializeCoasterDocument(json);
+        if (!track) return std::unexpected(track.error());
+
+        try
+        {
+            auto centerline = quantum::editor::createCenterlineVisualization(
+                *track, track->trackStyle());
+            auto riderLoads =
+                quantum::editor::evaluateRiderLoadDiagnostics(*track);
+            quantum::editor::AuthoredTrackEditTransaction transaction{*track};
+            transaction.requireAcceptableRiderLoads(riderLoads);
+            return PreparedDocument{
+                std::move(*track),
+                std::move(centerline),
+                std::move(riderLoads)};
+        }
+        catch (const std::exception& error)
+        {
+            return std::unexpected(std::string{error.what()});
+        }
+    }
 }
 
 namespace quantum::engine
 {
     int Application::run()
+    {
+        return runImpl(nullptr);
+    }
+
+    int Application::run(
+        const editor::PreviewSmokeOptions& previewSmokeOptions)
+    {
+        const auto validInput =
+            editor::validatePreviewSmokeInput(previewSmokeOptions);
+        if (!validInput)
+            throw std::invalid_argument(validInput.error());
+        return runImpl(&previewSmokeOptions);
+    }
+
+    int Application::runImpl(
+        const editor::PreviewSmokeOptions* const previewSmokeOptions)
     {
         if (!SDL_Init(SDL_INIT_VIDEO))
         {
@@ -177,21 +239,43 @@ namespace quantum::engine
             );
         }
 
+        int applicationExitCode = 0;
         try
         {
             {
+                std::optional<PreparedDocument> startupDocument;
+                if (previewSmokeOptions != nullptr)
+                {
+                    auto prepared = prepareDocument(
+                        previewSmokeOptions->documentPath);
+                    if (!prepared)
+                        throw std::runtime_error(
+                            "Preview smoke document load failed: "
+                            + prepared.error());
+                    startupDocument = std::move(*prepared);
+                }
+
                 quantum::coaster::AuthoredTrack authoredTrack =
-                    interactiveAuthoringDemoEnabled()
-                    ? createInteractiveAuthoringDemoTrack()
-                    : quantum::coaster::createNewDocument();
+                    startupDocument
+                    ? std::move(startupDocument->track)
+                    : interactiveAuthoringDemoEnabled()
+                        ? createInteractiveAuthoringDemoTrack()
+                        : quantum::coaster::createNewDocument();
                 quantum::editor::DocumentState documentState;
+                if (previewSmokeOptions != nullptr)
+                    documentState.setOpenDocument(
+                        previewSmokeOptions->documentPath);
                 quantum::editor::DocumentHistory documentHistory;
                 documentHistory.reset(authoredTrack);
                 quantum::editor::CenterlineVisualizationCache
                     centerlineCache;
                 centerlineCache.setTrackStyle(authoredTrack.trackStyle());
-                static_cast<void>(
-                    centerlineCache.rebuildIfDirty(authoredTrack));
+                if (startupDocument)
+                    centerlineCache.replace(
+                        std::move(startupDocument->centerline));
+                else
+                    static_cast<void>(
+                        centerlineCache.rebuildIfDirty(authoredTrack));
                 const quantum::editor::CenterlineVisualization& centerline =
                     centerlineCache.visualization();
 
@@ -229,10 +313,10 @@ namespace quantum::engine
                 );
                 editorUi.setCenterlineSections(centerline.sectionSlices);
                 editorUi.setCenterlineVisualization(centerline);
-                editorUi.setRiderLoadHistory(
-                    quantum::editor::evaluateRiderLoadDiagnostics(
-                        authoredTrack)
-                );
+                editorUi.setRiderLoadHistory(startupDocument
+                    ? std::move(startupDocument->riderLoads)
+                    : quantum::editor::evaluateRiderLoadDiagnostics(
+                        authoredTrack));
                 editorUi.updateWindowTitle(documentState.windowTitle());
                 editorUi.setHistoryAvailability(
                     documentHistory.canUndo(),
@@ -304,6 +388,31 @@ namespace quantum::engine
                 rebuildSimulationPreview();
                 publishSimulationStatus();
 
+                using PerformanceClock = std::chrono::steady_clock;
+                std::optional<quantum::editor::PreviewSmokeCollector>
+                    previewSmokeCollector;
+                std::optional<PerformanceClock::time_point>
+                    previewSmokeStart;
+                bool previewSmokeDurationCompleted = false;
+                bool previewSmokeFailure = false;
+                std::string previewSmokeFailureMessage;
+                if (previewSmokeOptions != nullptr)
+                {
+                    previewSmokeCollector.emplace(*previewSmokeOptions);
+                    if (!simulationPreview.isAvailable())
+                    {
+                        previewSmokeFailure = true;
+                        previewSmokeFailureMessage =
+                            "Simulation preview unavailable: "
+                            + simulationPreview.error();
+                    }
+                    else
+                    {
+                        simulationPreview.play();
+                        previewSmokeStart = PerformanceClock::now();
+                    }
+                }
+
                 const auto synchronizeDirtyState = [&]
                 {
                     if (documentHistory.isDirty())
@@ -355,13 +464,90 @@ namespace quantum::engine
                     editorUi.setCenterlineSections(centerline.sectionSlices);
                     editorUi.setRiderLoadHistory(
                         std::move(restoredRiderLoads));
-                    editorUi.selectSection(restoredSelection, true);
+editorUi.selectSection(restoredSelection, true);
                 };
 
-                bool running = true;
+                // Shared save plumbing. All save paths serialize the
+                // committed AuthoredTrack and present the same failure
+                // message; callers decide the post-save title, log, and
+                // loop behavior because those differ by workflow.
+                const auto writeSerializedDocument =
+                    [&](const std::filesystem::path& path) -> bool
+                {
+                    const std::string json =
+                        quantum::coaster::serializeCoasterDocument(
+                            authoredTrack);
+                    std::ofstream ofs(path);
+
+                    if (ofs.is_open()
+                        && ofs.write(
+                            json.data(),
+                            static_cast<std::streamsize>(
+                                json.size())))
+                    {
+                        return true;
+                    }
+
+                    SDL_ShowSimpleMessageBox(
+                        SDL_MESSAGEBOX_ERROR,
+                        "Save Failed",
+                        "Could not write the document file.",
+                        window
+                    );
+                    return false;
+                };
+
+                // Saves to the committed document path and marks the
+                // history baseline so the document is no longer dirty.
+                const auto saveToCurrentPath = [&]() -> bool
+                {
+                    if (!writeSerializedDocument(
+                        documentState.currentPath()))
+                    {
+                        return false;
+                    }
+
+                    documentHistory.markSaved();
+                    documentState.clearDirty();
+                    return true;
+                };
+
+                // Prompts for a destination (defaulting the extension) and
+                // saves there, adopting it as the current document path.
+                const auto saveToChosenPath = [&]() -> bool
+                {
+                    auto savePath =
+                        quantum::editor::saveFileDialog(window);
+
+                    if (!savePath.has_value())
+                    {
+                        return false;
+                    }
+
+                    if (savePath->extension().empty())
+                    {
+                        *savePath += ".quantum";
+                    }
+
+                    if (!writeSerializedDocument(*savePath))
+                    {
+                        return false;
+                    }
+
+                    documentState.setOpenDocument(*savePath);
+                    documentHistory.markSaved();
+                    return true;
+                };
+
+                bool running = !previewSmokeFailure;
+                std::optional<PerformanceClock::time_point>
+                    previousRenderedFrameStart;
+                std::uint64_t renderedFrameId = 0;
 
                 while (running)
                 {
+                    const auto frameLoopStart = PerformanceClock::now();
+                    const auto eventPumpBegin = frameLoopStart;
                     SDL_Event event{};
 
                     while (SDL_PollEvent(&event))
@@ -370,6 +556,14 @@ namespace quantum::engine
 
                         if (event.type == SDL_EVENT_QUIT)
                         {
+                            if (previewSmokeOptions != nullptr)
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage =
+                                    "Window closed before the requested smoke duration elapsed.";
+                                running = false;
+                                continue;
+                            }
                             if (documentState.isDirty())
                             {
                                 const SDL_MessageBoxButtonData buttons[] = {
@@ -396,84 +590,14 @@ namespace quantum::engine
 
                                 if (buttonId == 0)
                                 {
-                                    if (documentState.hasPath())
+                                    const bool saved =
+                                        documentState.hasPath()
+                                        ? saveToCurrentPath()
+                                        : saveToChosenPath();
+
+                                    if (saved)
                                     {
-                                        const std::string json =
-                                            quantum::coaster::
-                                                serializeCoasterDocument(
-                                                    authoredTrack);
-                                        const auto path =
-                                            documentState.currentPath();
-                                        std::ofstream ofs(path);
-
-                                        if (ofs.is_open()
-                                            && ofs.write(
-                                                json.data(),
-                                                static_cast<
-                                                    std::streamsize>(
-                                                    json.size())))
-                                        {
-                                            documentHistory.markSaved();
-                                            documentState.clearDirty();
-                                            running = false;
-                                        }
-                                        else
-                                        {
-                                            SDL_ShowSimpleMessageBox(
-                                                SDL_MESSAGEBOX_ERROR,
-                                                "Save Failed",
-                                                "Could not write the "
-                                                "document file.",
-                                                window
-                                            );
-                                        }
-                                    }
-                                    else
-                                    {
-                                        auto savePath =
-                                            quantum::editor::
-                                                saveFileDialog(window);
-
-                                        if (savePath.has_value())
-                                        {
-                                            if (savePath->extension()
-                                                .empty())
-                                            {
-                                                *savePath += ".quantum";
-                                            }
-
-                                            const std::string json =
-                                                quantum::coaster::
-                                                    serializeCoasterDocument(
-                                                        authoredTrack);
-                                            std::ofstream ofs(
-                                                *savePath);
-
-                                            if (ofs.is_open()
-                                                && ofs.write(
-                                                    json.data(),
-                                                    static_cast<
-                                                        std::streamsize>(
-                                                        json.size())))
-                                            {
-                                                documentState
-                                                    .setOpenDocument(
-                                                        *savePath);
-                                                documentHistory.markSaved();
-                                                running = false;
-                                            }
-                                            else
-                                            {
-                                                SDL_ShowSimpleMessageBox(
-                                                    SDL_MESSAGEBOX_ERROR,
-                                                    "Save Failed",
-                                                    "Could not write "
-                                                    "the document "
-                                                    "file.",
-                                                    window
-                                                );
-                                            }
-                                        }
+                                        running = false;
                                     }
                                 }
                                 else if (buttonId == 1)
@@ -488,6 +612,10 @@ namespace quantum::engine
                             }
                         }
                     }
+                    const auto eventPumpEnd = PerformanceClock::now();
+                    const double eventPumpMilliseconds =
+                        std::chrono::duration<double, std::milli>(
+                            eventPumpEnd - eventPumpBegin).count();
 
                     if (running)
                     {
@@ -497,6 +625,20 @@ namespace quantum::engine
                             SDL_Delay(10);
                             continue;
                         }
+
+                        const auto renderedFrameStart =
+                            PerformanceClock::now();
+                        const double frameTimeMilliseconds =
+                            previousRenderedFrameStart.has_value()
+                            ? std::chrono::duration<double, std::milli>(
+                                renderedFrameStart
+                                    - *previousRenderedFrameStart).count()
+                            : 0.0;
+                        previousRenderedFrameStart = renderedFrameStart;
+                        ++renderedFrameId;
+                        simulationPreview.beginFrameTelemetry();
+                        quantum::editor::FrameBlockingEvents
+                            applicationBlockingEvents;
 
                         const auto pendingHistoryOperation =
                             editorUi.takePendingHistoryOperation();
@@ -515,6 +657,8 @@ namespace quantum::engine
                                 try
                                 {
                                     publishHistoryState(*restoredTrack);
+                                    applicationBlockingEvents
+                                        .trackBufferMutation = true;
                                     synchronizeDirtyState();
                                     quantum::logging::logMessage(
                                         quantum::logging::LogLevel::Info,
@@ -558,6 +702,18 @@ namespace quantum::engine
                         if (pendingFileOp.has_value())
                         {
                             using quantum::editor::FileOperationType;
+                            applicationBlockingEvents.modalOrFileDialog =
+                                *pendingFileOp == FileOperationType::Open
+                                || *pendingFileOp == FileOperationType::SaveAs
+                                || (*pendingFileOp == FileOperationType::Save
+                                    && !documentState.hasPath())
+                                || (*pendingFileOp == FileOperationType::New
+                                    && documentState.isDirty());
+                        }
+
+                        if (pendingFileOp.has_value())
+                        {
+                            using quantum::editor::FileOperationType;
 
                             auto confirmUnsaved = [&]() -> bool
                             {
@@ -590,85 +746,18 @@ namespace quantum::engine
 
                                 if (buttonId == 0)
                                 {
-                                    if (documentState.hasPath())
+                                    const bool saved =
+                                        documentState.hasPath()
+                                        ? saveToCurrentPath()
+                                        : saveToChosenPath();
+
+                                    if (saved)
                                     {
-                                        const std::string json =
-                                            quantum::coaster::
-                                                serializeCoasterDocument(
-                                                    authoredTrack);
-                                        const auto path =
-                                            documentState.currentPath();
-                                        std::ofstream ofs(path);
-
-                                        if (ofs.is_open()
-                                            && ofs.write(
-                                                json.data(),
-                                                static_cast<
-                                                    std::streamsize>(
-                                                    json.size())))
-                                        {
-                                            documentHistory.markSaved();
-                                            documentState.clearDirty();
-                                            editorUi.updateWindowTitle(
-                                                documentState.windowTitle()
-                                            );
-                                            return true;
-                                        }
-
-                                        SDL_ShowSimpleMessageBox(
-                                            SDL_MESSAGEBOX_ERROR,
-                                            "Save Failed",
-                                            "Could not write the "
-                                            "document file.",
-                                            window
-                                        );
-                                        return false;
-                                    }
-
-                                    auto savePath =
-                                        quantum::editor::
-                                            saveFileDialog(window);
-
-                                    if (savePath.has_value())
-                                    {
-                                        if (savePath->extension().empty())
-                                        {
-                                            *savePath += ".quantum";
-                                        }
-
-                                        const std::string json =
-                                            quantum::coaster::
-                                                serializeCoasterDocument(
-                                                    authoredTrack);
-                                        std::ofstream ofs(*savePath);
-
-                                        if (ofs.is_open()
-                                            && ofs.write(
-                                                json.data(),
-                                                static_cast<
-                                                    std::streamsize>(
-                                                    json.size())))
-                                        {
-                                            documentState.setOpenDocument(
-                                                *savePath
-                                            );
-                                            documentHistory.markSaved();
-                                            editorUi.updateWindowTitle(
-                                                documentState.windowTitle()
-                                            );
-                                            return true;
-                                        }
-
-                                        SDL_ShowSimpleMessageBox(
-                                            SDL_MESSAGEBOX_ERROR,
-                                            "Save Failed",
-                                            "Could not write the "
-                                            "document file.",
-                                            window
+                                        editorUi.updateWindowTitle(
+                                            documentState.windowTitle()
                                         );
                                     }
-
-                                    return false;
+                                    return saved;
                                 }
 
                                 if (buttonId == 1)
@@ -714,6 +803,8 @@ namespace quantum::engine
                                             evaluateRiderLoadDiagnostics(
                                                 authoredTrack)
                                     );
+                                    applicationBlockingEvents
+                                        .trackBufferMutation = true;
                                     vulkan.updateTrackCurveVertices(
                                         centerline.vertices,
                                         centerline.verticesPerCurve
@@ -749,50 +840,22 @@ namespace quantum::engine
 
                                     if (openPath.has_value())
                                     {
-                                        std::ifstream ifs(*openPath);
-                                        std::string json(
-                                            (std::istreambuf_iterator<char>(
-                                                ifs)),
-                                            std::istreambuf_iterator<char>()
-                                        );
-
-                                        auto result =
-                                            quantum::coaster::
-                                                deserializeCoasterDocument(
-                                                    json);
-
-                                        // Force documents can be structurally valid yet fail
-                                        // generation or load acceptance. Prepare everything
-                                        // before replacing the open document or its buffers.
-                                        std::optional<quantum::editor::CenterlineVisualization> loadedCenterline;
-                                        std::optional<quantum::coaster::RiderLoadHistory> loadedRiderLoads;
-                                        if (result.has_value())
+                                        auto loaded = prepareDocument(*openPath);
+                                        if (loaded.has_value())
                                         {
-                                            try
-                                            {
-                                                loadedCenterline = quantum::editor::createCenterlineVisualization(
-                                                    *result,
-                                                    result->trackStyle());
-                                                loadedRiderLoads = quantum::editor::evaluateRiderLoadDiagnostics(*result);
-                                                quantum::editor::AuthoredTrackEditTransaction loadedTransaction{*result};
-                                                loadedTransaction.requireAcceptableRiderLoads(*loadedRiderLoads);
-                                                vulkan.updateTrackCurveVertices(loadedCenterline->vertices,
-                                                    loadedCenterline->verticesPerCurve);
-                                                vulkan.updateRenderableTrack(
-                                                    loadedCenterline->renderableTrack);
-                                            }
-                                            catch (const std::exception& error)
-                                            {
-                                                result = std::unexpected(std::string{error.what()});
-                                            }
-                                        }
-
-                                        if (result.has_value())
-                                        {
-                                            authoredTrack = std::move(*result);
+                                            applicationBlockingEvents
+                                                .trackBufferMutation = true;
+                                            vulkan.updateTrackCurveVertices(
+                                                loaded->centerline.vertices,
+                                                loaded->centerline.verticesPerCurve);
+                                            vulkan.updateRenderableTrack(
+                                                loaded->centerline.renderableTrack);
+                                            authoredTrack =
+                                                std::move(loaded->track);
                                             centerlineCache.setTrackStyle(
                                                 authoredTrack.trackStyle());
-                                            centerlineCache.replace(std::move(*loadedCenterline));
+                                            centerlineCache.replace(
+                                                std::move(loaded->centerline));
                                             documentHistory.reset(authoredTrack);
                                             documentState.setOpenDocument(*openPath);
                                             editorUi.resetTransientState();
@@ -800,7 +863,8 @@ namespace quantum::engine
                                             editorUi.setCenterlineBounds(centerline.minimumPosition,
                                                 centerline.maximumPosition);
                                             editorUi.setCenterlineSections(centerline.sectionSlices);
-                                            editorUi.setRiderLoadHistory(std::move(*loadedRiderLoads));
+                                            editorUi.setRiderLoadHistory(
+                                                std::move(loaded->riderLoads));
                                             editorUi.updateWindowTitle(
                                                 documentState.windowTitle()
                                             );
@@ -821,7 +885,7 @@ namespace quantum::engine
                                             SDL_ShowSimpleMessageBox(
                                                 SDL_MESSAGEBOX_ERROR,
                                                 "Open Failed",
-                                                result.error().c_str(),
+                                                loaded.error().c_str(),
                                                 window
                                             );
                                         }
@@ -831,154 +895,45 @@ namespace quantum::engine
                             else if (
                                 *pendingFileOp == FileOperationType::Save)
                             {
-                                if (!documentState.hasPath())
+                                const bool saved =
+                                    documentState.hasPath()
+                                    ? saveToCurrentPath()
+                                    : saveToChosenPath();
+
+                                if (saved)
                                 {
-                                    auto savePath =
-                                        quantum::editor::
-                                            saveFileDialog(window);
+                                    editorUi.updateWindowTitle(
+                                        documentState.windowTitle()
+                                    );
 
-                                    if (savePath.has_value())
-                                    {
-                                        if (savePath->extension().empty())
-                                        {
-                                            *savePath += ".quantum";
-                                        }
-
-                                        const std::string json =
-                                            quantum::coaster::
-                                                serializeCoasterDocument(
-                                                    authoredTrack);
-                                        std::ofstream ofs(*savePath);
-
-                                        if (ofs.is_open()
-                                            && ofs.write(
-                                                json.data(),
-                                                static_cast<
-                                                    std::streamsize>(
-                                                    json.size())))
-                                        {
-                                            documentState.setOpenDocument(
-                                                *savePath
-                                            );
-                                            documentHistory.markSaved();
-                                            editorUi.updateWindowTitle(
-                                                documentState.windowTitle()
-                                            );
-
-                                            quantum::logging::logMessagef(
-                                                quantum::logging::LogLevel::Info,
-                                                "FILE",
-                                                "Saved %s",
-                                                savePath->string()
-                                                    .c_str()
-                                            );
-                                        }
-                                        else
-                                        {
-                                            SDL_ShowSimpleMessageBox(
-                                                SDL_MESSAGEBOX_ERROR,
-                                                "Save Failed",
-                                                "Could not write the "
-                                                "document file.",
-                                                window
-                                            );
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    const std::string json =
-                                        quantum::coaster::
-                                            serializeCoasterDocument(
-                                                authoredTrack);
-                                    const auto path =
-                                        documentState.currentPath();
-                                    std::ofstream ofs(path);
-
-                                    if (ofs.is_open()
-                                        && ofs.write(
-                                            json.data(),
-                                            static_cast<
-                                                std::streamsize>(
-                                                json.size())))
-                                    {
-                                        documentHistory.markSaved();
-                                        documentState.clearDirty();
-                                        editorUi.updateWindowTitle(
-                                            documentState.windowTitle()
-                                        );
-
-                                        quantum::logging::logMessagef(
-                                            quantum::logging::LogLevel::Info,
-                                            "FILE",
-                                            "Saved %s",
-                                            path.string().c_str()
-                                        );
-                                    }
-                                    else
-                                    {
-                                        SDL_ShowSimpleMessageBox(
-                                            SDL_MESSAGEBOX_ERROR,
-                                            "Save Failed",
-                                            "Could not write the "
-                                            "document file.",
-                                            window
-                                        );
-                                    }
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "FILE",
+                                        "Saved %s",
+                                        documentState.currentPath()
+                                            .string()
+                                            .c_str()
+                                    );
                                 }
                             }
                             else if (
                                 *pendingFileOp
                                 == FileOperationType::SaveAs)
                             {
-                                auto savePath =
-                                    quantum::editor::saveFileDialog(window);
-
-                                if (savePath.has_value())
+                                if (saveToChosenPath())
                                 {
-                                    if (savePath->extension().empty())
-                                    {
-                                        *savePath += ".quantum";
-                                    }
+                                    editorUi.updateWindowTitle(
+                                        documentState.windowTitle()
+                                    );
 
-                                    const std::string json =
-                                        quantum::coaster::
-                                            serializeCoasterDocument(
-                                                authoredTrack);
-                                    std::ofstream ofs(*savePath);
-
-                                    if (ofs.is_open()
-                                        && ofs.write(
-                                            json.data(),
-                                            static_cast<
-                                                std::streamsize>(
-                                                json.size())))
-                                    {
-                                        documentState.setOpenDocument(
-                                            *savePath
-                                        );
-                                        documentHistory.markSaved();
-                                        editorUi.updateWindowTitle(
-                                            documentState.windowTitle()
-                                        );
-
-                                        quantum::logging::logMessagef(
-                                            quantum::logging::LogLevel::Info,
-                                            "FILE",
-                                            "Saved As %s",
-                                            savePath->string().c_str()
-                                        );
-                                    }
-                                    else
-                                    {
-                                        SDL_ShowSimpleMessageBox(
-                                            SDL_MESSAGEBOX_ERROR,
-                                            "Save Failed",
-                                            "Could not write the "
-                                            "document file.",
-                                            window
-                                        );
-                                    }
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "FILE",
+                                        "Saved As %s",
+                                        documentState.currentPath()
+                                            .string()
+                                            .c_str()
+                                    );
                                 }
                             }
                         }
@@ -1069,6 +1024,8 @@ namespace quantum::engine
                                 if (requestedHardwareEdit->type
                                     == TrackHardwareEditType::ReloadAsset)
                                 {
+                                    applicationBlockingEvents
+                                        .hardwareAssetReload = true;
                                     vulkan.reloadTrackHardwareAsset(
                                         requestedHardwareEdit
                                             ->hardware.asset.path,
@@ -1540,6 +1497,8 @@ namespace quantum::engine
 
                             if (candidateChanged)
                             {
+                                applicationBlockingEvents
+                                    .trackBufferMutation = true;
                                 quantum::editor::CenterlineVisualization
                                     candidateCenterline =
                                         quantum::editor::
@@ -1990,10 +1949,75 @@ namespace quantum::engine
                                     authoredTrack.layoutMode()));
                         }
 
+                        // Setup edits are document configuration. Only a
+                        // heartline edit regenerates viewport reference-curve
+                        // vertices; it does not change authored geometry,
+                        // track mesh geometry, or simulation physics.
+                        const auto requestedCoasterSetup =
+                            editorUi.takePendingCoasterSetupEdit();
+
+                        if (requestedCoasterSetup.has_value()
+                            && *requestedCoasterSetup
+                                != authoredTrack.coasterSetup())
+                        {
+                            try
+                            {
+                                quantum::coaster::AuthoredTrack candidateTrack =
+                                    authoredTrack;
+                                candidateTrack.setCoasterSetup(
+                                    *requestedCoasterSetup);
+
+                                std::optional<quantum::editor::
+                                    CenterlineVisualization>
+                                    candidateCenterline;
+                                if (requestedCoasterSetup->heartline
+                                    != authoredTrack.coasterSetup().heartline)
+                                {
+                                    candidateCenterline = quantum::editor::
+                                        createCenterlineVisualization(
+                                            candidateTrack,
+                                            candidateTrack.trackStyle());
+                                    vulkan.updateTrackCurveVertices(
+                                        candidateCenterline->vertices,
+                                        candidateCenterline->verticesPerCurve);
+                                    applicationBlockingEvents
+                                        .trackBufferMutation = true;
+                                }
+
+                                authoredTrack = std::move(candidateTrack);
+                                if (candidateCenterline.has_value())
+                                {
+                                    centerlineCache.replace(
+                                        std::move(*candidateCenterline));
+                                }
+                                documentHistory.record(authoredTrack);
+                                synchronizeDirtyState();
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "CFG",
+                                    "Coaster setup applied (style %s, "
+                                    "%u cars)",
+                                    authoredTrack.coasterSetup()
+                                        .styleId.c_str(),
+                                    static_cast<unsigned>(
+                                        authoredTrack.coasterSetup()
+                                            .carsPerTrain));
+                            }
+                            catch (const std::invalid_argument& error)
+                            {
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Error,
+                                    "CFG",
+                                    "Coaster setup rejected: %s",
+                                    error.what());
+                            }
+                        }
+
                         // Circuit completion: run solver and show
                         // result.
                         if (editorUi.takeCircuitCompletionRequest())
                         {
+                            applicationBlockingEvents.modalOrFileDialog = true;
                             const quantum::coaster::
                                 CircuitCompletionResult result =
                                     quantum::coaster::
@@ -2036,6 +2060,8 @@ namespace quantum::engine
                                     newCenterline.maximumPosition);
                                 editorUi.setCenterlineSections(
                                     newCenterline.sectionSlices);
+                                applicationBlockingEvents
+                                    .trackBufferMutation = true;
                                 vulkan.updateTrackCurveVertices(
                                     newCenterline.vertices,
                                     newCenterline.verticesPerCurve);
@@ -2112,6 +2138,15 @@ namespace quantum::engine
                             documentHistory.canUndo(),
                             documentHistory.canRedo());
                         editorUi.beginFrame(vulkan);
+                        quantum::editor::FrameBlockingEvents
+                            frameBlockingEvents =
+                                editorUi.takeFrameBlockingEvents();
+                        frameBlockingEvents.trackBufferMutation =
+                            applicationBlockingEvents.trackBufferMutation;
+                        frameBlockingEvents.hardwareAssetReload =
+                            applicationBlockingEvents.hardwareAssetReload;
+                        frameBlockingEvents.modalOrFileDialog =
+                            applicationBlockingEvents.modalOrFileDialog;
 
                         if (const auto control =
                                 editorUi.takeSimulationControl())
@@ -2131,15 +2166,34 @@ namespace quantum::engine
                             }
                         }
 
-                        simulationPreview.update(
-                            editorUi.frameDeltaSeconds());
+                        const auto simulationUpdateBegin =
+                            PerformanceClock::now();
+                        const double preSimulationCpuMilliseconds =
+                            std::chrono::duration<double, std::milli>(
+                                simulationUpdateBegin - eventPumpEnd).count();
+                        const double frameStartToSimulationMilliseconds =
+                            std::chrono::duration<double, std::milli>(
+                                simulationUpdateBegin - frameLoopStart).count();
+                        // Minimized iterations skip ImGui NewFrame, so its
+                        // first restored delta includes the entire suspension.
+                        // The event flags survive those skipped iterations.
+                        simulationPreview.update(editorUi.frameDeltaSeconds(),
+                            frameBlockingEvents.windowMinimized
+                                || frameBlockingEvents.windowRestored);
                         publishSimulationStatus();
 
+                        double previewVertexPublishMilliseconds = 0.0;
                         if (uploadedSimulationVertexGeneration
                             != simulationPreview.vertexGeneration())
                         {
+                            const auto previewPublishBegin =
+                                PerformanceClock::now();
                             vulkan.updateTrainPreviewVertices(
                                 simulationPreview.vertices());
+                            previewVertexPublishMilliseconds =
+                                std::chrono::duration<double, std::milli>(
+                                    PerformanceClock::now()
+                                        - previewPublishBegin).count();
                             uploadedSimulationVertexGeneration =
                                 simulationPreview.vertexGeneration();
                         }
@@ -2153,7 +2207,158 @@ namespace quantum::engine
                     },
                     &editorUi
                         );
+
+                        const quantum::editor::
+                            SimulationPreviewFrameTelemetry& preview =
+                                simulationPreview.frameTelemetry();
+                        const quantum::renderer::DrawFrameCpuTelemetry& draw =
+                            vulkan.lastDrawFrameCpuTelemetry();
+                        const quantum::editor::FramePerformanceSample
+                            performanceSample{
+                                .frameId = renderedFrameId,
+                                .rawSimulationDeltaMilliseconds =
+                                    preview.rawDeltaMilliseconds,
+                                .accumulatorBeforeMilliseconds =
+                                    preview.accumulatorBeforeMilliseconds,
+                                .accumulatorAfterIncomingMilliseconds =
+                                    preview.accumulatorAfterIncomingMilliseconds,
+                                .accumulatorRemainingMilliseconds =
+                                    preview.accumulatorRemainingMilliseconds,
+                                .discardedWallTimeMilliseconds =
+                                    preview.discardedWallTimeMilliseconds,
+                                .requestedPhysicsStepCount =
+                                    preview.requestedStepCount,
+                                .frameTimeMilliseconds =
+                                    frameTimeMilliseconds,
+                                .fixedPhysicsStepCount =
+                                    preview.fixedStepCount,
+                                .maximumPhysicsStepsHit =
+                                    preview.maximumStepsHit,
+                                .minimumPhysicsStepMilliseconds =
+                                    preview.minimumStepMilliseconds,
+                                .averagePhysicsStepMilliseconds =
+                                    preview.averageStepMilliseconds,
+                                .maximumPhysicsStepMilliseconds =
+                                    preview.maximumStepMilliseconds,
+                                .physicsMilliseconds =
+                                    preview.physicsMilliseconds,
+                                .consecutiveCatchUpFrameCount =
+                                    preview.consecutiveCatchUpFrameCount,
+                                .eventPumpMilliseconds =
+                                    eventPumpMilliseconds,
+                                .preSimulationCpuMilliseconds =
+                                    preSimulationCpuMilliseconds,
+                                .frameStartToSimulationMilliseconds =
+                                    frameStartToSimulationMilliseconds,
+                                .interpolationMilliseconds =
+                                    preview.interpolationMilliseconds,
+                                .renderPoseSolveMilliseconds =
+                                    preview.renderPoseSolveMilliseconds,
+                                .renderPoseSolveCount = preview.renderPoseSolveCount,
+                                .renderPoseFailureCount = preview.renderPoseFailureCount,
+                                .previewVertexPreparationMilliseconds =
+                                    preview.vertexPreparationMilliseconds,
+                                .previewVertexPublishMilliseconds =
+                                    previewVertexPublishMilliseconds,
+                                .previewFrameSlotUpdateMilliseconds =
+                                    draw.previewFrameSlotUpdateMilliseconds,
+                                .previewFrameSlotWaitMilliseconds =
+                                    draw.frameSlotWaitMilliseconds,
+                                .drawFrameCpuMilliseconds =
+                                    draw.totalMilliseconds,
+                                .acquireCallMilliseconds =
+                                    draw.acquireCallMilliseconds,
+                                .presentCallMilliseconds =
+                                    draw.presentCallMilliseconds,
+                                .previewStreamUpdated =
+                                    draw.previewStreamUpdated,
+                                .swapchainRecreated =
+                                    draw.swapchainRecreated,
+                                .synchronousReadback =
+                                    draw.synchronousReadback,
+                                .blockingEvents = frameBlockingEvents,
+                                .synchronization = draw.synchronization
+                        };
+                        editorUi.recordFramePerformance(performanceSample);
+                        if (previewSmokeCollector.has_value())
+                        {
+                            previewSmokeCollector->record(performanceSample);
+                            if (!simulationPreview.isAvailable())
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage =
+                                    simulationPreview.error();
+                                simulationPreview.pause();
+                                running = false;
+                            }
+                            else if (preview.renderPoseFailureCount > 0)
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage =
+                                    "Simulation preview interpolation failed.";
+                                simulationPreview.pause();
+                                running = false;
+                            }
+                            else if (simulationPreview.playbackState()
+                                != quantum::editor::SimulationPreview::
+                                    PlaybackState::Playing
+                                && !(previewSmokeOptions->repeat
+                                    && preview.boundaryStopped))
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage =
+                                    "Simulation playback stopped before the "
+                                    "requested duration elapsed.";
+                                running = false;
+                            }
+                            else
+                            {
+                                const double elapsedSeconds =
+                                    std::chrono::duration<double>(
+                                        PerformanceClock::now()
+                                        - *previewSmokeStart).count();
+                                if (previewSmokeOptions->repeat
+                                    && preview.boundaryStopped)
+                                {
+                                    simulationPreview.reset();
+                                    simulationPreview.play();
+                                }
+                                if (elapsedSeconds
+                                    >= previewSmokeOptions->durationSeconds)
+                                {
+                                    previewSmokeDurationCompleted = true;
+                                    simulationPreview.pause();
+                                    running = false;
+                                }
+                            }
+                        }
                     }
+                }
+
+                if (previewSmokeCollector.has_value())
+                {
+                    const double elapsedSeconds = previewSmokeStart
+                        ? std::chrono::duration<double>(
+                            PerformanceClock::now()
+                            - *previewSmokeStart).count()
+                        : 0.0;
+                    const auto report = previewSmokeCollector->finish(
+                        elapsedSeconds,
+                        previewSmokeDurationCompleted && !previewSmokeFailure,
+                        previewSmokeFailure,
+                        previewSmokeFailureMessage);
+                    const auto paths =
+                        quantum::editor::writePreviewSmokeReports(
+                            report, *previewSmokeOptions);
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Info,
+                        "SMOKE",
+                        "Preview smoke reports written to %s and %s",
+                        paths.json.string().c_str(),
+                        paths.text.string().c_str());
+                    applicationExitCode =
+                        report.playbackCompletedNormally
+                            && !report.previewOrPhysicsFailure ? 0 : 2;
                 }
             }
         }
@@ -2167,6 +2372,6 @@ namespace quantum::engine
         SDL_DestroyWindow(window);
         SDL_Quit();
 
-        return 0;
+        return applicationExitCode;
     }
 }

@@ -81,8 +81,8 @@ namespace quantum::editor
         const CenterlineSectionSlice* slice = nullptr);
 
     // Tiny editor-side dirty/version wrapper for the generated visualization.
-    // The caller remains responsible for marking geometry edits dirty; pure
-    // selection changes intentionally do not touch this state.
+    // The caller marks geometry, track-presentation geometry, or heartline
+    // reference edits dirty; pure selection changes do not touch this state.
     class CenterlineVisualizationCache
     {
     public:

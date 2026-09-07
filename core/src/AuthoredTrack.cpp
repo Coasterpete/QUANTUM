@@ -741,6 +741,18 @@ namespace quantum::coaster
         trackStyle_ = style;
     }
 
+    const CoasterSetup& AuthoredTrack::coasterSetup() const noexcept
+    {
+        return coasterSetup_;
+    }
+
+    void AuthoredTrack::setCoasterSetup(const CoasterSetup& setup)
+    {
+        CoasterSetup replacement = setup;
+        validateCoasterSetup(replacement);
+        coasterSetup_ = std::move(replacement);
+    }
+
     AuthoredTrackSection createForceDrivenSection(const double length)
     {
         AuthoredTrackSection section = createRateProfileSection(length);

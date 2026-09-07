@@ -644,8 +644,8 @@ are tracked separately because they change physics topology without changing
 visible geometry. Rebuild always stops and resets playback, so no compiled
 track or train state survives an authored-track change.
 
-The preview owns its `TrainDefinition`, initial and current
-`TrainDynamicsState`, initial and current `TrainPose`, playback state, and one
+The preview owns its `TrainDefinition`, initial, previous, and current
+`TrainDynamicsState` and committed `TrainPose`, a separate render pose, playback state, and one
 fixed-step accumulator. Play starts or resumes, Pause preserves the current
 state and pose, and Reset restores the deterministic increasing-station initial
 placement and the document's authored initial speed before returning to
@@ -654,7 +654,28 @@ then later 0.5 m candidates until `solveTrainPose` accepts the complete
 consist; an open-track consist boundary intervention pauses playback. Circuit
 wrapping and reverse-travel orientation remain Core behavior.
 
-Rendering consumes the `TrainPose` directly. Each wireframe car box transforms
+The first frame carrying minimize/restore events discards its incoming preview
+wall time, since minimized iterations skip ImGui frame timing. It preserves the
+fractional fixed-step remainder and poses and reports the raw/discarded interval
+in telemetry. This affects editor wall-clock synchronization only; ordinary
+catch-up and the exact 1/240-second Core timestep are unchanged.
+
+During playback, presentation uses `alpha = clamp(accumulator / (1/240), 0, 1)`:
+zero displays the previous committed tick and one displays the current tick.
+Only the reference station is interpolated; `solveTrainPose` reconstructs all
+rigid bogies and connectors from the immutable compiled track. Circuit station
+differences use the nearest local displacement (adjacent ticks are assumed to
+move less than half a lap). Physical facing is retained independently of signed
+velocity, including the exact-zero rollback tick. No render pose feeds Core's
+integrator. Catch-up keeps the final adjacent pair and solves presentation only
+once. Before the first tick both poses are initial; Pause freezes presentation,
+Reset clears its history, and boundary intervention displays the legal committed
+endpoint. A failed presentation solve falls back to the committed pose and
+increments the visible interpolation failure counter without invalidating physics.
+This adds one fixed tick of presentation latency and only queries train geometry;
+it neither recompiles the track nor traverses or rebuilds static scene objects.
+
+Rendering consumes the render-only `TrainPose`. Each wireframe car box transforms
 its authored body dimensions through `CarPose::transformLocalPoint`; bogie
 markers use `BogiePose::transformLocalPoint`; connector lines use the solved
 `InterCarConnectionPose` endpoints. SI pose positions are converted back to the

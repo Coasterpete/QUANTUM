@@ -2,12 +2,14 @@ add_executable(
     QUANTUM
     src/main.cpp
     src/CenterlineVisualization.cpp
+    src/CoasterSetupUi.cpp
     src/DocumentHistory.cpp
     src/DocumentState.cpp
     src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
     src/PlatformDialogs.cpp
+    src/PreviewSmoke.cpp
     src/RegionSummary.cpp
     src/ReadmeCapture.cpp
     src/ReadmeCaptureRunner.cpp
@@ -19,12 +21,15 @@ add_executable(
     src/ViewportTrackAnchors.cpp
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
+    include/quantum/editor/CoasterSetupUi.hpp
     include/quantum/editor/DocumentHistory.hpp
     include/quantum/editor/DocumentState.hpp
     include/quantum/editor/EditorIcons.hpp
     include/quantum/editor/EditorStyle.hpp
     include/quantum/editor/EditorUi.hpp
+    include/quantum/editor/FramePerformanceTelemetry.hpp
     include/quantum/editor/PlatformDialogs.hpp
+    include/quantum/editor/PreviewSmoke.hpp
     include/quantum/editor/RegionSummary.hpp
     include/quantum/editor/ReadmeCapture.hpp
     include/quantum/editor/RegionSelection.hpp

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -78,6 +79,25 @@ namespace
             || glm::length(actual - expected) > tolerance)
         {
             throw TestFailure(std::string(message));
+        }
+    }
+
+    void requireRigidBogiePivots(
+        const CarPose& pose,
+        const CarDefinition& definition,
+        const std::string_view message)
+    {
+        constexpr double toleranceMeters = 1.0e-8;
+        for (const BogiePose* bogie : {
+            &pose.frontBogie(), &pose.rearBogie()})
+        {
+            requireNear(
+                pose.transformLocalPoint(
+                    definition.bogies[bogie->definitionIndex()]
+                        .referencePositionMeters),
+                bogie->worldPositionMeters(),
+                toleranceMeters,
+                message);
         }
     }
 
@@ -284,6 +304,56 @@ namespace
         const bool crest)
     {
         const auto samples = verticalArcSamples(12.0, crest, 256);
+        return {samples, 1.0, TopologyKind::OpenLinear};
+    }
+
+    [[nodiscard]] CompiledPhysicsTrack straightToRisingTrack()
+    {
+        constexpr double straightLength = 20.0;
+        constexpr double radius = 10.0;
+        constexpr double arcLength = 20.0;
+        constexpr int arcSegments = 400;
+        std::vector<TrackKinematicState> samples{
+            {
+                0.0,
+                {0.0, 0.0, 0.0},
+                straightFrame({1.0, 0.0, 0.0}),
+                {0.0, 0.0, 0.0}
+            },
+            {
+                straightLength,
+                {straightLength, 0.0, 0.0},
+                straightFrame({1.0, 0.0, 0.0}),
+                {0.0, 0.0, 1.0 / radius}
+            }
+        };
+        samples.reserve(arcSegments + 2);
+        for (int index = 1; index <= arcSegments; ++index)
+        {
+            const double distance = arcLength
+                * static_cast<double>(index) / arcSegments;
+            const double angle = distance / radius;
+            const glm::dvec3 tangent{
+                std::cos(angle), 0.0, std::sin(angle)};
+            samples.push_back({
+                straightLength + distance,
+                {
+                    straightLength + radius * std::sin(angle),
+                    0.0,
+                    radius * (1.0 - std::cos(angle))
+                },
+                {
+                    tangent,
+                    {0.0, 1.0, 0.0},
+                    glm::cross(tangent, glm::dvec3{0.0, 1.0, 0.0})
+                },
+                {
+                    -std::sin(angle) / radius,
+                    0.0,
+                    std::cos(angle) / radius
+                }
+            });
+        }
         return {samples, 1.0, TopologyKind::OpenLinear};
     }
 
@@ -536,8 +606,10 @@ namespace
     void horizontalCurveArticulatesBogies()
     {
         const CompiledPhysicsTrack track = horizontalArcTrack();
-        const CarPose pose = solveCarPose(
-            track, passengerCar(), locationAt(7.5));
+        const CarDefinition definition = passengerCar();
+        const CarPose pose = solveCarPose(track, definition, locationAt(7.5));
+        requireRigidBogiePivots(
+            pose, definition, "horizontal arc rigid bogie pivots");
         require(glm::length(
                 pose.frontBogie().trackFrame().tangent
                 - pose.rearBogie().trackFrame().tangent) > 0.1,
@@ -593,7 +665,64 @@ namespace
                 "crest/valley bogies must occupy different local pitches");
             require(finite(pose.worldCenterOfGravityMeters()),
                 "crest/valley COG must be finite");
+            requireRigidBogiePivots(
+                pose, definition, "vertical arc rigid bogie pivots");
         }
+    }
+
+    void straightToRisingTransitionIsRigidAndContinuous()
+    {
+        const CompiledPhysicsTrack track = straightToRisingTrack();
+        const CarDefinition definition = passengerCar();
+        bool sampledBefore = false;
+        bool sampledStraddling = false;
+        bool sampledAfter = false;
+        std::optional<CarPose> previous;
+        for (int index = 0; index <= 800; ++index)
+        {
+            const double station = 16.0 + 0.01 * index;
+            CarPose pose = solveCarPose(
+                track, definition, locationAt(station));
+            requireRigidBogiePivots(
+                pose, definition, "straight-to-rising rigid bogie pivots");
+
+            const double frontStation =
+                pose.frontBogie().location().stationMeters;
+            const double rearStation =
+                pose.rearBogie().location().stationMeters;
+            sampledBefore |= frontStation < 20.0;
+            sampledStraddling |= rearStation < 20.0
+                && frontStation >= 20.0;
+            sampledAfter |= rearStation >= 20.0;
+
+            if (previous)
+            {
+                require(glm::length(
+                        pose.bodyWorldPositionMeters()
+                        - previous->bodyWorldPositionMeters()) < 0.02,
+                    "body position must remain continuous across transition");
+                require(glm::length(
+                        pose.bodyFrame().tangent
+                        - previous->bodyFrame().tangent) < 0.003,
+                    "body orientation must remain continuous across transition");
+            }
+            previous = std::move(pose);
+        }
+        require(sampledBefore && sampledStraddling && sampledAfter,
+            "transition sweep must cover both sides and the straddling pose");
+    }
+
+    void asymmetricAndOffsetBogiePivotsRemainRigid()
+    {
+        CarDefinition definition = passengerCar();
+        definition.bogies = {
+            BogieDefinition{{-0.8, 0.3, 0.45}},
+            BogieDefinition{{1.7, 0.3, 0.45}}
+        };
+        const CarPose pose = solveCarPose(
+            horizontalArcTrack(), definition, locationAt(7.5));
+        requireRigidBogiePivots(
+            pose, definition, "asymmetric offset rigid bogie pivots");
     }
 
     void verticalTrackHasNoSingularity()
@@ -625,7 +754,7 @@ namespace
             "fallback must retain the ordered front sampled up direction");
     }
 
-    void openTrackEndpointsClampThroughTrackAdvance()
+    void openTrackEndpointsRemainRigidOrFailDeterministically()
     {
         const CompiledPhysicsTrack track = straightTrack();
         const CarDefinition definition = passengerCar();
@@ -637,8 +766,30 @@ namespace
             0.0, 0.0, "open-start rear bogie clamp");
         requireNear(end.frontBogie().location().stationMeters,
             track.lengthMeters(), 0.0, "open-end front bogie clamp");
+        requireRigidBogiePivots(
+            start, definition, "open-start rigid bogie pivots");
+        requireRigidBogiePivots(
+            end, definition, "open-end rigid bogie pivots");
         requireOrthonormal(start.bodyFrame(), "open-start body frame");
         requireOrthonormal(end.bodyFrame(), "open-end body frame");
+
+        const CompiledPhysicsTrack tooShort = straightTrack(2.0);
+        std::string firstError;
+        std::string secondError;
+        for (std::string* error : {&firstError, &secondError})
+        {
+            try
+            {
+                static_cast<void>(solveCarPose(
+                    tooShort, definition, locationAt(1.0)));
+            }
+            catch (const std::domain_error& exception)
+            {
+                *error = exception.what();
+            }
+        }
+        require(!firstError.empty() && firstError == secondError,
+            "infeasible open-endpoint placement must fail deterministically");
     }
 
     void circuitSeamIsContinuous()
@@ -665,12 +816,17 @@ namespace
                 before.bodyFrame().tangent
                 - after.bodyFrame().tangent) < 1.0e-4,
             "body orientation must be continuous across seam");
+        requireRigidBogiePivots(
+            before, definition, "pre-seam rigid bogie pivots");
+        requireRigidBogiePivots(
+            after, definition, "post-seam rigid bogie pivots");
     }
 
     void reverseTravelUsesPhysicalCarForward()
     {
+        const CarDefinition definition = passengerCar();
         const CarPose pose = solveCarPose(
-            straightTrack(), passengerCar(),
+            straightTrack(), definition,
             locationAt(10.0, TravelDirection::DecreasingStation));
         requireNear(pose.frontBogie().location().stationMeters,
             8.75, positionTolerance, "reverse front station");
@@ -690,6 +846,15 @@ namespace
         requireNear(pose.frontBogie().orientedFrame().tangent,
             {-1.0, 0.0, 0.0}, directionTolerance,
             "reverse bogie frame must face car travel");
+        requireRigidBogiePivots(
+            pose, definition, "reverse rigid bogie pivots");
+
+        const CarPose curvedPose = solveCarPose(
+            horizontalArcTrack(),
+            definition,
+            locationAt(7.5, TravelDirection::DecreasingStation));
+        requireRigidBogiePivots(
+            curvedPose, definition, "reverse curved rigid bogie pivots");
     }
 
     void coordinateScaleIsAppliedOnce()
@@ -846,9 +1011,14 @@ int main()
     run("banked track", bankedTrackBlendsUpDirection);
     run("compound pitch yaw bank", compoundTrackProducesOrthonormalFrame);
     run("hill crest and valley", crestAndValleyRemainStable);
+    run("straight-to-rising transition",
+        straightToRisingTransitionIsRigidAndContinuous);
+    run("asymmetric offset bogies",
+        asymmetricAndOffsetBogiePivotsRemainRigid);
     run("vertical track", verticalTrackHasNoSingularity);
     run("deterministic up fallback", deterministicFallbackHandlesOpposedUpVectors);
-    run("open-track endpoint clamping", openTrackEndpointsClampThroughTrackAdvance);
+    run("open-track endpoint feasibility",
+        openTrackEndpointsRemainRigidOrFailDeterministically);
     run("circuit seam", circuitSeamIsContinuous);
     run("reverse travel", reverseTravelUsesPhysicalCarForward);
     run("coordinate scale", coordinateScaleIsAppliedOnce);

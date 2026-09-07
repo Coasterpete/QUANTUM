@@ -38,10 +38,12 @@ namespace quantum::physics
     };
 
     // Car-local physical coordinates use +X forward, +Y lateral, and +Z up.
-    // A bogie's X coordinate selects its nominal station offset. Its complete
-    // position identifies the corresponding body reference point, allowing
-    // the body origin to differ from the track centerline (for example, for a
-    // suspended vehicle) without depending on rendered rail geometry.
+    // A bogie's X coordinate seeds its nominal station offset; the two-bogie
+    // solver adjusts those stations locally to preserve rigid pivot spacing.
+    // Its complete position identifies the corresponding body reference
+    // point, allowing the body origin to differ from the track centerline
+    // (for example, for a suspended vehicle) without depending on rendered
+    // rail geometry.
     struct BogieDefinition
     {
         glm::dvec3 referencePositionMeters{0.0};
@@ -234,9 +236,10 @@ namespace quantum::physics
             const CarLoadout&);
     };
 
-    // The reference location corresponds to car-local X = 0. Bogie stations
-    // are found only through CompiledPhysicsTrack::advance(), with local +X
-    // following the car's recorded travel direction.
+    // The reference location corresponds nominally to car-local X = 0. Bogie
+    // station guesses and their local rigid-spacing correction are evaluated
+    // only through CompiledPhysicsTrack::advance(), with local +X following
+    // the car's recorded travel direction.
     [[nodiscard]] CarPose solveCarPose(
         const CompiledPhysicsTrack& track,
         const CarDefinition& definition,

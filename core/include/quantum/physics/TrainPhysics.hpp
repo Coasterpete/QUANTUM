@@ -144,7 +144,8 @@ namespace quantum::physics
             glm::dquat followingBodyRelativeOrientation,
             glm::dvec3 relativeYawPitchRollRadians,
             std::size_t solverIterationCount,
-            double finalBracketSizeMeters);
+            double finalBracketSizeMeters,
+            bool usedExhaustiveSearchFallback);
 
         [[nodiscard]] std::size_t connectionIndex() const noexcept;
         [[nodiscard]] std::size_t leadingCarIndex() const noexcept;
@@ -170,6 +171,7 @@ namespace quantum::physics
             const noexcept;
         [[nodiscard]] std::size_t solverIterationCount() const noexcept;
         [[nodiscard]] double finalBracketSizeMeters() const noexcept;
+        [[nodiscard]] bool usedExhaustiveSearchFallback() const noexcept;
 
     private:
         std::size_t connectionIndex_ = 0;
@@ -187,6 +189,7 @@ namespace quantum::physics
         glm::dvec3 relativeYawPitchRollRadians_{0.0};
         std::size_t solverIterationCount_ = 0;
         double finalBracketSizeMeters_ = 0.0;
+        bool usedExhaustiveSearchFallback_ = false;
     };
 
     class TrainPose

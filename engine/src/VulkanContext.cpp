@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -1745,13 +1746,15 @@ namespace quantum::renderer
 
     // Regenerates the grid and axes in place. The vertex count never changes,
     // so this only needs the retained persistent mapping of the static aid
-    // buffer; the GPU must not be reading it during a frame, which holds
-    // because updates happen between drawFrame calls.
+    // buffer. Earlier submissions can still be executing between drawFrame
+    // calls and reading this buffer, so all in-flight frames must be drained
+    // first, exactly like the other persistent mapped-buffer update paths.
     void VulkanContext::rewriteViewportAidVertices(
         const float centerX,
         const float centerY,
         const float spacing)
     {
+        waitForFrameCompletion();
         writeHostVisibleVertexBuffer(
             allocator_,
             staticVertexAllocation_,
@@ -2361,12 +2364,12 @@ namespace quantum::renderer
         allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocateInfo.commandPool = commandPool_;
         allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocateInfo.commandBufferCount = 1;
+        allocateInfo.commandBufferCount = maxFramesInFlight;
 
         result = vkAllocateCommandBuffers(
             device_,
             &allocateInfo,
-            &commandBuffer_
+            commandBuffers_.data()
         );
 
         if (result != VK_SUCCESS)
@@ -2377,49 +2380,118 @@ namespace quantum::renderer
 
     void VulkanContext::createSynchronizationResources()
     {
+        if (swapchainImages_.size() < maxFramesInFlight)
+        {
+            throw std::runtime_error(
+                "The Vulkan swapchain provides fewer images than "
+                "framesInFlight."
+            );
+        }
+
         VkSemaphoreCreateInfo semaphoreCreateInfo{};
         semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        VkResult result = vkCreateSemaphore(
-            device_,
-            &semaphoreCreateInfo,
-            nullptr,
-            &imageAvailableSemaphore_
-        );
-
-        if (result != VK_SUCCESS)
+        for (VkSemaphore& semaphore : imageAvailableSemaphores_)
         {
-            throwVulkanError("vkCreateSemaphore", result);
+            const VkResult createResult = vkCreateSemaphore(
+                device_,
+                &semaphoreCreateInfo,
+                nullptr,
+                &semaphore
+            );
+
+            if (createResult != VK_SUCCESS)
+            {
+                for (const VkSemaphore createdSemaphore
+                    : imageAvailableSemaphores_)
+                {
+                    if (createdSemaphore != VK_NULL_HANDLE)
+                    {
+                        vkDestroySemaphore(
+                            device_,
+                            createdSemaphore,
+                            nullptr
+                        );
+                    }
+                }
+                throwVulkanError("vkCreateSemaphore", createResult);
+            }
         }
 
         VkFenceCreateInfo fenceCreateInfo{};
         fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-        result = vkCreateFence(
-            device_,
-            &fenceCreateInfo,
-            nullptr,
-            &frameFence_
-        );
-
-        if (result != VK_SUCCESS)
+        for (VkFence& fence : frameFences_)
         {
-            throwVulkanError("vkCreateFence", result);
+            const VkResult createResult = vkCreateFence(
+                device_,
+                &fenceCreateInfo,
+                nullptr,
+                &fence
+            );
+
+            if (createResult != VK_SUCCESS)
+            {
+                for (const VkFence createdFence : frameFences_)
+                {
+                    if (createdFence != VK_NULL_HANDLE)
+                    {
+                        vkDestroyFence(device_, createdFence, nullptr);
+                    }
+                }
+                for (const VkSemaphore semaphore : imageAvailableSemaphores_)
+                {
+                    if (semaphore != VK_NULL_HANDLE)
+                    {
+                        vkDestroySemaphore(device_, semaphore, nullptr);
+                    }
+                }
+                imageAvailableSemaphores_.fill(VK_NULL_HANDLE);
+                frameFences_.fill(VK_NULL_HANDLE);
+                throwVulkanError("vkCreateFence", createResult);
+            }
         }
+    }
+
+    std::uint32_t VulkanContext::currentFrameSlot() const noexcept
+    {
+        return frameIndex_ % maxFramesInFlight;
     }
 
     void VulkanContext::waitForFrameCompletion()
     {
-        if (frameFence_ == VK_NULL_HANDLE)
+        if (frameFences_[0] == VK_NULL_HANDLE)
         {
             return;
         }
 
         const VkResult result = vkWaitForFences(
             device_,
+            maxFramesInFlight,
+            frameFences_.data(),
+            VK_TRUE,
+            std::numeric_limits<std::uint64_t>::max()
+        );
+
+        if (result != VK_SUCCESS)
+        {
+            throwVulkanError("vkWaitForFences", result);
+        }
+    }
+
+    void VulkanContext::waitForFrameSlot(const std::uint32_t frameSlot)
+    {
+        if (frameFences_[0] == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        const VkFence fence = frameFences_[frameSlot];
+        const VkResult result = vkWaitForFences(
+            device_,
             1,
-            &frameFence_,
+            &fence,
             VK_TRUE,
             std::numeric_limits<std::uint64_t>::max()
         );
@@ -2450,9 +2522,10 @@ namespace quantum::renderer
 
         if (viewportImage_ != VK_NULL_HANDLE)
         {
-            // The frame fence covers the viewport color/depth writes and
-            // ImGui's sampling of the color image. Descriptor retirement and
-            // attachment destruction are safe once that frame completes.
+            // Retiring every in-flight frame is required: any one of them may
+            // still write the viewport color/depth attachments and sample the
+            // color image through the ImGui descriptor. Only a full drain makes
+            // descriptor retirement and attachment destruction safe.
             waitForFrameCompletion();
 
             if (retirementCallback != nullptr)
@@ -2578,9 +2651,10 @@ namespace quantum::renderer
 
         try
         {
-            // The single frame fence covers every draw that can still read the
-            // old track-curve allocation. Waiting here is needed only for an
-            // authored edit, not for every buffer creation or every frame.
+            // Draining every in-flight frame is required: any of them may still
+            // read the old track-curve allocation. Waiting here is needed only
+            // for an authored edit, not for every buffer creation or every
+            // frame.
             waitForFrameCompletion();
         }
         catch (...)
@@ -2623,51 +2697,73 @@ namespace quantum::renderer
             );
         }
 
-        if (vertices.empty())
+        if (vertices.size() > std::numeric_limits<std::uint32_t>::max())
         {
-            trainPreviewVertexCount_ = 0;
+            throw std::length_error(
+                "Train preview vertex count is outside Vulkan's draw range."
+            );
+        }
+
+        trainPreviewVertices_.assign(vertices.begin(), vertices.end());
+        for (TrainPreviewFrameBuffer& frameBuffer
+            : trainPreviewFrameBuffers_)
+        {
+            frameBuffer.requiresUpdate = true;
+        }
+    }
+
+    void VulkanContext::updateTrainPreviewFrameBuffer(
+        const std::uint32_t frameSlot)
+    {
+        TrainPreviewFrameBuffer& frameBuffer =
+            trainPreviewFrameBuffers_[frameSlot];
+        if (!frameBuffer.requiresUpdate)
+        {
             return;
         }
 
-        const VkDeviceSize size = sizeof(LineVertex) * vertices.size();
-        if (trainPreviewVertexBuffer_ != VK_NULL_HANDLE && size <= trainPreviewVertexCapacity_)
+        if (trainPreviewVertices_.empty())
         {
-            waitForFrameCompletion();
+            frameBuffer.vertexCount = 0;
+            frameBuffer.requiresUpdate = false;
+            return;
+        }
+
+        const VkDeviceSize size =
+            sizeof(LineVertex) * trainPreviewVertices_.size();
+        if (frameBuffer.vertexBuffer != VK_NULL_HANDLE
+            && size <= frameBuffer.vertexCapacity)
+        {
             writeHostVisibleVertexBuffer(
                 allocator_,
-                trainPreviewVertexAllocation_,
-                trainPreviewVertexMappedData_,
-                trainPreviewVertexCapacity_,
-                vertices
+                frameBuffer.vertexAllocation,
+                frameBuffer.vertexMappedData,
+                frameBuffer.vertexCapacity,
+                std::span<const LineVertex>{trainPreviewVertices_}
             );
-            trainPreviewVertexCount_ = static_cast<std::uint32_t>(vertices.size());
+            frameBuffer.vertexCount = static_cast<std::uint32_t>(
+                trainPreviewVertices_.size());
+            frameBuffer.requiresUpdate = false;
             return;
         }
 
-        const CreatedVertexBuffer created =
-            createHostVisibleVertexBuffer(allocator_, vertices);
-        try
+        const CreatedVertexBuffer created = createHostVisibleVertexBuffer(
+            allocator_, std::span<const LineVertex>{trainPreviewVertices_});
+        if (frameBuffer.vertexBuffer != VK_NULL_HANDLE)
         {
-            waitForFrameCompletion();
-        }
-        catch (...)
-        {
-            vmaDestroyBuffer(
-                allocator_, created.buffer, created.allocation);
-            throw;
-        }
-        if (trainPreviewVertexBuffer_ != VK_NULL_HANDLE)
-        {
+            // drawFrame waited for this slot's fence before calling here, so
+            // no other in-flight frame can still reference this allocation.
             vmaDestroyBuffer(
                 allocator_,
-                trainPreviewVertexBuffer_,
-                trainPreviewVertexAllocation_);
+                frameBuffer.vertexBuffer,
+                frameBuffer.vertexAllocation);
         }
-        trainPreviewVertexBuffer_ = created.buffer;
-        trainPreviewVertexAllocation_ = created.allocation;
-        trainPreviewVertexMappedData_ = created.mappedData;
-        trainPreviewVertexCapacity_ = created.capacity;
-        trainPreviewVertexCount_ = created.vertexCount;
+        frameBuffer.vertexBuffer = created.buffer;
+        frameBuffer.vertexAllocation = created.allocation;
+        frameBuffer.vertexMappedData = created.mappedData;
+        frameBuffer.vertexCapacity = created.capacity;
+        frameBuffer.vertexCount = created.vertexCount;
+        frameBuffer.requiresUpdate = false;
     }
 
     StaticMeshGpuHandle VulkanContext::uploadStaticMeshOnce(
@@ -3020,16 +3116,20 @@ namespace quantum::renderer
     }
 
     void VulkanContext::recordDrawCommands(
+        const std::uint32_t frameSlot,
         const std::uint32_t imageIndex,
         const FrameRenderCallback renderCallback,
         void* const userData,
         const bool readback)
     {
+        const VkCommandBuffer commandBuffer =
+            commandBuffers_[frameSlot];
+
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        VkResult result = vkBeginCommandBuffer(commandBuffer_, &beginInfo);
+        VkResult result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
         if (result != VK_SUCCESS)
         {
@@ -3071,7 +3171,7 @@ namespace quantum::renderer
                 : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 
             vkCmdPipelineBarrier(
-                commandBuffer_,
+                commandBuffer,
                 viewportSourceStage,
                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                 0,
@@ -3109,7 +3209,7 @@ namespace quantum::renderer
                 toDepthAttachmentBarrier.subresourceRange.layerCount = 1;
 
                 vkCmdPipelineBarrier(
-                    commandBuffer_,
+                    commandBuffer,
                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
                     0,
@@ -3154,18 +3254,18 @@ namespace quantum::renderer
             viewportRenderingInfo.pDepthAttachment =
                 &viewportDepthAttachment;
 
-            vkCmdBeginRendering(commandBuffer_, &viewportRenderingInfo);
+            vkCmdBeginRendering(commandBuffer, &viewportRenderingInfo);
 
             VkViewport viewport{};
             viewport.width = static_cast<float>(viewportExtent_.width);
             viewport.height = static_cast<float>(viewportExtent_.height);
             viewport.minDepth = 0.0F;
             viewport.maxDepth = 1.0F;
-            vkCmdSetViewport(commandBuffer_, 0, 1, &viewport);
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
             VkRect2D scissor{};
             scissor.extent = viewportExtent_;
-            vkCmdSetScissor(commandBuffer_, 0, 1, &scissor);
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
             const TrackPresentationMode presentationMode =
                 trackPresentation_.mode();
@@ -3179,22 +3279,22 @@ namespace quantum::renderer
                     == TrackPresentationMode::ShadedWireframe;
             constexpr std::array<float, 4> noTrackOverride{
                 1.0F, 0.82F, 0.12F, 0.0F};
-            const auto pushTrackDraw = [this](
+            const auto pushTrackDraw = [this, commandBuffer](
                 const std::array<float, 4>& baseColor,
                 const std::array<float, 4>& colorOverride)
             {
                 vkCmdPushConstants(
-                    commandBuffer_, trackPipelineLayout_,
+                    commandBuffer, trackPipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                     0, sizeof(viewportViewProjection_),
                     viewportViewProjection_.data());
                 vkCmdPushConstants(
-                    commandBuffer_, trackPipelineLayout_,
+                    commandBuffer, trackPipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                     sizeof(viewportViewProjection_), sizeof(baseColor),
                     baseColor.data());
                 vkCmdPushConstants(
-                    commandBuffer_, trackPipelineLayout_,
+                    commandBuffer, trackPipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                     sizeof(viewportViewProjection_) + sizeof(baseColor),
                     sizeof(colorOverride), colorOverride.data());
@@ -3203,19 +3303,19 @@ namespace quantum::renderer
             constexpr VkDeviceSize vertexOffset = 0;
             if (drawShadedTrack && trackTriangleIndexCount_ > 0)
             {
-                vkCmdBindPipeline(commandBuffer_,
+                vkCmdBindPipeline(commandBuffer,
                     VK_PIPELINE_BIND_POINT_GRAPHICS, trackShadedPipeline_);
-                vkCmdBindVertexBuffers(commandBuffer_, 0, 1,
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1,
                     &trackMeshVertexBuffer_, &vertexOffset);
-                vkCmdBindIndexBuffer(commandBuffer_,
+                vkCmdBindIndexBuffer(commandBuffer,
                     trackTriangleIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
                 pushTrackDraw(trackBaseColor_, noTrackOverride);
-                vkCmdDrawIndexed(commandBuffer_, trackTriangleIndexCount_,
+                vkCmdDrawIndexed(commandBuffer, trackTriangleIndexCount_,
                     1, 0, 0, 0);
 
                 if (hardwareInstanceCount_ > 0)
                 {
-                    vkCmdBindPipeline(commandBuffer_,
+                    vkCmdBindPipeline(commandBuffer,
                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                         hardwareShadedPipeline_);
                     constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
@@ -3228,13 +3328,13 @@ namespace quantum::renderer
                             hardwareMeshes_.at(batch.mesh.value);
                         const std::array hardwareBuffers{
                             mesh.vertexBuffer, hardwareInstanceBuffer_};
-                        vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
+                        vkCmdBindVertexBuffers(commandBuffer, 0, 2,
                             hardwareBuffers.data(), offsets.data());
-                        vkCmdBindIndexBuffer(commandBuffer_,
+                        vkCmdBindIndexBuffer(commandBuffer,
                             mesh.triangleIndexBuffer, 0,
                             VK_INDEX_TYPE_UINT32);
                         pushTrackDraw(batch.baseColor, noTrackOverride);
-                        vkCmdDrawIndexed(commandBuffer_,
+                        vkCmdDrawIndexed(commandBuffer,
                             mesh.triangleIndexCount,
                             batch.instanceCount, 0, 0,
                             batch.firstInstance);
@@ -3247,19 +3347,19 @@ namespace quantum::renderer
                 const std::array<float, 4> edgeColor = drawShadedTrack
                     ? std::array<float, 4>{0.025F, 0.035F, 0.045F, 1.0F}
                     : std::array<float, 4>{0.30F, 0.68F, 0.95F, 1.0F};
-                vkCmdBindPipeline(commandBuffer_,
+                vkCmdBindPipeline(commandBuffer,
                     VK_PIPELINE_BIND_POINT_GRAPHICS, trackEdgePipeline_);
-                vkCmdBindVertexBuffers(commandBuffer_, 0, 1,
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1,
                     &trackMeshVertexBuffer_, &vertexOffset);
-                vkCmdBindIndexBuffer(commandBuffer_,
+                vkCmdBindIndexBuffer(commandBuffer,
                     trackEdgeIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
                 pushTrackDraw(edgeColor, noTrackOverride);
-                vkCmdDrawIndexed(commandBuffer_, trackEdgeIndexCount_,
+                vkCmdDrawIndexed(commandBuffer, trackEdgeIndexCount_,
                     1, 0, 0, 0);
 
                 if (hardwareInstanceCount_ > 0)
                 {
-                    vkCmdBindPipeline(commandBuffer_,
+                    vkCmdBindPipeline(commandBuffer,
                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                         hardwareEdgePipeline_);
                     constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
@@ -3272,13 +3372,13 @@ namespace quantum::renderer
                             hardwareMeshes_.at(batch.mesh.value);
                         const std::array hardwareBuffers{
                             mesh.vertexBuffer, hardwareInstanceBuffer_};
-                        vkCmdBindVertexBuffers(commandBuffer_, 0, 2,
+                        vkCmdBindVertexBuffers(commandBuffer, 0, 2,
                             hardwareBuffers.data(), offsets.data());
-                        vkCmdBindIndexBuffer(commandBuffer_,
+                        vkCmdBindIndexBuffer(commandBuffer,
                             mesh.edgeIndexBuffer, 0,
                             VK_INDEX_TYPE_UINT32);
                         pushTrackDraw(edgeColor, noTrackOverride);
-                        vkCmdDrawIndexed(commandBuffer_,
+                        vkCmdDrawIndexed(commandBuffer,
                             mesh.edgeIndexCount, batch.instanceCount,
                             0, 0, batch.firstInstance);
                     }
@@ -3286,13 +3386,13 @@ namespace quantum::renderer
             }
 
             vkCmdBindPipeline(
-                commandBuffer_,
+                commandBuffer,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                 graphicsPipeline_
             );
 
             vkCmdPushConstants(
-                commandBuffer_,
+                commandBuffer,
                 pipelineLayout_,
                 VK_SHADER_STAGE_VERTEX_BIT,
                 0,
@@ -3303,7 +3403,7 @@ namespace quantum::renderer
                 1.0F, 0.82F, 0.12F, 0.0F
             };
             vkCmdPushConstants(
-                commandBuffer_,
+                commandBuffer,
                 pipelineLayout_,
                 VK_SHADER_STAGE_VERTEX_BIT,
                 sizeof(viewportViewProjection_),
@@ -3314,14 +3414,14 @@ namespace quantum::renderer
             if (viewportGridVisible_)
             {
                 vkCmdBindVertexBuffers(
-                    commandBuffer_,
+                    commandBuffer,
                     0,
                     1,
                     &staticVertexBuffer_,
                     &vertexOffset
                 );
                 vkCmdDraw(
-                    commandBuffer_,
+                    commandBuffer,
                     staticVertexCount_,
                     1,
                     0,
@@ -3336,7 +3436,7 @@ namespace quantum::renderer
             {
                 const std::uint32_t verticesPerCurve = trackVerticesPerCurve_;
                 vkCmdBindVertexBuffers(
-                    commandBuffer_,
+                    commandBuffer,
                     0,
                     1,
                     &trackCurveVertexBuffer_,
@@ -3358,7 +3458,7 @@ namespace quantum::renderer
                     }
 
                     vkCmdDraw(
-                        commandBuffer_,
+                        commandBuffer,
                         verticesPerCurve,
                         1,
                         curve * verticesPerCurve,
@@ -3372,7 +3472,7 @@ namespace quantum::renderer
                         1.0F, 0.82F, 0.12F, 0.78F
                     };
                     vkCmdPushConstants(
-                        commandBuffer_,
+                        commandBuffer,
                         pipelineLayout_,
                         VK_SHADER_STAGE_VERTEX_BIT,
                         sizeof(viewportViewProjection_),
@@ -3389,7 +3489,7 @@ namespace quantum::renderer
                         }
 
                         vkCmdDraw(
-                            commandBuffer_,
+                            commandBuffer,
                             trackHighlightVertexCount_,
                             1,
                             curve * verticesPerCurve
@@ -3400,13 +3500,15 @@ namespace quantum::renderer
                 }
             }
 
-            if (trainPreviewVertexCount_ > 0)
+            const TrainPreviewFrameBuffer& trainPreviewFrameBuffer =
+                trainPreviewFrameBuffers_[frameSlot];
+            if (trainPreviewFrameBuffer.vertexCount > 0)
             {
                 constexpr std::array<float, 4> noHighlight{
                     1.0F, 0.82F, 0.12F, 0.0F
                 };
                 vkCmdPushConstants(
-                    commandBuffer_,
+                    commandBuffer,
                     pipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT,
                     sizeof(viewportViewProjection_),
@@ -3414,22 +3516,22 @@ namespace quantum::renderer
                     noHighlight.data()
                 );
                 vkCmdBindVertexBuffers(
-                    commandBuffer_,
+                    commandBuffer,
                     0,
                     1,
-                    &trainPreviewVertexBuffer_,
+                    &trainPreviewFrameBuffer.vertexBuffer,
                     &vertexOffset
                 );
                 vkCmdDraw(
-                    commandBuffer_,
-                    trainPreviewVertexCount_,
+                    commandBuffer,
+                    trainPreviewFrameBuffer.vertexCount,
                     1,
                     0,
                     0
                 );
             }
 
-            vkCmdEndRendering(commandBuffer_);
+            vkCmdEndRendering(commandBuffer);
 
             VkImageMemoryBarrier toShaderReadBarrier{};
             toShaderReadBarrier.sType =
@@ -3450,7 +3552,7 @@ namespace quantum::renderer
                 toColorAttachmentBarrier.subresourceRange;
 
             vkCmdPipelineBarrier(
-                commandBuffer_,
+                commandBuffer,
                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                 0,
@@ -3493,7 +3595,7 @@ namespace quantum::renderer
             : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 
         vkCmdPipelineBarrier(
-            commandBuffer_,
+            commandBuffer,
             sourceStage,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             0,
@@ -3524,14 +3626,14 @@ namespace quantum::renderer
         renderingInfo.colorAttachmentCount = 1;
         renderingInfo.pColorAttachments = &colorAttachment;
 
-        vkCmdBeginRendering(commandBuffer_, &renderingInfo);
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
         if (renderCallback != nullptr)
         {
-            renderCallback(commandBuffer_, userData);
+            renderCallback(commandBuffer, userData);
         }
 
-        vkCmdEndRendering(commandBuffer_);
+        vkCmdEndRendering(commandBuffer);
 
         if (readback)
         {
@@ -3540,14 +3642,14 @@ namespace quantum::renderer
             toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             toTransfer.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toTransfer);
 
             VkBufferImageCopy copy{};
             copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             copy.imageSubresource.layerCount = 1;
             copy.imageExtent = {swapchainExtent_.width, swapchainExtent_.height, 1};
-            vkCmdCopyImageToBuffer(commandBuffer_, swapchainImages_[imageIndex],
+            vkCmdCopyImageToBuffer(commandBuffer, swapchainImages_[imageIndex],
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackBuffer_, 1, &copy);
 
             VkBufferMemoryBarrier toHost{};
@@ -3558,7 +3660,7 @@ namespace quantum::renderer
             toHost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             toHost.buffer = readbackBuffer_;
             toHost.size = VK_WHOLE_SIZE;
-            vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &toHost, 0, nullptr);
         }
 
@@ -3577,7 +3679,7 @@ namespace quantum::renderer
             toColorAttachmentBarrier.subresourceRange;
 
         vkCmdPipelineBarrier(
-            commandBuffer_,
+            commandBuffer,
             readback ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
             0,
@@ -3589,7 +3691,7 @@ namespace quantum::renderer
             &toPresentBarrier
         );
 
-        result = vkEndCommandBuffer(commandBuffer_);
+        result = vkEndCommandBuffer(commandBuffer);
 
         if (result != VK_SUCCESS)
         {
@@ -3633,8 +3735,32 @@ namespace quantum::renderer
         void* const userData,
         FrameImage* const readback)
     {
+        using Clock = std::chrono::steady_clock;
+        const auto drawFrameBegin = Clock::now();
+        lastDrawFrameCpuTelemetry_ = {};
+        const auto millisecondsNow = []()
+        {
+            return std::chrono::duration<double, std::milli>(
+                Clock::now().time_since_epoch()).count();
+        };
+        auto& synchronization = lastDrawFrameCpuTelemetry_.synchronization;
+        auto& submission = synchronization.current;
+        submission.drawId = ++drawAttemptId_;
+        submission.frameSlot = currentFrameSlot();
+        submission.swapchainGeneration = swapchainGeneration_;
+        const auto finishTelemetry = [this, drawFrameBegin]()
+        {
+            const auto& current = lastDrawFrameCpuTelemetry_.synchronization.current;
+            if (current.submitted)
+                frameSubmissions_[current.frameSlot] = current;
+            lastDrawFrameCpuTelemetry_.totalMilliseconds =
+                std::chrono::duration<double, std::milli>(
+                    Clock::now() - drawFrameBegin).count();
+        };
+
         if (readback != nullptr)
         {
+            lastDrawFrameCpuTelemetry_.synchronousReadback = true;
             *readback = {};
             if (!frameReadbackEnabled_)
                 throw std::logic_error("Frame readback was not enabled during Vulkan initialization.");
@@ -3652,27 +3778,61 @@ namespace quantum::renderer
 
         if (width == 0 || height == 0)
         {
+            finishTelemetry();
             return;
         }
 
-        waitForFrameCompletion();
+        const std::uint32_t frameSlot = currentFrameSlot();
+        synchronization.waitedSubmission = frameSubmissions_[frameSlot];
+        const double statusBegin = millisecondsNow();
+        const VkResult fenceStatus = vkGetFenceStatus(device_, frameFences_[frameSlot]);
+        synchronization.fenceStatusCallMilliseconds = millisecondsNow() - statusBegin;
+        synchronization.fenceStatusBeforeWait = fenceStatus;
+        if (fenceStatus != VK_SUCCESS && fenceStatus != VK_NOT_READY)
+            throwVulkanError("vkGetFenceStatus", fenceStatus);
+        const auto frameSlotWaitBegin = Clock::now();
+        synchronization.waitBeginMilliseconds = std::chrono::duration<double, std::milli>(
+            frameSlotWaitBegin.time_since_epoch()).count();
+        waitForFrameSlot(frameSlot);
+        synchronization.waitEndMilliseconds = millisecondsNow();
+        lastDrawFrameCpuTelemetry_.frameSlotWaitMilliseconds =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - frameSlotWaitBegin).count();
+
+        if (trainPreviewFrameBuffers_[frameSlot].requiresUpdate)
+        {
+            const auto previewUpdateBegin = Clock::now();
+            updateTrainPreviewFrameBuffer(frameSlot);
+            lastDrawFrameCpuTelemetry_.previewFrameSlotUpdateMilliseconds =
+                std::chrono::duration<double, std::milli>(
+                    Clock::now() - previewUpdateBegin).count();
+            lastDrawFrameCpuTelemetry_.previewStreamUpdated = true;
+        }
 
         if (readback != nullptr)
             prepareFrameReadback();
 
         std::uint32_t imageIndex = 0;
+        const auto acquireBegin = Clock::now();
         const VkResult acquireResult = vkAcquireNextImageKHR(
             device_,
             swapchain_,
             std::numeric_limits<std::uint64_t>::max(),
-            imageAvailableSemaphore_,
+            imageAvailableSemaphores_[frameSlot],
             VK_NULL_HANDLE,
             &imageIndex
         );
+        lastDrawFrameCpuTelemetry_.acquireCallMilliseconds =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - acquireBegin).count();
+        submission.acquireResult = acquireResult;
+        submission.imageIndex = imageIndex;
 
         if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
         {
             recreateSwapchain();
+            lastDrawFrameCpuTelemetry_.swapchainRecreated = true;
+            finishTelemetry();
             return;
         }
 
@@ -3682,21 +3842,33 @@ namespace quantum::renderer
             throwVulkanError("vkAcquireNextImageKHR", acquireResult);
         }
 
-        VkResult result = vkResetFences(device_, 1, &frameFence_);
+        submission.resetBeginMilliseconds = millisecondsNow();
+        VkResult result = vkResetFences(
+            device_, 1, &frameFences_[frameSlot]);
+        submission.resetEndMilliseconds = millisecondsNow();
+        submission.resetResult = result;
+        submission.fenceReset = result == VK_SUCCESS;
 
         if (result != VK_SUCCESS)
         {
             throwVulkanError("vkResetFences", result);
         }
 
-        result = vkResetCommandBuffer(commandBuffer_, 0);
+        result = vkResetCommandBuffer(commandBuffers_[frameSlot], 0);
 
         if (result != VK_SUCCESS)
         {
             throwVulkanError("vkResetCommandBuffer", result);
         }
 
-        recordDrawCommands(imageIndex, renderCallback, userData, readback != nullptr);
+        const double recordBegin = millisecondsNow();
+        recordDrawCommands(
+            frameSlot,
+            imageIndex,
+            renderCallback,
+            userData,
+            readback != nullptr);
+        submission.recordCommandsMilliseconds = millisecondsNow() - recordBegin;
 
         const VkPipelineStageFlags waitStage =
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -3706,19 +3878,23 @@ namespace quantum::renderer
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &imageAvailableSemaphore_;
+        submitInfo.pWaitSemaphores = &imageAvailableSemaphores_[frameSlot];
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer_;
+        submitInfo.pCommandBuffers = &commandBuffers_[frameSlot];
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &renderFinishedSemaphore;
 
+        submission.submitBeginMilliseconds = millisecondsNow();
         result = vkQueueSubmit(
             graphicsQueue_,
             1,
             &submitInfo,
-            frameFence_
+            frameFences_[frameSlot]
         );
+        submission.submitEndMilliseconds = millisecondsNow();
+        submission.submitResult = result;
+        submission.submitted = result == VK_SUCCESS;
 
         if (result != VK_SUCCESS)
         {
@@ -3734,7 +3910,10 @@ namespace quantum::renderer
 
         if (readback != nullptr)
         {
-            // Host reads only after the copy completes, including noncoherent heaps.
+            // Host reads only after the copy completes, including noncoherent
+            // heaps. Synchronous readback drains every in-flight frame so the
+            // single shared readback buffer is owned by the CPU again before
+            // it is read or resized on a later frame.
             waitForFrameCompletion();
             const VkResult invalidateResult = vmaInvalidateAllocation(
                 allocator_, readbackAllocation_, 0, VK_WHOLE_SIZE);
@@ -3762,10 +3941,19 @@ namespace quantum::renderer
         presentInfo.pSwapchains = &swapchain_;
         presentInfo.pImageIndices = &imageIndex;
 
+        const auto presentBegin = Clock::now();
+        submission.presentBeginMilliseconds = std::chrono::duration<double, std::milli>(
+            presentBegin.time_since_epoch()).count();
+        submission.presentCalled = true;
         const VkResult presentResult = vkQueuePresentKHR(
             presentQueue_,
             &presentInfo
         );
+        lastDrawFrameCpuTelemetry_.presentCallMilliseconds =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - presentBegin).count();
+        submission.presentEndMilliseconds = millisecondsNow();
+        submission.presentResult = presentResult;
 
         if (presentResult == VK_ERROR_OUT_OF_DATE_KHR
             || presentResult == VK_SUBOPTIMAL_KHR
@@ -3774,6 +3962,8 @@ namespace quantum::renderer
             if (readback != nullptr)
                 *readback = {};
             recreateSwapchain();
+            lastDrawFrameCpuTelemetry_.swapchainRecreated = true;
+            finishTelemetry();
             return;
         }
 
@@ -3781,6 +3971,9 @@ namespace quantum::renderer
         {
             throwVulkanError("vkQueuePresentKHR", presentResult);
         }
+
+        ++frameIndex_;
+        finishTelemetry();
     }
 
     void VulkanContext::recreateSwapchain()
@@ -3896,23 +4089,29 @@ namespace quantum::renderer
                 );
             }
 
-            if (frameFence_ != VK_NULL_HANDLE)
+            for (VkFence& fence : frameFences_)
             {
-                vkDestroyFence(device_, frameFence_, nullptr);
-                frameFence_ = VK_NULL_HANDLE;
+                if (fence != VK_NULL_HANDLE)
+                {
+                    vkDestroyFence(device_, fence, nullptr);
+                    fence = VK_NULL_HANDLE;
+                }
             }
 
-            if (imageAvailableSemaphore_ != VK_NULL_HANDLE)
+            for (VkSemaphore& semaphore : imageAvailableSemaphores_)
             {
-                vkDestroySemaphore(
-                    device_,
-                    imageAvailableSemaphore_,
-                    nullptr
-                );
-                imageAvailableSemaphore_ = VK_NULL_HANDLE;
+                if (semaphore != VK_NULL_HANDLE)
+                {
+                    vkDestroySemaphore(
+                        device_,
+                        semaphore,
+                        nullptr
+                    );
+                    semaphore = VK_NULL_HANDLE;
+                }
             }
 
-            commandBuffer_ = VK_NULL_HANDLE;
+            commandBuffers_.fill(VK_NULL_HANDLE);
 
             if (commandPool_ != VK_NULL_HANDLE)
             {
@@ -4021,18 +4220,18 @@ namespace quantum::renderer
             trackCurveVertexCapacity_ = 0;
             trackCurveVertexCount_ = 0;
 
-            if (trainPreviewVertexBuffer_ != VK_NULL_HANDLE)
+            for (TrainPreviewFrameBuffer& frameBuffer
+                : trainPreviewFrameBuffers_)
             {
-                vmaDestroyBuffer(
-                    allocator_,
-                    trainPreviewVertexBuffer_,
-                    trainPreviewVertexAllocation_);
-                trainPreviewVertexBuffer_ = VK_NULL_HANDLE;
-                trainPreviewVertexAllocation_ = VK_NULL_HANDLE;
+                destroyAllocatedBuffer(
+                    frameBuffer.vertexBuffer,
+                    frameBuffer.vertexAllocation);
+                frameBuffer.vertexMappedData = nullptr;
+                frameBuffer.vertexCapacity = 0;
+                frameBuffer.vertexCount = 0;
+                frameBuffer.requiresUpdate = false;
             }
-            trainPreviewVertexMappedData_ = nullptr;
-            trainPreviewVertexCapacity_ = 0;
-            trainPreviewVertexCount_ = 0;
+            trainPreviewVertices_.clear();
 
             if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE)
             {
@@ -4108,6 +4307,7 @@ namespace quantum::renderer
             0.0F, 0.0F, 0.0F, 1.0F
         };
         swapchainGeneration_ = 0;
+        lastDrawFrameCpuTelemetry_ = {};
     }
 
     VkInstance VulkanContext::instance() const noexcept
@@ -4163,6 +4363,12 @@ namespace quantum::renderer
     bool VulkanContext::fillModeNonSolidSupported() const noexcept
     {
         return fillModeNonSolidSupported_;
+    }
+
+    const DrawFrameCpuTelemetry&
+    VulkanContext::lastDrawFrameCpuTelemetry() const noexcept
+    {
+        return lastDrawFrameCpuTelemetry_;
     }
 
     const std::filesystem::path& VulkanContext::runtimeAssetRoot() const noexcept

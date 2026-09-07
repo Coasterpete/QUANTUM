@@ -167,10 +167,10 @@ namespace
     }
 
     [[nodiscard]] CompiledPhysicsTrack horizontalCircuit(
-        const double bankRadians = 0.0)
+        const double bankRadians = 0.0,
+        const double radius = 25.0,
+        const int count = 20'000)
     {
-        constexpr double radius = 25.0;
-        constexpr int count = 20'000;
         std::vector<TrackKinematicState> samples;
         samples.reserve(count + 1);
         for (int index = 0; index <= count; ++index)
@@ -1020,15 +1020,21 @@ namespace
                 && !illConditionedCar.frontBogie.worldReactionNewtons,
             "near-coincident supports are ill-conditioned, not explosive");
 
-        constexpr double circuitRadius = 25.0;
+        constexpr int circuitSampleCount = 20'000;
+        constexpr double circuitLength = 0.01 * circuitSampleCount;
+        constexpr double circuitRadius =
+            circuitLength / (2.0 * std::numbers::pi);
+        // The 1 cm sample spacing aligns the pose and both 1 cm derivative
+        // samples with exact antipodal vertices. Their rigid chord is one
+        // diameter and their contact planes remain exactly rank-deficient.
         CarDefinition rankDeficientCar = carDefinition(
             1'000.0,
-            0.5 * std::numbers::pi * circuitRadius);
+            circuitRadius);
         rankDeficientCar.dryCenterOfGravityMeters.z = 0.0;
         const CarTrackReaction& rankDeficient = availableCar(analyze(
-            horizontalCircuit(),
+            horizontalCircuit(0.0, circuitRadius, circuitSampleCount),
             singleCarTrain(rankDeficientCar),
-            locationAt(std::numbers::pi * circuitRadius)));
+            locationAt(0.5 * circuitLength)));
         require(rankDeficient.frontBogie.status
                     == BogieReactionRecoveryStatus::RankDeficient
                 && rankDeficient.frontBogie.reactionSolveRank < 4

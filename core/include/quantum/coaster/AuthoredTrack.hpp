@@ -1,5 +1,6 @@
 #pragma once
 
+#include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/coaster/GeometricSection.hpp>
 #include <quantum/coaster/ForceDrivenRegion.hpp>
 #include <quantum/coaster/PlanarArcRegion.hpp>
@@ -208,6 +209,11 @@ namespace quantum::coaster
         // Validates the complete preset before replacing authored style state.
         void setTrackStyle(const TrackStylePreset& style);
 
+        [[nodiscard]] const CoasterSetup& coasterSetup() const noexcept;
+        // Validates the complete coaster configuration before replacing the
+        // document's authored style/options/train/heartline state.
+        void setCoasterSetup(const CoasterSetup& setup);
+
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
         // Throws std::out_of_range for an invalid index.
@@ -251,6 +257,8 @@ namespace quantum::coaster
         AuthoredStartPose startPose_;
         TrackPhysicalSettings physicalSettings_;
         TrackStylePreset trackStyle_ = createStandardDualRailPreset();
+        CoasterSetup coasterSetup_ =
+            createCoasterSetupForStyle(defaultCoasterStyleId);
         std::vector<AuthoredTrackSection> sections_;
     };
 
