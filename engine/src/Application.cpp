@@ -18,6 +18,8 @@
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
+#include <AudioEngine.hpp>
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -243,6 +245,49 @@ namespace quantum::engine
         try
         {
             {
+                // Audio is a non-fatal startup subsystem. The engine is scoped
+                // to this block so its destructor releases the SDL audio
+                // subsystem before the application's SDL_DestroyWindow/SDL_Quit
+                // on both normal exit and exception unwinding.
+                quantum::audio::AudioEngine audioEngine;
+                if (audioEngine.initialize())
+                {
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Info,
+                        "AUDIO",
+                        "Audio engine initialized: driver '%.*s', "
+                        "%zu playback device(s), default playback device "
+                        "'%.*s'.",
+                        static_cast<int>(
+                            audioEngine.audioDriverName().size()),
+                        audioEngine.audioDriverName().data(),
+                        audioEngine.playbackDeviceCount(),
+                        static_cast<int>(
+                            audioEngine.defaultPlaybackDeviceName().size()),
+                        audioEngine.defaultPlaybackDeviceName().data()
+                    );
+                    if (audioEngine.playbackDeviceCount() == 0)
+                    {
+                        quantum::logging::logMessage(
+                            quantum::logging::LogLevel::Warning,
+                            "AUDIO",
+                            "No audio playback devices were found; QUANTUM "
+                            "will continue without audio playback."
+                        );
+                    }
+                }
+                else
+                {
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Warning,
+                        "AUDIO",
+                        "Audio engine initialization failed and audio has "
+                        "been disabled: %.*s",
+                        static_cast<int>(audioEngine.lastError().size()),
+                        audioEngine.lastError().data()
+                    );
+                }
+
                 std::optional<PreparedDocument> startupDocument;
                 if (previewSmokeOptions != nullptr)
                 {

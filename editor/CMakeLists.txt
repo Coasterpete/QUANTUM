@@ -63,6 +63,7 @@ target_link_libraries(
     PRIVATE
         Quantum::Engine
         Quantum::Core
+        Quantum::Audio
         SDL3::SDL3
         imgui::imgui
 )
