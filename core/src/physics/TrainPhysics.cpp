@@ -683,15 +683,17 @@ namespace quantum::physics
             }
         }
 
-        [[nodiscard]] CarPose solveLegalCarPose(
+[[nodiscard]] CarPose solveLegalCarPose(
             const CompiledPhysicsTrack& track,
             const TrainCarDefinition& definition,
-            const TrackLocation& referenceLocation)
+            const TrackLocation& referenceLocation,
+            TrainSolveCounters* const counters = nullptr)
         {
             requireLegalOpenCarPlacement(
                 track, definition.car, referenceLocation);
             return detail::solveCarPoseForValidatedDefinition(
-                track, definition.car, referenceLocation, definition.loadout);
+                track, definition.car, referenceLocation,
+                definition.loadout, counters);
         }
 
         struct ConnectionCandidate
@@ -715,12 +717,13 @@ namespace quantum::physics
             return location;
         }
 
-        [[nodiscard]] ConnectionCandidate connectionCandidate(
+[[nodiscard]] ConnectionCandidate connectionCandidate(
             const CompiledPhysicsTrack& track,
             const TrainCarDefinition& followingDefinition,
             const CarPose& leadingPose,
             const double connectorLengthMeters,
-            const double backwardOffsetMeters)
+            const double backwardOffsetMeters,
+            TrainSolveCounters* const counters = nullptr)
         {
             if (!std::isfinite(backwardOffsetMeters)
                 || backwardOffsetMeters < 0.0)
@@ -733,9 +736,14 @@ namespace quantum::physics
                 track, leadingPose, backwardOffsetMeters);
             requireLegalOpenCarPlacement(
                 track, followingDefinition.car, followingLocation);
+            if (counters)
+            {
+                ++counters->connectionCandidateEvaluations;
+            }
             const glm::dvec3 frontHitch = detail::
                 solveFrontHitchPositionForValidatedDefinition(
-                    track, followingDefinition.car, followingLocation);
+                    track, followingDefinition.car, followingLocation,
+                    counters);
             const double distance = glm::length(
                 frontHitch
                 - leadingPose.rearHitchWorldPositionMeters());
@@ -781,7 +789,8 @@ namespace quantum::physics
             const TrainCarDefinition& leadingDefinition,
             const CarPose& leadingPose,
             const TrainCarDefinition& followingDefinition,
-            const InterCarConnectionDefinition& connection)
+            const InterCarConnectionDefinition& connection,
+            TrainSolveCounters* const counters = nullptr)
         {
             const double baseSeparation =
                 followingDefinition.car.frontHitchPositionMeters.x
@@ -860,7 +869,7 @@ namespace quantum::physics
                     {
                         break;
                     }
-                    const double midpoint = 0.5
+const double midpoint = 0.5
                         * (lower.backwardOffsetMeters
                             + upper.backwardOffsetMeters);
                     ConnectionCandidate middle = connectionCandidate(
@@ -868,7 +877,8 @@ namespace quantum::physics
                         followingDefinition,
                         leadingPose,
                         connection.rigidLengthMeters,
-                        midpoint);
+                        midpoint,
+                        counters);
                     if (std::signbit(lower.residualMeters)
                         == std::signbit(middle.residualMeters))
                     {
@@ -892,14 +902,15 @@ namespace quantum::physics
                 {
                     return std::nullopt;
                 }
-                return SolvedFollowingCar{
+return SolvedFollowingCar{
                     solveLegalCarPose(
                         track,
                         followingDefinition,
                         followingCarLocation(
                             track,
                             leadingPose,
-                            solved.backwardOffsetMeters)),
+                            solved.backwardOffsetMeters),
+                        counters),
                     iterations,
                     finalBracketSize
                 };
@@ -935,18 +946,20 @@ namespace quantum::physics
                 };
                 try
                 {
-                    ConnectionCandidate lower = connectionCandidate(
+ConnectionCandidate lower = connectionCandidate(
                         track,
                         followingDefinition,
                         leadingPose,
                         connection.rigidLengthMeters,
-                        offsetAt(lowerIndex));
+                        offsetAt(lowerIndex),
+                        counters);
                     ConnectionCandidate upper = connectionCandidate(
                         track,
                         followingDefinition,
                         leadingPose,
                         connection.rigidLengthMeters,
-                        offsetAt(upperIndex));
+                        offsetAt(upperIndex),
+                        counters);
                     if (std::signbit(lower.residualMeters)
                         != std::signbit(upper.residualMeters))
                     {
@@ -984,19 +997,19 @@ namespace quantum::physics
                         Bracket adjacent;
                         if (lowerDistance <= upperDistance)
                         {
-                            ConnectionCandidate next = connectionCandidate(
-                                track, followingDefinition, leadingPose,
-                                connection.rigidLengthMeters,
-                                offsetAt(--lowerIndex));
+ConnectionCandidate next = connectionCandidate(
+                            track, followingDefinition, leadingPose,
+                            connection.rigidLengthMeters,
+                            offsetAt(--lowerIndex), counters);
                             adjacent = {next, lower};
                             lower = next;
                         }
                         else
                         {
-                            ConnectionCandidate next = connectionCandidate(
-                                track, followingDefinition, leadingPose,
-                                connection.rigidLengthMeters,
-                                offsetAt(++upperIndex));
+ConnectionCandidate next = connectionCandidate(
+                            track, followingDefinition, leadingPose,
+                            connection.rigidLengthMeters,
+                            offsetAt(++upperIndex), counters);
                             adjacent = {upper, next};
                             upper = next;
                         }
@@ -1033,7 +1046,8 @@ namespace quantum::physics
                         followingDefinition,
                         leadingPose,
                         connection.rigidLengthMeters,
-                        offset);
+                        offset,
+                        counters);
                     if (!bestCandidate
                         || std::abs(candidate.residualMeters)
                             < std::abs(bestCandidate->residualMeters)
@@ -1081,19 +1095,27 @@ namespace quantum::physics
                     "No legal following-car placement exists on the open track.");
             }
 
-            if (selectedBracket)
+if (selectedBracket)
             {
                 if (auto solved = refineBracket(
                         std::move(*selectedBracket)))
                 {
                     solved->usedExhaustiveSearchFallback = true;
+                    if (counters)
+                    {
+                        ++counters->connectorFallbackUses;
+                    }
                     return std::move(*solved);
                 }
             }
 
-            if (std::abs(bestCandidate->residualMeters)
+if (std::abs(bestCandidate->residualMeters)
                 <= connectorLengthToleranceMeters)
             {
+                if (counters)
+                {
+                    ++counters->connectorFallbackUses;
+                }
                 return {
                     solveLegalCarPose(
                         track,
@@ -1101,7 +1123,8 @@ namespace quantum::physics
                         followingCarLocation(
                             track,
                             leadingPose,
-                            bestCandidate->backwardOffsetMeters)),
+                            bestCandidate->backwardOffsetMeters),
+                        counters),
                     0,
                     sampleSpacing,
                     true
@@ -1125,14 +1148,16 @@ namespace quantum::physics
                 leadingPose,
                 connection.rigidLengthMeters,
                 upperOffset - goldenRatioConjugate
-                    * (upperOffset - lowerOffset));
+                    * (upperOffset - lowerOffset),
+                counters);
             ConnectionCandidate right = connectionCandidate(
                 track,
                 followingDefinition,
                 leadingPose,
                 connection.rigidLengthMeters,
                 lowerOffset + goldenRatioConjugate
-                    * (upperOffset - lowerOffset));
+                    * (upperOffset - lowerOffset),
+                counters);
             std::size_t iterations = 0;
             for (; iterations < connectorRefinementIterationCount;
                 ++iterations)
@@ -1148,7 +1173,8 @@ namespace quantum::physics
                         leadingPose,
                         connection.rigidLengthMeters,
                         upperOffset - goldenRatioConjugate
-                            * (upperOffset - lowerOffset));
+                            * (upperOffset - lowerOffset),
+                        counters);
                 }
                 else
                 {
@@ -1160,7 +1186,8 @@ namespace quantum::physics
                         leadingPose,
                         connection.rigidLengthMeters,
                         lowerOffset + goldenRatioConjugate
-                            * (upperOffset - lowerOffset));
+                            * (upperOffset - lowerOffset),
+                        counters);
                 }
             }
             ConnectionCandidate solved =
@@ -1168,9 +1195,13 @@ namespace quantum::physics
                     <= std::abs(right.residualMeters)
                 ? std::move(left)
                 : std::move(right);
-            if (std::abs(solved.residualMeters)
+if (std::abs(solved.residualMeters)
                 <= connectorLengthToleranceMeters)
             {
+                if (counters)
+                {
+                    ++counters->connectorFallbackUses;
+                }
                 return {
                     solveLegalCarPose(
                         track,
@@ -1178,7 +1209,8 @@ namespace quantum::physics
                         followingCarLocation(
                             track,
                             leadingPose,
-                            solved.backwardOffsetMeters)),
+                            solved.backwardOffsetMeters),
+                        counters),
                     iterations,
                     upperOffset - lowerOffset,
                     true
@@ -1310,14 +1342,16 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const TrainDefinition& definition,
             const TrackLocation& location,
-            const double distanceMeters)
+            const double distanceMeters,
+            TrainSolveCounters* const counters = nullptr)
         {
             try
             {
                 return solveTrainPose(
                     track,
                     definition,
-                    displacedLocation(track, location, distanceMeters));
+                    displacedLocation(track, location, distanceMeters),
+                    counters);
             }
             catch (const OpenConsistBoundaryError&)
             {
@@ -1411,15 +1445,16 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const TrainDefinition& definition,
             const TrainPose& center,
-            const std::span<const ExternalForceApplication> applications)
+            const std::span<const ExternalForceApplication> applications,
+            TrainSolveCounters* const counters = nullptr)
         {
             const double epsilon = trainKinematicJacobianStepMeters;
             const TrackLocation& location =
                 center.generalizedReferenceLocation();
             const std::optional<TrainPose> before = tryDisplacedPose(
-                track, definition, location, -epsilon);
+                track, definition, location, -epsilon, counters);
             const std::optional<TrainPose> after = tryDisplacedPose(
-                track, definition, location, epsilon);
+                track, definition, location, epsilon, counters);
             const std::vector<glm::dvec3> centerPositions =
                 cogPositions(center);
             const std::vector<glm::dquat> centerOrientations =
@@ -1483,7 +1518,7 @@ namespace quantum::physics
             if (after)
             {
                 const std::optional<TrainPose> afterTwice = tryDisplacedPose(
-                    track, definition, location, 2.0 * epsilon);
+                    track, definition, location, 2.0 * epsilon, counters);
                 if (!afterTwice)
                 {
                     throw OpenConsistBoundaryError(
@@ -1542,7 +1577,7 @@ namespace quantum::physics
             if (before)
             {
                 const std::optional<TrainPose> beforeTwice = tryDisplacedPose(
-                    track, definition, location, -2.0 * epsilon);
+                    track, definition, location, -2.0 * epsilon, counters);
                 if (!beforeTwice)
                 {
                     throw OpenConsistBoundaryError(
@@ -1926,14 +1961,15 @@ namespace quantum::physics
             return result;
         }
 
-        [[nodiscard]] std::optional<TrainPose> trySolveTrainPose(
+[[nodiscard]] std::optional<TrainPose> trySolveTrainPose(
             const CompiledPhysicsTrack& track,
             const TrainDefinition& definition,
-            const TrackLocation& location)
+            const TrackLocation& location,
+            TrainSolveCounters* const counters = nullptr)
         {
             try
             {
-                return solveTrainPose(track, definition, location);
+                return solveTrainPose(track, definition, location, counters);
             }
             catch (const OpenConsistBoundaryError&)
             {
@@ -2431,11 +2467,20 @@ namespace quantum::physics
     TrainPose solveTrainPose(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
-        const TrackLocation& generalizedReferenceLocation)
+        const TrackLocation& generalizedReferenceLocation,
+        TrainSolveCounters* const counters)
     {
         validateTrainDefinition(definition);
+        if (counters)
+        {
+            ++counters->solveTrainPoseCalls;
+        }
         // sample() is the authoritative public location validation seam.
         static_cast<void>(track.sample(generalizedReferenceLocation));
+        if (counters)
+        {
+            ++counters->trackSampleCalls;
+        }
 
         std::vector<TrainCarPose> cars;
         std::vector<InterCarConnectionPose> connections;
@@ -2443,7 +2488,8 @@ namespace quantum::physics
         connections.reserve(definition.connections.size());
 
         CarPose leadPose = solveLegalCarPose(
-            track, definition.cars.front(), generalizedReferenceLocation);
+            track, definition.cars.front(), generalizedReferenceLocation,
+            counters);
         cars.emplace_back(0, std::move(leadPose));
 
         double maximumResidual = 0.0;
@@ -2459,7 +2505,8 @@ namespace quantum::physics
                 definition.cars[leadingIndex],
                 leadingPose,
                 definition.cars[followingIndex],
-                definition.connections[connectionIndex]);
+                definition.connections[connectionIndex],
+                counters);
 
             const glm::dvec3 leadingEndpoint =
                 leadingPose.rearHitchWorldPositionMeters();
@@ -2560,14 +2607,15 @@ namespace quantum::physics
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
         const TrackLocation& generalizedReferenceLocation,
-        const std::span<const ExternalForceApplication> externalForces)
+        const std::span<const ExternalForceApplication> externalForces,
+        TrainSolveCounters* const counters)
     {
         validatePhysicsEnvironment(environment);
         TrainPose center = solveTrainPose(
-            track, definition, generalizedReferenceLocation);
+            track, definition, generalizedReferenceLocation, counters);
         validateExternalForceApplications(externalForces, center.carCount());
         DerivativeSamples derivatives = kinematicDerivatives(
-            track, definition, center, externalForces);
+            track, definition, center, externalForces, counters);
         const glm::dvec3 gravityWorld{
             0.0,
             0.0,
@@ -4561,7 +4609,8 @@ namespace quantum::physics
         const PhysicsEnvironment& environment,
         const TrainDynamicsState& currentState,
         const FixedStepSettings& step,
-        const std::span<const ExternalForceApplication> externalForces)
+        const std::span<const ExternalForceApplication> externalForces,
+        TrainSolveCounters* const counters)
     {
         validateTrainDefinition(definition);
         validatePhysicsEnvironment(environment);
@@ -4584,7 +4633,8 @@ namespace quantum::physics
             definition,
             environment,
             currentState.generalizedReferenceLocation,
-            externalForces);
+            externalForces,
+            counters);
         double workingVelocity = currentState.signedVelocityMetersPerSecond;
         if (std::abs(workingVelocity)
             <= followerRestSpeedToleranceMetersPerSecond)
@@ -4652,8 +4702,8 @@ namespace quantum::physics
 
         if (track.topology() == coaster::TopologyKind::OpenLinear)
         {
-            committedPose = trySolveTrainPose(
-                track, definition, advancement.location);
+committedPose = trySolveTrainPose(
+                track, definition, advancement.location, counters);
             if (!committedPose)
             {
                 boundaryIntervention = true;
@@ -4674,8 +4724,8 @@ namespace quantum::physics
                     TrackLocation orientedCandidate = candidate;
                     orientedCandidate.direction =
                         currentState.generalizedReferenceLocation.direction;
-                    if (auto candidatePose = trySolveTrainPose(
-                            track, definition, orientedCandidate))
+if (auto candidatePose = trySolveTrainPose(
+                            track, definition, orientedCandidate, counters))
                     {
                         legalFraction = midpoint;
                         committedPose = std::move(candidatePose);
@@ -4734,10 +4784,11 @@ namespace quantum::physics
 
         // Match Phase 1: pose is for the committed state while forces and the
         // per-car Jacobians are those used to integrate from the prior state.
-        if (!committedPose)
+if (!committedPose)
         {
             committedPose.emplace(solveTrainPose(
-                track, definition, nextState.generalizedReferenceLocation));
+                track, definition, nextState.generalizedReferenceLocation,
+                counters));
         }
         const double committedMaximumResidual =
             committedPose->maximumAbsoluteConnectorResidualMeters();

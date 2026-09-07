@@ -230,7 +230,8 @@ namespace quantum::physics
     [[nodiscard]] TrainPose solveTrainPose(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
-        const TrackLocation& generalizedReferenceLocation);
+        const TrackLocation& generalizedReferenceLocation,
+        TrainSolveCounters* counters = nullptr);
 
     enum class TrainFiniteDifferenceKind : std::uint8_t
     {
@@ -369,7 +370,8 @@ namespace quantum::physics
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
         const TrackLocation& generalizedReferenceLocation,
-        std::span<const ExternalForceApplication> externalForces = {});
+        std::span<const ExternalForceApplication> externalForces = {},
+        TrainSolveCounters* counters = nullptr);
 
     // Converts the q-based orientation derivatives in an existing evaluation
     // into deterministic angular velocity, acceleration, and kinetic energy
@@ -888,5 +890,6 @@ namespace quantum::physics
         const PhysicsEnvironment& environment,
         const TrainDynamicsState& currentState,
         const FixedStepSettings& step = {},
-        std::span<const ExternalForceApplication> externalForces = {});
+        std::span<const ExternalForceApplication> externalForces = {},
+        TrainSolveCounters* counters = nullptr);
 }

@@ -92,6 +92,7 @@ namespace quantum::editor
         double totalDiscardedWallTimeMilliseconds = 0.0;
         std::uint64_t discardedWallTimeFrameCount = 0;
 
+        physics::TrainSolveCounters solverCounters;
         std::uint64_t percentileSamplesDropped = 0;
         std::vector<PreviewSmokeSpikeRecord> spikes;
     };

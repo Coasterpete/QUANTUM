@@ -401,6 +401,21 @@ namespace quantum::editor
         if (sample.discardedWallTimeMilliseconds > 0.0)
             ++totals_.discardedWallTimeFrameCount;
 
+        totals_.solverCounters.solveTrainPoseCalls +=
+            sample.solverCounters.solveTrainPoseCalls;
+        totals_.solverCounters.solveCarGeometryCalls +=
+            sample.solverCounters.solveCarGeometryCalls;
+        totals_.solverCounters.rigidBogieSolveCalls +=
+            sample.solverCounters.rigidBogieSolveCalls;
+        totals_.solverCounters.rigidBogieRefinementIterations +=
+            sample.solverCounters.rigidBogieRefinementIterations;
+        totals_.solverCounters.connectionCandidateEvaluations +=
+            sample.solverCounters.connectionCandidateEvaluations;
+        totals_.solverCounters.connectorFallbackUses +=
+            sample.solverCounters.connectorFallbackUses;
+        totals_.solverCounters.trackSampleCalls +=
+            sample.solverCounters.trackSampleCalls;
+
         if (sample.frameTimeMilliseconds >= options_.spikeFrameMilliseconds
             || sample.previewFrameSlotWaitMilliseconds >= options_.spikeFrameMilliseconds
             || sample.fixedPhysicsStepCount >= options_.spikeStepThreshold)
@@ -533,6 +548,14 @@ namespace quantum::editor
                 {"average_fixed_step_cpu_ms", report.averageFixedStepMilliseconds},
                 {"maximum_fixed_step_cpu_ms", report.maximumFixedStepMilliseconds},
                 {"maximum_steps_hit_frame_count", report.maximumStepsHitFrameCount}}},
+            {"solver_counters", {
+                {"solve_train_pose_calls", report.solverCounters.solveTrainPoseCalls},
+                {"solve_car_geometry_calls", report.solverCounters.solveCarGeometryCalls},
+                {"rigid_bogie_solve_calls", report.solverCounters.rigidBogieSolveCalls},
+                {"rigid_bogie_refinement_iterations", report.solverCounters.rigidBogieRefinementIterations},
+                {"connection_candidate_evaluations", report.solverCounters.connectionCandidateEvaluations},
+                {"connector_fallback_uses", report.solverCounters.connectorFallbackUses},
+                {"track_sample_calls", report.solverCounters.trackSampleCalls}}},
             {"interpolation", {
                 {"average_cpu_ms", report.averageInterpolationMilliseconds},
                 {"maximum_cpu_ms", report.maximumInterpolationMilliseconds},
@@ -587,6 +610,13 @@ namespace quantum::editor
             << report.maximumPhysicsMillisecondsPerFrame << '\n'
             << "Physics step ms avg/max: " << report.averageFixedStepMilliseconds
             << " / " << report.maximumFixedStepMilliseconds << '\n'
+            << "Solver calls: solve=" << report.solverCounters.solveTrainPoseCalls
+            << " geometry=" << report.solverCounters.solveCarGeometryCalls
+            << " rigidsolve=" << report.solverCounters.rigidBogieSolveCalls
+            << " refinement=" << report.solverCounters.rigidBogieRefinementIterations
+            << " candidates=" << report.solverCounters.connectionCandidateEvaluations
+            << " fallbacks=" << report.solverCounters.connectorFallbackUses
+            << " track_samples=" << report.solverCounters.trackSampleCalls << '\n'
             << "Catch-up requested/executed max: "
             << report.maximumRequestedStepCount << " / "
             << report.maximumExecutedStepCount << '\n'

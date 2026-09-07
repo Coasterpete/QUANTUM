@@ -282,7 +282,9 @@ namespace quantum::editor
         {
             ++telemetry->renderPoseSolveCount;
         }
-        auto result = physics::solveTrainPose(track, train, location);
+        auto result = physics::solveTrainPose(
+            track, train, location,
+            telemetry ? &telemetry->solveCounters : nullptr);
         if (telemetry)
         {
             telemetry->renderPoseSolveMilliseconds +=
@@ -457,7 +459,10 @@ namespace quantum::editor
                     *compiledTrack_,
                     trainDefinition_,
                     environment_,
-                    *dynamicsState_);
+                    *dynamicsState_,
+                    {},
+                    {},
+                    &frameTelemetry_.solveCounters);
                 const double stepMilliseconds =
                     std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - stepBegin).count();
