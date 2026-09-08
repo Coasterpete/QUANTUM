@@ -1079,7 +1079,9 @@ editorUi.selectSection(restoredSelection, true);
                             || (requestedStartPoseEdit.has_value()
                                 && requestedStartPoseEdit->continuous)
                             || (requestedHardwareEdit.has_value()
-                                && requestedHardwareEdit->continuous);
+                                && requestedHardwareEdit->continuous)
+                            || (requestedSupportEdit.has_value()
+                                && requestedSupportEdit->continuous);
                         // A paused pointer can produce no changed value for
                         // one or more frames while the same drag is still
                         // held. Keep that gesture coalesced until the UI
@@ -1117,21 +1119,27 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateSupports);
                                 editorUi.setSupportVisualization(
                                     supportVisualization);
-                                documentHistory.record(authoredTrack);
+                                documentHistory.record(
+                                    authoredTrack,
+                                    requestedSupportEdit->continuous);
                                 synchronizeDirtyState();
-                                quantum::logging::logMessagef(
-                                    quantum::logging::LogLevel::Info,
-                                    "EDIT",
-                                    "Support node %u:%u position updated to "
-                                    "(%.6f, %.6f, %.6f).",
-                                    requestedSupportEdit->structureId,
-                                    requestedSupportEdit->nodeId,
-                                    requestedSupportEdit->position.x,
-                                    requestedSupportEdit->position.y,
-                                    requestedSupportEdit->position.z);
+                                if (!requestedSupportEdit->continuous)
+                                {
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        "Support node %u:%u position updated "
+                                        "to (%.6f, %.6f, %.6f).",
+                                        requestedSupportEdit->structureId,
+                                        requestedSupportEdit->nodeId,
+                                        requestedSupportEdit->position.x,
+                                        requestedSupportEdit->position.y,
+                                        requestedSupportEdit->position.z);
+                                }
                             }
                             catch (const std::exception& error)
                             {
+                                editorUi.rejectSupportNodeManipulation();
                                 for (const auto& structure
                                     : authoredTrack.supports().structures)
                                 {

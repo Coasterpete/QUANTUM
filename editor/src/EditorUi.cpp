@@ -88,6 +88,19 @@ namespace
         return "select";
     }
 
+    [[nodiscard]] const char* supportMoveAxisName(
+        const quantum::editor::SupportMoveAxis axis) noexcept
+    {
+        using quantum::editor::SupportMoveAxis;
+        switch (axis)
+        {
+        case SupportMoveAxis::X: return "X";
+        case SupportMoveAxis::Y: return "Y";
+        case SupportMoveAxis::Z: return "Z";
+        }
+        return "X";
+    }
+
     [[nodiscard]] double pointSegmentDistanceSquared(
         const ImVec2 point,
         const ImVec2 begin,
@@ -3840,6 +3853,11 @@ namespace quantum::editor
         }
 
         ImGui::Text("Supports");
+        ImGui::Checkbox("Node Snap", &supportNodeSnapEnabled_);
+        ImGui::SameLine();
+        ImGui::Checkbox("Ground Snap", &supportGroundSnapEnabled_);
+        ImGui::TextDisabled(
+            "Move gizmo: world X/Y/Z; ground applies near Z = 0.");
         ImGui::Separator();
 
         ImGui::Text("Structures");
@@ -3853,6 +3871,7 @@ namespace quantum::editor
                 selectedSupport_ = {
                     structure.id, SupportSelectionKind::Structure,
                     coaster::invalidSupportElementId};
+                supportNodeManipulation_.reset();
             }
         }
         if (supports.structures.empty())
@@ -3910,6 +3929,7 @@ namespace quantum::editor
                 {
                     selectedSupport_ = {
                         structure.id, SupportSelectionKind::Node, node.id};
+                    supportNodeManipulation_.reset();
                     supportNodePositionEditBuffer_ = node.position;
                     selectedNodeId = node.id;
                 }
@@ -3980,6 +4000,7 @@ namespace quantum::editor
                     selectedSupport_ = {
                         structure.id, SupportSelectionKind::Member,
                         member.id};
+                    supportNodeManipulation_.reset();
                     selectedMemberId = member.id;
                 }
                 if (isSelected)
@@ -4515,6 +4536,265 @@ namespace quantum::editor
         }
     }
 
+    bool EditorUi::updateSupportNodeManipulation(
+        const bool viewportHovered,
+        const std::uint32_t pixelWidth,
+        const std::uint32_t pixelHeight,
+        const float imageWidth,
+        const float imageHeight)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        const float presentationScale = editorPresentationScale();
+
+        if (supportNodeManipulation_.has_value())
+        {
+            SupportNodeManipulation& manipulation =
+                *supportNodeManipulation_;
+            if (io.AppFocusLost
+                || supportConnectState_
+                    == SupportConnectState::WaitingForSecondNode
+                || supportVisualization_ == nullptr
+                || std::ranges::none_of(
+                    supportVisualization_->nodes,
+                    [&manipulation](const SupportVisualizationNode& node)
+                    {
+                        return node.selection == manipulation.node;
+                    }))
+            {
+                supportNodePositionEdit_.reset();
+                supportNodeManipulation_.reset();
+                return true;
+            }
+
+            // Finish one frame after release so the final pointer position is
+            // published before history coalescing ends.
+            if (manipulation.released)
+            {
+                if (manipulation.changed)
+                {
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Info,
+                        "EDIT",
+                        "completed support-node move node=%u:%u axis=%s "
+                        "position=(%.6f,%.6f,%.6f)",
+                        manipulation.node.structureId,
+                        manipulation.node.elementId,
+                        supportMoveAxisName(manipulation.axis),
+                        manipulation.candidatePosition.x,
+                        manipulation.candidatePosition.y,
+                        manipulation.candidatePosition.z);
+                }
+                supportNodeManipulation_.reset();
+                return true;
+            }
+
+            manipulation.released =
+                !ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            const double mouseDeltaX = static_cast<double>(
+                io.MousePos.x - manipulation.mouseStart.x);
+            const double mouseDeltaY = static_cast<double>(
+                io.MousePos.y - manipulation.mouseStart.y);
+            const double projectedPixels =
+                mouseDeltaX * manipulation.screenDirectionX
+                + mouseDeltaY * manipulation.screenDirectionY;
+            const glm::dvec3 unsnappedPosition = translateSupportNode(
+                manipulation.initialPosition,
+                manipulation.axis,
+                projectedPixels * manipulation.worldUnitsPerPixel);
+
+            std::optional<SupportNodeSnapTarget> nodeTarget;
+            if (supportNodeSnapEnabled_ && imageWidth > 0.0F
+                && imageHeight > 0.0F)
+            {
+                const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+                const glm::dvec2 normalizedPointer{
+                    (static_cast<double>(io.MousePos.x) - imageMinimum.x)
+                        / imageWidth,
+                    (static_cast<double>(io.MousePos.y) - imageMinimum.y)
+                        / imageHeight};
+                if (normalizedPointer.x >= 0.0
+                    && normalizedPointer.x <= 1.0
+                    && normalizedPointer.y >= 0.0
+                    && normalizedPointer.y <= 1.0)
+                {
+                    nodeTarget = pickSupportNodeSnapTarget(
+                        *supportVisualization_,
+                        viewportCamera_,
+                        normalizedPointer,
+                        pixelWidth,
+                        pixelHeight,
+                        manipulation.node,
+                        supportNodeSnapRadiusPixels * presentationScale);
+                }
+            }
+
+            const SupportPositionSnapResult snapped =
+                resolveSupportPositionSnap(
+                    unsnappedPosition,
+                    manipulation.axis,
+                    nodeTarget,
+                    supportNodeSnapEnabled_,
+                    supportGroundSnapEnabled_,
+                    supportGroundSnapThresholdPixels * presentationScale
+                        * manipulation.worldUnitsPerPixel);
+            manipulation.snapTarget = nodeTarget;
+            manipulation.snapKind = snapped.kind;
+
+            if (snapped.position != manipulation.candidatePosition)
+            {
+                manipulation.candidatePosition = snapped.position;
+                manipulation.changed = true;
+                supportNodePositionEdit_ = {
+                    manipulation.node.structureId,
+                    manipulation.node.elementId,
+                    snapped.position,
+                    true};
+            }
+            return true;
+        }
+
+        if (!viewportHovered || io.AppFocusLost
+            || supportConnectState_
+                == SupportConnectState::WaitingForSecondNode
+            || cameraGesture_ != CameraGesture::None
+            || firstActiveEndpoint(endpointDrags_)
+                != ScalarProfileEndpoint::None
+            || !ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+            || supportVisualization_ == nullptr
+            || !supportNodeManipulationAvailable(
+                *supportVisualization_,
+                selectedSupport_,
+                supportConnectState_
+                    == SupportConnectState::WaitingForSecondNode)
+            || imageWidth <= 0.0F || imageHeight <= 0.0F)
+        {
+            return false;
+        }
+
+        const auto selectedNode = std::find_if(
+            supportVisualization_->nodes.begin(),
+            supportVisualization_->nodes.end(),
+            [this](const SupportVisualizationNode& node)
+            {
+                return node.selection == *selectedSupport_;
+            });
+        if (selectedNode == supportVisualization_->nodes.end())
+        {
+            return false;
+        }
+
+        const auto projectedOrigin = projectViewportPoint(
+            viewportCamera_, selectedNode->position, viewportAspectRatio_);
+        if (!projectedOrigin.has_value())
+        {
+            return false;
+        }
+
+        const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+        const ImVec2 origin{
+            imageMinimum.x + static_cast<float>(
+                projectedOrigin->normalizedPosition.x) * imageWidth,
+            imageMinimum.y + static_cast<float>(
+                projectedOrigin->normalizedPosition.y) * imageHeight};
+        const double scaleDistance = viewportCamera_.projection()
+                == ViewportProjection::Perspective
+            ? glm::length(selectedNode->position - viewportCamera_.position())
+            : viewportCamera_.distance();
+        const double baseWorldUnitsPerPixel = 2.0 * scaleDistance
+            * std::tan(0.5 * viewportCamera_.verticalFieldOfView())
+            / static_cast<double>(imageHeight);
+        const double axisLength =
+            viewportStyle::moveHandleLength * presentationScale
+            * baseWorldUnitsPerPixel;
+        constexpr std::array<ImVec2, 3> fallbackDirections{
+            ImVec2{1.0F, 0.0F},
+            ImVec2{-0.7071F, 0.7071F},
+            ImVec2{0.0F, -1.0F}};
+
+        std::optional<SupportMoveAxis> pickedAxis;
+        double pickedMetric = std::numeric_limits<double>::max();
+        double pickedDirectionX = 1.0;
+        double pickedDirectionY = 0.0;
+        double pickedWorldUnitsPerPixel = 0.0;
+        for (std::size_t axisIndex = 0; axisIndex < 3; ++axisIndex)
+        {
+            const auto axis = static_cast<SupportMoveAxis>(axisIndex);
+            const auto projectedEnd = projectViewportPoint(
+                viewportCamera_,
+                selectedNode->position
+                    + axisLength * supportMoveWorldAxis(axis),
+                viewportAspectRatio_);
+            double directionX = fallbackDirections[axisIndex].x;
+            double directionY = fallbackDirections[axisIndex].y;
+            double screenLength =
+                viewportStyle::moveHandleLength * presentationScale;
+            double worldUnitsPerPixel = baseWorldUnitsPerPixel;
+            if (projectedEnd.has_value())
+            {
+                const ImVec2 end{
+                    imageMinimum.x + static_cast<float>(
+                        projectedEnd->normalizedPosition.x) * imageWidth,
+                    imageMinimum.y + static_cast<float>(
+                        projectedEnd->normalizedPosition.y) * imageHeight};
+                const double dx = end.x - origin.x;
+                const double dy = end.y - origin.y;
+                const double projectedLength = std::hypot(dx, dy);
+                if (projectedLength >= 10.0 * presentationScale)
+                {
+                    directionX = dx / projectedLength;
+                    directionY = dy / projectedLength;
+                    screenLength = projectedLength;
+                    worldUnitsPerPixel = axisLength / projectedLength;
+                }
+            }
+
+            const ImVec2 begin{
+                origin.x + static_cast<float>(
+                    8.0 * presentationScale * directionX),
+                origin.y + static_cast<float>(
+                    8.0 * presentationScale * directionY)};
+            const ImVec2 end{
+                origin.x + static_cast<float>(screenLength * directionX),
+                origin.y + static_cast<float>(screenLength * directionY)};
+            const double metric = pointSegmentDistanceSquared(
+                io.MousePos, begin, end);
+            const double hitRadius =
+                viewportStyle::moveHitRadius * presentationScale;
+            if (metric <= hitRadius * hitRadius && metric < pickedMetric)
+            {
+                pickedAxis = axis;
+                pickedMetric = metric;
+                pickedDirectionX = directionX;
+                pickedDirectionY = directionY;
+                pickedWorldUnitsPerPixel = worldUnitsPerPixel;
+            }
+        }
+
+        if (!pickedAxis.has_value())
+        {
+            return false;
+        }
+
+        supportNodeManipulation_ = SupportNodeManipulation{
+            .node = selectedNode->selection,
+            .axis = *pickedAxis,
+            .initialPosition = selectedNode->position,
+            .candidatePosition = selectedNode->position,
+            .mouseStart = {io.MousePos.x, io.MousePos.y},
+            .screenDirectionX = pickedDirectionX,
+            .screenDirectionY = pickedDirectionY,
+            .worldUnitsPerPixel = pickedWorldUnitsPerPixel};
+        supportEditMessage_.clear();
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Trace,
+            "EDIT",
+            "support-node manipulation begin node=%u:%u axis=%s",
+            selectedNode->selection.structureId,
+            selectedNode->selection.elementId,
+            supportMoveAxisName(*pickedAxis));
+        return true;
+    }
+
     bool EditorUi::updateStartPoseManipulation(
         const bool viewportHovered,
         const float imageWidth,
@@ -4854,12 +5134,22 @@ namespace quantum::editor
             viewportNavigationActive_ = viewportHovered;
         }
 
+        const bool supportManipulationCaptured =
+            updateSupportNodeManipulation(
+                viewportHovered,
+                pixelWidth,
+                pixelHeight,
+                logicalWidth,
+                logicalHeight);
+        const bool supportConnectWaiting = supportConnectState_
+            == SupportConnectState::WaitingForSecondNode;
         const bool startPoseManipulationCaptured =
-            updateStartPoseManipulation(
+            supportManipulationCaptured
+                || (!supportConnectWaiting && updateStartPoseManipulation(
                 viewportHovered,
                 logicalWidth,
                 logicalHeight
-            );
+            ));
 
         if (io.AppFocusLost)
         {
@@ -4944,6 +5234,7 @@ namespace quantum::editor
                             != SupportConnectState::WaitingForSecondNode)
                         {
                             selectedSupport_ = supportHit->selection;
+                            supportNodeManipulation_.reset();
                             if (selectedSupport_->kind
                                 == SupportSelectionKind::Node)
                             {
@@ -5877,7 +6168,8 @@ namespace quantum::editor
             ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[2]), "U");
 
         if (isViewportTrackAnchorEditable(displayedAnchor.kind)
-            && startPoseTransformMode_ != StartPoseTransformMode::Select)
+            && startPoseTransformMode_ != StartPoseTransformMode::Select
+            && supportConnectState_ == SupportConnectState::Inactive)
         {
             const std::array<ImU32, 3> axisColors{
                 ImGui::ColorConvertFloat4ToU32(palette::viewportAxes[0]),
@@ -7854,7 +8146,12 @@ ImGui::MenuItem(
         for (const SupportVisualizationNode& node
             : supportVisualization_->nodes)
         {
-            const auto projected = project(node.position);
+            const glm::dvec3 displayedPosition =
+                supportNodeManipulation_.has_value()
+                    && supportNodeManipulation_->node == node.selection
+                ? supportNodeManipulation_->candidatePosition
+                : node.position;
+            const auto projected = project(displayedPosition);
             if (!projected.has_value())
             {
                 continue;
@@ -7869,6 +8166,159 @@ ImGui::MenuItem(
                 center, radius,
                 isSelected ? selected : isHovered ? hovered : normal,
                 16);
+        }
+
+        if (supportNodeManipulation_.has_value()
+            && supportNodeManipulation_->snapKind
+                == SupportPositionSnapKind::Node
+            && supportNodeManipulation_->snapTarget.has_value())
+        {
+            const SupportNodeSnapTarget& target =
+                *supportNodeManipulation_->snapTarget;
+            const auto projected = project(target.position);
+            if (projected.has_value())
+            {
+                const ImVec2 center = screenPosition(*projected);
+                drawList->AddCircle(
+                    center,
+                    10.0F * scale,
+                    outline,
+                    24,
+                    4.0F * scale);
+                drawList->AddCircle(
+                    center,
+                    10.0F * scale,
+                    hovered,
+                    24,
+                    2.0F * scale);
+                drawList->AddText(
+                    {center.x + 13.0F * scale,
+                        center.y - 0.5F * ImGui::GetFontSize()},
+                    hovered,
+                    "Node Snap");
+            }
+        }
+
+        // Support nodes are position-only authored points. They always use
+        // the established world-space Move gizmo and never expose Rotate or
+        // Scale handles.
+        if (supportConnectState_ == SupportConnectState::Inactive
+            && selectedSupport_.has_value()
+            && selectedSupport_->kind == SupportSelectionKind::Node)
+        {
+            const auto selectedNode = std::find_if(
+                supportVisualization_->nodes.begin(),
+                supportVisualization_->nodes.end(),
+                [this](const SupportVisualizationNode& node)
+                {
+                    return node.selection == *selectedSupport_;
+                });
+            if (selectedNode != supportVisualization_->nodes.end())
+            {
+                const glm::dvec3 gizmoPosition =
+                    supportNodeManipulation_.has_value()
+                        && supportNodeManipulation_->node
+                            == selectedNode->selection
+                    ? supportNodeManipulation_->candidatePosition
+                    : selectedNode->position;
+                const auto projectedOrigin = project(gizmoPosition);
+                if (projectedOrigin.has_value())
+                {
+                    const ImVec2 origin = screenPosition(*projectedOrigin);
+                    const double scaleDistance = viewportCamera_.projection()
+                            == ViewportProjection::Perspective
+                        ? glm::length(
+                            gizmoPosition - viewportCamera_.position())
+                        : viewportCamera_.distance();
+                    const double worldUnitsPerPixel = 2.0 * scaleDistance
+                        * std::tan(
+                            0.5 * viewportCamera_.verticalFieldOfView())
+                        / static_cast<double>(imageHeight);
+                    const double axisLength =
+                        viewportStyle::moveHandleLength * scale
+                        * worldUnitsPerPixel;
+                    const std::array<ImU32, 3> axisColors{
+                        ImGui::ColorConvertFloat4ToU32(
+                            palette::viewportAxes[0]),
+                        ImGui::ColorConvertFloat4ToU32(
+                            palette::viewportAxes[1]),
+                        ImGui::ColorConvertFloat4ToU32(
+                            palette::viewportAxes[2])};
+                    constexpr std::array<ImVec2, 3> fallbackDirections{
+                        ImVec2{1.0F, 0.0F},
+                        ImVec2{-0.7071F, 0.7071F},
+                        ImVec2{0.0F, -1.0F}};
+
+                    for (std::size_t axisIndex = 0;
+                        axisIndex < 3;
+                        ++axisIndex)
+                    {
+                        const auto axis = static_cast<SupportMoveAxis>(
+                            axisIndex);
+                        double directionX = fallbackDirections[axisIndex].x;
+                        double directionY = fallbackDirections[axisIndex].y;
+                        double screenLength =
+                            viewportStyle::moveHandleLength * scale;
+                        const auto projectedEnd = project(
+                            gizmoPosition
+                                + axisLength * supportMoveWorldAxis(axis));
+                        if (projectedEnd.has_value())
+                        {
+                            const ImVec2 end = screenPosition(*projectedEnd);
+                            const double dx = end.x - origin.x;
+                            const double dy = end.y - origin.y;
+                            const double projectedLength = std::hypot(dx, dy);
+                            if (projectedLength >= 10.0 * scale)
+                            {
+                                directionX = dx / projectedLength;
+                                directionY = dy / projectedLength;
+                                screenLength = projectedLength;
+                            }
+                        }
+
+                        const ImVec2 begin{
+                            origin.x + static_cast<float>(
+                                8.0 * scale * directionX),
+                            origin.y + static_cast<float>(
+                                8.0 * scale * directionY)};
+                        const ImVec2 end{
+                            origin.x + static_cast<float>(
+                                screenLength * directionX),
+                            origin.y + static_cast<float>(
+                                screenLength * directionY)};
+                        const bool active =
+                            supportNodeManipulation_.has_value()
+                            && supportNodeManipulation_->axis == axis;
+                        const ImU32 color = active
+                            ? ImGui::ColorConvertFloat4ToU32(
+                                palette::viewportRing)
+                            : axisColors[axisIndex];
+                        drawList->AddLine(
+                            origin, end, outline, 6.0F * scale);
+                        drawList->AddLine(
+                            begin, end, color,
+                            (active ? 4.0F : 3.0F) * scale);
+                        drawList->AddCircleFilled(
+                            end, 5.0F * scale, color, 16);
+                        drawList->AddText(
+                            {end.x + 5.0F * scale,
+                                end.y - 0.5F * ImGui::GetFontSize()},
+                            color,
+                            supportMoveAxisName(axis));
+                    }
+
+                    if (supportNodeManipulation_.has_value()
+                        && supportNodeManipulation_->snapKind
+                            == SupportPositionSnapKind::Ground)
+                    {
+                        drawList->AddText(
+                            {origin.x + 12.0F * scale,
+                                origin.y + 12.0F * scale},
+                            hovered,
+                            "Ground Z = 0");
+                    }
+                }
+            }
         }
 
         if (supportConnectState_
@@ -8281,6 +8731,7 @@ ImGui::MenuItem(
         selectedSupport_.reset();
         hoveredSupport_.reset();
         supportNodePositionEdit_.reset();
+        supportNodeManipulation_.reset();
         supportEditCommand_.reset();
         supportConnectState_ = SupportConnectState::Inactive;
         supportConnectFirstNode_ = {};
@@ -8351,6 +8802,7 @@ ImGui::MenuItem(
                     authoredTrack_->supports(), *selectedSupport_)))
         {
             selectedSupport_.reset();
+            supportNodeManipulation_.reset();
         }
         if (selectedSupport_.has_value()
             && selectedSupport_->kind == SupportSelectionKind::Node)
@@ -8381,6 +8833,12 @@ ImGui::MenuItem(
         const glm::dvec3& position) noexcept
     {
         supportNodePositionEditBuffer_ = position;
+    }
+
+    void EditorUi::rejectSupportNodeManipulation() noexcept
+    {
+        supportNodePositionEdit_.reset();
+        supportNodeManipulation_.reset();
     }
 
     std::optional<SupportNodePositionEdit>
@@ -8414,6 +8872,8 @@ ImGui::MenuItem(
 
         supportConnectFirstNode_ = *selectedSupport_;
         supportConnectState_ = SupportConnectState::WaitingForSecondNode;
+        supportNodeManipulation_.reset();
+        startPoseManipulation_.reset();
         supportEditMessage_.clear();
     }
 
@@ -8440,6 +8900,7 @@ ImGui::MenuItem(
         selectedSupport_ = {
             structureId, SupportSelectionKind::Structure,
             coaster::invalidSupportElementId};
+        supportNodeManipulation_.reset();
     }
 
     void EditorUi::selectSupportNode(
@@ -8449,6 +8910,7 @@ ImGui::MenuItem(
     {
         selectedSupport_ = {
             structureId, SupportSelectionKind::Node, nodeId};
+        supportNodeManipulation_.reset();
         supportNodePositionEditBuffer_ = position;
     }
 
@@ -8458,6 +8920,7 @@ ImGui::MenuItem(
     {
         selectedSupport_ = {
             structureId, SupportSelectionKind::Member, memberId};
+        supportNodeManipulation_.reset();
     }
 
     std::optional<HistoryOperationType>
@@ -8479,6 +8942,7 @@ ImGui::MenuItem(
     bool EditorUi::documentDragActive() const noexcept
     {
         return startPoseManipulation_.has_value()
+            || supportNodeManipulation_.has_value()
             || hardwareDragActive_
             || firstActiveEndpoint(endpointDrags_)
                 != ScalarProfileEndpoint::None;
@@ -8517,6 +8981,7 @@ std::optional<coaster::LayoutMode>
         hoveredSupport_.reset();
         supportNodePositionEditBuffer_ = {0.0, 0.0, 0.0};
         supportNodePositionEdit_.reset();
+        supportNodeManipulation_.reset();
         supportEditCommand_.reset();
         supportConnectState_ = SupportConnectState::Inactive;
         supportConnectFirstNode_ = {};
