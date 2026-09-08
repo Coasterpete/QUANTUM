@@ -425,6 +425,7 @@ namespace quantum::physics
             const double longitudinalOffsetMeters,
             const std::size_t definitionIndex,
             const double travelSign,
+            detail::TrackSampleIntervalHint& intervalHint,
             TrainSolveCounters* const counters = nullptr)
         {
             const TrackAdvanceResult advancement = track.advance(
@@ -438,7 +439,8 @@ namespace quantum::physics
             {
                 ++counters->trackSampleCalls;
             }
-            const PhysicsTrackSample sample = track.sample(location);
+            const PhysicsTrackSample sample = intervalHint.sample(
+                track, location);
             return {
                 definitionIndex,
                 location,
@@ -490,16 +492,18 @@ namespace quantum::physics
             const double pivotSeparation = magnitude(
                 frontDefinition.referencePositionMeters
                     - rearDefinition.referencePositionMeters);
+            detail::TrackSampleIntervalHint frontIntervalHint;
+            detail::TrackSampleIntervalHint rearIntervalHint;
 
             const auto sampleAt = [&](const double addedStationSeparation)
             {
                 return SolvedBogieStations{
                     sampleBogie(track, referenceLocation,
                         frontX + 0.5 * addedStationSeparation,
-                        frontIndex, travelSign, counters),
+                        frontIndex, travelSign, frontIntervalHint, counters),
                     sampleBogie(track, referenceLocation,
                         rearX - 0.5 * addedStationSeparation,
-                        rearIndex, travelSign, counters)
+                        rearIndex, travelSign, rearIntervalHint, counters)
                 };
             };
             const auto residual = [pivotSeparation](

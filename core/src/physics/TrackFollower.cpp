@@ -309,6 +309,77 @@ namespace quantum::physics
                 return sample.stationMeters < station;
             });
 
+        return sampleAtUpperIndex(
+            location,
+            static_cast<std::size_t>(upper - samples_.begin()));
+    }
+
+    PhysicsTrackSample CompiledPhysicsTrack::sampleWithIntervalHint(
+        const TrackLocation& location,
+        std::size_t& upperSampleIndex,
+        bool& hintValid) const
+    {
+        validateLocation(location);
+
+        const auto isExactInterval = [this, &location](
+            const std::size_t candidate)
+        {
+            if (candidate == 0)
+            {
+                return location.stationMeters <= samples_.front().stationMeters;
+            }
+            if (candidate == samples_.size())
+            {
+                return location.stationMeters > samples_.back().stationMeters;
+            }
+            return location.stationMeters > samples_[candidate - 1].stationMeters
+                && location.stationMeters <= samples_[candidate].stationMeters;
+        };
+
+        std::size_t resolvedUpperIndex = upperSampleIndex;
+        if (!hintValid || !isExactInterval(resolvedUpperIndex))
+        {
+            const bool forwardMatch = hintValid
+                && resolvedUpperIndex < samples_.size()
+                && isExactInterval(resolvedUpperIndex + 1);
+            const bool backwardMatch = hintValid
+                && resolvedUpperIndex > 0
+                && isExactInterval(resolvedUpperIndex - 1);
+            if (forwardMatch)
+            {
+                ++resolvedUpperIndex;
+            }
+            else if (backwardMatch)
+            {
+                --resolvedUpperIndex;
+            }
+            else
+            {
+                const auto upper = std::lower_bound(
+                    samples_.begin(),
+                    samples_.end(),
+                    location.stationMeters,
+                    [](const Sample& sample, const double station)
+                    {
+                        return sample.stationMeters < station;
+                    });
+                resolvedUpperIndex = static_cast<std::size_t>(
+                    upper - samples_.begin());
+            }
+        }
+
+        upperSampleIndex = resolvedUpperIndex;
+        hintValid = true;
+        return sampleAtUpperIndex(location, resolvedUpperIndex);
+    }
+
+    PhysicsTrackSample CompiledPhysicsTrack::sampleAtUpperIndex(
+        const TrackLocation& location,
+        const std::size_t upperSampleIndex) const
+    {
+        const auto upper = samples_.begin()
+            + static_cast<std::ptrdiff_t>(upperSampleIndex);
+
         if (upper == samples_.begin())
         {
             return {

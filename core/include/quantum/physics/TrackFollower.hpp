@@ -6,12 +6,18 @@
 
 #include <glm/vec3.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
 
 namespace quantum::physics
 {
+    namespace detail
+    {
+        class TrackSampleIntervalHint;
+    }
+
     inline constexpr double defaultFixedTimeStepSeconds = 1.0 / 240.0;
     inline constexpr double followerRestSpeedToleranceMetersPerSecond = 1.0e-9;
 
@@ -114,11 +120,42 @@ namespace quantum::physics
         };
 
         void validateLocation(const TrackLocation& location) const;
+        [[nodiscard]] PhysicsTrackSample sampleWithIntervalHint(
+            const TrackLocation& location,
+            std::size_t& upperSampleIndex,
+            bool& hintValid) const;
+        [[nodiscard]] PhysicsTrackSample sampleAtUpperIndex(
+            const TrackLocation& location,
+            std::size_t upperSampleIndex) const;
 
         std::vector<Sample> samples_;
         double lengthMeters_ = 0.0;
         coaster::TopologyKind topology_ = coaster::TopologyKind::OpenLinear;
+
+        friend class detail::TrackSampleIntervalHint;
     };
+
+    namespace detail
+    {
+        // Solver-local cursor for repeated queries in one station neighborhood.
+        // It never owns or outlives track data and falls back to the track's
+        // authoritative lower_bound lookup whenever an exact local match fails.
+        class TrackSampleIntervalHint
+        {
+        public:
+            [[nodiscard]] PhysicsTrackSample sample(
+                const CompiledPhysicsTrack& track,
+                const TrackLocation& location)
+            {
+                return track.sampleWithIntervalHint(
+                    location, upperSampleIndex_, valid_);
+            }
+
+        private:
+            std::size_t upperSampleIndex_ = 0;
+            bool valid_ = false;
+        };
+    }
 
     struct BasicResistance
     {
