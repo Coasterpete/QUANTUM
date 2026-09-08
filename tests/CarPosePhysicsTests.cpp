@@ -26,6 +26,7 @@ namespace
     using quantum::physics::CarPose;
     using quantum::physics::CompiledPhysicsTrack;
     using quantum::physics::TrackLocation;
+    using quantum::physics::TrainSolveCounters;
     using quantum::physics::TravelDirection;
     using quantum::physics::loadedCarCenterOfGravityMeters;
     using quantum::physics::primaryTrackPathId;
@@ -458,6 +459,54 @@ namespace
             1000.0, 0.0, "loaded mass");
         requireNear(loadedCarCenterOfGravityMeters(definition, loadout),
             {0.14, 0.0, 0.59}, positionTolerance, "loaded COG");
+    }
+
+    void frontHitchOnlyMatchesFullPoseExactly()
+    {
+        const CarDefinition definition = passengerCar();
+        const CarLoadout loadout{200.0, {0.3, 0.0, 0.75}};
+        for (const CompiledPhysicsTrack& track : {
+            straightTrack(), horizontalArcTrack(), compoundTrack()})
+        {
+            for (const TravelDirection direction : {
+                TravelDirection::IncreasingStation,
+                TravelDirection::DecreasingStation})
+            {
+                const TrackLocation location = locationAt(
+                    0.5 * track.lengthMeters(), direction);
+                TrainSolveCounters fullCounters;
+                const CarPose pose = quantum::physics::detail::
+                    solveCarPoseForValidatedDefinition(
+                        track, definition, location, loadout, &fullCounters);
+                TrainSolveCounters hitchCounters;
+                const glm::dvec3 frontHitch = quantum::physics::detail::
+                    solveFrontHitchPositionForValidatedDefinition(
+                        track, definition, location, &hitchCounters);
+
+                require(frontHitch.x
+                            == pose.frontHitchWorldPositionMeters().x
+                        && frontHitch.y
+                            == pose.frontHitchWorldPositionMeters().y
+                        && frontHitch.z
+                            == pose.frontHitchWorldPositionMeters().z,
+                    "front-hitch-only solve must exactly match full pose");
+                require(hitchCounters.solveTrainPoseCalls
+                            == fullCounters.solveTrainPoseCalls
+                        && hitchCounters.solveCarGeometryCalls
+                            == fullCounters.solveCarGeometryCalls
+                        && hitchCounters.rigidBogieSolveCalls
+                            == fullCounters.rigidBogieSolveCalls
+                        && hitchCounters.rigidBogieRefinementIterations
+                            == fullCounters.rigidBogieRefinementIterations
+                        && hitchCounters.connectionCandidateEvaluations
+                            == fullCounters.connectionCandidateEvaluations
+                        && hitchCounters.connectorFallbackUses
+                            == fullCounters.connectorFallbackUses
+                        && hitchCounters.trackSampleCalls
+                            == fullCounters.trackSampleCalls,
+                    "front-hitch-only solve must preserve geometry counters");
+            }
+        }
     }
 
     void zeroCarCompatibleDefinition()
@@ -1002,6 +1051,7 @@ int main()
     std::fprintf(stdout, "Car Pose Physics Tests\n");
 
     run("valid car definition and loadout", validCarDefinitionAndLoadout);
+    run("front-hitch-only exact parity", frontHitchOnlyMatchesFullPoseExactly);
     run("zero-car-compatible definition", zeroCarCompatibleDefinition);
     run("invalid mass and dimensions", invalidMassAndDimensionsAreRejected);
     run("invalid bogie geometry", invalidBogieGeometryIsRejected);

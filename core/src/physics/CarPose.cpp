@@ -630,6 +630,14 @@ namespace quantum::physics
                 "The rigid-bogie station solve did not converge within tolerance.");
         }
 
+        struct SolvedCarBodyGeometry
+        {
+            SampledBogie front;
+            SampledBogie rear;
+            geometry::CurveFrame bodyFrame;
+            glm::dvec3 bodyPositionMeters{0.0};
+        };
+
         struct SolvedCarGeometry
         {
             SampledBogie front;
@@ -644,7 +652,7 @@ namespace quantum::physics
             const glm::dvec3& value,
             const char* errorMessage);
 
-        [[nodiscard]] SolvedCarGeometry solveCarGeometry(
+        [[nodiscard]] SolvedCarBodyGeometry solveCarBodyGeometry(
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
             const TrackLocation& referenceLocation,
@@ -675,7 +683,7 @@ namespace quantum::physics
             const BogieDefinition& rearDefinition = bogies[rearIndex];
             const double travelSign = directionSign(referenceLocation.direction);
 
-            SolvedCarGeometry result;
+            SolvedCarBodyGeometry result;
             SolvedBogieStations stations = solveBogieStations(
                 track,
                 referenceLocation,
@@ -723,6 +731,23 @@ namespace quantum::physics
                 throw std::domain_error(
                     "The solved car transform does not preserve its rigid bogie pivots.");
             }
+            return result;
+        }
+
+        [[nodiscard]] SolvedCarGeometry solveCarGeometry(
+            const CompiledPhysicsTrack& track,
+            const CarDefinition& definition,
+            const TrackLocation& referenceLocation,
+            TrainSolveCounters* const counters = nullptr)
+        {
+            SolvedCarBodyGeometry body = solveCarBodyGeometry(
+                track, definition, referenceLocation, counters);
+            SolvedCarGeometry result{
+                std::move(body.front),
+                std::move(body.rear),
+                body.bodyFrame,
+                body.bodyPositionMeters
+            };
             result.frontHitchPositionMeters = transformPoint(
                 result.bodyPositionMeters,
                 result.bodyFrame,
@@ -1214,8 +1239,19 @@ namespace quantum::physics
         const TrackLocation& referenceLocation,
         TrainSolveCounters* const counters)
     {
-        return solveCarGeometry(track, definition, referenceLocation, counters)
-            .frontHitchPositionMeters;
+        const SolvedCarBodyGeometry geometry = solveCarBodyGeometry(
+            track, definition, referenceLocation, counters);
+        const glm::dvec3 frontHitchPositionMeters = transformPoint(
+            geometry.bodyPositionMeters,
+            geometry.bodyFrame,
+            definition.frontHitchPositionMeters);
+        requireFinitePoseValue(
+            geometry.bodyPositionMeters,
+            "Car body position is non-finite.");
+        requireFinitePoseValue(
+            frontHitchPositionMeters,
+            "Car front hitch world position is non-finite.");
+        return frontHitchPositionMeters;
     }
 
     CarPose solveCarPose(
