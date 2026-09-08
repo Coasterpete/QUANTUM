@@ -24,6 +24,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <chrono>
 #include <cstdint>
@@ -1063,6 +1064,8 @@ editorUi.selectSection(restoredSelection, true);
                             editorUi.takeTrackHardwareEdit();
                         const auto requestedSupportEdit =
                             editorUi.takeSupportNodePositionEdit();
+                        const auto requestedSupportCommand =
+                            editorUi.takeSupportEditCommand();
 
                         // Continuous handle drags queue a changed-value or
                         // changed-boundary edit every motion frame; both
@@ -1156,6 +1159,202 @@ editorUi.selectSection(restoredSelection, true);
                                     quantum::logging::LogLevel::Warning,
                                     "EDIT",
                                     "Support node edit rejected: %s",
+                                    error.what());
+                            }
+                        }
+
+                        if (requestedSupportCommand.has_value())
+                        {
+                            try
+                            {
+                                using quantum::editor::SupportEditType;
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    supportTransaction{authoredTrack};
+                                quantum::coaster::AuthoredTrack& candidate =
+                                    supportTransaction.candidate();
+                                std::optional<quantum::editor::SupportSelection>
+                                    postCommitSelection;
+                                std::array<char, 160> detail{};
+                                const char* editLabel = "";
+                                switch (requestedSupportCommand->type)
+                                {
+                                case SupportEditType::CreateStructure:
+                                {
+                                    const auto createdId =
+                                        candidate.createSupportStructure();
+                                    postCommitSelection = {
+                                        createdId,
+                                        quantum::editor::SupportSelectionKind::
+                                            Structure,
+                                        quantum::coaster::
+                                            invalidSupportElementId};
+                                    editLabel = "structure";
+                                    std::snprintf(
+                                        detail.data(), detail.size(),
+                                        "Support structure %u created.",
+                                        createdId);
+                                    break;
+                                }
+                                case SupportEditType::DeleteStructure:
+                                    candidate.removeSupportStructure(
+                                        requestedSupportCommand->structureId);
+                                    editLabel = "structure";
+                                    std::snprintf(
+                                        detail.data(), detail.size(),
+                                        "Support structure %u deleted.",
+                                        requestedSupportCommand->structureId);
+                                    break;
+                                case SupportEditType::CreateNode:
+                                {
+                                    const auto createdId =
+                                        candidate.createSupportNode(
+                                            requestedSupportCommand
+                                                ->structureId,
+                                            requestedSupportCommand
+                                                ->nodePosition);
+                                    postCommitSelection = {
+                                        requestedSupportCommand->structureId,
+                                        quantum::editor::SupportSelectionKind::
+                                            Node,
+                                        createdId};
+                                    editLabel = "node";
+                                    std::snprintf(
+                                        detail.data(), detail.size(),
+                                        "Support node %u created.",
+                                        createdId);
+                                    break;
+                                }
+                                case SupportEditType::DeleteNode:
+                                    candidate.removeSupportNode(
+                                        requestedSupportCommand->structureId,
+                                        requestedSupportCommand->elementId);
+                                    editLabel = "node";
+                                    std::snprintf(
+                                        detail.data(), detail.size(),
+                                        "Support node %u deleted.",
+                                        requestedSupportCommand->elementId);
+                                    break;
+                                case SupportEditType::CreateMember:
+                                {
+                                    const auto createdId =
+                                        candidate.createSupportMember(
+                                            requestedSupportCommand
+                                                ->structureId,
+                                            requestedSupportCommand
+                                                ->elementId,
+                                            requestedSupportCommand
+                                                ->secondElementId);
+                                    postCommitSelection = {
+                                        requestedSupportCommand->structureId,
+                                        quantum::editor::SupportSelectionKind::
+                                            Member,
+                                        createdId};
+                                    editLabel = "member";
+                                    std::snprintf(
+                                        detail.data(), detail.size(),
+                                        "Support member %u created.",
+                                        createdId);
+                                    break;
+                                }
+                                case SupportEditType::DeleteMember:
+                                    candidate.removeSupportMember(
+                                        requestedSupportCommand->structureId,
+                                        requestedSupportCommand->elementId);
+                                    editLabel = "member";
+                                    std::snprintf(
+                                        detail.data(), detail.size(),
+                                        "Support member %u deleted.",
+                                        requestedSupportCommand->elementId);
+                                    break;
+                                }
+
+                                quantum::editor::SupportVisualization
+                                    candidateSupports = quantum::editor::
+                                        createSupportVisualization(
+                                            candidate.supports());
+
+                                // The retained upload drains in-flight users;
+                                // publication occurs only after the candidate
+                                // visualization and GPU update both succeed.
+                                vulkan.updateSupportVertices(
+                                    candidateSupports.memberVertices);
+                                supportTransaction.commit(authoredTrack);
+                                supportVisualization =
+                                    std::move(candidateSupports);
+                                editorUi.setSupportVisualization(
+                                    supportVisualization);
+                                documentHistory.record(authoredTrack);
+                                synchronizeDirtyState();
+                                // The Connect Nodes tool completes when its
+                                // member is created; a rejection above leaves
+                                // it waiting so the user can retry.
+                                if (requestedSupportCommand->type
+                                    == SupportEditType::CreateMember)
+                                {
+                                    editorUi.cancelSupportConnect();
+                                }
+                                if (postCommitSelection.has_value())
+                                {
+                                    switch (postCommitSelection->kind)
+                                    {
+                                    case quantum::editor::
+                                        SupportSelectionKind::Structure:
+                                        editorUi.selectSupportStructure(
+                                            postCommitSelection
+                                                ->structureId);
+                                        break;
+                                    case quantum::editor::
+                                        SupportSelectionKind::Node:
+                                    {
+                                        const auto createdNode =
+                                            std::find_if(
+                                                supportVisualization.nodes
+                                                    .begin(),
+                                                supportVisualization.nodes
+                                                    .end(),
+                                                [&](
+                                                    const quantum::editor::
+                                                        SupportVisualizationNode&
+                                                            value)
+                                                {
+                                                    return value.selection
+                                                        == *postCommitSelection;
+                                                });
+                                        editorUi.selectSupportNode(
+                                            postCommitSelection->structureId,
+                                            postCommitSelection->elementId,
+                                            createdNode
+                                                != supportVisualization.nodes
+                                                    .end()
+                                                ? createdNode->position
+                                                : glm::dvec3{0.0, 0.0, 0.0});
+                                        break;
+                                    }
+                                    case quantum::editor::
+                                        SupportSelectionKind::Member:
+                                        editorUi.selectSupportMember(
+                                            postCommitSelection->structureId,
+                                            postCommitSelection->elementId);
+                                        break;
+                                    }
+                                }
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "EDIT",
+                                    "Support %s %s",
+                                    editLabel,
+                                    detail.data());
+                            }
+                            catch (const std::exception& error)
+                            {
+                                // The document is unchanged. The Connect
+                                // tool stays waiting so the user can pick a
+                                // different second node.
+                                editorUi.noteSupportEditFailure(error.what());
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "EDIT",
+                                    "Support edit rejected: %s",
                                     error.what());
                             }
                         }

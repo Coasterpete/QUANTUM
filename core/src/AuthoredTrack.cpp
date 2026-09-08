@@ -799,6 +799,69 @@ namespace quantum::coaster
         supports_ = std::move(candidate);
     }
 
+    SupportStructureId AuthoredTrack::createSupportStructure(
+        std::string name)
+    {
+        SupportCollection candidate = supports_;
+        const SupportStructureId id =
+            quantum::coaster::createSupportStructure(
+                candidate, std::move(name));
+        supports_ = std::move(candidate);
+        return id;
+    }
+
+    void AuthoredTrack::removeSupportStructure(
+        const SupportStructureId structureId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::removeSupportStructure(candidate, structureId);
+        supports_ = std::move(candidate);
+    }
+
+    SupportElementId AuthoredTrack::createSupportNode(
+        const SupportStructureId structureId,
+        const glm::dvec3& position)
+    {
+        SupportCollection candidate = supports_;
+        const SupportElementId id =
+            quantum::coaster::createSupportNode(
+                candidate, structureId, position);
+        supports_ = std::move(candidate);
+        return id;
+    }
+
+    void AuthoredTrack::removeSupportNode(
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::removeSupportNode(candidate, structureId, nodeId);
+        supports_ = std::move(candidate);
+    }
+
+    SupportElementId AuthoredTrack::createSupportMember(
+        const SupportStructureId structureId,
+        const SupportElementId startNodeId,
+        const SupportElementId endNodeId,
+        const SupportMemberProfile& profile)
+    {
+        SupportCollection candidate = supports_;
+        const SupportElementId id = quantum::coaster::createSupportMember(
+            candidate, structureId, startNodeId, endNodeId, profile);
+        supports_ = std::move(candidate);
+        return id;
+    }
+
+    void AuthoredTrack::removeSupportMember(
+        const SupportStructureId structureId,
+        const SupportElementId memberId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::removeSupportMember(
+            candidate, structureId, memberId);
+        supports_ = std::move(candidate);
+    }
+
     AuthoredTrackSection createForceDrivenSection(const double length)
     {
         AuthoredTrackSection section = createRateProfileSection(length);

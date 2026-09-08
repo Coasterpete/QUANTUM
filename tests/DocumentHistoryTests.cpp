@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -310,6 +311,68 @@ namespace
                 == glm::dvec3{4.0, 5.0, 6.0},
             "support-node Redo must restore the accepted edit");
     }
+
+    void supportGraphAuthoringUndoRedoIsExact()
+    {
+        using quantum::coaster::SupportCollection;
+        using quantum::coaster::SupportStructureId;
+
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+
+        auto publish = [&](auto&& mutation)
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            std::forward<decltype(mutation)>(mutation)(transaction);
+            transaction.commit(track);
+            history.record(track);
+        };
+
+        SupportStructureId structureId = 0;
+        publish([&](AuthoredTrackEditTransaction& transaction) {
+            structureId = transaction.candidate().createSupportStructure(
+                "Undo frame");
+        });
+        const std::string structureOnly = snapshot(track);
+
+        const auto applyNodesAndMember = [&](
+            AuthoredTrackEditTransaction& transaction)
+        {
+            const auto left = transaction.candidate().createSupportNode(
+                structureId, {-2.0, 0.0, 0.0});
+            const auto right = transaction.candidate().createSupportNode(
+                structureId, {2.0, 0.0, 0.0});
+            transaction.candidate().createSupportMember(
+                structureId, left, right);
+        };
+        publish(applyNodesAndMember);
+        const std::string connected = snapshot(track);
+
+        const auto removeMember = [&](AuthoredTrackEditTransaction& transaction)
+        {
+            const auto& structure = transaction.candidate()
+                .supports().structures.front();
+            transaction.candidate().removeSupportMember(
+                structureId, structure.members.front().id);
+        };
+        publish(removeMember);
+
+        track = requireState(history.undo(), "member-delete Undo missing");
+        require(snapshot(track) == connected,
+            "Undo of member deletion must restore the connected pair");
+        track = requireState(history.undo(), "member-create Undo missing");
+        require(snapshot(track) == structureOnly,
+            "Undo of member creation must keep the empty structure");
+        track = requireState(history.undo(), "structure Undo missing");
+        require(snapshot(track) == snapshot(
+                quantum::coaster::createNewDocument()),
+            "Undo of structure creation must restore the empty document");
+        track = requireState(history.redo(), "structure Redo missing");
+        track = requireState(history.redo(), "member Redo missing");
+        require(snapshot(track) == connected,
+            "Redo must restore the graph exactly as authored");
+    }
 }
 
 int main()
@@ -324,6 +387,7 @@ int main()
         newOpenResetAndContinuousCoalescing();
         trackHardwareEditsUndoAndRedo();
         supportNodeEditsUseWholeDocumentHistory();
+        supportGraphAuthoringUndoRedoIsExact();
     }
     catch (const std::exception& exception)
     {

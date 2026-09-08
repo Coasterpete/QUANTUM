@@ -1,6 +1,8 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/Supports.hpp>
 
+#include <algorithm>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -275,15 +277,216 @@ namespace
                 == glm::dvec3{7.0, 8.0, 9.0},
             "rejected node editing must leave the document unchanged");
     }
+
+    void mutationApiEnforcesGraphInvariants()
+    {
+        SupportCollection collection;
+        const SupportStructureId first =
+            createSupportStructure(collection);
+        const SupportStructureId second =
+            createSupportStructure(collection, "A-frame");
+        require(first == 1 && second == 2,
+            "structure IDs must be allocated in order");
+        require(collection.structures[0].name == "Support 1"
+                && collection.structures[1].name == "A-frame",
+            "unnamed structures must receive a default generated name");
+        validateSupportCollection(collection);
+
+        SupportStructure& secondStructure =
+            collection.structures[1];
+        const SupportElementId left = createSupportNode(
+            collection, second, {-2.0, 0.0, 0.0});
+        const SupportElementId right = createSupportNode(
+            collection, second, {2.0, 0.0, 0.0});
+        const SupportElementId top = createSupportNode(
+            collection, second, {0.0, 0.0, 6.0});
+        require(left == 1 && right == 2 && top == 3,
+            "element IDs must be allocated in order within a structure");
+        require(secondStructure.nodes.size() == 3
+                && secondStructure.members.empty(),
+            "node creation must not fabricate members");
+
+        const SupportElementId leftMember = createSupportMember(
+            collection, second, left, top, {SupportMemberProfileShape::Circular, {0.3, 0.3}, 0.025});
+        const SupportElementId rightMember = createSupportMember(
+            collection, second, right, top, roundTube());
+        require(leftMember == 4 && rightMember == 5,
+            "member IDs must share the element ID stream");
+        validateSupportCollection(collection);
+
+        requireInvalid([&] {
+            createSupportMember(collection, second, top, top, roundTube());
+        }, "self-connected member must be rejected");
+        requireInvalid([&] {
+            createSupportMember(collection, second, left, top, roundTube());
+        }, "duplicate unordered node pair must be rejected");
+        requireInvalid([&] {
+            createSupportMember(collection, second, top, left, roundTube());
+        }, "reversed duplicate node pair must be rejected");
+        requireInvalid([&] {
+            createSupportMember(collection, second, left, 999, roundTube());
+        }, "missing endpoint node must be rejected");
+        requireInvalid([&] {
+            createSupportMember(
+                collection, first, left, top, roundTube());
+        }, "cross-structure endpoints must be rejected");
+
+        requireInvalid([&] {
+            removeSupportNode(collection, second, left);
+        }, "referenced node removal must be rejected");
+        validateSupportCollection(collection);
+
+        removeSupportMember(collection, second, leftMember);
+        createSupportMember(collection, second, left, top, roundTube());
+        require(secondStructure.members.size() == 2,
+            "removing a member must allow the pair to be re-created");
+
+        const SupportElementId loose = createSupportNode(
+            collection, second, {0.0, 5.0, 5.0});
+        removeSupportNode(collection, second, loose);
+        requireInvalid([&] {
+            removeSupportNode(collection, second, loose);
+        }, "removing an already-removed node must be rejected");
+        requireInvalid([&] {
+            removeSupportStructure(collection, 999);
+        }, "removing an unknown structure must be rejected");
+
+        removeSupportStructure(collection, first);
+        require(collection.structures.size() == 1
+                && collection.structures.front().id == second,
+            "structure removal must remove the whole graph");
+        validateSupportCollection(collection);
+
+        const SupportStructureId third =
+            createSupportStructure(collection);
+        require(third == 3,
+            "deleted structures must not cause ID reuse");
+    }
+
+    void woodenBentAuthoredWithMutationApi()
+    {
+        SupportCollection collection;
+        const SupportStructureId bentId =
+            createSupportStructure(collection, "Wood bent");
+        const auto at = [&](const glm::dvec3 position)
+        {
+            return createSupportNode(collection, bentId, position);
+        };
+        const auto connect = [&](const SupportElementId start,
+            const SupportElementId end)
+        {
+            return createSupportMember(collection, bentId, start, end,
+                timber());
+        };
+
+        const SupportElementId leftBottom = at({-2.0, 0.0, 0.0});
+        const SupportElementId rightBottom = at({2.0, 0.0, 0.0});
+        const SupportElementId leftTop = at({-2.0, 0.0, 6.0});
+        const SupportElementId rightTop = at({2.0, 0.0, 6.0});
+        const SupportElementId leftMid = at({-2.0, 0.0, 3.0});
+        const SupportElementId rightMid = at({2.0, 0.0, 3.0});
+        const SupportElementId nextLeftBottom = at({-2.0, 4.0, 0.0});
+        const SupportElementId nextRightBottom = at({2.0, 4.0, 0.0});
+        const SupportElementId nextLeftTop = at({-2.0, 4.0, 6.0});
+        const SupportElementId nextRightTop = at({2.0, 4.0, 6.0});
+        connect(leftBottom, leftTop);
+        connect(rightBottom, rightTop);
+        connect(leftTop, rightTop);
+        connect(leftBottom, rightMid);
+        connect(rightBottom, leftMid);
+        connect(leftMid, rightMid);
+        connect(nextLeftBottom, nextLeftTop);
+        connect(nextRightBottom, nextRightTop);
+        connect(nextLeftTop, nextRightTop);
+        connect(nextLeftBottom, nextRightTop);
+        connect(nextRightBottom, nextLeftTop);
+        connect(leftTop, nextLeftTop);
+        const SupportElementId lastMember =
+            connect(rightTop, nextRightTop);
+        validateSupportCollection(collection);
+
+        require(collection.structures.size() == 1,
+            "the proof must stay a single structure");
+        const SupportStructure& bent = collection.structures.front();
+        require(bent.name == "Wood bent" && bent.id == bentId,
+            "structure identity must be preserved");
+        require(bent.nodes.size() == 10,
+            "the wood bent proof must contain exactly ten nodes");
+        require(bent.members.size() == 13,
+            "the wood bent proof must contain exactly thirteen members");
+        require(std::any_of(
+            bent.members.begin(), bent.members.end(),
+            [lastMember](const SupportMember& member)
+            {
+                return member.id == lastMember
+                    && member.profile.shape
+                        == SupportMemberProfileShape::Rectangular;
+            }),
+            "the last member must carry the timber profile");
+    }
+
+    void steelAFrameAuthoredWithMutationApi()
+    {
+        SupportCollection collection;
+        const SupportStructureId columnId =
+            createSupportStructure(collection, "Steel column");
+        const SupportElementId base = createSupportNode(
+            collection, columnId, {0.0, 0.0, 0.0});
+        const SupportElementId columnTop = createSupportNode(
+            collection, columnId, {0.0, 0.0, 8.0});
+        const SupportElementId columnMember = createSupportMember(
+            collection, columnId, base, columnTop, roundTube());
+
+        const SupportStructureId frameId =
+            createSupportStructure(collection, "A/V frame");
+        const SupportElementId left = createSupportNode(
+            collection, frameId, {-2.0, 0.0, 0.0});
+        const SupportElementId right = createSupportNode(
+            collection, frameId, {2.0, 0.0, 0.0});
+        const SupportElementId center = createSupportNode(
+            collection, frameId, {0.0, 0.0, 6.0});
+        const SupportElementId upper = createSupportNode(
+            collection, frameId, {0.0, 0.0, 9.0});
+        createSupportMember(collection, frameId, left, center, roundTube());
+        createSupportMember(collection, frameId, right, center, roundTube());
+        createSupportMember(collection, frameId, center, upper, roundTube());
+        validateSupportCollection(collection);
+
+        require(collection.structures.size() == 2,
+            "the steel proof must contain two structures");
+        require(collection.structures[0].members.size() == 1
+                && collection.structures[0].members.front().id
+                    == columnMember,
+            "the steel column must retain its single member");
+        const SupportStructure& frame = collection.structures[1];
+        require(frame.nodes.size() == 4 && frame.members.size() == 3,
+            "the A/V frame must retain four nodes and three members");
+        requireInvalid([&] {
+            createSupportMember(
+                collection, frameId, base, center, roundTube());
+        }, "a member crossing structures must be rejected");
+    }
 }
 
 int main()
 {
-    emptyCollectionIsValid();
-    allocationIsMonotonicAndDoesNotReuseIds();
-    invalidIdsAndReferencesAreRejected();
-    invalidGeometryAndCountersAreRejected();
-    steelGraphsUseTheCommonModel();
-    woodenBentRunUsesTheCommonModel();
-    nodePositionEditingUsesStableIds();
+    try
+    {
+        emptyCollectionIsValid();
+        allocationIsMonotonicAndDoesNotReuseIds();
+        invalidIdsAndReferencesAreRejected();
+        invalidGeometryAndCountersAreRejected();
+        steelGraphsUseTheCommonModel();
+        woodenBentRunUsesTheCommonModel();
+        nodePositionEditingUsesStableIds();
+        mutationApiEnforcesGraphInvariants();
+        woodenBentAuthoredWithMutationApi();
+        steelAFrameAuthoredWithMutationApi();
+    }
+    catch (const std::exception& exception)
+    {
+        std::cerr << "Support model test failure: " << exception.what()
+                  << '\n';
+        return 1;
+    }
 }

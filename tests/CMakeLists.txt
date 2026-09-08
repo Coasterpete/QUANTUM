@@ -1625,6 +1625,49 @@ set_tests_properties(
         LABELS "editor;coaster;supports;visualization;selection"
 )
 
+add_executable(
+    QuantumEditorSupportAuthoringTests
+    SupportAuthoringTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportVisualization.cpp
+)
+
+target_include_directories(
+    QuantumEditorSupportAuthoringTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorSupportAuthoringTests
+    PRIVATE
+        Quantum::Core
+        Quantum::Engine
+)
+
+target_compile_features(
+    QuantumEditorSupportAuthoringTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorSupportAuthoringTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.SupportAuthoring
+    COMMAND QuantumEditorSupportAuthoringTests
+)
+
+set_tests_properties(
+    QuantumEditor.SupportAuthoring
+    PROPERTIES
+        LABELS "editor;coaster;supports;authoring;connection;history"
+)
+
 target_link_libraries(
     QuantumCoreCoasterDocumentTests
     PRIVATE

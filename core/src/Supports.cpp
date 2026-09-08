@@ -4,7 +4,9 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <unordered_set>
+#include <utility>
 
 namespace quantum::coaster
 {
@@ -72,6 +74,227 @@ namespace quantum::coaster
             structure.nextElementId,
             maximumId,
             "SupportStructure::nextElementId");
+    }
+
+    SupportMemberProfile defaultSupportMemberProfile() noexcept
+    {
+        return {};
+    }
+
+    SupportStructureId createSupportStructure(
+        SupportCollection& collection,
+        std::string name)
+    {
+        const SupportStructureId id = allocateSupportStructureId(collection);
+        if (name.empty())
+        {
+            name = "Support " + std::to_string(id);
+        }
+
+        collection.structures.push_back({id, std::move(name)});
+        validateSupportCollection(collection);
+        return id;
+    }
+
+    void removeSupportStructure(
+        SupportCollection& collection,
+        const SupportStructureId structureId)
+    {
+        const auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        collection.structures.erase(structure);
+        validateSupportCollection(collection);
+    }
+
+    SupportElementId createSupportNode(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const glm::dvec3& position)
+    {
+        if (!std::isfinite(position.x) || !std::isfinite(position.y)
+            || !std::isfinite(position.z))
+        {
+            throw std::invalid_argument(
+                "Support node positions must be finite.");
+        }
+
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        const SupportElementId id = allocateSupportElementId(*structure);
+        structure->nodes.push_back({id, position});
+        validateSupportCollection(collection);
+        return id;
+    }
+
+    void removeSupportNode(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        const auto node = std::find_if(
+            structure->nodes.begin(),
+            structure->nodes.end(),
+            [nodeId](const SupportNode& value)
+            {
+                return value.id == nodeId;
+            });
+        if (node == structure->nodes.end())
+        {
+            throw std::invalid_argument("Unknown support node ID.");
+        }
+
+        const bool referenced = std::any_of(
+            structure->members.begin(),
+            structure->members.end(),
+            [nodeId](const SupportMember& member)
+            {
+                return member.startNodeId == nodeId
+                    || member.endNodeId == nodeId;
+            });
+        if (referenced)
+        {
+            throw std::invalid_argument(
+                "Delete connected members first.");
+        }
+
+        structure->nodes.erase(node);
+        validateSupportCollection(collection);
+    }
+
+    SupportElementId createSupportMember(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId startNodeId,
+        const SupportElementId endNodeId,
+        const SupportMemberProfile& profile)
+    {
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        const bool hasStart = std::any_of(
+            structure->nodes.begin(),
+            structure->nodes.end(),
+            [startNodeId](const SupportNode& node)
+            {
+                return node.id == startNodeId;
+            });
+        const bool hasEnd = std::any_of(
+            structure->nodes.begin(),
+            structure->nodes.end(),
+            [endNodeId](const SupportNode& node)
+            {
+                return node.id == endNodeId;
+            });
+        if (!hasStart || !hasEnd)
+        {
+            throw std::invalid_argument(
+                "Support member endpoints must reference nodes in their "
+                "owning structure.");
+        }
+        if (startNodeId == endNodeId)
+        {
+            throw std::invalid_argument(
+                "A support member must connect two distinct nodes.");
+        }
+
+        const std::pair<SupportElementId, SupportElementId> pair{
+            std::min(startNodeId, endNodeId),
+            std::max(startNodeId, endNodeId)};
+        const bool alreadyConnected = std::any_of(
+            structure->members.begin(),
+            structure->members.end(),
+            [pair](const SupportMember& member)
+            {
+                return std::min(member.startNodeId, member.endNodeId)
+                        == pair.first
+                    && std::max(member.startNodeId, member.endNodeId)
+                        == pair.second;
+            });
+        if (alreadyConnected)
+        {
+            throw std::invalid_argument(
+                "A member already connects this pair of nodes.");
+        }
+
+        const SupportElementId id = allocateSupportElementId(*structure);
+        structure->members.push_back({
+            id, startNodeId, endNodeId, profile});
+        validateSupportCollection(collection);
+        return id;
+    }
+
+    void removeSupportMember(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId memberId)
+    {
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        const auto member = std::find_if(
+            structure->members.begin(),
+            structure->members.end(),
+            [memberId](const SupportMember& value)
+            {
+                return value.id == memberId;
+            });
+        if (member == structure->members.end())
+        {
+            throw std::invalid_argument("Unknown support member ID.");
+        }
+
+        structure->members.erase(member);
+        validateSupportCollection(collection);
     }
 
     void validateSupportMemberProfile(const SupportMemberProfile& profile)

@@ -93,6 +93,10 @@ namespace quantum::editor
             return false;
         }
 
+        if (selection.kind == SupportSelectionKind::Structure)
+        {
+            return true;
+        }
         if (selection.kind == SupportSelectionKind::Node)
         {
             return std::ranges::any_of(
@@ -108,5 +112,100 @@ namespace quantum::editor
             {
                 return member.id == selection.elementId;
             });
+    }
+
+    std::string_view supportConnectCheckMessage(
+        const SupportConnectCheck check) noexcept
+    {
+        switch (check)
+        {
+        case SupportConnectCheck::Ok:
+            return "Nodes can be connected.";
+        case SupportConnectCheck::UnknownStructure:
+            return "Select a valid support structure.";
+        case SupportConnectCheck::UnknownNode:
+            return "The target node no longer exists.";
+        case SupportConnectCheck::SameNode:
+            return "A member must connect two different nodes.";
+        case SupportConnectCheck::DifferentStructure:
+            return "A member must connect nodes in the same structure.";
+        case SupportConnectCheck::AlreadyConnected:
+            return "A member already connects this pair of nodes.";
+        }
+        return "Cannot connect these nodes.";
+    }
+
+    SupportConnectCheck checkSupportNodeConnection(
+        const coaster::SupportCollection& supports,
+        const coaster::SupportStructureId structureId,
+        const coaster::SupportElementId firstNodeId,
+        const coaster::SupportElementId secondNodeId) noexcept
+    {
+        const auto structure = std::find_if(
+            supports.structures.begin(), supports.structures.end(),
+            [structureId](const coaster::SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == supports.structures.end())
+        {
+            return SupportConnectCheck::UnknownStructure;
+        }
+
+        const auto nodeInStructure =
+            [](const coaster::SupportStructure& target,
+                const coaster::SupportElementId nodeId)
+        {
+            return std::ranges::any_of(
+                target.nodes,
+                [nodeId](const coaster::SupportNode& node)
+                {
+                    return node.id == nodeId;
+                });
+        };
+        const auto nodeInOtherStructure =
+            [&supports, structure, nodeInStructure](
+                const coaster::SupportElementId nodeId)
+        {
+            return std::ranges::any_of(
+                supports.structures,
+                [structure, nodeId, nodeInStructure](
+                    const coaster::SupportStructure& value)
+                {
+                    return &value != &*structure
+                        && nodeInStructure(value, nodeId);
+                });
+        };
+
+        if (!nodeInStructure(*structure, firstNodeId))
+        {
+            return nodeInOtherStructure(firstNodeId)
+                ? SupportConnectCheck::DifferentStructure
+                : SupportConnectCheck::UnknownNode;
+        }
+        if (!nodeInStructure(*structure, secondNodeId))
+        {
+            return nodeInOtherStructure(secondNodeId)
+                ? SupportConnectCheck::DifferentStructure
+                : SupportConnectCheck::UnknownNode;
+        }
+        if (firstNodeId == secondNodeId)
+        {
+            return SupportConnectCheck::SameNode;
+        }
+
+        const auto connectedPair = std::ranges::any_of(
+            structure->members,
+            [firstNodeId, secondNodeId](
+                const coaster::SupportMember& member)
+            {
+                return std::min(member.startNodeId, member.endNodeId)
+                        == std::min(firstNodeId, secondNodeId)
+                    && std::max(member.startNodeId, member.endNodeId)
+                        == std::max(firstNodeId, secondNodeId);
+            });
+        return connectedPair
+            ? SupportConnectCheck::AlreadyConnected
+            : SupportConnectCheck::Ok;
     }
 }

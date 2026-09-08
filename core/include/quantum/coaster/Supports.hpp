@@ -84,12 +84,68 @@ namespace quantum::coaster
             const SupportCollection&, const SupportCollection&) = default;
     };
 
+    // The profile created for manually connected members. A simple valid
+    // solid round section; the M1A manual toolset authoring does not pick
+    // materials or manufacturer-specific sections yet.
+    [[nodiscard]] SupportMemberProfile defaultSupportMemberProfile() noexcept;
+
     // Allocation advances the persisted counter and never searches for or
     // reuses gaps. Malformed counters and exhausted ID spaces are rejected.
     [[nodiscard]] SupportStructureId allocateSupportStructureId(
         SupportCollection& collection);
     [[nodiscard]] SupportElementId allocateSupportElementId(
         SupportStructure& structure);
+
+    // Invariant-preserving topology editing. Every mutation operates on a
+    // live SupportCollection, owns allocator behavior (IDs are never
+    // caller-supplied), validates its inputs before changing anything, and
+    // finishes by validating the complete collection. On a rejected mutation
+    // the collection is left exactly unchanged; deleted IDs are never reused
+    // and allocator counters never roll back.
+    //
+    // Creates an empty structure, allocating its nextSupportStructureId and a
+    // deterministic default name ("Support N") when name is empty.
+    // Throws std::invalid_argument when the structure ID space is exhausted.
+    [[nodiscard]] SupportStructureId createSupportStructure(
+        SupportCollection& collection,
+        std::string name = {});
+    // Removes one structure and its entire owned node/member graph.
+    // Throws std::invalid_argument for an unknown structure ID.
+    void removeSupportStructure(
+        SupportCollection& collection,
+        SupportStructureId structureId);
+    // Adds one node to the target structure, allocating its stable element ID.
+    // Throws std::invalid_argument for an unknown structure or a non-finite
+    // position.
+    [[nodiscard]] SupportElementId createSupportNode(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        const glm::dvec3& position);
+    // Refuses to remove a node referenced by any member: the connected members
+    // must be deleted first. Throws std::invalid_argument for an unknown
+    // node or a node still referenced by a member.
+    void removeSupportNode(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId nodeId);
+    // Connects two distinct nodes of the same structure. Rejects another
+    // member across the same unordered endpoint pair, so A->B and B->A count
+    // as the same connection and coincident duplicate members cannot be
+    // authored. Uses defaultSupportMemberProfile() when no profile is given.
+    // Throws std::invalid_argument for missing endpoints, a self connection,
+    // or an existing member across the same pair.
+    [[nodiscard]] SupportElementId createSupportMember(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId startNodeId,
+        SupportElementId endNodeId,
+        const SupportMemberProfile& profile = defaultSupportMemberProfile());
+    // Removes exactly one member, preserving every node. Throws
+    // std::invalid_argument for an unknown member ID.
+    void removeSupportMember(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId memberId);
 
     // Geometric/document consistency only. This does not perform loads,
     // stress, buckling, foundation, or code-compliance analysis.

@@ -7,12 +7,14 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace quantum::editor
 {
     enum class SupportSelectionKind
     {
+        Structure,
         Node,
         Member
     };
@@ -63,4 +65,30 @@ namespace quantum::editor
     [[nodiscard]] bool supportSelectionExists(
         const coaster::SupportCollection& supports,
         const SupportSelection& selection) noexcept;
+
+    // UI-side readiness check for the Connect Nodes workflow. Core
+    // createSupportMember remains the authoritative gate; this query gives
+    // the editor an exception-free reason to present before a commit.
+    enum class SupportConnectCheck : std::uint8_t
+    {
+        Ok,
+        UnknownStructure,
+        UnknownNode,
+        SameNode,
+        DifferentStructure,
+        AlreadyConnected
+    };
+
+    [[nodiscard]] std::string_view supportConnectCheckMessage(
+        SupportConnectCheck check) noexcept;
+
+    // Returns Ok when a member between the two nodes may be authored, and a
+    // concrete reason otherwise. Both endpoints must exist in the same target
+    // structure, be distinct, and not already be connected by an existing
+    // member across the unordered pair.
+    [[nodiscard]] SupportConnectCheck checkSupportNodeConnection(
+        const coaster::SupportCollection& supports,
+        coaster::SupportStructureId structureId,
+        coaster::SupportElementId firstNodeId,
+        coaster::SupportElementId secondNodeId) noexcept;
 }
