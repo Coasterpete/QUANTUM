@@ -19,8 +19,9 @@
 namespace quantum::renderer
 {
     // One endpoint of a viewport line-list segment. Every viewport geometry
-    // stream (ground grid, world axes, authored-track reference curves) uses
-    // this vertex layout, matching the graphics pipeline's vertex input.
+    // stream (ground grid, world axes, authored-track reference curves,
+    // support members, diagnostics) uses this vertex layout, matching the
+    // graphics pipeline's vertex input.
     struct LineVertex
     {
         float x;
@@ -120,6 +121,9 @@ namespace quantum::renderer
         // Replaces the Editor's dynamic diagnostic train line stream.
         void updateTrainPreviewVertices(
             std::span<const LineVertex> vertices);
+
+        // Replaces the Editor's renderer-neutral support-member line stream.
+        void updateSupportVertices(std::span<const LineVertex> vertices);
 
         // Host-side draw skipping for the viewport reference elements.
         // Idempotent; intended to be pushed every frame from the editor's
@@ -281,8 +285,13 @@ namespace quantum::renderer
         VmaAllocation spareTrackCurveVertexAllocation_ = VK_NULL_HANDLE;
         void* spareTrackCurveVertexMappedData_ = nullptr;
         VkDeviceSize spareTrackCurveVertexCapacity_ = 0;
+        VkBuffer supportVertexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation supportVertexAllocation_ = VK_NULL_HANDLE;
+        void* supportVertexMappedData_ = nullptr;
+        VkDeviceSize supportVertexCapacity_ = 0;
+        std::uint32_t supportVertexCount_ = 0;
 
-        struct TrainPreviewFrameBuffer
+        struct DynamicLineFrameBuffer
         {
             VkBuffer vertexBuffer = VK_NULL_HANDLE;
             VmaAllocation vertexAllocation = VK_NULL_HANDLE;
@@ -294,7 +303,7 @@ namespace quantum::renderer
 
         // Each in-flight frame owns the preview allocation it records. The
         // retained CPU vertices let a slot catch up after a one-shot update.
-        std::array<TrainPreviewFrameBuffer, maxFramesInFlight>
+        std::array<DynamicLineFrameBuffer, maxFramesInFlight>
             trainPreviewFrameBuffers_{};
         std::vector<LineVertex> trainPreviewVertices_;
 

@@ -1,4 +1,5 @@
 #include <quantum/editor/EditorUi.hpp>
+#include <quantum/editor/SupportPicking.hpp>
 #include <quantum/editor/ReadmeCapture.hpp>
 
 #include <quantum/coaster/ChannelProfileEditing.hpp>
@@ -2702,27 +2703,6 @@ namespace
         return edit;
     }
 
-    void showSupportWorkspace()
-    {
-        ImGui::Begin(supportWorkspaceWindowName);
-
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            quantum::editor::palette::textSecondary);
-        ImGui::TextWrapped("Support tools are not available yet.");
-        ImGui::PopStyleColor();
-        if (ImGui::TreeNode("Planned tools"))
-        {
-            ImGui::BeginDisabled();
-            ImGui::TextWrapped("Support prefabs\nFoundations\nRail connectors\nSupport settings");
-            ImGui::Spacing();
-            ImGui::TextWrapped("Prefab copy / define / paste (.qcwPrefab)");
-            ImGui::EndDisabled();
-            ImGui::TreePop();
-        }
-
-        ImGui::End();
-    }
-
     // Floating preferences window for the shared Transition Editor drag
     // and snapping settings. Widgets mutate the live settings struct, so
     // changes apply on the next drag frame without restart.
@@ -3830,6 +3810,124 @@ namespace
 
 namespace quantum::editor
 {
+    void EditorUi::drawSupportWorkspace()
+    {
+        ImGui::Begin(supportWorkspaceWindowName);
+
+        if (authoredTrack_ == nullptr || authoredTrack_->supports().empty())
+        {
+            ImGui::TextDisabled("No supports in this document.");
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Text("Supports");
+        ImGui::Separator();
+        if (!selectedSupport_.has_value())
+        {
+            ImGui::Text("Structures: %zu",
+                authoredTrack_->supports().structures.size());
+            ImGui::TextDisabled("Select a support node or member in the viewport.");
+            ImGui::End();
+            return;
+        }
+
+        const SupportSelection selection = *selectedSupport_;
+        const auto structure = std::find_if(
+            authoredTrack_->supports().structures.begin(),
+            authoredTrack_->supports().structures.end(),
+            [selection](const coaster::SupportStructure& value)
+            {
+                return value.id == selection.structureId;
+            });
+        if (structure == authoredTrack_->supports().structures.end())
+        {
+            selectedSupport_.reset();
+            ImGui::TextDisabled("The selected support no longer exists.");
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Text("Structure");
+        ImGui::Text("Name: %s", structure->name.c_str());
+        ImGui::Text("ID: %u", structure->id);
+        ImGui::Spacing();
+        ImGui::Text("Selected");
+
+        if (selection.kind == SupportSelectionKind::Node)
+        {
+            const auto node = std::find_if(
+                structure->nodes.begin(), structure->nodes.end(),
+                [selection](const coaster::SupportNode& value)
+                {
+                    return value.id == selection.elementId;
+                });
+            if (node == structure->nodes.end())
+            {
+                selectedSupport_.reset();
+                ImGui::TextDisabled("The selected node no longer exists.");
+                ImGui::End();
+                return;
+            }
+
+            ImGui::Text("Node %u", node->id);
+            ImGui::Spacing();
+            ImGui::Text("Position");
+            bool changed = false;
+            ImGui::SetNextItemWidth(-1.0F);
+            changed |= ImGui::InputScalar(
+                "X", ImGuiDataType_Double,
+                &supportNodePositionEditBuffer_.x,
+                nullptr, nullptr, "%.6f");
+            ImGui::SetNextItemWidth(-1.0F);
+            changed |= ImGui::InputScalar(
+                "Y", ImGuiDataType_Double,
+                &supportNodePositionEditBuffer_.y,
+                nullptr, nullptr, "%.6f");
+            ImGui::SetNextItemWidth(-1.0F);
+            changed |= ImGui::InputScalar(
+                "Z", ImGuiDataType_Double,
+                &supportNodePositionEditBuffer_.z,
+                nullptr, nullptr, "%.6f");
+            if (changed)
+            {
+                supportNodePositionEdit_ = {
+                    structure->id,
+                    node->id,
+                    supportNodePositionEditBuffer_};
+            }
+        }
+        else
+        {
+            const auto member = std::find_if(
+                structure->members.begin(), structure->members.end(),
+                [selection](const coaster::SupportMember& value)
+                {
+                    return value.id == selection.elementId;
+                });
+            if (member == structure->members.end())
+            {
+                selectedSupport_.reset();
+                ImGui::TextDisabled("The selected member no longer exists.");
+                ImGui::End();
+                return;
+            }
+
+            ImGui::Text("Member %u", member->id);
+            ImGui::Text("Endpoint A: %u", member->startNodeId);
+            ImGui::Text("Endpoint B: %u", member->endNodeId);
+            ImGui::Text("Profile: %s %.6g x %.6g, wall %.6g",
+                member->profile.shape
+                        == coaster::SupportMemberProfileShape::Circular
+                    ? "Circular" : "Rectangular",
+                member->profile.outerDimensions.x,
+                member->profile.outerDimensions.y,
+                member->profile.wallThickness);
+        }
+
+        ImGui::End();
+    }
+
     EditorUi::~EditorUi()
     {
         shutdown();
@@ -4576,6 +4674,7 @@ namespace quantum::editor
         }
 
         hoveredTrackAnchor_.reset();
+        hoveredSupport_.reset();
         std::optional<std::size_t> hoveredSection;
         // ImGui owns the raw SDL event stream. Treat a left click as a
         // viewport action only when the submitted viewport Image itself is
@@ -4587,7 +4686,8 @@ namespace quantum::editor
             && cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
-            && centerlineVisualization_ != nullptr)
+            && (centerlineVisualization_ != nullptr
+                || supportVisualization_ != nullptr))
         {
             const ImVec2 imageMinimum = ImGui::GetItemRectMin();
             const ImVec2 imageMaximum = ImGui::GetItemRectMax();
@@ -4611,7 +4711,18 @@ namespace quantum::editor
                     normalizedY,
                     aspectRatio
                 );
+                const auto supportHit = supportVisualization_ != nullptr
+                    ? pickSupport(
+                        *supportVisualization_,
+                        viewportCamera_,
+                        {normalizedX, normalizedY},
+                        pixelWidth,
+                        pixelHeight,
+                        supportNodeHitRadiusPixels * presentationScale,
+                        supportMemberHitTolerancePixels * presentationScale)
+                    : std::nullopt;
                 const auto anchorHit = viewportSettings_.anchorsVisible
+                        && centerlineVisualization_ != nullptr
                     ? pickViewportTrackAnchor(
                         centerlineVisualization_->anchors,
                         viewportCamera_,
@@ -4622,10 +4733,32 @@ namespace quantum::editor
                     )
                     : std::nullopt;
 
-                // Semantic anchors have priority inside their marker radius.
-                // Only an anchor miss falls through to reference-curve
-                // picking, so a shared boundary cannot be hidden by its line.
-                if (anchorHit.has_value())
+                // Support nodes/members are the most specific scene objects,
+                // followed by semantic track anchors and reference curves.
+                if (supportHit.has_value())
+                {
+                    hoveredSupport_ = supportHit->selection;
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    {
+                        selectedSupport_ = supportHit->selection;
+                        if (selectedSupport_->kind
+                            == SupportSelectionKind::Node)
+                        {
+                            const auto node = std::find_if(
+                                supportVisualization_->nodes.begin(),
+                                supportVisualization_->nodes.end(),
+                                [this](const SupportVisualizationNode& value)
+                                {
+                                    return value.selection == *selectedSupport_;
+                                });
+                            if (node != supportVisualization_->nodes.end())
+                            {
+                                supportNodePositionEditBuffer_ = node->position;
+                            }
+                        }
+                    }
+                }
+                else if (anchorHit.has_value())
                 {
                     hoveredTrackAnchor_ = anchorHit->anchorIndex;
                     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -4641,14 +4774,15 @@ namespace quantum::editor
                         ? visibleTrackCurveMask(viewportSettings_)
                         : (1u << renderer::viewportLeftRailCurve)
                             | (1u << renderer::viewportRightRailCurve);
-                    const auto trackHit = pickViewportSection(
-                        *centerlineVisualization_,
-                        viewportCamera_,
-                        ray,
-                        contentPixelDimension(logicalHeight, 1.0F),
-                        pickingCurveMask,
-                        viewportSelectionTolerancePixels * presentationScale
-                    );
+                    const auto trackHit = centerlineVisualization_ != nullptr
+                        ? pickViewportSection(
+                            *centerlineVisualization_,
+                            viewportCamera_,
+                            ray,
+                            pixelHeight,
+                            pickingCurveMask,
+                            viewportSelectionTolerancePixels * presentationScale)
+                        : std::nullopt;
 
                     // Empty viewport space deliberately preserves selection,
                     // matching the Section List's always-selected behavior.
@@ -4902,6 +5036,7 @@ namespace quantum::editor
         }
         drawSimulationTelemetry();
         drawViewportTrackAnchors();
+        drawViewportSupports();
         drawList->PopClipRect();
     }
 
@@ -6628,7 +6763,7 @@ ImGui::MenuItem(
 
         if (captureScenario_ == nullptr
             || authoredTrack_->section(selectedSection_).kind == coaster::RegionKind::RateProfiles)
-            showSupportWorkspace();
+            drawSupportWorkspace();
 
         // Clamp the selection against the live document before any panel
         // reads it; structural commits can shrink or reorder sections.
@@ -7406,6 +7541,91 @@ ImGui::MenuItem(
         return edit;
     }
 
+    void EditorUi::drawViewportSupports()
+    {
+        if (supportVisualization_ == nullptr)
+        {
+            return;
+        }
+
+        const ImVec2 imageMinimum = ImGui::GetItemRectMin();
+        const ImVec2 imageMaximum = ImGui::GetItemRectMax();
+        const float imageWidth = imageMaximum.x - imageMinimum.x;
+        const float imageHeight = imageMaximum.y - imageMinimum.y;
+        if (imageWidth <= 0.0F || imageHeight <= 0.0F)
+        {
+            return;
+        }
+
+        const auto screenPosition = [imageMinimum, imageWidth, imageHeight](
+            const ViewportProjectedPoint& point)
+        {
+            return ImVec2{
+                imageMinimum.x + static_cast<float>(
+                    point.normalizedPosition.x) * imageWidth,
+                imageMinimum.y + static_cast<float>(
+                    point.normalizedPosition.y) * imageHeight};
+        };
+        const auto project = [&](const glm::dvec3& position)
+        {
+            return projectViewportPoint(
+                viewportCamera_, position, viewportAspectRatio_);
+        };
+
+        ImDrawList* const drawList = ImGui::GetWindowDrawList();
+        const float scale = editorPresentationScale();
+        const ImU32 outline = ImGui::ColorConvertFloat4ToU32(palette::black);
+        const ImU32 normal = ImGui::ColorConvertFloat4ToU32(
+            palette::viewportAnchor);
+        const ImU32 hovered = ImGui::ColorConvertFloat4ToU32(
+            palette::viewportHovered);
+        const ImU32 selected = ImGui::ColorConvertFloat4ToU32(
+            palette::viewportSelected);
+
+        for (const SupportVisualizationMember& member
+            : supportVisualization_->members)
+        {
+            const bool isSelected = selectedSupport_ == member.selection;
+            const bool isHovered = hoveredSupport_ == member.selection;
+            if (!isSelected && !isHovered)
+            {
+                continue;
+            }
+            const auto start = project(member.startPosition);
+            const auto end = project(member.endPosition);
+            if (!start.has_value() || !end.has_value())
+            {
+                continue;
+            }
+            const ImVec2 first = screenPosition(*start);
+            const ImVec2 second = screenPosition(*end);
+            const float width = (isSelected ? 3.0F : 2.0F) * scale;
+            drawList->AddLine(first, second, outline, width + 2.0F * scale);
+            drawList->AddLine(first, second,
+                isSelected ? selected : hovered, width);
+        }
+
+        for (const SupportVisualizationNode& node
+            : supportVisualization_->nodes)
+        {
+            const auto projected = project(node.position);
+            if (!projected.has_value())
+            {
+                continue;
+            }
+            const ImVec2 center = screenPosition(*projected);
+            const bool isSelected = selectedSupport_ == node.selection;
+            const bool isHovered = hoveredSupport_ == node.selection;
+            const float radius = (isSelected ? 5.0F : 3.5F) * scale;
+            drawList->AddCircleFilled(
+                center, radius + 1.5F * scale, outline, 16);
+            drawList->AddCircleFilled(
+                center, radius,
+                isSelected ? selected : isHovered ? hovered : normal,
+                16);
+        }
+    }
+
     std::optional<TrackHardwareEdit>
     EditorUi::takeTrackHardwareEdit() noexcept
     {
@@ -7760,6 +7980,10 @@ ImGui::MenuItem(
         initialViewportFramePending_ = true;
         authoredTrack_ = nullptr;
         centerlineVisualization_ = nullptr;
+        supportVisualization_ = nullptr;
+        selectedSupport_.reset();
+        hoveredSupport_.reset();
+        supportNodePositionEdit_.reset();
         riderLoadDiagnostics_.clear();
         selectedSection_ = 0;
         startPoseManipulation_.reset();
@@ -7816,6 +8040,48 @@ ImGui::MenuItem(
         return op;
     }
 
+    void EditorUi::setSupportVisualization(
+        const SupportVisualization& visualization) noexcept
+    {
+        supportVisualization_ = &visualization;
+        if (selectedSupport_.has_value()
+            && (authoredTrack_ == nullptr
+                || !supportSelectionExists(
+                    authoredTrack_->supports(), *selectedSupport_)))
+        {
+            selectedSupport_.reset();
+        }
+        if (selectedSupport_.has_value()
+            && selectedSupport_->kind == SupportSelectionKind::Node)
+        {
+            const auto node = std::find_if(
+                visualization.nodes.begin(), visualization.nodes.end(),
+                [this](const SupportVisualizationNode& value)
+                {
+                    return value.selection == *selectedSupport_;
+                });
+            if (node != visualization.nodes.end())
+            {
+                supportNodePositionEditBuffer_ = node->position;
+            }
+        }
+    }
+
+    void EditorUi::synchronizeSupportNodePosition(
+        const glm::dvec3& position) noexcept
+    {
+        supportNodePositionEditBuffer_ = position;
+    }
+
+    std::optional<SupportNodePositionEdit>
+    EditorUi::takeSupportNodePositionEdit() noexcept
+    {
+        std::optional<SupportNodePositionEdit> edit =
+            std::move(supportNodePositionEdit_);
+        supportNodePositionEdit_.reset();
+        return edit;
+    }
+
     std::optional<HistoryOperationType>
     EditorUi::takePendingHistoryOperation() noexcept
     {
@@ -7869,6 +8135,10 @@ std::optional<coaster::LayoutMode>
         viewportNavigationActive_ = false;
         selectedSection_ = 0;
         selectedTrackAnchor_ = 0;
+        selectedSupport_.reset();
+        hoveredSupport_.reset();
+        supportNodePositionEditBuffer_ = {0.0, 0.0, 0.0};
+        supportNodePositionEdit_.reset();
         startPoseTransformMode_ = StartPoseTransformMode::Move;
         startPoseManipulation_.reset();
         startPoseEdit_.reset();

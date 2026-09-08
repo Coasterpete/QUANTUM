@@ -239,6 +239,42 @@ namespace
         addMember(bent, rightTop, nextRightTop, timber());
         validateSupportCollection(collection);
     }
+
+    void nodePositionEditingUsesStableIds()
+    {
+        SupportCollection collection;
+        SupportStructure& first = addStructure(collection, "First");
+        const auto untouchedNode = addNode(first, {1.0, 2.0, 3.0});
+        SupportStructure& second = addStructure(collection, "Second");
+        const auto targetNode = addNode(second, {4.0, 5.0, 6.0});
+
+        AuthoredTrack track;
+        track.setSupports(collection);
+        track.setSupportNodePosition(second.id, targetNode, {7.0, 8.0, 9.0});
+
+        require(track.supports().structures[0].nodes[0].id == untouchedNode
+                && track.supports().structures[0].nodes[0].position
+                    == glm::dvec3{1.0, 2.0, 3.0},
+            "node editing must preserve unrelated support data");
+        require(track.supports().structures[1].nodes[0].id == targetNode
+                && track.supports().structures[1].nodes[0].position
+                    == glm::dvec3{7.0, 8.0, 9.0},
+            "node editing must change only the stable target ID");
+
+        requireInvalid([&] {
+            track.setSupportNodePosition(999, targetNode, {0.0, 0.0, 0.0});
+        }, "unknown structure ID must be rejected");
+        requireInvalid([&] {
+            track.setSupportNodePosition(second.id, 999, {0.0, 0.0, 0.0});
+        }, "unknown node ID must be rejected");
+        requireInvalid([&] {
+            track.setSupportNodePosition(second.id, targetNode,
+                {std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0});
+        }, "non-finite node position must be rejected");
+        require(track.supports().structures[1].nodes[0].position
+                == glm::dvec3{7.0, 8.0, 9.0},
+            "rejected node editing must leave the document unchanged");
+    }
 }
 
 int main()
@@ -249,4 +285,5 @@ int main()
     invalidGeometryAndCountersAreRejected();
     steelGraphsUseTheCommonModel();
     woodenBentRunUsesTheCommonModel();
+    nodePositionEditingUsesStableIds();
 }

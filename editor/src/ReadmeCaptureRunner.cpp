@@ -5,6 +5,7 @@
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
+#include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <SDL3/SDL.h>
@@ -24,6 +25,7 @@ namespace quantum::editor
         {
             coaster::AuthoredTrack track;
             CenterlineVisualization centerline;
+            SupportVisualization supports;
             coaster::RiderLoadHistory loads;
         };
 
@@ -44,6 +46,7 @@ namespace quantum::editor
             validateReadmeCaptureDocument(scenario, *track);
             // The same solve/load acceptance as File > Open, with no document mutation.
             auto centerline = createCenterlineVisualization(*track);
+            auto supports = createSupportVisualization(track->supports());
             auto loads = evaluateRiderLoadDiagnostics(*track);
             AuthoredTrackEditTransaction transaction{*track};
             transaction.requireAcceptableRiderLoads(loads);
@@ -55,7 +58,8 @@ namespace quantum::editor
                 if (model.selectedSection().samples.size() < 2)
                     throw std::invalid_argument("force-diagnostics: selected region has no plottable rider loads.");
             }
-            return {std::move(*track), std::move(centerline), std::move(loads)};
+            return {std::move(*track), std::move(centerline),
+                std::move(supports), std::move(loads)};
         }
 
         void savePng(renderer::FrameImage& image, const std::filesystem::path& path)
@@ -85,11 +89,13 @@ namespace quantum::editor
             vulkan.initialize(window.get(), loaded.centerline.vertices,
                 loaded.centerline.verticesPerCurve,
                 loaded.centerline.renderableTrack, true);
+            vulkan.updateSupportVertices(loaded.supports.memberVertices);
             EditorUi ui;
             ui.initialize(window.get(), vulkan, loaded.track,
                 loaded.centerline.minimumPosition, loaded.centerline.maximumPosition, &scenario);
             ui.setCenterlineSections(loaded.centerline.sectionSlices);
             ui.setCenterlineVisualization(loaded.centerline);
+            ui.setSupportVisualization(loaded.supports);
             ui.setRiderLoadHistory(loaded.loads);
 
             int stableFrames = 0;

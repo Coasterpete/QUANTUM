@@ -14,6 +14,7 @@
 #include <quantum/editor/RegionSelection.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/SimulationPreview.hpp>
+#include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
@@ -142,6 +143,28 @@ namespace
             0.004
         );
 
+        quantum::coaster::SupportCollection supports;
+        const auto structureId =
+            quantum::coaster::allocateSupportStructureId(supports);
+        supports.structures.push_back({structureId, "Demo A-frame"});
+        auto& structure = supports.structures.back();
+        const auto left =
+            quantum::coaster::allocateSupportElementId(structure);
+        structure.nodes.push_back({left, {8.0, -6.0, -3.0}});
+        const auto right =
+            quantum::coaster::allocateSupportElementId(structure);
+        structure.nodes.push_back({right, {8.0, -6.0, 3.0}});
+        const auto top =
+            quantum::coaster::allocateSupportElementId(structure);
+        structure.nodes.push_back({top, {8.0, 3.0, 0.0}});
+        structure.members.push_back({
+            quantum::coaster::allocateSupportElementId(structure),
+            left, top, {}});
+        structure.members.push_back({
+            quantum::coaster::allocateSupportElementId(structure),
+            right, top, {}});
+        track.setSupports(supports);
+
         return track;
     }
 
@@ -149,6 +172,7 @@ namespace
     {
         quantum::coaster::AuthoredTrack track;
         quantum::editor::CenterlineVisualization centerline;
+        quantum::editor::SupportVisualization supports;
         quantum::coaster::RiderLoadHistory riderLoads;
     };
 
@@ -171,6 +195,8 @@ namespace
         {
             auto centerline = quantum::editor::createCenterlineVisualization(
                 *track, track->trackStyle());
+            auto supports = quantum::editor::createSupportVisualization(
+                track->supports());
             auto riderLoads =
                 quantum::editor::evaluateRiderLoadDiagnostics(*track);
             quantum::editor::AuthoredTrackEditTransaction transaction{*track};
@@ -178,6 +204,7 @@ namespace
             return PreparedDocument{
                 std::move(*track),
                 std::move(centerline),
+                std::move(supports),
                 std::move(riderLoads)};
         }
         catch (const std::exception& error)
@@ -323,6 +350,11 @@ namespace quantum::engine
                         centerlineCache.rebuildIfDirty(authoredTrack));
                 const quantum::editor::CenterlineVisualization& centerline =
                     centerlineCache.visualization();
+                quantum::editor::SupportVisualization supportVisualization =
+                    startupDocument
+                    ? std::move(startupDocument->supports)
+                    : quantum::editor::createSupportVisualization(
+                        authoredTrack.supports());
 
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Info,
@@ -347,6 +379,8 @@ namespace quantum::engine
                     centerline.verticesPerCurve,
                     centerline.renderableTrack
                 );
+                vulkan.updateSupportVertices(
+                    supportVisualization.memberVertices);
 
                 quantum::editor::EditorUi editorUi;
                 editorUi.initialize(
@@ -358,6 +392,7 @@ namespace quantum::engine
                 );
                 editorUi.setCenterlineSections(centerline.sectionSlices);
                 editorUi.setCenterlineVisualization(centerline);
+                editorUi.setSupportVisualization(supportVisualization);
                 editorUi.setRiderLoadHistory(startupDocument
                     ? std::move(startupDocument->riderLoads)
                     : quantum::editor::evaluateRiderLoadDiagnostics(
@@ -482,6 +517,9 @@ namespace quantum::engine
                     quantum::coaster::RiderLoadHistory restoredRiderLoads =
                         quantum::editor::evaluateRiderLoadDiagnostics(
                             restoredTrack);
+                    quantum::editor::SupportVisualization restoredSupports =
+                        quantum::editor::createSupportVisualization(
+                            restoredTrack.supports());
                     quantum::editor::AuthoredTrackEditTransaction
                         restoredTransaction{restoredTrack};
                     restoredTransaction.requireAcceptableRiderLoads(
@@ -495,6 +533,8 @@ namespace quantum::engine
                         restoredCenterline.verticesPerCurve);
                     vulkan.updateRenderableTrack(
                         restoredCenterline.renderableTrack);
+                    vulkan.updateSupportVertices(
+                        restoredSupports.memberVertices);
 
                     const std::size_t restoredSelection = std::min(
                         editorUi.selectedSection(),
@@ -503,6 +543,8 @@ namespace quantum::engine
                     centerlineCache.setTrackStyle(
                         authoredTrack.trackStyle());
                     centerlineCache.replace(std::move(restoredCenterline));
+                    supportVisualization = std::move(restoredSupports);
+                    editorUi.setSupportVisualization(supportVisualization);
                     editorUi.setCenterlineBounds(
                         centerline.minimumPosition,
                         centerline.maximumPosition);
@@ -836,6 +878,11 @@ editorUi.selectSection(restoredSelection, true);
                                     static_cast<void>(
                                         centerlineCache.rebuildIfDirty(
                                             authoredTrack));
+                                    supportVisualization = quantum::editor::
+                                        createSupportVisualization(
+                                            authoredTrack.supports());
+                                    editorUi.setSupportVisualization(
+                                        supportVisualization);
                                     editorUi.setCenterlineBounds(
                                         centerline.minimumPosition,
                                         centerline.maximumPosition
@@ -856,6 +903,8 @@ editorUi.selectSection(restoredSelection, true);
                                     );
                                     vulkan.updateRenderableTrack(
                                         centerline.renderableTrack);
+                                    vulkan.updateSupportVertices(
+                                        supportVisualization.memberVertices);
                                     editorUi.updateWindowTitle(
                                         documentState.windowTitle()
                                     );
@@ -895,16 +944,22 @@ editorUi.selectSection(restoredSelection, true);
                                                 loaded->centerline.verticesPerCurve);
                                             vulkan.updateRenderableTrack(
                                                 loaded->centerline.renderableTrack);
+                                            vulkan.updateSupportVertices(
+                                                loaded->supports.memberVertices);
                                             authoredTrack =
                                                 std::move(loaded->track);
                                             centerlineCache.setTrackStyle(
                                                 authoredTrack.trackStyle());
                                             centerlineCache.replace(
                                                 std::move(loaded->centerline));
+                                            supportVisualization =
+                                                std::move(loaded->supports);
                                             documentHistory.reset(authoredTrack);
                                             documentState.setOpenDocument(*openPath);
                                             editorUi.resetTransientState();
                                             editorUi.selectSection(0, true);
+                                            editorUi.setSupportVisualization(
+                                                supportVisualization);
                                             editorUi.setCenterlineBounds(centerline.minimumPosition,
                                                 centerline.maximumPosition);
                                             editorUi.setCenterlineSections(centerline.sectionSlices);
@@ -1006,6 +1061,8 @@ editorUi.selectSection(restoredSelection, true);
                             editorUi.takeStartPoseEdit();
                         const auto requestedHardwareEdit =
                             editorUi.takeTrackHardwareEdit();
+                        const auto requestedSupportEdit =
+                            editorUi.takeSupportNodePositionEdit();
 
                         // Continuous handle drags queue a changed-value or
                         // changed-boundary edit every motion frame; both
@@ -1028,6 +1085,79 @@ editorUi.selectSection(restoredSelection, true);
                             && !editorUi.documentDragActive())
                         {
                             documentHistory.endContinuousEdit();
+                        }
+
+                        if (requestedSupportEdit.has_value())
+                        {
+                            try
+                            {
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    supportTransaction{authoredTrack};
+                                supportTransaction.candidate()
+                                    .setSupportNodePosition(
+                                        requestedSupportEdit->structureId,
+                                        requestedSupportEdit->nodeId,
+                                        requestedSupportEdit->position);
+                                quantum::editor::SupportVisualization
+                                    candidateSupports = quantum::editor::
+                                        createSupportVisualization(
+                                            supportTransaction.candidate()
+                                                .supports());
+
+                                // The retained upload drains in-flight users;
+                                // publication occurs only after the candidate
+                                // visualization and GPU update both succeed.
+                                vulkan.updateSupportVertices(
+                                    candidateSupports.memberVertices);
+                                supportTransaction.commit(authoredTrack);
+                                supportVisualization =
+                                    std::move(candidateSupports);
+                                editorUi.setSupportVisualization(
+                                    supportVisualization);
+                                documentHistory.record(authoredTrack);
+                                synchronizeDirtyState();
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "EDIT",
+                                    "Support node %u:%u position updated to "
+                                    "(%.6f, %.6f, %.6f).",
+                                    requestedSupportEdit->structureId,
+                                    requestedSupportEdit->nodeId,
+                                    requestedSupportEdit->position.x,
+                                    requestedSupportEdit->position.y,
+                                    requestedSupportEdit->position.z);
+                            }
+                            catch (const std::exception& error)
+                            {
+                                for (const auto& structure
+                                    : authoredTrack.supports().structures)
+                                {
+                                    if (structure.id
+                                        != requestedSupportEdit->structureId)
+                                    {
+                                        continue;
+                                    }
+                                    const auto node = std::find_if(
+                                        structure.nodes.begin(),
+                                        structure.nodes.end(),
+                                        [&](const quantum::coaster::SupportNode& value)
+                                        {
+                                            return value.id
+                                                == requestedSupportEdit->nodeId;
+                                        });
+                                    if (node != structure.nodes.end())
+                                    {
+                                        editorUi.synchronizeSupportNodePosition(
+                                            node->position);
+                                    }
+                                    break;
+                                }
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "EDIT",
+                                    "Support node edit rejected: %s",
+                                    error.what());
+                            }
                         }
 
                         quantum::editor::AuthoredTrackEditTransaction

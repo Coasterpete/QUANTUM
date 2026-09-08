@@ -280,6 +280,36 @@ namespace
         require(history.size() == 2,
             "one hardware drag must coalesce into one history entry");
     }
+
+    void supportNodeEditsUseWholeDocumentHistory()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        quantum::coaster::SupportCollection supports;
+        const auto structureId =
+            quantum::coaster::allocateSupportStructureId(supports);
+        supports.structures.push_back({structureId, "History"});
+        auto& structure = supports.structures.back();
+        const auto nodeId =
+            quantum::coaster::allocateSupportElementId(structure);
+        structure.nodes.push_back({nodeId, {1.0, 2.0, 3.0}});
+        track.setSupports(supports);
+
+        DocumentHistory history;
+        history.reset(track);
+        track.setSupportNodePosition(structureId, nodeId, {4.0, 5.0, 6.0});
+        history.record(track);
+
+        const AuthoredTrack undone = requireState(
+            history.undo(), "support-node Undo missing");
+        require(undone.supports().structures[0].nodes[0].position
+                == glm::dvec3{1.0, 2.0, 3.0},
+            "support-node Undo must restore the complete document snapshot");
+        const AuthoredTrack redone = requireState(
+            history.redo(), "support-node Redo missing");
+        require(redone.supports().structures[0].nodes[0].position
+                == glm::dvec3{4.0, 5.0, 6.0},
+            "support-node Redo must restore the accepted edit");
+    }
 }
 
 int main()
@@ -293,6 +323,7 @@ int main()
         dirtyStateTracksSavedRevision();
         newOpenResetAndContinuousCoalescing();
         trackHardwareEditsUndoAndRedo();
+        supportNodeEditsUseWholeDocumentHistory();
     }
     catch (const std::exception& exception)
     {
