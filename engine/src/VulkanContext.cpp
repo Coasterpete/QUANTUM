@@ -18,6 +18,7 @@
 #include <fstream>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -2705,7 +2706,7 @@ namespace quantum::renderer
         }
 
         trainPreviewVertices_.assign(vertices.begin(), vertices.end());
-        for (TrainPreviewFrameBuffer& frameBuffer
+        for (DynamicLineFrameBuffer& frameBuffer
             : trainPreviewFrameBuffers_)
         {
             frameBuffer.requiresUpdate = true;
@@ -2715,7 +2716,7 @@ namespace quantum::renderer
     void VulkanContext::updateTrainPreviewFrameBuffer(
         const std::uint32_t frameSlot)
     {
-        TrainPreviewFrameBuffer& frameBuffer =
+        DynamicLineFrameBuffer& frameBuffer =
             trainPreviewFrameBuffers_[frameSlot];
         if (!frameBuffer.requiresUpdate)
         {
@@ -2764,6 +2765,86 @@ namespace quantum::renderer
         frameBuffer.vertexCapacity = created.capacity;
         frameBuffer.vertexCount = created.vertexCount;
         frameBuffer.requiresUpdate = false;
+    }
+
+    void VulkanContext::updateSupportVertices(
+        const std::span<const LineVertex> vertices)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update support vertices before initialization."
+            );
+        }
+        if (vertices.size() > std::numeric_limits<std::uint32_t>::max())
+        {
+            throw std::length_error(
+                "Support vertex count is outside Vulkan's draw range.");
+        }
+        if (vertices.size() % 2 != 0)
+        {
+            throw std::invalid_argument(
+                "Support vertices must form complete line-list segments.");
+        }
+        for (const LineVertex& vertex : vertices)
+        {
+            if (!std::isfinite(vertex.x)
+                || !std::isfinite(vertex.y)
+                || !std::isfinite(vertex.z)
+                || !std::ranges::all_of(
+                    vertex.color, [](const float value)
+                    {
+                        return std::isfinite(value);
+                    }))
+            {
+                throw std::invalid_argument(
+                    "VulkanContext cannot upload a non-finite support vertex."
+                );
+            }
+        }
+
+        if (vertices.empty())
+        {
+            waitForFrameCompletion();
+            supportVertexCount_ = 0;
+            return;
+        }
+
+        const VkDeviceSize size = sizeof(LineVertex) * vertices.size();
+        if (supportVertexBuffer_ != VK_NULL_HANDLE
+            && size <= supportVertexCapacity_)
+        {
+            waitForFrameCompletion();
+            writeHostVisibleVertexBuffer(
+                allocator_, supportVertexAllocation_,
+                supportVertexMappedData_, supportVertexCapacity_, vertices);
+            supportVertexCount_ = static_cast<std::uint32_t>(vertices.size());
+            return;
+        }
+
+        const CreatedVertexBuffer candidate = createHostVisibleVertexBuffer(
+            allocator_, vertices);
+        try
+        {
+            waitForFrameCompletion();
+        }
+        catch (...)
+        {
+            vmaDestroyBuffer(
+                allocator_, candidate.buffer, candidate.allocation);
+            throw;
+        }
+
+        if (supportVertexBuffer_ != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(
+                allocator_, supportVertexBuffer_, supportVertexAllocation_);
+        }
+        supportVertexBuffer_ = candidate.buffer;
+        supportVertexAllocation_ = candidate.allocation;
+        supportVertexMappedData_ = candidate.mappedData;
+        supportVertexCapacity_ = candidate.capacity;
+        supportVertexCount_ = candidate.vertexCount;
     }
 
     StaticMeshGpuHandle VulkanContext::uploadStaticMeshOnce(
@@ -3500,7 +3581,26 @@ namespace quantum::renderer
                 }
             }
 
-            const TrainPreviewFrameBuffer& trainPreviewFrameBuffer =
+            if (supportVertexCount_ > 0)
+            {
+                constexpr std::array<float, 4> noHighlight{
+                    1.0F, 0.82F, 0.12F, 0.0F};
+                vkCmdPushConstants(
+                    commandBuffer,
+                    pipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT,
+                    sizeof(viewportViewProjection_),
+                    sizeof(noHighlight),
+                    noHighlight.data());
+                vkCmdBindVertexBuffers(
+                    commandBuffer, 0, 1,
+                    &supportVertexBuffer_, &vertexOffset);
+                vkCmdDraw(
+                    commandBuffer, supportVertexCount_,
+                    1, 0, 0);
+            }
+
+            const DynamicLineFrameBuffer& trainPreviewFrameBuffer =
                 trainPreviewFrameBuffers_[frameSlot];
             if (trainPreviewFrameBuffer.vertexCount > 0)
             {
@@ -3808,7 +3908,6 @@ namespace quantum::renderer
                     Clock::now() - previewUpdateBegin).count();
             lastDrawFrameCpuTelemetry_.previewStreamUpdated = true;
         }
-
         if (readback != nullptr)
             prepareFrameReadback();
 
@@ -4220,7 +4319,7 @@ namespace quantum::renderer
             trackCurveVertexCapacity_ = 0;
             trackCurveVertexCount_ = 0;
 
-            for (TrainPreviewFrameBuffer& frameBuffer
+            for (DynamicLineFrameBuffer& frameBuffer
                 : trainPreviewFrameBuffers_)
             {
                 destroyAllocatedBuffer(
@@ -4232,6 +4331,12 @@ namespace quantum::renderer
                 frameBuffer.requiresUpdate = false;
             }
             trainPreviewVertices_.clear();
+
+            destroyAllocatedBuffer(
+                supportVertexBuffer_, supportVertexAllocation_);
+            supportVertexMappedData_ = nullptr;
+            supportVertexCapacity_ = 0;
+            supportVertexCount_ = 0;
 
             if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE)
             {

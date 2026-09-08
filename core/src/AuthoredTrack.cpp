@@ -764,6 +764,41 @@ namespace quantum::coaster
         supports_ = supports;
     }
 
+    void AuthoredTrack::setSupportNodePosition(
+        const SupportStructureId structureId,
+        const SupportElementId nodeId,
+        const glm::dvec3& position)
+    {
+        SupportCollection candidate = supports_;
+        const auto structure = std::find_if(
+            candidate.structures.begin(),
+            candidate.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == candidate.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        const auto node = std::find_if(
+            structure->nodes.begin(),
+            structure->nodes.end(),
+            [nodeId](const SupportNode& value)
+            {
+                return value.id == nodeId;
+            });
+        if (node == structure->nodes.end())
+        {
+            throw std::invalid_argument("Unknown support node ID.");
+        }
+
+        node->position = position;
+        validateSupportCollection(candidate);
+        supports_ = std::move(candidate);
+    }
+
     AuthoredTrackSection createForceDrivenSection(const double length)
     {
         AuthoredTrackSection section = createRateProfileSection(length);

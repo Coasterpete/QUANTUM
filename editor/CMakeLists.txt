@@ -2,6 +2,8 @@ add_executable(
     QUANTUM
     src/main.cpp
     src/CenterlineVisualization.cpp
+    src/SupportPicking.cpp
+    src/SupportVisualization.cpp
     src/CoasterSetupUi.cpp
     src/DocumentHistory.cpp
     src/DocumentState.cpp
@@ -21,6 +23,8 @@ add_executable(
     src/ViewportTrackAnchors.cpp
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
+    include/quantum/editor/SupportPicking.hpp
+    include/quantum/editor/SupportVisualization.hpp
     include/quantum/editor/CoasterSetupUi.hpp
     include/quantum/editor/DocumentHistory.hpp
     include/quantum/editor/DocumentState.hpp

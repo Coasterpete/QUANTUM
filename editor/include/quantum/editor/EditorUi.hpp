@@ -3,6 +3,7 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/editor/EditorIcons.hpp>
 #include <quantum/editor/EditorStyle.hpp>
 #include <quantum/editor/FramePerformanceTelemetry.hpp>
@@ -158,6 +159,15 @@ namespace quantum::editor
     {
         coaster::AuthoredStartPose pose;
         bool continuous = true;
+    };
+
+    struct SupportNodePositionEdit
+    {
+        coaster::SupportStructureId structureId =
+            coaster::invalidSupportStructureId;
+        coaster::SupportElementId nodeId =
+            coaster::invalidSupportElementId;
+        glm::dvec3 position{0.0};
     };
 
     enum class TrackHardwareEditType
@@ -375,6 +385,11 @@ namespace quantum::editor
         void setCenterlineVisualization(
             const CenterlineVisualization& visualization
         ) noexcept;
+        void setSupportVisualization(
+            const SupportVisualization& visualization) noexcept;
+        void synchronizeSupportNodePosition(const glm::dvec3& position) noexcept;
+        [[nodiscard]] std::optional<SupportNodePositionEdit>
+        takeSupportNodePositionEdit() noexcept;
         // Replaces the authoritative whole-track Core load history and
         // remaps it to the current selected section. Accepted edits call
         // this only after commit; rejected transactions leave it untouched.
@@ -484,6 +499,8 @@ namespace quantum::editor
 void drawSimulationTelemetry();
         void drawPerformanceTelemetry();
         void drawViewportTrackAnchors();
+        void drawViewportSupports();
+        void drawSupportWorkspace();
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
             float imageWidth,
@@ -580,6 +597,11 @@ void drawSimulationTelemetry();
         bool hardwareDragActive_ = false;
         std::vector<CenterlineSectionSlice> centerlineSlices_;
         const CenterlineVisualization* centerlineVisualization_ = nullptr;
+        const SupportVisualization* supportVisualization_ = nullptr;
+        std::optional<SupportSelection> selectedSupport_;
+        std::optional<SupportSelection> hoveredSupport_;
+        glm::dvec3 supportNodePositionEditBuffer_{0.0};
+        std::optional<SupportNodePositionEdit> supportNodePositionEdit_;
         RiderLoadDiagnosticsModel riderLoadDiagnostics_;
         bool riderLoadDiagnosticsWindowOpen_ = true;
         double sectionLengthEditBuffer_ = 0.0;

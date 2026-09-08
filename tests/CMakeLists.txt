@@ -1580,6 +1580,51 @@ set_tests_properties(
         LABELS "core;coaster;supports;serialization"
 )
 
+add_executable(
+    QuantumEditorSupportVisualizationTests
+    SupportVisualizationTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportPicking.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+)
+
+target_include_directories(
+    QuantumEditorSupportVisualizationTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorSupportVisualizationTests
+    PRIVATE
+        Quantum::Core
+        Quantum::Engine
+)
+
+target_compile_features(
+    QuantumEditorSupportVisualizationTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorSupportVisualizationTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.SupportVisualization
+    COMMAND QuantumEditorSupportVisualizationTests
+)
+
+set_tests_properties(
+    QuantumEditor.SupportVisualization
+    PROPERTIES
+        LABELS "editor;coaster;supports;visualization;selection"
+)
+
 target_link_libraries(
     QuantumCoreCoasterDocumentTests
     PRIVATE

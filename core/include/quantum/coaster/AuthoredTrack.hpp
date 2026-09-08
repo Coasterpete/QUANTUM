@@ -219,6 +219,13 @@ namespace quantum::coaster
         // Validates the complete collection before replacing persistent
         // support state.
         void setSupports(const SupportCollection& supports);
+        // Changes one node by stable document/element identity. Throws for
+        // an unknown ID or non-finite position and leaves the document
+        // unchanged on failure.
+        void setSupportNodePosition(
+            SupportStructureId structureId,
+            SupportElementId nodeId,
+            const glm::dvec3& position);
 
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 

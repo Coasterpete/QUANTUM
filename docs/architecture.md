@@ -199,8 +199,43 @@ structure persists its ID, name, `nextElementId`, ordered nodes, and ordered
 members. Member endpoint IDs and profile data round-trip unchanged. Missing
 `supports` loads as an empty collection with its initial allocator state;
 unknown fields and malformed references are rejected rather than repaired.
-Foundations, track attachments, origin/generator metadata, materials,
-rendering, picking, and editor interaction remain later milestones.
+Foundations, track attachments, origin/generator metadata, materials, final
+member meshes, and structural analysis remain later milestones.
+
+### Support visualization and selection
+
+The Editor derives a transient `SupportVisualization` directly from the
+committed or candidate `SupportCollection`. It retains double-precision node
+positions and resolved member endpoints with stable `(structureId, elementId)`
+identity, while converting each member to one pair of float `LineVertex`
+values for rendering. Authored vector order defines deterministic conversion
+order. Empty collections produce empty visualization and draw streams.
+
+The renderer treats support members as an ordinary renderer-neutral line
+stream and draws them through the existing viewport line pipeline. Updates
+follow the retained track-curve buffer pattern: candidate allocation happens
+first, in-flight frames are drained before replacement, and only a successful
+upload may precede document commit. Empty updates logically clear the draw.
+Node markers and selected/hovered member
+emphasis are image-clipped ImGui overlays; M0B deliberately has no support
+mesh, material, profile shading, or support-specific graphics pipeline.
+
+Support selection is Editor-only state and is separate from authored-region
+and track-anchor selection. Nodes use screen-space marker-distance picking;
+members use projected segment distance. Nodes have priority over members,
+which have priority over existing track selection. Equal hits prefer screen
+distance, depth, then the lower stable structure and element IDs. Selection is
+re-resolved after document replacement and survives only while both IDs and
+the selected kind remain present.
+
+The Support Workspace displays the selected structure and element. Node XYZ
+is the only editable M0B property; member endpoints and profile data are
+read-only. A node edit targets stable IDs through
+`AuthoredTrack::setSupportNodePosition`, prepares and uploads candidate support
+visualization, then commits through `AuthoredTrackEditTransaction`. Accepted
+states enter the existing whole-document `DocumentHistory`, so Undo/Redo needs
+no support-specific stack. New documents remain empty; the existing opt-in
+interactive-authoring demo supplies a small deterministic A-frame.
 
 ### Implemented region kinds
 
@@ -553,9 +588,9 @@ and empty space preserves the current selection. The Editor overlays the
 selected slice with thicker rails and square end caps (falling back to a visible
 reference curve when rails are hidden), and gives hover a separate emphasis.
 These image-clipped ImGui overlays do not rewrite the geometry buffer or add a
-Vulkan rendering pass. Accepted authored geometry or structure
-edits regenerate the whole continuous visualization and dynamically update the
-Vulkan track-curve buffer. An Editor-owned orbit camera supplies the
+Vulkan rendering pass. Accepted authored track-geometry edits regenerate the
+whole continuous visualization and dynamically update the Vulkan track-curve
+buffer. An Editor-owned orbit camera supplies the
 view-projection matrix and supports navigation and region/whole-track framing.
 Viewport resize only recreates the offscreen color/depth target.
 
@@ -1347,9 +1382,9 @@ architectural commitments:
 - editable force-target profiles and endpoint-constrained force solving;
 - expanded authored track-style geometry families, configurable rail/heartline geometry, and final rail meshing systems;
 - direct deformation or control-point editing in the 3D viewport;
-- support authoring/rendering, foundations, and track/support attachment
-  hardware (the persistent node/member model exists, while the Support
-  Workspace remains an unfinished disabled shell);
+- manual support creation/deletion and gizmo movement, node snapping,
+  foundations, track/support attachments, procedural generation, final member
+  meshes/materials, and structural analysis;
 - connector compliance, slack, springs, damping, and train whip;
 - suspension/compliance, gaps/preload, friction/slip, and physically resolved
   individual-wheel load sharing beyond the rigid representative allocation;
