@@ -170,6 +170,34 @@ namespace quantum::editor
         glm::dvec3 position{0.0};
     };
 
+    // One-shot support topology commands requested by the Supports
+    // workspace / Connect Nodes workflow. Application applies each command to
+    // an AuthoredTrackEditTransaction candidate; all IDs are Core-allocated.
+    enum class SupportEditType
+    {
+        CreateStructure,
+        DeleteStructure,
+        CreateNode,
+        DeleteNode,
+        CreateMember,
+        DeleteMember
+    };
+
+    struct SupportEditCommand
+    {
+        SupportEditType type = SupportEditType::CreateStructure;
+        coaster::SupportStructureId structureId =
+            coaster::invalidSupportStructureId;
+        // Delete target element ID, or the first member endpoint.
+        coaster::SupportElementId elementId =
+            coaster::invalidSupportElementId;
+        // Second member endpoint for CreateMember.
+        coaster::SupportElementId secondElementId =
+            coaster::invalidSupportElementId;
+        // Position for CreateNode.
+        glm::dvec3 nodePosition{0.0};
+    };
+
     enum class TrackHardwareEditType
     {
         SetConfiguration,
@@ -390,6 +418,34 @@ namespace quantum::editor
         void synchronizeSupportNodePosition(const glm::dvec3& position) noexcept;
         [[nodiscard]] std::optional<SupportNodePositionEdit>
         takeSupportNodePositionEdit() noexcept;
+        // Returns and clears a pending support topology command. Selection and
+        // Connect-tool state are handled by the Application layer once a
+        // command is accepted or rejected.
+        [[nodiscard]] std::optional<SupportEditCommand>
+        takeSupportEditCommand() noexcept;
+        // Starts the Connect Nodes workflow using the currently selected
+        // node. No-op unless a live node is selected. The stored first node
+        // uses its stable ID and is re-resolved against the committed
+        // document every time the visualization refreshes.
+        void beginSupportConnect();
+        void cancelSupportConnect() noexcept;
+        [[nodiscard]] bool supportConnectWaiting() const noexcept;
+        // Displays a concise reason after a support mutation or second-node
+        // click was rejected. Leaves the Connect tool state intact so the
+        // user can retry.
+        void noteSupportEditFailure(const std::string& message) noexcept;
+        // Programmatic post-commit selection of a newly created object.
+        // Selection always resolves against the committed document through
+        // stable IDs.
+        void selectSupportStructure(
+            coaster::SupportStructureId structureId) noexcept;
+        void selectSupportNode(
+            coaster::SupportStructureId structureId,
+            coaster::SupportElementId nodeId,
+            const glm::dvec3& position) noexcept;
+        void selectSupportMember(
+            coaster::SupportStructureId structureId,
+            coaster::SupportElementId memberId) noexcept;
         // Replaces the authoritative whole-track Core load history and
         // remaps it to the current selected section. Accepted edits call
         // this only after commit; rejected transactions leave it untouched.
@@ -602,6 +658,17 @@ void drawSimulationTelemetry();
         std::optional<SupportSelection> hoveredSupport_;
         glm::dvec3 supportNodePositionEditBuffer_{0.0};
         std::optional<SupportNodePositionEdit> supportNodePositionEdit_;
+        // Transient Connect Nodes workflow state. It is editor memory only
+        // and is never serialized.
+        std::optional<SupportEditCommand> supportEditCommand_;
+        enum class SupportConnectState : std::uint8_t
+        {
+            Inactive,
+            WaitingForSecondNode
+        };
+        SupportConnectState supportConnectState_ = SupportConnectState::Inactive;
+        SupportSelection supportConnectFirstNode_;
+        std::string supportEditMessage_;
         RiderLoadDiagnosticsModel riderLoadDiagnostics_;
         bool riderLoadDiagnosticsWindowOpen_ = true;
         double sectionLengthEditBuffer_ = 0.0;

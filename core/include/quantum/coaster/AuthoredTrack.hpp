@@ -227,6 +227,34 @@ namespace quantum::coaster
             SupportElementId nodeId,
             const glm::dvec3& position);
 
+        // Invariant-preserving topology editing for the manual support
+        // authoring workflow. Each operation copies the committed support
+        // collection, mutates the copy through the Core support mutation API
+        // (which allocates all IDs and validates every invariant), and only
+        // then replaces the committed document. A rejected operation throws
+        // std::invalid_argument with the committed document unchanged, so the
+        // callers can run the same mutation on an
+        // AuthoredTrackEditTransaction candidate and publish it as one
+        // history entry. Deleted IDs are never reused.
+        [[nodiscard]] SupportStructureId createSupportStructure(
+            std::string name = {});
+        void removeSupportStructure(SupportStructureId structureId);
+        [[nodiscard]] SupportElementId createSupportNode(
+            SupportStructureId structureId,
+            const glm::dvec3& position);
+        void removeSupportNode(
+            SupportStructureId structureId,
+            SupportElementId nodeId);
+        [[nodiscard]] SupportElementId createSupportMember(
+            SupportStructureId structureId,
+            SupportElementId startNodeId,
+            SupportElementId endNodeId,
+            const SupportMemberProfile& profile =
+                defaultSupportMemberProfile());
+        void removeSupportMember(
+            SupportStructureId structureId,
+            SupportElementId memberId);
+
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
         // Throws std::out_of_range for an invalid index.

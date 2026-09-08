@@ -119,6 +119,41 @@ namespace
         require(restored.error().find("futureField") != std::string::npos,
             "unknown support field error must identify the field");
     }
+
+    void manuallyAuthoredGraphRoundTripsExactly()
+    {
+        SupportCollection supports;
+        const SupportStructureId frameId =
+            createSupportStructure(supports, "Manual steel frame");
+        const SupportElementId base = createSupportNode(
+            supports, frameId, {0.0, 0.0, 0.0});
+        const SupportElementId top = createSupportNode(
+            supports, frameId, {0.0, 0.0, 7.0});
+        createSupportMember(supports, frameId, base, top,
+            {SupportMemberProfileShape::Circular, {0.28, 0.28}, 0.018});
+        const SupportElementId loose = createSupportNode(
+            supports, frameId, {1.5, 0.0, 3.5});
+        const SupportStructureId bentId =
+            createSupportStructure(supports);
+        createSupportNode(supports, bentId, {-2.0, 0.0, 0.0});
+        createSupportNode(supports, bentId, {2.0, 0.0, 0.0});
+        // Delete one node and the structure it left behind so the round-trip
+        // must preserve the allocator past an erase.
+        removeSupportStructure(supports, frameId);
+
+        AuthoredTrack track = createNewDocument();
+        track.setSupports(supports);
+
+        const std::string serialized = serializeCoasterDocument(track);
+        const auto restored = deserializeCoasterDocument(serialized);
+        require(restored.has_value(),
+            "a manually authored graph must deserialize");
+        require(restored->supports() == track.supports(),
+            "manual graph IDs, counters, profiles, and erase history must "
+            "round-trip");
+        require(serializeCoasterDocument(*restored) == serialized,
+            "manual graph serialization must be deterministic");
+    }
 }
 
 int main()
@@ -128,4 +163,5 @@ int main()
     malformedReferencesAreRejected();
     malformedIdsAndCountersAreRejected();
     unknownSupportFieldsAreRejected();
+    manuallyAuthoredGraphRoundTripsExactly();
 }

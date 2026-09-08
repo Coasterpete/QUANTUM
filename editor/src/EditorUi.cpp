@@ -3814,115 +3814,315 @@ namespace quantum::editor
     {
         ImGui::Begin(supportWorkspaceWindowName);
 
-        if (authoredTrack_ == nullptr || authoredTrack_->supports().empty())
+        if (authoredTrack_ == nullptr)
         {
-            ImGui::TextDisabled("No supports in this document.");
+            ImGui::TextDisabled("No document.");
             ImGui::End();
             return;
+        }
+
+        const coaster::SupportCollection& supports = authoredTrack_->supports();
+        const auto findStructure = [&supports](
+            const coaster::SupportStructureId id)
+        {
+            return std::find_if(
+                supports.structures.begin(), supports.structures.end(),
+                [id](const coaster::SupportStructure& value)
+                {
+                    return value.id == id;
+                });
+        };
+
+        if (selectedSupport_.has_value()
+            && !supportSelectionExists(supports, *selectedSupport_))
+        {
+            selectedSupport_.reset();
         }
 
         ImGui::Text("Supports");
         ImGui::Separator();
-        if (!selectedSupport_.has_value())
-        {
-            ImGui::Text("Structures: %zu",
-                authoredTrack_->supports().structures.size());
-            ImGui::TextDisabled("Select a support node or member in the viewport.");
-            ImGui::End();
-            return;
-        }
 
-        const SupportSelection selection = *selectedSupport_;
-        const auto structure = std::find_if(
-            authoredTrack_->supports().structures.begin(),
-            authoredTrack_->supports().structures.end(),
-            [selection](const coaster::SupportStructure& value)
+        ImGui::Text("Structures");
+        ImGui::Indent();
+        for (const coaster::SupportStructure& structure : supports.structures)
+        {
+            const bool isSelected = selectedSupport_.has_value()
+                && selectedSupport_->structureId == structure.id;
+            if (ImGui::Selectable(structure.name.c_str(), isSelected))
             {
-                return value.id == selection.structureId;
-            });
-        if (structure == authoredTrack_->supports().structures.end())
-        {
-            selectedSupport_.reset();
-            ImGui::TextDisabled("The selected support no longer exists.");
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Text("Structure");
-        ImGui::Text("Name: %s", structure->name.c_str());
-        ImGui::Text("ID: %u", structure->id);
-        ImGui::Spacing();
-        ImGui::Text("Selected");
-
-        if (selection.kind == SupportSelectionKind::Node)
-        {
-            const auto node = std::find_if(
-                structure->nodes.begin(), structure->nodes.end(),
-                [selection](const coaster::SupportNode& value)
-                {
-                    return value.id == selection.elementId;
-                });
-            if (node == structure->nodes.end())
-            {
-                selectedSupport_.reset();
-                ImGui::TextDisabled("The selected node no longer exists.");
-                ImGui::End();
-                return;
+                selectedSupport_ = {
+                    structure.id, SupportSelectionKind::Structure,
+                    coaster::invalidSupportElementId};
             }
+        }
+        if (supports.structures.empty())
+        {
+            ImGui::TextDisabled("No structures.");
+        }
 
-            ImGui::Text("Node %u", node->id);
+        if (ImGui::Button("+ Structure"))
+        {
+            supportEditCommand_ = {SupportEditType::CreateStructure};
+        }
+        const bool canDeleteStructure = selectedSupport_.has_value()
+            && findStructure(selectedSupport_->structureId)
+                != supports.structures.end();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!canDeleteStructure);
+        if (ImGui::Button("Delete Structure"))
+        {
+            supportEditCommand_ = {
+                SupportEditType::DeleteStructure,
+                selectedSupport_->structureId};
+        }
+        ImGui::EndDisabled();
+        ImGui::Unindent();
+        ImGui::Separator();
+
+        // The detail area follows the structure the current selection
+        // addresses; with no selection yet the first structure is shown so
+        // the workspace is immediately usable.
+        const auto activeStructure = selectedSupport_.has_value()
+            ? findStructure(selectedSupport_->structureId)
+            : (supports.structures.empty()
+                ? supports.structures.end()
+                : supports.structures.begin());
+        if (activeStructure != supports.structures.end())
+        {
+            const coaster::SupportStructure& structure = *activeStructure;
+            ImGui::Text("Selected Structure");
+            ImGui::Text("Name: %s", structure.name.c_str());
+            ImGui::Text("Stable ID: %u", structure.id);
             ImGui::Spacing();
-            ImGui::Text("Position");
-            bool changed = false;
-            ImGui::SetNextItemWidth(-1.0F);
-            changed |= ImGui::InputScalar(
-                "X", ImGuiDataType_Double,
-                &supportNodePositionEditBuffer_.x,
-                nullptr, nullptr, "%.6f");
-            ImGui::SetNextItemWidth(-1.0F);
-            changed |= ImGui::InputScalar(
-                "Y", ImGuiDataType_Double,
-                &supportNodePositionEditBuffer_.y,
-                nullptr, nullptr, "%.6f");
-            ImGui::SetNextItemWidth(-1.0F);
-            changed |= ImGui::InputScalar(
-                "Z", ImGuiDataType_Double,
-                &supportNodePositionEditBuffer_.z,
-                nullptr, nullptr, "%.6f");
-            if (changed)
+
+            ImGui::Text("Nodes");
+            ImGui::Indent();
+            std::optional<coaster::SupportElementId> selectedNodeId;
+            for (const coaster::SupportNode& node : structure.nodes)
             {
-                supportNodePositionEdit_ = {
-                    structure->id,
-                    node->id,
-                    supportNodePositionEditBuffer_};
+                const bool isSelected = selectedSupport_.has_value()
+                    && selectedSupport_->kind == SupportSelectionKind::Node
+                    && selectedSupport_->elementId == node.id;
+                char label[48];
+                std::snprintf(
+                    label, sizeof(label), "Node %u", node.id);
+                if (ImGui::Selectable(label, isSelected))
+                {
+                    selectedSupport_ = {
+                        structure.id, SupportSelectionKind::Node, node.id};
+                    supportNodePositionEditBuffer_ = node.position;
+                    selectedNodeId = node.id;
+                }
+                if (isSelected)
+                {
+                    selectedNodeId = node.id;
+                }
             }
+            if (structure.nodes.empty())
+            {
+                ImGui::TextDisabled("No nodes.");
+            }
+
+            if (ImGui::Button("+ Node"))
+            {
+                glm::dvec3 newPosition{0.0, 0.0, 0.0};
+                if (selectedNodeId.has_value())
+                {
+                    const auto selectedNode = std::find_if(
+                        structure.nodes.begin(), structure.nodes.end(),
+                        [selectedNodeId](const coaster::SupportNode& node)
+                        {
+                            return node.id == *selectedNodeId;
+                        });
+                    if (selectedNode != structure.nodes.end())
+                    {
+                        // Deterministic M1A placement: a small fixed offset
+                        // from the selected node keeps new nodes visible and
+                        // unambiguous without viewport gizmos.
+                        newPosition =
+                            selectedNode->position + glm::dvec3{1.0, 0.0, 0.0};
+                    }
+                }
+                supportEditCommand_ = {
+                    SupportEditType::CreateNode, structure.id,
+                    coaster::invalidSupportElementId,
+                    coaster::invalidSupportElementId, newPosition};
+            }
+            const bool canDeleteNode = selectedSupport_.has_value()
+                && selectedSupport_->kind == SupportSelectionKind::Node
+                && selectedSupport_->structureId == structure.id;
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!canDeleteNode);
+            if (ImGui::Button("Delete Node"))
+            {
+                supportEditCommand_ = {
+                    SupportEditType::DeleteNode, structure.id,
+                    selectedSupport_->elementId};
+            }
+            ImGui::EndDisabled();
+            ImGui::Unindent();
+            ImGui::Spacing();
+
+            ImGui::Text("Members");
+            ImGui::Indent();
+            std::optional<coaster::SupportElementId> selectedMemberId;
+            for (const coaster::SupportMember& member : structure.members)
+            {
+                const bool isSelected = selectedSupport_.has_value()
+                    && selectedSupport_->kind == SupportSelectionKind::Member
+                    && selectedSupport_->elementId == member.id;
+                char label[48];
+                std::snprintf(
+                    label, sizeof(label), "Member %u [%u -> %u]",
+                    member.id, member.startNodeId, member.endNodeId);
+                if (ImGui::Selectable(label, isSelected))
+                {
+                    selectedSupport_ = {
+                        structure.id, SupportSelectionKind::Member,
+                        member.id};
+                    selectedMemberId = member.id;
+                }
+                if (isSelected)
+                {
+                    selectedMemberId = member.id;
+                }
+            }
+            if (structure.members.empty())
+            {
+                ImGui::TextDisabled("No members.");
+            }
+
+            const bool canConnect = selectedSupport_.has_value()
+                && selectedSupport_->kind == SupportSelectionKind::Node;
+            ImGui::BeginDisabled(!canConnect);
+            if (ImGui::Button("Connect Nodes"))
+            {
+                beginSupportConnect();
+            }
+            ImGui::EndDisabled();
+            const bool canDeleteMember = selectedSupport_.has_value()
+                && selectedSupport_->kind == SupportSelectionKind::Member
+                && selectedSupport_->structureId == structure.id;
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!canDeleteMember);
+            if (ImGui::Button("Delete Member"))
+            {
+                supportEditCommand_ = {
+                    SupportEditType::DeleteMember, structure.id,
+                    selectedSupport_->elementId};
+            }
+            ImGui::EndDisabled();
+            ImGui::Unindent();
+
+            ImGui::Spacing();
+            if (supportConnectState_ == SupportConnectState::WaitingForSecondNode)
+            {
+                if (!supportSelectionExists(
+                        supports, supportConnectFirstNode_))
+                {
+                    cancelSupportConnect();
+                }
+                else
+                {
+                    ImGui::TextColored(
+                        palette::viewportAnchor,
+                        "Connect Nodes: select a second node in this structure.");
+                    if (ImGui::Button("Cancel"))
+                    {
+                        cancelSupportConnect();
+                    }
+                }
+            }
+            if (!supportEditMessage_.empty())
+            {
+                ImGui::TextWrapped("%s", supportEditMessage_.c_str());
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Selected");
+            if (selectedSupport_.has_value()
+                && selectedSupport_->kind == SupportSelectionKind::Node
+                && selectedSupport_->structureId == structure.id)
+            {
+                const auto node = std::find_if(
+                    structure.nodes.begin(), structure.nodes.end(),
+                    [this](const coaster::SupportNode& value)
+                    {
+                        return value.id == selectedSupport_->elementId;
+                    });
+                if (node == structure.nodes.end())
+                {
+                    selectedSupport_.reset();
+                }
+                else
+                {
+                    ImGui::Text("Node %u", node->id);
+                    ImGui::Spacing();
+                    ImGui::Text("Position");
+                    bool changed = false;
+                    ImGui::SetNextItemWidth(-1.0F);
+                    changed |= ImGui::InputScalar(
+                        "X", ImGuiDataType_Double,
+                        &supportNodePositionEditBuffer_.x,
+                        nullptr, nullptr, "%.6f");
+                    ImGui::SetNextItemWidth(-1.0F);
+                    changed |= ImGui::InputScalar(
+                        "Y", ImGuiDataType_Double,
+                        &supportNodePositionEditBuffer_.y,
+                        nullptr, nullptr, "%.6f");
+                    ImGui::SetNextItemWidth(-1.0F);
+                    changed |= ImGui::InputScalar(
+                        "Z", ImGuiDataType_Double,
+                        &supportNodePositionEditBuffer_.z,
+                        nullptr, nullptr, "%.6f");
+                    if (changed)
+                    {
+                        supportNodePositionEdit_ = {
+                            structure.id,
+                            node->id,
+                            supportNodePositionEditBuffer_};
+                    }
+                }
+            }
+            else if (selectedSupport_.has_value()
+                && selectedSupport_->kind == SupportSelectionKind::Member
+                && selectedSupport_->structureId == structure.id)
+            {
+                const auto member = std::find_if(
+                    structure.members.begin(), structure.members.end(),
+                    [this](const coaster::SupportMember& value)
+                    {
+                        return value.id == selectedSupport_->elementId;
+                    });
+                if (member == structure.members.end())
+                {
+                    selectedSupport_.reset();
+                }
+                else
+                {
+                    ImGui::Text("Member %u", member->id);
+                    ImGui::Text("Endpoint A: %u", member->startNodeId);
+                    ImGui::Text("Endpoint B: %u", member->endNodeId);
+                    ImGui::Text(
+                        "Profile: %s %.6g x %.6g, wall %.6g",
+                        member->profile.shape
+                                == coaster::SupportMemberProfileShape::Circular
+                            ? "Circular" : "Rectangular",
+                        member->profile.outerDimensions.x,
+                        member->profile.outerDimensions.y,
+                        member->profile.wallThickness);
+                }
+            }
+        }
+        else if (supports.structures.empty())
+        {
+            ImGui::TextDisabled(
+                "Create a structure to start building supports.");
         }
         else
         {
-            const auto member = std::find_if(
-                structure->members.begin(), structure->members.end(),
-                [selection](const coaster::SupportMember& value)
-                {
-                    return value.id == selection.elementId;
-                });
-            if (member == structure->members.end())
-            {
-                selectedSupport_.reset();
-                ImGui::TextDisabled("The selected member no longer exists.");
-                ImGui::End();
-                return;
-            }
-
-            ImGui::Text("Member %u", member->id);
-            ImGui::Text("Endpoint A: %u", member->startNodeId);
-            ImGui::Text("Endpoint B: %u", member->endNodeId);
-            ImGui::Text("Profile: %s %.6g x %.6g, wall %.6g",
-                member->profile.shape
-                        == coaster::SupportMemberProfileShape::Circular
-                    ? "Circular" : "Rectangular",
-                member->profile.outerDimensions.x,
-                member->profile.outerDimensions.y,
-                member->profile.wallThickness);
+            ImGui::TextDisabled(
+                "The selected support no longer exists.");
         }
 
         ImGui::End();
@@ -4740,21 +4940,67 @@ namespace quantum::editor
                     hoveredSupport_ = supportHit->selection;
                     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                     {
-                        selectedSupport_ = supportHit->selection;
-                        if (selectedSupport_->kind
-                            == SupportSelectionKind::Node)
+                        if (supportConnectState_
+                            != SupportConnectState::WaitingForSecondNode)
                         {
-                            const auto node = std::find_if(
-                                supportVisualization_->nodes.begin(),
-                                supportVisualization_->nodes.end(),
-                                [this](const SupportVisualizationNode& value)
-                                {
-                                    return value.selection == *selectedSupport_;
-                                });
-                            if (node != supportVisualization_->nodes.end())
+                            selectedSupport_ = supportHit->selection;
+                            if (selectedSupport_->kind
+                                == SupportSelectionKind::Node)
                             {
-                                supportNodePositionEditBuffer_ = node->position;
+                                const auto node = std::find_if(
+                                    supportVisualization_->nodes.begin(),
+                                    supportVisualization_->nodes.end(),
+                                    [this](
+                                        const SupportVisualizationNode& value)
+                                    {
+                                        return value.selection
+                                            == *selectedSupport_;
+                                    });
+                                if (node != supportVisualization_->nodes.end())
+                                {
+                                    supportNodePositionEditBuffer_ =
+                                        node->position;
+                                }
                             }
+                        }
+                        else
+                        {
+                            // Connect Nodes workflow: a click on a second
+                            // node requests a member. The Connect state and
+                            // the first node selection are deliberately left
+                            // untouched; Application selects the new member
+                            // on success or reports the Core rejection while
+                            // the tool keeps waiting.
+                            const SupportSelection hit =
+                                supportHit->selection;
+                            if (hit.kind == SupportSelectionKind::Node)
+                            {
+                                if (hit.structureId
+                                    != supportConnectFirstNode_.structureId)
+                                {
+                                    noteSupportEditFailure(
+                                        "Second node must be in the same "
+                                        "structure.");
+                                }
+                                else if (
+                                    hit.elementId
+                                    == supportConnectFirstNode_.elementId)
+                                {
+                                    noteSupportEditFailure(
+                                        "Select a different node for the "
+                                        "second endpoint.");
+                                }
+                                else
+                                {
+                                    supportEditCommand_ = {
+                                        SupportEditType::CreateMember,
+                                        hit.structureId,
+                                        supportConnectFirstNode_.elementId,
+                                        hit.elementId};
+                                }
+                            }
+                            // Member and cross-structure hits do not satisfy
+                            // the second endpoint and are ignored.
                         }
                     }
                 }
@@ -7624,6 +7870,57 @@ ImGui::MenuItem(
                 isSelected ? selected : isHovered ? hovered : normal,
                 16);
         }
+
+        if (supportConnectState_
+            == SupportConnectState::WaitingForSecondNode)
+        {
+            // Keep the first endpoint highly visible while the user picks
+            // the second node.
+            for (const SupportVisualizationNode& node
+                : supportVisualization_->nodes)
+            {
+                if (node.selection != supportConnectFirstNode_)
+                {
+                    continue;
+                }
+                const auto projected = project(node.position);
+                if (!projected.has_value())
+                {
+                    break;
+                }
+                const ImVec2 center = screenPosition(*projected);
+                drawList->AddCircleFilled(
+                    center, 7.5F * scale, outline, 20);
+                drawList->AddCircleFilled(
+                    center, 5.5F * scale, selected, 20);
+                break;
+            }
+
+            constexpr char connectMessage[] =
+                "Connect Nodes: select a second node in this structure.";
+            const float margin = viewportStyle::overlayMargin * scale;
+            const float padding = viewportStyle::overlayPadding * scale;
+            const ImVec2 messageSize = ImGui::CalcTextSize(connectMessage);
+            const ImVec2 panelMinimum{
+                imageMinimum.x + margin,
+                imageMinimum.y + margin
+            };
+            const ImVec2 panelMaximum{
+                panelMinimum.x + messageSize.x + 2.0F * padding,
+                panelMinimum.y + messageSize.y + 2.0F * padding
+            };
+            drawList->AddRectFilled(
+                panelMinimum,
+                panelMaximum,
+                ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
+                padding);
+            drawList->AddText(
+                ImGui::GetFont(),
+                ImGui::GetFontSize(),
+                {panelMinimum.x + padding, panelMinimum.y + padding},
+                selected,
+                connectMessage);
+        }
     }
 
     std::optional<TrackHardwareEdit>
@@ -7984,6 +8281,10 @@ ImGui::MenuItem(
         selectedSupport_.reset();
         hoveredSupport_.reset();
         supportNodePositionEdit_.reset();
+        supportEditCommand_.reset();
+        supportConnectState_ = SupportConnectState::Inactive;
+        supportConnectFirstNode_ = {};
+        supportEditMessage_.clear();
         riderLoadDiagnostics_.clear();
         selectedSection_ = 0;
         startPoseManipulation_.reset();
@@ -8065,6 +8366,15 @@ ImGui::MenuItem(
                 supportNodePositionEditBuffer_ = node->position;
             }
         }
+        // The Connect tool keeps its first endpoint only while that node
+        // still exists in the committed document.
+        if (supportConnectState_ == SupportConnectState::WaitingForSecondNode
+            && (authoredTrack_ == nullptr
+                || !supportSelectionExists(
+                    authoredTrack_->supports(), supportConnectFirstNode_)))
+        {
+            cancelSupportConnect();
+        }
     }
 
     void EditorUi::synchronizeSupportNodePosition(
@@ -8080,6 +8390,74 @@ ImGui::MenuItem(
             std::move(supportNodePositionEdit_);
         supportNodePositionEdit_.reset();
         return edit;
+    }
+
+    std::optional<SupportEditCommand>
+    EditorUi::takeSupportEditCommand() noexcept
+    {
+        std::optional<SupportEditCommand> command =
+            std::move(supportEditCommand_);
+        supportEditCommand_.reset();
+        return command;
+    }
+
+    void EditorUi::beginSupportConnect()
+    {
+        if (authoredTrack_ == nullptr
+            || !selectedSupport_.has_value()
+            || selectedSupport_->kind != SupportSelectionKind::Node
+            || !supportSelectionExists(
+                authoredTrack_->supports(), *selectedSupport_))
+        {
+            return;
+        }
+
+        supportConnectFirstNode_ = *selectedSupport_;
+        supportConnectState_ = SupportConnectState::WaitingForSecondNode;
+        supportEditMessage_.clear();
+    }
+
+    void EditorUi::cancelSupportConnect() noexcept
+    {
+        supportConnectState_ = SupportConnectState::Inactive;
+        supportConnectFirstNode_ = {};
+        supportEditMessage_.clear();
+    }
+
+    bool EditorUi::supportConnectWaiting() const noexcept
+    {
+        return supportConnectState_ == SupportConnectState::WaitingForSecondNode;
+    }
+
+    void EditorUi::noteSupportEditFailure(const std::string& message) noexcept
+    {
+        supportEditMessage_ = message;
+    }
+
+    void EditorUi::selectSupportStructure(
+        const coaster::SupportStructureId structureId) noexcept
+    {
+        selectedSupport_ = {
+            structureId, SupportSelectionKind::Structure,
+            coaster::invalidSupportElementId};
+    }
+
+    void EditorUi::selectSupportNode(
+        const coaster::SupportStructureId structureId,
+        const coaster::SupportElementId nodeId,
+        const glm::dvec3& position) noexcept
+    {
+        selectedSupport_ = {
+            structureId, SupportSelectionKind::Node, nodeId};
+        supportNodePositionEditBuffer_ = position;
+    }
+
+    void EditorUi::selectSupportMember(
+        const coaster::SupportStructureId structureId,
+        const coaster::SupportElementId memberId) noexcept
+    {
+        selectedSupport_ = {
+            structureId, SupportSelectionKind::Member, memberId};
     }
 
     std::optional<HistoryOperationType>
@@ -8139,6 +8517,10 @@ std::optional<coaster::LayoutMode>
         hoveredSupport_.reset();
         supportNodePositionEditBuffer_ = {0.0, 0.0, 0.0};
         supportNodePositionEdit_.reset();
+        supportEditCommand_.reset();
+        supportConnectState_ = SupportConnectState::Inactive;
+        supportConnectFirstNode_ = {};
+        supportEditMessage_.clear();
         startPoseTransformMode_ = StartPoseTransformMode::Move;
         startPoseManipulation_.reset();
         startPoseEdit_.reset();
