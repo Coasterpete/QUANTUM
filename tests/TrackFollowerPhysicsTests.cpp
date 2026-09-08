@@ -25,6 +25,7 @@ namespace
     using quantum::physics::TrackFollowerState;
     using quantum::physics::TrackLocation;
     using quantum::physics::TravelDirection;
+    using quantum::physics::detail::TrackSampleIntervalHint;
     using quantum::physics::primaryTrackPathId;
     using quantum::physics::stepTrackFollower;
 
@@ -116,6 +117,113 @@ namespace
             lengthCoordinateUnits, tangent, startPosition, curvature);
         return CompiledPhysicsTrack{
             samples, metersPerCoordinateUnit, topology};
+    }
+
+    [[nodiscard]] CompiledPhysicsTrack intervalHintTrack(
+        const TopologyKind topology)
+    {
+        std::vector<TrackKinematicState> samples;
+        for (std::size_t index = 0; index <= 5; ++index)
+        {
+            const double station = static_cast<double>(index);
+            const double bank = 0.1 * station;
+            const CurveFrame frame{
+                {1.0, 0.0, 0.0},
+                {0.0, std::cos(bank), std::sin(bank)},
+                {0.0, -std::sin(bank), std::cos(bank)}
+            };
+            samples.push_back({
+                station,
+                {station, station * station, -station},
+                frame,
+                {0.01 * station, -0.02 * station, 0.03 * station}
+            });
+        }
+        return {samples, 1.0, topology};
+    }
+
+    void requireSamplesExactlyEqual(
+        const quantum::physics::PhysicsTrackSample& actual,
+        const quantum::physics::PhysicsTrackSample& expected,
+        const std::string_view message)
+    {
+        const auto vectorEqual = [](const glm::dvec3& left,
+                                    const glm::dvec3& right)
+        {
+            return left.x == right.x
+                && left.y == right.y
+                && left.z == right.z;
+        };
+        require(actual.location == expected.location
+                && vectorEqual(actual.positionMeters, expected.positionMeters)
+                && vectorEqual(actual.frame.tangent, expected.frame.tangent)
+                && vectorEqual(actual.frame.lateral, expected.frame.lateral)
+                && vectorEqual(actual.frame.up, expected.frame.up)
+                && vectorEqual(
+                    actual.curvaturePerMeter, expected.curvaturePerMeter),
+            message);
+    }
+
+    void intervalHintsMatchAuthoritativeSamplingExactly()
+    {
+        const CompiledPhysicsTrack open = intervalHintTrack(
+            TopologyKind::OpenLinear);
+        TrackSampleIntervalHint hint;
+        for (const double station : {
+            0.0, 0.25, 0.75, 1.0, 1.25, 0.5, 4.5, 2.5, 5.0})
+        {
+            const TrackLocation location{
+                primaryTrackPathId,
+                station,
+                TravelDirection::IncreasingStation
+            };
+            requireSamplesExactlyEqual(
+                hint.sample(open, location),
+                open.sample(location),
+                "hinted open-track sample parity");
+        }
+
+        TrackSampleIntervalHint frontHint;
+        TrackSampleIntervalHint rearHint;
+        for (const auto [frontStation, rearStation] : {
+            std::pair{1.2, 3.8},
+            std::pair{1.3, 3.7},
+            std::pair{2.1, 2.9},
+            std::pair{1.9, 3.1}})
+        {
+            for (const auto [station, intervalHint] : {
+                std::pair{frontStation, &frontHint},
+                std::pair{rearStation, &rearHint}})
+            {
+                const TrackLocation location{
+                    primaryTrackPathId,
+                    station,
+                    TravelDirection::DecreasingStation
+                };
+                requireSamplesExactlyEqual(
+                    intervalHint->sample(open, location),
+                    open.sample(location),
+                    "alternating front/rear hint parity");
+            }
+        }
+
+        const CompiledPhysicsTrack closed = intervalHintTrack(
+            TopologyKind::ClosedCircuit);
+        TrackSampleIntervalHint seamHint;
+        const TrackLocation nearEnd{
+            primaryTrackPathId,
+            4.75,
+            TravelDirection::IncreasingStation
+        };
+        requireSamplesExactlyEqual(
+            seamHint.sample(closed, nearEnd),
+            closed.sample(nearEnd),
+            "closed-track last-interval hint parity");
+        const TrackLocation wrapped = closed.advance(nearEnd, 0.5).location;
+        requireSamplesExactlyEqual(
+            seamHint.sample(closed, wrapped),
+            closed.sample(wrapped),
+            "closed-track seam fallback parity");
     }
 
     [[nodiscard]] TrackFollowerState stateAt(
@@ -651,6 +759,8 @@ int main()
     std::fprintf(stdout, "Track Follower Physics Tests\n");
 
     run("flat track keeps constant velocity", flatTrackKeepsConstantVelocity);
+    run("interval hints match authoritative sampling",
+        intervalHintsMatchAuthoritativeSamplingExactly);
     run("downhill gravity accelerates", downhillGravityAccelerates);
     run("uphill gravity decelerates", uphillGravityDecelerates);
     run("reverse motion uses gravity projection", reverseMotionUsesTheSameGravityProjection);
