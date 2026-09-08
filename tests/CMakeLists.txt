@@ -1512,6 +1512,74 @@ add_executable(
     CoasterDocumentTests.cpp
 )
 
+add_executable(
+    QuantumCoreSupportModelTests
+    SupportModelTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreSupportModelTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreSupportModelTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreSupportModelTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.SupportModel
+    COMMAND QuantumCoreSupportModelTests
+)
+
+set_tests_properties(
+    QuantumCore.SupportModel
+    PROPERTIES
+        LABELS "core;coaster;supports"
+)
+
+add_executable(
+    QuantumCoreSupportSerializationTests
+    SupportSerializationTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreSupportSerializationTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreSupportSerializationTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreSupportSerializationTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.SupportSerialization
+    COMMAND QuantumCoreSupportSerializationTests
+)
+
+set_tests_properties(
+    QuantumCore.SupportSerialization
+    PROPERTIES
+        LABELS "core;coaster;supports;serialization"
+)
+
 target_link_libraries(
     QuantumCoreCoasterDocumentTests
     PRIVATE

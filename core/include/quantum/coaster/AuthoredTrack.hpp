@@ -5,6 +5,7 @@
 #include <quantum/coaster/ForceDrivenRegion.hpp>
 #include <quantum/coaster/PlanarArcRegion.hpp>
 #include <quantum/coaster/RiderLocalGeometry.hpp>
+#include <quantum/coaster/Supports.hpp>
 #include <quantum/coaster/TrackStyle.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -214,6 +215,11 @@ namespace quantum::coaster
         // document's authored style/options/train/heartline state.
         void setCoasterSetup(const CoasterSetup& setup);
 
+        [[nodiscard]] const SupportCollection& supports() const noexcept;
+        // Validates the complete collection before replacing persistent
+        // support state.
+        void setSupports(const SupportCollection& supports);
+
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
         // Throws std::out_of_range for an invalid index.
@@ -259,6 +265,7 @@ namespace quantum::coaster
         TrackStylePreset trackStyle_ = createStandardDualRailPreset();
         CoasterSetup coasterSetup_ =
             createCoasterSetupForStyle(defaultCoasterStyleId);
+        SupportCollection supports_;
         std::vector<AuthoredTrackSection> sections_;
     };
 

@@ -164,6 +164,44 @@ dual-rail preset. Deserialization constructs a new document and accepts it only
 after Core validation; it does not partially mutate an existing document on
 failure.
 
+### Persistent support model
+
+`AuthoredTrack` owns one `SupportCollection` as authored document state. The
+collection is independent of track generation, physics, rendering, and editor
+state. It contains ordinary `SupportStructure` values made from positioned
+`SupportNode` values and endpoint-connected `SupportMember` values. The same
+low-level graph represents steel columns, A-frames, V-frames, towers, wooden
+bents, and braced wooden runs. Manual authoring and future procedural
+generation therefore produce the same persistent types; there is no separate
+procedural-support object model.
+
+Structure IDs are nonzero and unique across the document. The collection owns
+their monotonic `nextStructureId` allocator. Within each structure, nodes and
+members share one nonzero element-ID namespace and one monotonic
+`nextElementId` allocator. Deleted IDs are not reused, and both counters are
+persisted and must remain greater than every allocated ID. Member endpoints
+reference nodes within their owning structure only. A wooden run that needs
+longitudinal braces can be one larger structure; cross-structure references
+are deferred unless later authoring requirements establish a concrete need.
+
+Member profiles contain only geometric cross-section data: circular or
+rectangular outer dimensions and wall thickness. Zero thickness denotes a
+solid member, allowing timber and solid sections without a parallel wood
+model. Positive thickness represents tube or box sections. Core validation
+rejects non-finite node coordinates, zero or duplicate IDs, dangling or
+self-connected members, unsupported or degenerate profiles, illegal wall
+thickness, and allocator counters that could reuse an ID. This is document
+consistency validation, not structural engineering analysis.
+
+Format version 1 is extended additively with an optional root `supports`
+object containing `nextStructureId` and the ordered `structures` array. Each
+structure persists its ID, name, `nextElementId`, ordered nodes, and ordered
+members. Member endpoint IDs and profile data round-trip unchanged. Missing
+`supports` loads as an empty collection with its initial allocator state;
+unknown fields and malformed references are rejected rather than repaired.
+Foundations, track attachments, origin/generator metadata, materials,
+rendering, picking, and editor interaction remain later milestones.
+
 ### Implemented region kinds
 
 The authored region variant currently has two kinds:
@@ -1309,8 +1347,9 @@ architectural commitments:
 - editable force-target profiles and endpoint-constrained force solving;
 - expanded authored track-style geometry families, configurable rail/heartline geometry, and final rail meshing systems;
 - direct deformation or control-point editing in the 3D viewport;
-- supports, foundations, and track/support attachment hardware (the Support Workspace remains an
-  unfinished disabled shell);
+- support authoring/rendering, foundations, and track/support attachment
+  hardware (the persistent node/member model exists, while the Support
+  Workspace remains an unfinished disabled shell);
 - connector compliance, slack, springs, damping, and train whip;
 - suspension/compliance, gaps/preload, friction/slip, and physically resolved
   individual-wheel load sharing beyond the rigid representative allocation;
