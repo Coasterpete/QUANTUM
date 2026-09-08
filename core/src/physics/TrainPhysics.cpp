@@ -15,6 +15,21 @@
 
 namespace quantum::physics
 {
+    [[nodiscard]] static TrainPose solveTrainPoseForValidatedDefinition(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const TrackLocation& generalizedReferenceLocation,
+        TrainSolveCounters* counters = nullptr);
+
+    [[nodiscard]] static TrainKinematicEvaluation
+    evaluateTrainKinematicsForValidatedDefinition(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrackLocation& generalizedReferenceLocation,
+        std::span<const ExternalForceApplication> externalForces,
+        TrainSolveCounters* counters = nullptr);
+
     namespace
     {
         inline constexpr std::size_t connectorSearchSampleCount = 160;
@@ -1347,7 +1362,7 @@ if (std::abs(solved.residualMeters)
         {
             try
             {
-                return solveTrainPose(
+                return solveTrainPoseForValidatedDefinition(
                     track,
                     definition,
                     displacedLocation(track, location, distanceMeters),
@@ -1969,7 +1984,8 @@ if (std::abs(solved.residualMeters)
         {
             try
             {
-                return solveTrainPose(track, definition, location, counters);
+                return solveTrainPoseForValidatedDefinition(
+                    track, definition, location, counters);
             }
             catch (const OpenConsistBoundaryError&)
             {
@@ -2464,13 +2480,12 @@ if (std::abs(solved.residualMeters)
         return constrainedDerivativeKind_;
     }
 
-    TrainPose solveTrainPose(
+    [[nodiscard]] static TrainPose solveTrainPoseForValidatedDefinition(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const TrackLocation& generalizedReferenceLocation,
         TrainSolveCounters* const counters)
     {
-        validateTrainDefinition(definition);
         if (counters)
         {
             ++counters->solveTrainPoseCalls;
@@ -2602,7 +2617,8 @@ if (std::abs(solved.residualMeters)
         };
     }
 
-    TrainKinematicEvaluation evaluateTrainKinematics(
+    [[nodiscard]] static TrainKinematicEvaluation
+    evaluateTrainKinematicsForValidatedDefinition(
         const CompiledPhysicsTrack& track,
         const TrainDefinition& definition,
         const PhysicsEnvironment& environment,
@@ -2610,8 +2626,7 @@ if (std::abs(solved.residualMeters)
         const std::span<const ExternalForceApplication> externalForces,
         TrainSolveCounters* const counters)
     {
-        validatePhysicsEnvironment(environment);
-        TrainPose center = solveTrainPose(
+        TrainPose center = solveTrainPoseForValidatedDefinition(
             track, definition, generalizedReferenceLocation, counters);
         validateExternalForceApplications(externalForces, center.carCount());
         DerivativeSamples derivatives = kinematicDerivatives(
@@ -2760,6 +2775,36 @@ if (std::abs(solved.residualMeters)
             trainKinematicJacobianStepMeters,
             derivatives.kind
         };
+    }
+
+    TrainPose solveTrainPose(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const TrackLocation& generalizedReferenceLocation,
+        TrainSolveCounters* const counters)
+    {
+        validateTrainDefinition(definition);
+        return solveTrainPoseForValidatedDefinition(
+            track, definition, generalizedReferenceLocation, counters);
+    }
+
+    TrainKinematicEvaluation evaluateTrainKinematics(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const TrackLocation& generalizedReferenceLocation,
+        const std::span<const ExternalForceApplication> externalForces,
+        TrainSolveCounters* const counters)
+    {
+        validatePhysicsEnvironment(environment);
+        validateTrainDefinition(definition);
+        return evaluateTrainKinematicsForValidatedDefinition(
+            track,
+            definition,
+            environment,
+            generalizedReferenceLocation,
+            externalForces,
+            counters);
     }
 
     CarAngularKinematics::CarAngularKinematics(
@@ -2986,7 +3031,7 @@ if (std::abs(solved.residualMeters)
             return {};
         }
 
-        const TrainPose center = solveTrainPose(
+        const TrainPose center = solveTrainPoseForValidatedDefinition(
             track, definition, state.generalizedReferenceLocation);
         DerivativeSamples derivatives = kinematicDerivatives(
             track, definition, center, outputForces);
@@ -3073,7 +3118,7 @@ if (std::abs(solved.residualMeters)
         validateExternalForceApplications(
             externalForces, definition.cars.size());
 
-        const TrainPose center = solveTrainPose(
+        const TrainPose center = solveTrainPoseForValidatedDefinition(
             track, definition, state.generalizedReferenceLocation);
         const auto unavailable = [&center](
             const RigidConnectorLoadRecoveryStatus status,
@@ -3605,7 +3650,7 @@ if (std::abs(solved.residualMeters)
         std::optional<TrainKinematicEvaluation> kinematics;
         try
         {
-            kinematics.emplace(evaluateTrainKinematics(
+            kinematics.emplace(evaluateTrainKinematicsForValidatedDefinition(
                 track,
                 definition,
                 environment,
@@ -3614,7 +3659,7 @@ if (std::abs(solved.residualMeters)
         }
         catch (const OpenConsistBoundaryError&)
         {
-            const TrainPose pose = solveTrainPose(
+            const TrainPose pose = solveTrainPoseForValidatedDefinition(
                 track, definition, state.generalizedReferenceLocation);
             return {
                 CarTrackReactionRecoveryStatus::KinematicsUnavailable,
@@ -4628,7 +4673,8 @@ if (std::abs(solved.residualMeters)
             throw std::overflow_error("Train dynamics tick overflow.");
         }
 
-        TrainKinematicEvaluation current = evaluateTrainKinematics(
+        TrainKinematicEvaluation current =
+            evaluateTrainKinematicsForValidatedDefinition(
             track,
             definition,
             environment,
@@ -4786,7 +4832,7 @@ if (auto candidatePose = trySolveTrainPose(
         // per-car Jacobians are those used to integrate from the prior state.
 if (!committedPose)
         {
-            committedPose.emplace(solveTrainPose(
+            committedPose.emplace(solveTrainPoseForValidatedDefinition(
                 track, definition, nextState.generalizedReferenceLocation,
                 counters));
         }
