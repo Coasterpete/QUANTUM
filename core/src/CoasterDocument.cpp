@@ -197,6 +197,22 @@ namespace quantum::coaster
             return object[key].get<SegmentId>();
         }
 
+        template<typename Id>
+        Id deserializeSupportId(
+            const json& object,
+            const std::string& key,
+            const std::string& path)
+        {
+            requireInteger(object, key, path);
+            if (object[key] < 0
+                || object[key] > std::numeric_limits<Id>::max())
+            {
+                throw std::runtime_error(
+                    path + "." + key + ": support ID is out of range");
+            }
+            return object[key].get<Id>();
+        }
+
         // ----------------------------------------------------------------
         // Serialization
         // ----------------------------------------------------------------
@@ -412,6 +428,64 @@ namespace quantum::coaster
                 {"heartline", {
                     {"enabled", setup.heartline.enabled},
                     {"offsetMeters", setup.heartline.offsetMeters}}}};
+        }
+
+        [[nodiscard]] const char* supportProfileShapeToString(
+            const SupportMemberProfileShape shape)
+        {
+            switch (shape)
+            {
+            case SupportMemberProfileShape::Circular: return "Circular";
+            case SupportMemberProfileShape::Rectangular: return "Rectangular";
+            }
+            throw std::runtime_error("Unknown support member profile shape.");
+        }
+
+        json serializeSupportCollection(const SupportCollection& collection)
+        {
+            validateSupportCollection(collection);
+
+            json structuresJson = json::array();
+            for (const SupportStructure& structure : collection.structures)
+            {
+                json nodesJson = json::array();
+                for (const SupportNode& node : structure.nodes)
+                {
+                    nodesJson.push_back({
+                        {"id", node.id},
+                        {"position", {
+                            {"x", node.position.x},
+                            {"y", node.position.y},
+                            {"z", node.position.z}}}});
+                }
+
+                json membersJson = json::array();
+                for (const SupportMember& member : structure.members)
+                {
+                    membersJson.push_back({
+                        {"id", member.id},
+                        {"startNodeId", member.startNodeId},
+                        {"endNodeId", member.endNodeId},
+                        {"profile", {
+                            {"shape", supportProfileShapeToString(
+                                member.profile.shape)},
+                            {"outerDimensions", {
+                                {"x", member.profile.outerDimensions.x},
+                                {"y", member.profile.outerDimensions.y}}},
+                            {"wallThickness", member.profile.wallThickness}}}});
+                }
+
+                structuresJson.push_back({
+                    {"id", structure.id},
+                    {"name", structure.name},
+                    {"nextElementId", structure.nextElementId},
+                    {"nodes", std::move(nodesJson)},
+                    {"members", std::move(membersJson)}});
+            }
+
+            return {
+                {"nextStructureId", collection.nextStructureId},
+                {"structures", std::move(structuresJson)}};
         }
 
         json serializeSection(const AuthoredTrackSection& section)
@@ -749,6 +823,146 @@ namespace quantum::coaster
                 object["z"].get<double>()};
         }
 
+        SupportMemberProfile deserializeSupportMemberProfile(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(
+                object,
+                {"shape", "outerDimensions", "wallThickness"},
+                path);
+            requireString(object, "shape", path);
+            requireObject(object, "outerDimensions", path);
+            requireNumber(object, "wallThickness", path);
+
+            const std::string shape = object["shape"].get<std::string>();
+            SupportMemberProfile profile;
+            if (shape == "Circular")
+            {
+                profile.shape = SupportMemberProfileShape::Circular;
+            }
+            else if (shape == "Rectangular")
+            {
+                profile.shape = SupportMemberProfileShape::Rectangular;
+            }
+            else
+            {
+                throw std::runtime_error(
+                    path + ".shape: unknown support member profile shape '"
+                    + shape + "'");
+            }
+
+            const json& dimensions = object["outerDimensions"];
+            requireNoUnknownFields(dimensions, {"x", "y"},
+                path + ".outerDimensions");
+            requireNumber(dimensions, "x", path + ".outerDimensions");
+            requireNumber(dimensions, "y", path + ".outerDimensions");
+            profile.outerDimensions = {
+                dimensions["x"].get<double>(),
+                dimensions["y"].get<double>()};
+            profile.wallThickness = object["wallThickness"].get<double>();
+            return profile;
+        }
+
+        SupportCollection deserializeSupportCollection(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(
+                object, {"nextStructureId", "structures"}, path);
+            requireArray(object, "structures", path);
+
+            SupportCollection collection;
+            collection.nextStructureId =
+                deserializeSupportId<SupportStructureId>(
+                    object, "nextStructureId", path);
+
+            const json& structures = object["structures"];
+            collection.structures.reserve(structures.size());
+            for (std::size_t structureIndex = 0;
+                structureIndex < structures.size(); ++structureIndex)
+            {
+                const json& structureJson = structures[structureIndex];
+                const std::string structurePath = path + ".structures["
+                    + std::to_string(structureIndex) + "]";
+                if (!structureJson.is_object())
+                {
+                    throw std::runtime_error(
+                        structurePath + ": expected a JSON object");
+                }
+                requireNoUnknownFields(structureJson,
+                    {"id", "name", "nextElementId", "nodes", "members"},
+                    structurePath);
+                requireString(structureJson, "name", structurePath);
+                requireArray(structureJson, "nodes", structurePath);
+                requireArray(structureJson, "members", structurePath);
+
+                SupportStructure structure;
+                structure.id = deserializeSupportId<SupportStructureId>(
+                    structureJson, "id", structurePath);
+                structure.name = structureJson["name"].get<std::string>();
+                structure.nextElementId =
+                    deserializeSupportId<SupportElementId>(
+                        structureJson, "nextElementId", structurePath);
+
+                const json& nodes = structureJson["nodes"];
+                structure.nodes.reserve(nodes.size());
+                for (std::size_t nodeIndex = 0;
+                    nodeIndex < nodes.size(); ++nodeIndex)
+                {
+                    const json& nodeJson = nodes[nodeIndex];
+                    const std::string nodePath = structurePath + ".nodes["
+                        + std::to_string(nodeIndex) + "]";
+                    if (!nodeJson.is_object())
+                    {
+                        throw std::runtime_error(
+                            nodePath + ": expected a JSON object");
+                    }
+                    requireNoUnknownFields(
+                        nodeJson, {"id", "position"}, nodePath);
+                    requireObject(nodeJson, "position", nodePath);
+                    structure.nodes.push_back({
+                        deserializeSupportId<SupportElementId>(
+                            nodeJson, "id", nodePath),
+                        deserializeDvec3(
+                            nodeJson["position"], nodePath + ".position")});
+                }
+
+                const json& members = structureJson["members"];
+                structure.members.reserve(members.size());
+                for (std::size_t memberIndex = 0;
+                    memberIndex < members.size(); ++memberIndex)
+                {
+                    const json& memberJson = members[memberIndex];
+                    const std::string memberPath = structurePath + ".members["
+                        + std::to_string(memberIndex) + "]";
+                    if (!memberJson.is_object())
+                    {
+                        throw std::runtime_error(
+                            memberPath + ": expected a JSON object");
+                    }
+                    requireNoUnknownFields(memberJson,
+                        {"id", "startNodeId", "endNodeId", "profile"},
+                        memberPath);
+                    requireObject(memberJson, "profile", memberPath);
+                    structure.members.push_back({
+                        deserializeSupportId<SupportElementId>(
+                            memberJson, "id", memberPath),
+                        deserializeSupportId<SupportElementId>(
+                            memberJson, "startNodeId", memberPath),
+                        deserializeSupportId<SupportElementId>(
+                            memberJson, "endNodeId", memberPath),
+                        deserializeSupportMemberProfile(
+                            memberJson["profile"], memberPath + ".profile")});
+                }
+
+                collection.structures.push_back(std::move(structure));
+            }
+
+            validateSupportCollection(collection);
+            return collection;
+        }
+
 TrackStylePreset deserializeTrackStyle(
             const json& object,
             const std::string& path)
@@ -1052,6 +1266,7 @@ TrackStylePreset deserializeTrackStyle(
             {"gravityAcceleration", physical.gravityAcceleration}};
         root["trackStyle"] = serializeTrackStyle(track.trackStyle());
         root["coasterSetup"] = serializeCoasterSetup(track.coasterSetup());
+        root["supports"] = serializeSupportCollection(track.supports());
 
         json sectionsJson = json::array();
 
@@ -1083,7 +1298,7 @@ TrackStylePreset deserializeTrackStyle(
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
-                "physicalSettings", "trackStyle", "coasterSetup"
+                "physicalSettings", "trackStyle", "coasterSetup", "supports"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -1261,6 +1476,15 @@ TrackStylePreset deserializeTrackStyle(
                 requireObject(root, "coasterSetup", "root");
                 track.setCoasterSetup(deserializeCoasterSetup(
                     root["coasterSetup"], "coasterSetup"));
+            }
+
+            // Documents written before persistent supports were introduced
+            // retain the default empty collection.
+            if (root.contains("supports"))
+            {
+                requireObject(root, "supports", "root");
+                track.setSupports(deserializeSupportCollection(
+                    root["supports"], "supports"));
             }
 
             return track;
