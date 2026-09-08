@@ -1626,6 +1626,52 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEditorSupportNodeManipulationTests
+    SupportNodeManipulationTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportNodeManipulation.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+)
+
+target_include_directories(
+    QuantumEditorSupportNodeManipulationTests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include
+)
+
+target_link_libraries(
+    QuantumEditorSupportNodeManipulationTests
+    PRIVATE
+        Quantum::Core
+        Quantum::Engine
+)
+
+target_compile_features(
+    QuantumEditorSupportNodeManipulationTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEditorSupportNodeManipulationTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEditor.SupportNodeManipulation
+    COMMAND QuantumEditorSupportNodeManipulationTests
+)
+
+set_tests_properties(
+    QuantumEditor.SupportNodeManipulation
+    PROPERTIES
+        LABELS "editor;coaster;supports;gizmo;snapping;transaction;history;selection"
+)
+
+add_executable(
     QuantumEditorSupportAuthoringTests
     SupportAuthoringTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp

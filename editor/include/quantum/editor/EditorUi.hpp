@@ -3,6 +3,7 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/SupportNodeManipulation.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/editor/EditorIcons.hpp>
 #include <quantum/editor/EditorStyle.hpp>
@@ -168,6 +169,7 @@ namespace quantum::editor
         coaster::SupportElementId nodeId =
             coaster::invalidSupportElementId;
         glm::dvec3 position{0.0};
+        bool continuous = false;
     };
 
     // One-shot support topology commands requested by the Supports
@@ -416,6 +418,9 @@ namespace quantum::editor
         void setSupportVisualization(
             const SupportVisualization& visualization) noexcept;
         void synchronizeSupportNodePosition(const glm::dvec3& position) noexcept;
+        // Cancels a rejected viewport candidate while retaining the last
+        // committed node position and visualization.
+        void rejectSupportNodeManipulation() noexcept;
         [[nodiscard]] std::optional<SupportNodePositionEdit>
         takeSupportNodePositionEdit() noexcept;
         // Returns and clears a pending support topology command. Selection and
@@ -536,6 +541,22 @@ namespace quantum::editor
             bool released = false;
         };
 
+        struct SupportNodeManipulation
+        {
+            SupportSelection node;
+            SupportMoveAxis axis = SupportMoveAxis::X;
+            glm::dvec3 initialPosition{0.0};
+            glm::dvec3 candidatePosition{0.0};
+            MousePos mouseStart;
+            double screenDirectionX = 1.0;
+            double screenDirectionY = 0.0;
+            double worldUnitsPerPixel = 0.0;
+            std::optional<SupportNodeSnapTarget> snapTarget;
+            SupportPositionSnapKind snapKind = SupportPositionSnapKind::None;
+            bool changed = false;
+            bool released = false;
+        };
+
         void initializeVulkanBackend(
             const renderer::VulkanContext& vulkan
         );
@@ -559,6 +580,13 @@ void drawSimulationTelemetry();
         void drawSupportWorkspace();
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
+            float imageWidth,
+            float imageHeight
+        );
+        [[nodiscard]] bool updateSupportNodeManipulation(
+            bool viewportHovered,
+            std::uint32_t pixelWidth,
+            std::uint32_t pixelHeight,
             float imageWidth,
             float imageHeight
         );
@@ -603,6 +631,7 @@ void drawSimulationTelemetry();
         StartPoseTransformMode startPoseTransformMode_ =
             StartPoseTransformMode::Move;
         std::optional<StartPoseManipulation> startPoseManipulation_;
+        std::optional<SupportNodeManipulation> supportNodeManipulation_;
 
         // Per-channel editing state, indexed by RateChannel. Numeric buffers
         // present the selected marker value (or a selected segment's End
@@ -658,6 +687,8 @@ void drawSimulationTelemetry();
         std::optional<SupportSelection> hoveredSupport_;
         glm::dvec3 supportNodePositionEditBuffer_{0.0};
         std::optional<SupportNodePositionEdit> supportNodePositionEdit_;
+        bool supportNodeSnapEnabled_ = true;
+        bool supportGroundSnapEnabled_ = true;
         // Transient Connect Nodes workflow state. It is editor memory only
         // and is never serialized.
         std::optional<SupportEditCommand> supportEditCommand_;
