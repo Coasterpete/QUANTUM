@@ -63,7 +63,7 @@ namespace quantum::editor
         };
 
         editorHeading("Coaster style", fonts);
-        ImGui::TextDisabled(
+        editorSecondaryText(
             "Placeholder catalog for validating setup behavior.");
         for (const coaster::CoasterStyleDefinition& style :
             coaster::coasterStyleCatalog())
@@ -196,7 +196,7 @@ namespace quantum::editor
                 static_cast<std::uint32_t>(carsPerTrain);
             changed = true;
         }
-        ImGui::TextDisabled(
+        editorSecondaryTextWrapped(
             "Setup metadata only; Simulation Preview uses its own fixed "
             "four-car physics definition.");
 
@@ -222,7 +222,7 @@ namespace quantum::editor
             draft.heartline.offsetMeters = offsetMeters;
             changed = true;
         }
-        ImGui::TextDisabled(
+        editorSecondaryTextWrapped(
             "Affects the viewport reference curve only; authored track "
             "geometry and physics are unchanged.");
 

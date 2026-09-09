@@ -673,9 +673,8 @@ namespace
     {
         const ImU32 borderColor = ImGui::GetColorU32(ImGuiCol_Border);
         const ImU32 textColor = ImGui::GetColorU32(ImGuiCol_Text);
-        const ImU32 disabledTextColor = ImGui::GetColorU32(
-            ImGuiCol_TextDisabled
-        );
+        const ImU32 secondaryTextColor = ImGui::ColorConvertFloat4ToU32(
+            quantum::editor::palette::textSecondary);
 
         drawList->AddText(canvasBegin, textColor, "Distance in region");
 
@@ -689,7 +688,7 @@ namespace
         );
         drawList->AddText(
             ImVec2(canvasBegin.x, canvasBegin.y + ImGui::GetTextLineHeight()),
-            disabledTextColor,
+            secondaryTextColor,
             domainLabel
         );
 
@@ -735,7 +734,7 @@ namespace
             );
             drawList->AddText(
                 ImVec2(tickLabelX, rulerLineY + 5.0F),
-                disabledTextColor,
+                secondaryTextColor,
                 tickLabel
             );
         }
@@ -1042,7 +1041,8 @@ namespace
                         ImVec2(
                             plotBeginX,
                             labelBeginY + ImGui::GetTextLineHeight() + 2.0F),
-                        ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                        ImGui::ColorConvertFloat4ToU32(
+                            quantum::editor::palette::textSecondary),
                         rangeLabel
                     );
 
@@ -1523,9 +1523,8 @@ namespace
         const quantum::editor::GraphValueRange activeRange,
         const ImU32 activeColor)
     {
-        const ImU32 disabledTextColor = ImGui::GetColorU32(
-            ImGuiCol_TextDisabled
-        );
+        const ImU32 secondaryTextColor = ImGui::ColorConvertFloat4ToU32(
+            quantum::editor::palette::textSecondary);
         drawScalarDotGrid(drawList, {
             domainView,
             {activeRange.minimum * quantum::editor::degreesPerRadian,
@@ -1568,7 +1567,7 @@ namespace
                         plotEndY - ImGui::GetTextLineHeight() - 2.0F)),
                 division == divisions / 2
                     ? activeColor
-                    : disabledTextColor,
+                    : secondaryTextColor,
                 label
             );
         }
@@ -2160,7 +2159,7 @@ namespace
             }
         };
 
-        ImGui::TextDisabled("Hardware asset");
+        quantum::editor::editorSecondaryText("Hardware asset");
         ImGui::SetNextItemWidth(-1.0F);
         const bool submitted = ImGui::InputText(
             "##TrackHardwareAssetId",
@@ -2231,7 +2230,8 @@ namespace
             resolved = "assets/" + committed.asset.path.substr(9);
         else
             resolved = "built-in diagnostic mesh";
-        ImGui::TextDisabled("Resolved: %s", resolved.c_str());
+        quantum::editor::editorSecondaryText(
+            "Resolved: %s", resolved.c_str());
 
         if (const auto status = vulkan.hardwareAssetLoadStatus(
                 committed.asset.path))
@@ -2239,7 +2239,7 @@ namespace
             const bool loaded = status->state
                 == quantum::renderer::HardwareAssetLoadState::Loaded;
             ImGui::TextColored(loaded
-                    ? quantum::editor::palette::accent
+                    ? quantum::editor::palette::success
                     : quantum::editor::palette::error,
                 "%s", quantum::renderer::hardwareAssetLoadStateName(
                     status->state));
@@ -2261,14 +2261,14 @@ namespace
         }
 
         ImGui::Spacing();
-        ImGui::TextDisabled("Placement");
+        quantum::editor::editorSecondaryText("Placement");
         const auto dragValue = [&](const char* label, const char* id,
             double* values,
             const int components, const float speed,
             const double* minimum = nullptr,
             const double* maximum = nullptr)
         {
-            ImGui::TextDisabled("%s", label);
+            quantum::editor::editorSecondaryText("%s", label);
             ImGui::SetNextItemWidth(-1.0F);
             const bool changed = ImGui::DragScalarN(
                 id, ImGuiDataType_Double, values, components, speed,
@@ -2374,7 +2374,8 @@ namespace
                 std::move(diagnostic), false};
         }
 
-        ImGui::TextDisabled("(?) Blender export expectations");
+        quantum::editor::editorSecondaryText(
+            "(?) Blender export expectations");
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
         {
             ImGui::SetTooltip(
@@ -2458,7 +2459,7 @@ namespace
                 ImGui::Spacing();
                 quantum::editor::editorHeading("Selected region", fonts);
 
-                ImGui::TextDisabled("Length");
+                quantum::editor::editorSecondaryText("Length");
                 ImGui::SetNextItemWidth(-1.0F);
                 ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
                 if (ImGui::InputDouble(
@@ -2958,7 +2959,7 @@ namespace
         if (focusedSegment != nullptr)
         {
             ImGui::PushTextWrapPos();
-            ImGui::TextDisabled(
+            quantum::editor::editorSecondaryText(
                 "Selected: segment %u - %s [%.6g to %.6g m]",
                 selectedSegmentIds[activeIndex],
                 selectionKind,
@@ -3047,7 +3048,7 @@ namespace
         }
         itemTooltip("Zoom out on the active channel's vertical range");
         sameLineIfFits(ImGui::CalcTextSize("Y +/- 0.000e+00 deg/m").x);
-        ImGui::TextDisabled(
+        quantum::editor::editorSecondaryText(
             "Y +/- %.4g deg/m",
             graphRanges[activeIndex].magnitude()
                 * quantum::editor::degreesPerRadian
@@ -3856,7 +3857,7 @@ namespace quantum::editor
         ImGui::Checkbox("Node Snap", &supportNodeSnapEnabled_);
         ImGui::SameLine();
         ImGui::Checkbox("Ground Snap", &supportGroundSnapEnabled_);
-        ImGui::TextDisabled(
+        editorSecondaryText(
             "Move gizmo: world X/Y/Z; ground applies near Z = 0.");
         ImGui::Separator();
 
@@ -3876,7 +3877,7 @@ namespace quantum::editor
         }
         if (supports.structures.empty())
         {
-            ImGui::TextDisabled("No structures.");
+            editorSecondaryText("No structures.");
         }
 
         if (ImGui::Button("+ Structure"))
@@ -3940,7 +3941,7 @@ namespace quantum::editor
             }
             if (structure.nodes.empty())
             {
-                ImGui::TextDisabled("No nodes.");
+                editorSecondaryText("No nodes.");
             }
 
             if (ImGui::Button("+ Node"))
@@ -4010,7 +4011,7 @@ namespace quantum::editor
             }
             if (structure.members.empty())
             {
-                ImGui::TextDisabled("No members.");
+                editorSecondaryText("No members.");
             }
 
             const bool canConnect = selectedSupport_.has_value()
@@ -4175,7 +4176,7 @@ namespace quantum::editor
                             beginSupportTrackPick(structure.id, node->id);
                         }
                         ImGui::SameLine();
-                        ImGui::TextDisabled(
+                        editorSecondaryTextWrapped(
                             "Track frame origin; offsets zero on first pick.");
                         const coaster::TrackAttachment committedAttachment =
                             node->trackAttachment.value();
@@ -4229,7 +4230,7 @@ namespace quantum::editor
                     else if (node->foundation.has_value())
                     {
                         ImGui::Spacing();
-                        ImGui::TextDisabled(
+                        editorSecondaryTextWrapped(
                             "Foundation marks a base/ground anchor; the node "
                             "position stays authoritative.");
                     }
@@ -4419,12 +4420,12 @@ namespace quantum::editor
         }
         else if (supports.structures.empty())
         {
-            ImGui::TextDisabled(
+            editorSecondaryTextWrapped(
                 "Create a structure to start building supports.");
         }
         else
         {
-            ImGui::TextDisabled(
+            editorSecondaryTextWrapped(
                 "The selected support no longer exists.");
         }
 
@@ -6257,7 +6258,8 @@ namespace quantum::editor
         }
 
         char status[512]{};
-        ImU32 textColor = ImGui::ColorConvertFloat4ToU32(palette::text);
+        ImU32 textColor = ImGui::ColorConvertFloat4ToU32(
+            palette::textPrimary);
         if (!simulationAvailable_)
         {
             std::snprintf(
@@ -6317,7 +6319,7 @@ namespace quantum::editor
         drawList->AddRectFilled(
             panelMinimum,
             panelMaximum,
-            ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
+            ImGui::ColorConvertFloat4ToU32(palette::panelRaised),
             padding);
         drawList->AddText(
             ImGui::GetFont(),
@@ -6696,10 +6698,10 @@ namespace quantum::editor
         drawList->AddRectFilled(statusMinimum,
             {statusMinimum.x + textSize.x + 2.0F * padding,
              statusMinimum.y + textSize.y + 2.0F * padding},
-            ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised), padding);
+            ImGui::ColorConvertFloat4ToU32(palette::panelRaised), padding);
         drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
             {statusMinimum.x + padding, statusMinimum.y + padding},
-            ImGui::ColorConvertFloat4ToU32(palette::text),
+            ImGui::ColorConvertFloat4ToU32(palette::textPrimary),
             status, nullptr, statusWrapWidth);
     }
 
@@ -8755,7 +8757,7 @@ ImGui::MenuItem(
             drawList->AddRectFilled(
                 panelMinimum,
                 panelMaximum,
-                ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
+                ImGui::ColorConvertFloat4ToU32(palette::panelRaised),
                 padding);
             drawList->AddText(
                 ImGui::GetFont(),
@@ -8780,7 +8782,7 @@ ImGui::MenuItem(
             drawList->AddRectFilled(
                 panelMinimum,
                 panelMaximum,
-                ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
+                ImGui::ColorConvertFloat4ToU32(palette::panelRaised),
                 padding);
             drawList->AddText(
                 ImGui::GetFont(),

@@ -785,15 +785,15 @@ namespace quantum::editor
 
         ImDrawList* const drawList = ImGui::GetWindowDrawList();
 
-        ImVec4 frameColor = palette::control;
+        ImVec4 frameColor = palette::frame;
         ImVec4 borderColor = palette::border;
-        ImVec4 iconColor = palette::text;
+        ImVec4 iconColor = palette::textPrimary;
         float borderThickness = style.FrameBorderSize;
 
         if (!enabled)
         {
-            frameColor = palette::surfaceInset;
-            iconColor = palette::textSecondary;
+            frameColor = palette::background;
+            iconColor = palette::textDisabled;
         }
         else if (selected)
         {
@@ -801,7 +801,7 @@ namespace quantum::editor
                 ? palette::selectionActive
                 : hovered ? palette::selectionHovered : palette::selection;
             borderColor = palette::accent;
-            iconColor = palette::accent;
+            iconColor = palette::textPrimary;
             const float presentationScale = std::max(
                 style.FontScaleMain * style.FontScaleDpi, 0.5F);
             borderThickness = std::max(
@@ -812,14 +812,14 @@ namespace quantum::editor
         else if (held)
         {
             frameColor = palette::selectionActive;
-            borderColor = palette::accent;
-            iconColor = palette::accent;
+            borderColor = palette::accentActive;
+            iconColor = palette::textPrimary;
         }
         else if (hovered)
         {
-            frameColor = palette::controlHovered;
-            borderColor = palette::accent;
-            iconColor = palette::accent;
+            frameColor = palette::frameHovered;
+            borderColor = palette::accentHovered;
+            iconColor = palette::textPrimary;
         }
 
         drawList->AddRectFilled(

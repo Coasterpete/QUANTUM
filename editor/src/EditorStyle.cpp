@@ -4,6 +4,7 @@
 #include <quantum/engine/Logging.hpp>
 
 #include <algorithm>
+#include <cstdarg>
 #include <stdexcept>
 #include <string>
 
@@ -47,6 +48,24 @@ namespace quantum::editor
         ImGui::PopFont();
     }
 
+    void editorSecondaryText(const char* const format, ...)
+    {
+        va_list arguments;
+        va_start(arguments, format);
+        ImGui::TextColoredV(palette::textSecondary, format, arguments);
+        va_end(arguments);
+    }
+
+    void editorSecondaryTextWrapped(const char* const format, ...)
+    {
+        va_list arguments;
+        va_start(arguments, format);
+        ImGui::PushStyleColor(ImGuiCol_Text, palette::textSecondary);
+        ImGui::TextWrappedV(format, arguments);
+        ImGui::PopStyleColor();
+        va_end(arguments);
+    }
+
     float editorPresentationScale()
     {
         const ImGuiStyle& style = ImGui::GetStyle();
@@ -67,7 +86,7 @@ namespace quantum::editor
         ImGuiStyle& style = ImGui::GetStyle();
         ImGui::StyleColorsDark(&style);
         style.FontSizeBase = editorFontSize;
-        style.DisabledAlpha = 0.45F;
+        style.DisabledAlpha = 0.70F;
         style.WindowPadding = ImVec2(8.0F, 8.0F);
         style.FramePadding = ImVec2(5.0F, 4.0F);
         style.ItemSpacing = ImVec2(8.0F, 5.0F);
@@ -79,44 +98,44 @@ namespace quantum::editor
         style.FrameBorderSize = 1.0F;
 
         ImVec4* const colors = style.Colors;
-        colors[ImGuiCol_Text] = palette::text;
-        colors[ImGuiCol_TextDisabled] = palette::textSecondary;
-        colors[ImGuiCol_WindowBg] = palette::surface;
-        colors[ImGuiCol_ChildBg] = palette::surface;
-        colors[ImGuiCol_PopupBg] = palette::surfaceRaised;
+        colors[ImGuiCol_Text] = palette::textPrimary;
+        colors[ImGuiCol_TextDisabled] = palette::textDisabled;
+        colors[ImGuiCol_WindowBg] = palette::panel;
+        colors[ImGuiCol_ChildBg] = palette::panel;
+        colors[ImGuiCol_PopupBg] = palette::panelRaised;
         colors[ImGuiCol_Border] = palette::border;
         colors[ImGuiCol_BorderShadow] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
 
-        colors[ImGuiCol_FrameBg] = palette::surfaceInset;
-        colors[ImGuiCol_FrameBgHovered] = palette::controlHovered;
-        colors[ImGuiCol_FrameBgActive] = palette::selection;
-        colors[ImGuiCol_TitleBg] = palette::surfaceInset;
-        colors[ImGuiCol_TitleBgActive] = palette::surfaceRaised;
+        colors[ImGuiCol_FrameBg] = palette::frame;
+        colors[ImGuiCol_FrameBgHovered] = palette::frameHovered;
+        colors[ImGuiCol_FrameBgActive] = palette::accentMuted;
+        colors[ImGuiCol_TitleBg] = palette::background;
+        colors[ImGuiCol_TitleBgActive] = palette::panelRaised;
         colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.0F, 0.0F, 0.0F, 0.8F);
-        colors[ImGuiCol_MenuBarBg] = palette::surfaceRaised;
+        colors[ImGuiCol_MenuBarBg] = palette::panelRaised;
 
-        colors[ImGuiCol_ScrollbarBg] = palette::surfaceInset;
+        colors[ImGuiCol_ScrollbarBg] = palette::background;
         colors[ImGuiCol_ScrollbarGrab] = palette::border;
-        colors[ImGuiCol_ScrollbarGrabHovered] = palette::textSecondary;
-        colors[ImGuiCol_ScrollbarGrabActive] = palette::accent;
+        colors[ImGuiCol_ScrollbarGrabHovered] = palette::frameActive;
+        colors[ImGuiCol_ScrollbarGrabActive] = palette::accentActive;
         colors[ImGuiCol_CheckMark] = palette::accent;
-        colors[ImGuiCol_CheckboxSelectedBg] = palette::selection;
+        colors[ImGuiCol_CheckboxSelectedBg] = palette::accentMuted;
         colors[ImGuiCol_SliderGrab] = palette::accent;
-        colors[ImGuiCol_SliderGrabActive] = palette::text;
+        colors[ImGuiCol_SliderGrabActive] = palette::accentHovered;
 
-        colors[ImGuiCol_Button] = palette::control;
-        colors[ImGuiCol_ButtonHovered] = palette::controlHovered;
+        colors[ImGuiCol_Button] = palette::frame;
+        colors[ImGuiCol_ButtonHovered] = palette::frameHovered;
         colors[ImGuiCol_ButtonActive] = palette::selection;
         colors[ImGuiCol_Header] = palette::selection;
         colors[ImGuiCol_HeaderHovered] = palette::selectionHovered;
         colors[ImGuiCol_HeaderActive] = palette::selectionActive;
-        colors[ImGuiCol_Separator] = palette::border;
-        colors[ImGuiCol_SeparatorHovered] = palette::accent;
-        colors[ImGuiCol_SeparatorActive] = palette::accent;
+        colors[ImGuiCol_Separator] = palette::separator;
+        colors[ImGuiCol_SeparatorHovered] = palette::accentHovered;
+        colors[ImGuiCol_SeparatorActive] = palette::accentActive;
         colors[ImGuiCol_ResizeGrip] = ImVec4(
-            palette::surface.x,
-            palette::surface.y,
-            palette::surface.z,
+            palette::panel.x,
+            palette::panel.y,
+            palette::panel.z,
             0.35F
         );
         colors[ImGuiCol_ResizeGripHovered] = ImVec4(
@@ -133,12 +152,12 @@ namespace quantum::editor
         );
         colors[ImGuiCol_InputTextCursor] = palette::accent;
 
-        colors[ImGuiCol_Tab] = palette::surfaceInset;
-        colors[ImGuiCol_TabHovered] = palette::controlHovered;
-        colors[ImGuiCol_TabSelected] = palette::controlActive;
+        colors[ImGuiCol_Tab] = palette::background;
+        colors[ImGuiCol_TabHovered] = palette::frameHovered;
+        colors[ImGuiCol_TabSelected] = palette::frameActive;
         colors[ImGuiCol_TabSelectedOverline] = palette::accent;
-        colors[ImGuiCol_TabDimmed] = palette::surfaceInset;
-        colors[ImGuiCol_TabDimmedSelected] = palette::control;
+        colors[ImGuiCol_TabDimmed] = palette::background;
+        colors[ImGuiCol_TabDimmedSelected] = palette::frame;
         colors[ImGuiCol_TabDimmedSelectedOverline] = palette::textSecondary;
         colors[ImGuiCol_DockingPreview] = ImVec4(
             palette::accent.x,
@@ -148,13 +167,13 @@ namespace quantum::editor
         );
         colors[ImGuiCol_DockingEmptyBg] = palette::black;
 
-        colors[ImGuiCol_PlotLines] = palette::text;
+        colors[ImGuiCol_PlotLines] = palette::textPrimary;
         colors[ImGuiCol_PlotLinesHovered] = palette::accent;
         colors[ImGuiCol_PlotHistogram] = palette::accent;
-        colors[ImGuiCol_PlotHistogramHovered] = palette::text;
-        colors[ImGuiCol_TableHeaderBg] = palette::surfaceRaised;
+        colors[ImGuiCol_PlotHistogramHovered] = palette::textPrimary;
+        colors[ImGuiCol_TableHeaderBg] = palette::panelRaised;
         colors[ImGuiCol_TableBorderStrong] = palette::border;
-        colors[ImGuiCol_TableBorderLight] = palette::control;
+        colors[ImGuiCol_TableBorderLight] = palette::frame;
         colors[ImGuiCol_TableRowBg] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
         colors[ImGuiCol_TableRowBgAlt] = ImVec4(0.0F, 0.0F, 0.0F, 0.16F);
 
@@ -176,9 +195,9 @@ namespace quantum::editor
         colors[ImGuiCol_UnsavedMarker] = palette::warning;
         colors[ImGuiCol_NavCursor] = palette::accent;
         colors[ImGuiCol_NavWindowingHighlight] = ImVec4(
-            palette::text.x,
-            palette::text.y,
-            palette::text.z,
+            palette::textPrimary.x,
+            palette::textPrimary.y,
+            palette::textPrimary.z,
             0.70F
         );
         colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.0F, 0.0F, 0.0F, 0.65F);

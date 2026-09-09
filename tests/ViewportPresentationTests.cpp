@@ -20,6 +20,81 @@ namespace
         if (!condition) throw std::runtime_error(message);
     }
 
+    [[nodiscard]] float relativeLuminance(const ImVec4& color)
+    {
+        return 0.2126F * color.x + 0.7152F * color.y + 0.0722F * color.z;
+    }
+
+    [[nodiscard]] float contrastRatio(const ImVec4& first, const ImVec4& second)
+    {
+        const float lighter = std::max(
+            relativeLuminance(first), relativeLuminance(second));
+        const float darker = std::min(
+            relativeLuminance(first), relativeLuminance(second));
+        return (lighter + 0.05F) / (darker + 0.05F);
+    }
+
+    [[nodiscard]] bool sameColor(const ImVec4& first, const ImVec4& second)
+    {
+        return first.x == second.x && first.y == second.y
+            && first.z == second.z && first.w == second.w;
+    }
+
+    void quantumStylePalette()
+    {
+        using namespace palette;
+        const std::array colors{
+            background, panel, panelRaised, frame, frameHovered, frameActive,
+            border, separator, textPrimary, textSecondary, textDisabled,
+            accent, accentHovered, accentActive, accentMuted, selection,
+            selectionHovered, selectionActive, success, warning, error,
+            viewportAnchor, viewportSelected, viewportHovered, viewportRing,
+            rollChannelRed, pitchChannelPurple, yawChannelGold,
+            normalGChannel, speedChannel};
+        for (const ImVec4& color : colors)
+        {
+            require(std::isfinite(color.x) && std::isfinite(color.y)
+                    && std::isfinite(color.z) && std::isfinite(color.w)
+                    && color.x >= 0.0F && color.x <= 1.0F
+                    && color.y >= 0.0F && color.y <= 1.0F
+                    && color.z >= 0.0F && color.z <= 1.0F
+                    && color.w >= 0.0F && color.w <= 1.0F,
+                "QUANTUM palette colors must be finite and normalized");
+        }
+
+        require(relativeLuminance(textPrimary) > relativeLuminance(textSecondary)
+                && relativeLuminance(textSecondary) > relativeLuminance(textDisabled),
+            "primary, secondary and disabled text hierarchy regressed");
+        require(contrastRatio(textPrimary, panel) >= 7.0F,
+            "primary text lost strong contrast against the main panel");
+        require(contrastRatio(textSecondary, panel) >= 4.5F,
+            "secondary text is no longer clearly readable");
+        require(contrastRatio(textDisabled, panel) >= 3.0F,
+            "disabled text became effectively invisible");
+        require(contrastRatio(textPrimary, selection) >= 7.0F,
+            "selected-row neutral text lost contrast against its accent fill");
+
+        require(sameColor(viewportSelected, fromSrgb(153, 239, 232)),
+            "technical viewport selection must retain its cyan semantic color");
+        require(sameColor(pitchChannelPurple, fromSrgb(191, 0, 255)),
+            "transition pitch data must retain its magenta semantic color");
+
+        ImGuiStyle& style = ImGui::GetStyle();
+        require(sameColor(style.Colors[ImGuiCol_Text], textPrimary)
+                && sameColor(style.Colors[ImGuiCol_TextDisabled], textDisabled)
+                && sameColor(style.Colors[ImGuiCol_CheckMark], accent)
+                && sameColor(style.Colors[ImGuiCol_SliderGrabActive], accentHovered)
+                && sameColor(style.Colors[ImGuiCol_Header], selection),
+            "applyQuantumStyle did not install the centralized palette");
+        require(style.DisabledAlpha >= 0.65F,
+            "disabled controls are too faint for editor use");
+
+        style.Colors[ImGuiCol_Text] = ImVec4{};
+        applyQuantumStyle();
+        require(sameColor(style.Colors[ImGuiCol_Text], textPrimary),
+            "applying the QUANTUM theme must be deterministic");
+    }
+
     void presetSurvivesSettings()
     {
         ViewportCamera camera;
@@ -221,6 +296,7 @@ namespace
         try
         {
             applyQuantumStyle();
+            quantumStylePalette();
             const auto fonts = loadEditorFonts(basePath);
             auto& io = ImGui::GetIO();
             io.IniFilename = nullptr;
