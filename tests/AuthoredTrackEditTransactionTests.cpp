@@ -203,6 +203,31 @@ namespace
         requireSameGeneratedTrack(generatedBefore, committed,
             "a rejected structural candidate must leave generated track unchanged");
     }
+
+    void shorteningPastAttachmentRejectsCandidate()
+    {
+        AuthoredTrack committed = quantum::coaster::createNewDocument();
+        committed.setLayoutMode(quantum::coaster::LayoutMode::Shuttle);
+        const auto structureId = committed.createSupportStructure("Attached");
+        const auto nodeId = committed.createSupportNode(
+            structureId, {0.0, 0.0, 0.0});
+        committed.setSupportTrackAttachment(
+            structureId, nodeId, {40.0, 0.0, 0.0});
+
+        AuthoredTrackEditTransaction transaction{committed};
+        quantum::coaster::setSectionLength(
+            transaction.candidate().section(0), 30.0);
+        requireThrows<std::invalid_argument>([&transaction] {
+            static_cast<void>(quantum::coaster::integrateAuthoredTrack(
+                transaction.candidate(), 1.0));
+        }, "track shortening past an attachment must reject the candidate");
+
+        require(!transaction.committed()
+                && committed.section(0).length == 60.0
+                && committed.supports().structures[0].nodes[0]
+                    .trackAttachment->station == 40.0,
+            "attachment invalidation must preserve the committed document");
+    }
 }
 
 int main()
@@ -212,6 +237,7 @@ int main()
         rejectedSectionLengthRestoresCommittedBuffer();
         rejectedPlanarArcRadiusRestoresCommittedBuffers();
         rejectedStructuralCandidateDoesNotPublishSelection();
+        shorteningPastAttachmentRejectsCandidate();
     }
     catch (const std::exception& exception)
     {

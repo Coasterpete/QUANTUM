@@ -169,6 +169,39 @@ namespace
         require(!editor::supportSelectionExists(supports, retained),
             "selection must clear when its stable IDs disappear");
     }
+
+    void attachmentPositionIsDerivedWhileFoundationStaysAuthored()
+    {
+        coaster::AuthoredTrack track = coaster::createNewDocument();
+        const auto structureId = track.createSupportStructure("Resolved");
+        const auto attachedId = track.createSupportNode(
+            structureId, {-50.0, -50.0, -50.0});
+        const auto foundationId = track.createSupportNode(
+            structureId, {10.0, 2.0, 0.0});
+        track.setSupportTrackAttachment(
+            structureId, attachedId, {10.0, 2.0, 3.0});
+        track.setSupportFoundation(structureId, foundationId);
+        static_cast<void>(track.createSupportMember(
+            structureId, attachedId, foundationId));
+
+        const auto states = coaster::integrateAuthoredTrack(track, 1.0);
+        const auto visualization = editor::createSupportVisualization(
+            track, states);
+        require(visualization.nodes[0].position
+                    == glm::dvec3{10.0, 2.0, 3.0},
+            "track-attached node visualization must use derived placement");
+        require(visualization.nodes[1].position
+                    == glm::dvec3{10.0, 2.0, 0.0},
+            "foundation visualization must use its explicit authored point");
+        require(visualization.members[0].startPosition
+                    == visualization.nodes[0].position
+                && visualization.members[0].endPosition
+                    == visualization.nodes[1].position,
+            "member visualization must use resolved node endpoints");
+        require(track.supports().structures[0].nodes[0].position
+                    == glm::dvec3{-50.0, -50.0, -50.0},
+            "visualization resolution must not mutate persistent fallback state");
+    }
 }
 
 int main()
@@ -178,6 +211,7 @@ int main()
         visualizationIsDeterministicAndExact();
         pickingReturnsStableIdsWithNodePriority();
         pickingAndRefreshTieBreakDeterministically();
+        attachmentPositionIsDerivedWhileFoundationStaysAuthored();
     }
     catch (const std::exception& error)
     {

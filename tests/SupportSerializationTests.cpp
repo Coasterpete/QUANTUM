@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <stdexcept>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -154,6 +155,80 @@ namespace
         require(serializeCoasterDocument(*restored) == serialized,
             "manual graph serialization must be deterministic");
     }
+
+    void attachmentAndFoundationRoundTrip()
+    {
+        AuthoredTrack track = createNewDocument();
+        track.setLayoutMode(LayoutMode::Shuttle);
+        const SupportStructureId structureId =
+            track.createSupportStructure("Anchored support");
+        const SupportElementId attached = track.createSupportNode(
+            structureId, {91.0, 92.0, 93.0});
+        const SupportElementId foundation = track.createSupportNode(
+            structureId, {4.0, 5.0, 6.0});
+        track.setSupportTrackAttachment(
+            structureId, attached, {12.5, -1.25, 2.75});
+        track.setSupportFoundation(structureId, foundation);
+
+        const std::string serialized = serializeCoasterDocument(track);
+        const json document = json::parse(serialized);
+        const json& attachedJson =
+            document["supports"]["structures"][0]["nodes"][0];
+        require(attachedJson["position"]["x"] == 91.0,
+            "the authored fallback position must remain serialized");
+        require(attachedJson["trackAttachment"]["station"] == 12.5,
+            "attachment station must be serialized in authored units");
+        require(!attachedJson.contains("resolvedPosition")
+                && !attachedJson["trackAttachment"].contains("position"),
+            "derived world position must not be serialized");
+        require(document["supports"]["structures"][0]["nodes"][1]
+                ["foundation"].empty(),
+            "foundation v1 metadata must be an empty additive object");
+
+        const auto restored = deserializeCoasterDocument(serialized);
+        require(restored.has_value(),
+            "attachment/foundation document must deserialize");
+        require(restored->supports() == track.supports(),
+            "attachment and foundation metadata must round-trip exactly");
+        require(serializeCoasterDocument(*restored) == serialized,
+            "attachment/foundation serialization must be deterministic");
+    }
+
+    void malformedAnchorFieldsAreRejected()
+    {
+        AuthoredTrack track = createNewDocument();
+        const SupportStructureId structureId =
+            track.createSupportStructure("Attached");
+        const SupportElementId nodeId = track.createSupportNode(
+            structureId, {0.0, 0.0, 0.0});
+        track.setSupportTrackAttachment(
+            structureId, nodeId, {10.0, 0.0, 0.0});
+        const json valid = json::parse(serializeCoasterDocument(track));
+
+        json unknown = valid;
+        unknown["supports"]["structures"][0]["nodes"][0]
+            ["trackAttachment"]["pathId"] = 0;
+        require(!deserializeCoasterDocument(unknown.dump()).has_value(),
+            "unknown attachment fields must be rejected");
+
+        json malformed = valid;
+        malformed["supports"]["structures"][0]["nodes"][0]
+            ["trackAttachment"]["lateralOffset"] = "NaN";
+        require(!deserializeCoasterDocument(malformed.dump()).has_value(),
+            "non-numeric attachment values must be rejected");
+
+        json conflicting = valid;
+        conflicting["supports"]["structures"][0]["nodes"][0]
+            ["foundation"] = json::object();
+        require(!deserializeCoasterDocument(conflicting.dump()).has_value(),
+            "serialized attachment/foundation conflicts must be rejected");
+
+        json invalidStation = valid;
+        invalidStation["supports"]["structures"][0]["nodes"][0]
+            ["trackAttachment"]["station"] = 60.0;
+        require(!deserializeCoasterDocument(invalidStation.dump()).has_value(),
+            "non-canonical circuit end stations must be rejected");
+    }
 }
 
 int main()
@@ -164,4 +239,6 @@ int main()
     malformedIdsAndCountersAreRejected();
     unknownSupportFieldsAreRejected();
     manuallyAuthoredGraphRoundTripsExactly();
+    attachmentAndFoundationRoundTrip();
+    malformedAnchorFieldsAreRejected();
 }

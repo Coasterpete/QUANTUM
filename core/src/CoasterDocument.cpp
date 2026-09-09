@@ -451,12 +451,24 @@ namespace quantum::coaster
                 json nodesJson = json::array();
                 for (const SupportNode& node : structure.nodes)
                 {
-                    nodesJson.push_back({
+                    json nodeJson{
                         {"id", node.id},
                         {"position", {
                             {"x", node.position.x},
                             {"y", node.position.y},
-                            {"z", node.position.z}}}});
+                            {"z", node.position.z}}}};
+                    if (node.trackAttachment.has_value())
+                    {
+                        nodeJson["trackAttachment"] = {
+                            {"station", node.trackAttachment->station},
+                            {"lateralOffset", node.trackAttachment->lateralOffset},
+                            {"verticalOffset", node.trackAttachment->verticalOffset}};
+                    }
+                    if (node.foundation.has_value())
+                    {
+                        nodeJson["foundation"] = json::object();
+                    }
+                    nodesJson.push_back(std::move(nodeJson));
                 }
 
                 json membersJson = json::array();
@@ -918,14 +930,42 @@ namespace quantum::coaster
                         throw std::runtime_error(
                             nodePath + ": expected a JSON object");
                     }
-                    requireNoUnknownFields(
-                        nodeJson, {"id", "position"}, nodePath);
+                    requireNoUnknownFields(nodeJson,
+                        {"id", "position", "trackAttachment", "foundation"},
+                        nodePath);
                     requireObject(nodeJson, "position", nodePath);
-                    structure.nodes.push_back({
+                    SupportNode node{
                         deserializeSupportId<SupportElementId>(
                             nodeJson, "id", nodePath),
                         deserializeDvec3(
-                            nodeJson["position"], nodePath + ".position")});
+                            nodeJson["position"], nodePath + ".position")};
+                    if (nodeJson.contains("trackAttachment"))
+                    {
+                        requireObject(nodeJson, "trackAttachment", nodePath);
+                        const json& attachment = nodeJson["trackAttachment"];
+                        const std::string attachmentPath =
+                            nodePath + ".trackAttachment";
+                        requireNoUnknownFields(attachment,
+                            {"station", "lateralOffset", "verticalOffset"},
+                            attachmentPath);
+                        for (const char* field : {
+                            "station", "lateralOffset", "verticalOffset"})
+                        {
+                            requireNumber(attachment, field, attachmentPath);
+                        }
+                        node.trackAttachment = TrackAttachment{
+                            attachment["station"].get<double>(),
+                            attachment["lateralOffset"].get<double>(),
+                            attachment["verticalOffset"].get<double>()};
+                    }
+                    if (nodeJson.contains("foundation"))
+                    {
+                        requireObject(nodeJson, "foundation", nodePath);
+                        requireNoUnknownFields(
+                            nodeJson["foundation"], {}, nodePath + ".foundation");
+                        node.foundation.emplace();
+                    }
+                    structure.nodes.push_back(std::move(node));
                 }
 
                 const json& members = structureJson["members"];
@@ -1255,6 +1295,7 @@ TrackStylePreset deserializeTrackStyle(
 
     std::string serializeCoasterDocument(const AuthoredTrack& track)
     {
+        validateSupportAnchors(track);
         json root;
         root["formatVersion"] = currentFormatVersion;
         root["layoutMode"] = layoutModeToString(track.layoutMode());

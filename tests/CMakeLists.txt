@@ -1551,6 +1551,40 @@ add_executable(
     SupportSerializationTests.cpp
 )
 
+add_executable(
+    QuantumCoreSupportAttachmentTests
+    SupportAttachmentTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreSupportAttachmentTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreSupportAttachmentTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreSupportAttachmentTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.SupportAttachment
+    COMMAND QuantumCoreSupportAttachmentTests
+)
+
+set_tests_properties(
+    QuantumCore.SupportAttachment
+    PROPERTIES
+        LABELS "core;coaster;supports;attachment;foundation"
+)
+
 target_link_libraries(
     QuantumCoreSupportSerializationTests
     PRIVATE

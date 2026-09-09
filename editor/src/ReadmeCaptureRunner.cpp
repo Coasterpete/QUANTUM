@@ -46,7 +46,8 @@ namespace quantum::editor
             validateReadmeCaptureDocument(scenario, *track);
             // The same solve/load acceptance as File > Open, with no document mutation.
             auto centerline = createCenterlineVisualization(*track);
-            auto supports = createSupportVisualization(track->supports());
+            auto supports = createSupportVisualization(
+                *track, centerline.samples);
             auto loads = evaluateRiderLoadDiagnostics(*track);
             AuthoredTrackEditTransaction transaction{*track};
             transaction.requireAcceptableRiderLoads(loads);

@@ -199,8 +199,37 @@ structure persists its ID, name, `nextElementId`, ordered nodes, and ordered
 members. Member endpoint IDs and profile data round-trip unchanged. Missing
 `supports` loads as an empty collection with its initial allocator state;
 unknown fields and malformed references are rejected rather than repaired.
-Foundations, track attachments, origin/generator metadata, materials, final
-member meshes, and structural analysis remain later milestones.
+Each support node may additionally own either a `TrackAttachment` or a
+`Foundation`, but never both. These semantics use the node's existing stable
+`(structureId, elementId)` identity rather than introducing a parallel ID
+space. This keeps deletion cleanup local to the support graph and lets manual
+and future procedural authoring emit the same family-neutral model.
+
+A track attachment persists cumulative whole-track `station`,
+`lateralOffset`, and `verticalOffset` in Core coordinate units. Authored track
+state currently contains one ordered path, so the physics-only `TrackPathId`
+and SI `TrackLocation` types are not persisted in support data. Shuttle
+stations use the finite closed domain `[0, trackLength]`; Circuit stations use
+the canonical half-open domain `[0, trackLength)` so the seam has one stored
+representation. Candidate generation rejects edits that leave a committed
+attachment outside this domain. Attachments are not clamped, detached, or
+silently rewritten.
+
+Resolution interpolates the current canonical track position and `(T, L, U)`
+frame, then computes `trackPosition + lateralOffset * L + verticalOffset * U`.
+The resulting world position/frame are derived values and are never serialized.
+`SupportNode::position` remains the explicit authored fallback/manual point;
+when an attachment is active, visualization resolves the node and connected
+member endpoints from current track geometry. A foundation is currently an
+empty semantic marker whose node position stays authoritative. It does not
+encode nominal Z=0 or a terrain reference, leaving terrain projection and
+follow-terrain behavior additive in a later format-compatible milestone.
+
+Format version 1 adds optional `trackAttachment` and `foundation` objects to a
+serialized support node. Nodes without either field retain the M0/M1 behavior,
+unknown nested fields are rejected, and no transient editor or resolved-world
+cache is persisted. Origin/generator metadata, materials, final member meshes,
+terrain, manual anchor tools, and structural analysis remain later milestones.
 
 ### Support visualization and selection
 

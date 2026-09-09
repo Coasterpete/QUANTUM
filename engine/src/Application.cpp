@@ -197,7 +197,7 @@ namespace
             auto centerline = quantum::editor::createCenterlineVisualization(
                 *track, track->trackStyle());
             auto supports = quantum::editor::createSupportVisualization(
-                track->supports());
+                *track, centerline.samples);
             auto riderLoads =
                 quantum::editor::evaluateRiderLoadDiagnostics(*track);
             quantum::editor::AuthoredTrackEditTransaction transaction{*track};
@@ -355,7 +355,7 @@ namespace quantum::engine
                     startupDocument
                     ? std::move(startupDocument->supports)
                     : quantum::editor::createSupportVisualization(
-                        authoredTrack.supports());
+                        authoredTrack, centerline.samples);
 
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Info,
@@ -520,7 +520,7 @@ namespace quantum::engine
                             restoredTrack);
                     quantum::editor::SupportVisualization restoredSupports =
                         quantum::editor::createSupportVisualization(
-                            restoredTrack.supports());
+                            restoredTrack, restoredCenterline.samples);
                     quantum::editor::AuthoredTrackEditTransaction
                         restoredTransaction{restoredTrack};
                     restoredTransaction.requireAcceptableRiderLoads(
@@ -881,7 +881,9 @@ editorUi.selectSection(restoredSelection, true);
                                             authoredTrack));
                                     supportVisualization = quantum::editor::
                                         createSupportVisualization(
-                                            authoredTrack.supports());
+                                            authoredTrack,
+                                            centerlineCache.visualization()
+                                                .samples);
                                     editorUi.setSupportVisualization(
                                         supportVisualization);
                                     editorUi.setCenterlineBounds(
@@ -1106,8 +1108,8 @@ editorUi.selectSection(restoredSelection, true);
                                 quantum::editor::SupportVisualization
                                     candidateSupports = quantum::editor::
                                         createSupportVisualization(
-                                            supportTransaction.candidate()
-                                                .supports());
+                                            supportTransaction.candidate(),
+                                            centerline.samples);
 
                                 // The retained upload drains in-flight users;
                                 // publication occurs only after the candidate
@@ -1279,7 +1281,7 @@ editorUi.selectSection(restoredSelection, true);
                                 quantum::editor::SupportVisualization
                                     candidateSupports = quantum::editor::
                                         createSupportVisualization(
-                                            candidate.supports());
+                                            candidate, centerline.samples);
 
                                 // The retained upload drains in-flight users;
                                 // publication occurs only after the candidate
@@ -1894,6 +1896,11 @@ editorUi.selectSection(restoredSelection, true);
                                             evaluateRiderLoadDiagnostics(
                                                 candidateTrack
                                             );
+                                quantum::editor::SupportVisualization
+                                    candidateSupports = quantum::editor::
+                                        createSupportVisualization(
+                                            candidateTrack,
+                                            candidateCenterline.samples);
 
                                 editTransaction.requireAcceptableRiderLoads(candidateRiderLoads);
 
@@ -1911,12 +1918,18 @@ editorUi.selectSection(restoredSelection, true);
                                 );
                                 vulkan.updateRenderableTrack(
                                     candidateCenterline.renderableTrack);
+                                vulkan.updateSupportVertices(
+                                    candidateSupports.memberVertices);
 
                                 centerlineCache.setTrackStyle(
                                     candidateTrack.trackStyle());
                                 centerlineCache.replace(
                                     std::move(candidateCenterline));
                                 editTransaction.commit(authoredTrack);
+                                supportVisualization =
+                                    std::move(candidateSupports);
+                                editorUi.setSupportVisualization(
+                                    supportVisualization);
                                 documentHistory.record(
                                     authoredTrack,
                                     continuousDrag);

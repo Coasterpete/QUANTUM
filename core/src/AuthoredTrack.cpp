@@ -11,6 +11,116 @@ namespace quantum::coaster
 {
     namespace
     {
+        [[nodiscard]] double authoredTrackLength(const AuthoredTrack& track)
+        {
+            double length = 0.0;
+            for (std::size_t index = 0; index < track.sectionCount(); ++index)
+            {
+                length += sectionLength(track.section(index));
+            }
+            return length;
+        }
+
+        void validateSupportAnchorsForTrack(
+            const SupportCollection& supports,
+            const AuthoredTrack& track)
+        {
+            validateSupportCollection(supports);
+            const double length = authoredTrackLength(track);
+            for (const SupportStructure& structure : supports.structures)
+            {
+                for (const SupportNode& node : structure.nodes)
+                {
+                    if (!node.trackAttachment.has_value())
+                    {
+                        continue;
+                    }
+
+                    const double station = node.trackAttachment->station;
+                    const bool valid = track.layoutMode() == LayoutMode::Circuit
+                        ? station >= 0.0 && station < length
+                        : station >= 0.0 && station <= length;
+                    if (!valid)
+                    {
+                        throw std::invalid_argument(
+                            "Support track attachment station is outside the canonical authored track domain.");
+                    }
+                }
+            }
+        }
+
+        template<typename State>
+        [[nodiscard]] ResolvedTrackAttachment resolveAttachment(
+            const std::span<const State> states,
+            const TrackAttachment& attachment)
+        {
+            if (states.empty())
+            {
+                throw std::invalid_argument(
+                    "Track attachment resolution requires canonical track states.");
+            }
+            if (!std::isfinite(attachment.station)
+                || !std::isfinite(attachment.lateralOffset)
+                || !std::isfinite(attachment.verticalOffset)
+                || attachment.station < states.front().distance
+                || attachment.station > states.back().distance)
+            {
+                throw std::invalid_argument(
+                    "Track attachment is outside the resolved track domain.");
+            }
+
+            const auto upper = std::lower_bound(
+                states.begin(), states.end(), attachment.station,
+                [](const State& state, const double station)
+                {
+                    return state.distance < station;
+                });
+
+            glm::dvec3 trackPosition;
+            geometry::CurveFrame frame;
+            if (upper == states.begin())
+            {
+                trackPosition = upper->position;
+                frame = upper->frame;
+            }
+            else if (upper == states.end())
+            {
+                trackPosition = states.back().position;
+                frame = states.back().frame;
+            }
+            else
+            {
+                const State& after = *upper;
+                const State& before = *(upper - 1);
+                const double amount = (attachment.station - before.distance)
+                    / (after.distance - before.distance);
+                trackPosition = glm::mix(before.position, after.position, amount);
+
+                glm::dquat beforeOrientation = glm::normalize(glm::quat_cast(
+                    glm::dmat3{before.frame.tangent, before.frame.lateral,
+                        before.frame.up}));
+                glm::dquat afterOrientation = glm::normalize(glm::quat_cast(
+                    glm::dmat3{after.frame.tangent, after.frame.lateral,
+                        after.frame.up}));
+                if (glm::dot(beforeOrientation, afterOrientation) < 0.0)
+                {
+                    afterOrientation = -afterOrientation;
+                }
+                const glm::dquat orientation = glm::normalize(glm::slerp(
+                    beforeOrientation, afterOrientation, amount));
+                frame = {
+                    orientation * glm::dvec3{1.0, 0.0, 0.0},
+                    orientation * glm::dvec3{0.0, 1.0, 0.0},
+                    orientation * glm::dvec3{0.0, 0.0, 1.0}};
+            }
+
+            return {
+                trackPosition
+                    + attachment.lateralOffset * frame.lateral
+                    + attachment.verticalOffset * frame.up,
+                frame};
+        }
+
         [[nodiscard]] const PlanarArcRegion& planarArcConstruction(
             const GeometryRegion& region)
         {
@@ -532,8 +642,11 @@ namespace quantum::coaster
         return layoutMode_;
     }
 
-    void AuthoredTrack::setLayoutMode(const LayoutMode mode) noexcept
+    void AuthoredTrack::setLayoutMode(const LayoutMode mode)
     {
+        AuthoredTrack candidate = *this;
+        candidate.layoutMode_ = mode;
+        validateSupportAnchors(candidate);
         layoutMode_ = mode;
     }
 
@@ -760,7 +873,7 @@ namespace quantum::coaster
 
     void AuthoredTrack::setSupports(const SupportCollection& supports)
     {
-        validateSupportCollection(supports);
+        validateSupportAnchorsForTrack(supports, *this);
         supports_ = supports;
     }
 
@@ -862,6 +975,48 @@ namespace quantum::coaster
         supports_ = std::move(candidate);
     }
 
+    void AuthoredTrack::setSupportTrackAttachment(
+        const SupportStructureId structureId,
+        const SupportElementId nodeId,
+        const TrackAttachment& attachment)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::setSupportTrackAttachment(
+            candidate, structureId, nodeId, attachment);
+        validateSupportAnchorsForTrack(candidate, *this);
+        supports_ = std::move(candidate);
+    }
+
+    void AuthoredTrack::clearSupportTrackAttachment(
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::clearSupportTrackAttachment(
+            candidate, structureId, nodeId);
+        supports_ = std::move(candidate);
+    }
+
+    void AuthoredTrack::setSupportFoundation(
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::setSupportFoundation(
+            candidate, structureId, nodeId);
+        supports_ = std::move(candidate);
+    }
+
+    void AuthoredTrack::clearSupportFoundation(
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::clearSupportFoundation(
+            candidate, structureId, nodeId);
+        supports_ = std::move(candidate);
+    }
+
     AuthoredTrackSection createForceDrivenSection(const double length)
     {
         AuthoredTrackSection section = createRateProfileSection(length);
@@ -893,6 +1048,7 @@ namespace quantum::coaster
         const AuthoredTrack& track,
         const double integrationSpacing)
     {
+        validateSupportAnchors(track);
         if (hasForceDrivenRegions(track))
         {
             const auto kinematics = integrateAuthoredTrackKinematics(track, integrationSpacing);
@@ -996,6 +1152,7 @@ namespace quantum::coaster
         const double integrationSpacing,
         const ForceDrivenIntegrationSettings& forceSettings)
     {
+        validateSupportAnchors(track);
         if (!std::isfinite(integrationSpacing) || integrationSpacing <= 0.0)
         {
             throw std::invalid_argument(
@@ -1143,5 +1300,24 @@ namespace quantum::coaster
                 TrackGenerationFailureReason::IntegrationFailure, sectionIndex,
                 std::nullopt, std::nullopt, std::nullopt, error.what()});
         }
+    }
+
+    void validateSupportAnchors(const AuthoredTrack& track)
+    {
+        validateSupportAnchorsForTrack(track.supports(), track);
+    }
+
+    ResolvedTrackAttachment resolveSupportTrackAttachment(
+        const std::span<const TrackKinematicState> states,
+        const TrackAttachment& attachment)
+    {
+        return resolveAttachment(states, attachment);
+    }
+
+    ResolvedTrackAttachment resolveSupportTrackAttachment(
+        const std::span<const RiderLocalGeometryState> states,
+        const TrackAttachment& attachment)
+    {
+        return resolveAttachment(states, attachment);
     }
 }

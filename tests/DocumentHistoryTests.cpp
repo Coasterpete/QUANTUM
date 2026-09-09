@@ -373,6 +373,51 @@ namespace
         require(snapshot(track) == connected,
             "Redo must restore the graph exactly as authored");
     }
+
+    void supportAnchorMetadataUsesWholeDocumentHistory()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        const auto structureId = track.createSupportStructure("Anchors");
+        const auto attachedId = track.createSupportNode(
+            structureId, {1.0, 2.0, 3.0});
+        const auto foundationId = track.createSupportNode(
+            structureId, {4.0, 5.0, 6.0});
+
+        DocumentHistory history;
+        history.reset(track);
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            transaction.candidate().setSupportTrackAttachment(
+                structureId, attachedId, {12.0, -1.0, 2.0});
+            transaction.commit(track);
+            history.record(track);
+        }
+        require(!requireState(history.undo(), "attachment Undo missing")
+                    .supports().structures[0].nodes[0]
+                    .trackAttachment.has_value(),
+            "attachment Undo must restore the unanchored node");
+        track = requireState(history.redo(), "attachment Redo missing");
+        require(track.supports().structures[0].nodes[0].trackAttachment
+                    == quantum::coaster::TrackAttachment{12.0, -1.0, 2.0},
+            "attachment Redo must restore exact authored metadata");
+
+        history.reset(track);
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            transaction.candidate().setSupportFoundation(
+                structureId, foundationId);
+            transaction.commit(track);
+            history.record(track);
+        }
+        require(!requireState(history.undo(), "foundation Undo missing")
+                    .supports().structures[0].nodes[1]
+                    .foundation.has_value(),
+            "foundation Undo must restore the unanchored node");
+        track = requireState(history.redo(), "foundation Redo missing");
+        require(track.supports().structures[0].nodes[1]
+                    .foundation.has_value(),
+            "foundation Redo must restore exact authored metadata");
+    }
 }
 
 int main()
@@ -388,6 +433,7 @@ int main()
         trackHardwareEditsUndoAndRedo();
         supportNodeEditsUseWholeDocumentHistory();
         supportGraphAuthoringUndoRedoIsExact();
+        supportAnchorMetadataUsesWholeDocumentHistory();
     }
     catch (const std::exception& exception)
     {
