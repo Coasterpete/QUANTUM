@@ -45,8 +45,10 @@ The current editor uses:
 - a near-black 3D viewport;
 - Overpass for ordinary UI text;
 - Overpass Mono for technical and numeric values;
-- cyan/teal selection emphasis;
-- amber hover and warning emphasis;
+- chartreuse interaction and selection emphasis;
+- cyan/teal coaster and technical viewport geometry;
+- magenta/purple transition data where channel semantics call for it;
+- amber technical hover and warning emphasis;
 - red primarily for destructive and error states;
 - a distance-domain Transition Editor with a dot grid;
 - a compact viewport toolbar;

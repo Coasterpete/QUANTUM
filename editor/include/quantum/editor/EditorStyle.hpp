@@ -23,6 +23,8 @@ namespace quantum::editor
 
     [[nodiscard]] EditorFonts loadEditorFonts(const std::filesystem::path& basePath);
     void editorHeading(const char* label, const EditorFonts& fonts);
+    void editorSecondaryText(const char* format, ...);
+    void editorSecondaryTextWrapped(const char* format, ...);
 
     namespace viewportStyle
     {
@@ -75,22 +77,31 @@ namespace quantum::editor
         }
 
         inline const ImVec4 black = fromSrgb(0, 0, 0);
-        inline const ImVec4 surface = fromSrgb(34, 34, 34);
-        inline const ImVec4 surfaceRaised = fromSrgb(40, 40, 40);
-        inline const ImVec4 surfaceInset = fromSrgb(26, 26, 26);
-        inline const ImVec4 control = fromSrgb(46, 46, 46);
-        inline const ImVec4 controlHovered = fromSrgb(58, 58, 58);
-        inline const ImVec4 controlActive = fromSrgb(70, 70, 70);
-        inline const ImVec4 border = fromSrgb(76, 76, 76);
-        inline const ImVec4 text = fromSrgb(224, 224, 224);
-        inline const ImVec4 textSecondary = fromSrgb(148, 148, 148);
-        inline const ImVec4 plotDot = fromSrgb(53, 53, 53);
-        inline const ImVec4 plotReference = fromSrgb(72, 72, 72);
+        inline const ImVec4 background = fromSrgb(26, 26, 26);
+        inline const ImVec4 panel = fromSrgb(34, 34, 34);
+        inline const ImVec4 panelRaised = fromSrgb(41, 41, 41);
+        inline const ImVec4 frame = fromSrgb(48, 48, 48);
+        inline const ImVec4 frameHovered = fromSrgb(61, 61, 61);
+        inline const ImVec4 frameActive = fromSrgb(72, 72, 72);
+        inline const ImVec4 border = fromSrgb(86, 86, 86);
+        inline const ImVec4 separator = fromSrgb(74, 74, 74);
 
-        inline const ImVec4 accent = fromSrgb(80, 204, 196);
-        inline const ImVec4 selection = fromSrgb(32, 83, 81);
-        inline const ImVec4 selectionHovered = fromSrgb(40, 102, 98);
-        inline const ImVec4 selectionActive = fromSrgb(44, 109, 104);
+        inline const ImVec4 textPrimary = fromSrgb(236, 236, 236);
+        inline const ImVec4 textSecondary = fromSrgb(184, 184, 184);
+        inline const ImVec4 textDisabled = fromSrgb(152, 152, 152);
+
+        inline const ImVec4 accent = fromSrgb(168, 214, 42);
+        inline const ImVec4 accentHovered = fromSrgb(184, 224, 68);
+        inline const ImVec4 accentActive = fromSrgb(145, 190, 31);
+        inline const ImVec4 accentMuted = fromSrgb(63, 80, 30);
+        inline const ImVec4 selection = fromSrgb(52, 66, 28);
+        inline const ImVec4 selectionHovered = fromSrgb(65, 83, 34);
+        inline const ImVec4 selectionActive = fromSrgb(77, 99, 38);
+
+        inline const ImVec4 plotDot = fromSrgb(69, 69, 69);
+        inline const ImVec4 plotReference = fromSrgb(101, 101, 101);
+
+        inline const ImVec4 success = fromSrgb(116, 201, 139);
         inline const ImVec4 warning = fromSrgb(235, 185, 91);
         inline const ImVec4 error = fromSrgb(255, 146, 140);
         inline const ImVec4 destructive = fromSrgb(67, 38, 39);

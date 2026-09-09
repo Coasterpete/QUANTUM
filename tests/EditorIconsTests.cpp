@@ -270,22 +270,22 @@ namespace
             "Disabled icon buttons do not retain the standard hit target.");
 
         require(normal.frameColor == ImGui::GetColorU32(
-            quantum::editor::palette::control),
+            quantum::editor::palette::frame),
             "Normal Lucide buttons do not use the standard control surface.");
         require(containsColor(normal, ImGui::GetColorU32(
-            quantum::editor::palette::text)),
+            quantum::editor::palette::textPrimary)),
             "Normal Lucide icons do not use the readable text color.");
         require(selected.frameColor == ImGui::GetColorU32(
             quantum::editor::palette::selection),
             "Selected Lucide buttons lost the QUANTUM selection surface.");
         require(containsColor(selected, ImGui::GetColorU32(
-            quantum::editor::palette::accent)),
-            "Selected Lucide icons lost the QUANTUM accent.");
+            quantum::editor::palette::textPrimary)),
+            "Selected Lucide icons lost their neutral high-contrast tint.");
         require(disabled.frameColor == ImGui::GetColorU32(
-            quantum::editor::palette::surfaceInset),
+            quantum::editor::palette::background),
             "Disabled Lucide buttons are not visually distinct.");
         require(containsColor(disabled, ImGui::GetColorU32(
-            quantum::editor::palette::textSecondary)),
+            quantum::editor::palette::textDisabled)),
             "Disabled Lucide icons do not use the muted readable tint.");
         require(disabled.frameColor != normal.frameColor
                 && selected.frameColor != normal.frameColor,
@@ -299,17 +299,17 @@ namespace
         const RenderedButton active = renderInteractiveButton(icons, true);
         static_cast<void>(renderInteractiveButton(icons, false));
         require(hovered.frameColor == ImGui::GetColorU32(
-            quantum::editor::palette::controlHovered),
+            quantum::editor::palette::frameHovered),
             "Hovered Lucide buttons do not use the hover surface.");
         require(containsColor(hovered, ImGui::GetColorU32(
-            quantum::editor::palette::accent)),
-            "Hovered Lucide icons do not use the accent tint.");
+            quantum::editor::palette::textPrimary)),
+            "Hovered Lucide icons lost their neutral high-contrast tint.");
         require(active.frameColor == ImGui::GetColorU32(
             quantum::editor::palette::selectionActive),
             "Held Lucide buttons do not use the active surface.");
         require(containsColor(active, ImGui::GetColorU32(
-            quantum::editor::palette::accent)),
-            "Held Lucide icons do not use the accent tint.");
+            quantum::editor::palette::textPrimary)),
+            "Held Lucide icons lost their neutral high-contrast tint.");
     }
 }
 
