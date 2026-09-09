@@ -1,12 +1,13 @@
 #pragma once
 
-#include <quantum/coaster/Supports.hpp>
+#include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <glm/vec3.hpp>
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -61,6 +62,13 @@ namespace quantum::editor
 
     [[nodiscard]] SupportVisualization createSupportVisualization(
         const coaster::SupportCollection& supports);
+
+    // Resolves active track attachments from the current solved path before
+    // deriving the existing visualization. Unattached and foundation nodes
+    // continue to use their explicit authored positions.
+    [[nodiscard]] SupportVisualization createSupportVisualization(
+        const coaster::AuthoredTrack& track,
+        std::span<const coaster::RiderLocalGeometryState> trackStates);
 
     [[nodiscard]] bool supportSelectionExists(
         const coaster::SupportCollection& supports,

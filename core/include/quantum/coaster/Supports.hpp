@@ -4,6 +4,7 @@
 #include <glm/vec3.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,10 +39,37 @@ namespace quantum::coaster
             const SupportMemberProfile&) = default;
     };
 
+    // Authored placement on the document's single ordered track path.
+    // Station and offsets use Core coordinate units, not SI metres. The
+    // resolved world position/frame are derived from current track geometry
+    // and are deliberately not persisted here.
+    struct TrackAttachment
+    {
+        double station = 0.0;
+        double lateralOffset = 0.0;
+        double verticalOffset = 0.0;
+
+        [[nodiscard]] friend bool operator==(
+            const TrackAttachment&,
+            const TrackAttachment&) = default;
+    };
+
+    // Marks a node as an explicitly authored foundation/ground anchor. Its
+    // SupportNode::position remains authoritative; terrain projection and
+    // terrain-follow metadata are future additive concerns.
+    struct Foundation
+    {
+        [[nodiscard]] friend bool operator==(
+            const Foundation&,
+            const Foundation&) = default;
+    };
+
     struct SupportNode
     {
         SupportElementId id = invalidSupportElementId;
         glm::dvec3 position{0.0, 0.0, 0.0};
+        std::optional<TrackAttachment> trackAttachment;
+        std::optional<Foundation> foundation;
 
         [[nodiscard]] friend bool operator==(
             const SupportNode&, const SupportNode&) = default;
@@ -146,6 +174,27 @@ namespace quantum::coaster
         SupportCollection& collection,
         SupportStructureId structureId,
         SupportElementId memberId);
+
+    // Node anchor metadata uses the node's existing stable identity. Setting
+    // one anchor kind replaces no other state and rejects a node already
+    // carrying the mutually exclusive anchor kind.
+    void setSupportTrackAttachment(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId nodeId,
+        const TrackAttachment& attachment);
+    void clearSupportTrackAttachment(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId nodeId);
+    void setSupportFoundation(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId nodeId);
+    void clearSupportFoundation(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId nodeId);
 
     // Geometric/document consistency only. This does not perform loads,
     // stress, buckling, foundation, or code-compliance analysis.

@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <variant>
@@ -193,7 +194,7 @@ namespace quantum::coaster
         AuthoredTrack() = default;
 
         [[nodiscard]] LayoutMode layoutMode() const noexcept;
-        void setLayoutMode(LayoutMode mode) noexcept;
+        void setLayoutMode(LayoutMode mode);
 
         [[nodiscard]] const AuthoredStartPose& startPose() const noexcept;
 
@@ -254,6 +255,19 @@ namespace quantum::coaster
         void removeSupportMember(
             SupportStructureId structureId,
             SupportElementId memberId);
+        void setSupportTrackAttachment(
+            SupportStructureId structureId,
+            SupportElementId nodeId,
+            const TrackAttachment& attachment);
+        void clearSupportTrackAttachment(
+            SupportStructureId structureId,
+            SupportElementId nodeId);
+        void setSupportFoundation(
+            SupportStructureId structureId,
+            SupportElementId nodeId);
+        void clearSupportFoundation(
+            SupportStructureId structureId,
+            SupportElementId nodeId);
 
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
@@ -344,4 +358,26 @@ namespace quantum::coaster
         const AuthoredTrack& track,
         double integrationSpacing,
         const ForceDrivenIntegrationSettings& forceSettings = {});
+
+    // Validates node anchor metadata against the complete authored track.
+    // Shuttle stations use [0, length]; Circuit stations use canonical
+    // [0, length). An attachment beyond a shortened track is invalid rather
+    // than clamped, detached, or silently rewritten.
+    void validateSupportAnchors(const AuthoredTrack& track);
+
+    struct ResolvedTrackAttachment
+    {
+        glm::dvec3 position{0.0};
+        geometry::CurveFrame frame;
+    };
+
+    // Resolves authored station/offset metadata against current canonical
+    // track states. These are interpolation seams only; no resolved cache is
+    // written back into the document.
+    [[nodiscard]] ResolvedTrackAttachment resolveSupportTrackAttachment(
+        std::span<const TrackKinematicState> states,
+        const TrackAttachment& attachment);
+    [[nodiscard]] ResolvedTrackAttachment resolveSupportTrackAttachment(
+        std::span<const RiderLocalGeometryState> states,
+        const TrackAttachment& attachment);
 }

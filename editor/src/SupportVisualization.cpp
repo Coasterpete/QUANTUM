@@ -78,6 +78,26 @@ namespace quantum::editor
         return visualization;
     }
 
+    SupportVisualization createSupportVisualization(
+        const coaster::AuthoredTrack& track,
+        const std::span<const coaster::RiderLocalGeometryState> trackStates)
+    {
+        coaster::validateSupportAnchors(track);
+        coaster::SupportCollection resolved = track.supports();
+        for (coaster::SupportStructure& structure : resolved.structures)
+        {
+            for (coaster::SupportNode& node : structure.nodes)
+            {
+                if (node.trackAttachment.has_value())
+                {
+                    node.position = coaster::resolveSupportTrackAttachment(
+                        trackStates, *node.trackAttachment).position;
+                }
+            }
+        }
+        return createSupportVisualization(resolved);
+    }
+
     bool supportSelectionExists(
         const coaster::SupportCollection& supports,
         const SupportSelection& selection) noexcept

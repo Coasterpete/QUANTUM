@@ -12,6 +12,37 @@ namespace quantum::coaster
 {
     namespace
     {
+        [[nodiscard]] SupportNode& findSupportNode(
+            SupportCollection& collection,
+            const SupportStructureId structureId,
+            const SupportElementId nodeId)
+        {
+            const auto structure = std::find_if(
+                collection.structures.begin(),
+                collection.structures.end(),
+                [structureId](const SupportStructure& value)
+                {
+                    return value.id == structureId;
+                });
+            if (structure == collection.structures.end())
+            {
+                throw std::invalid_argument("Unknown support structure ID.");
+            }
+
+            const auto node = std::find_if(
+                structure->nodes.begin(),
+                structure->nodes.end(),
+                [nodeId](const SupportNode& value)
+                {
+                    return value.id == nodeId;
+                });
+            if (node == structure->nodes.end())
+            {
+                throw std::invalid_argument("Unknown support node ID.");
+            }
+            return *node;
+        }
+
         template<typename Id>
         void validateAllocationCounter(
             const Id nextId,
@@ -297,6 +328,65 @@ namespace quantum::coaster
         validateSupportCollection(collection);
     }
 
+    void setSupportTrackAttachment(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId nodeId,
+        const TrackAttachment& attachment)
+    {
+        validateSupportCollection(collection);
+        if (!std::isfinite(attachment.station)
+            || !std::isfinite(attachment.lateralOffset)
+            || !std::isfinite(attachment.verticalOffset))
+        {
+            throw std::invalid_argument(
+                "Support track attachment values must be finite.");
+        }
+        SupportNode& node = findSupportNode(collection, structureId, nodeId);
+        if (node.foundation.has_value())
+        {
+            throw std::invalid_argument(
+                "A support node cannot be both track-attached and a foundation.");
+        }
+        node.trackAttachment = attachment;
+        validateSupportCollection(collection);
+    }
+
+    void clearSupportTrackAttachment(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        validateSupportCollection(collection);
+        findSupportNode(collection, structureId, nodeId)
+            .trackAttachment.reset();
+    }
+
+    void setSupportFoundation(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        validateSupportCollection(collection);
+        SupportNode& node = findSupportNode(collection, structureId, nodeId);
+        if (node.trackAttachment.has_value())
+        {
+            throw std::invalid_argument(
+                "A support node cannot be both track-attached and a foundation.");
+        }
+        node.foundation.emplace();
+        validateSupportCollection(collection);
+    }
+
+    void clearSupportFoundation(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId nodeId)
+    {
+        validateSupportCollection(collection);
+        findSupportNode(collection, structureId, nodeId).foundation.reset();
+    }
+
     void validateSupportMemberProfile(const SupportMemberProfile& profile)
     {
         switch (profile.shape)
@@ -377,6 +467,23 @@ namespace quantum::coaster
                 {
                     throw std::invalid_argument(
                         "Support node positions must be finite.");
+                }
+                if (node.trackAttachment.has_value())
+                {
+                    const TrackAttachment& attachment = *node.trackAttachment;
+                    if (!std::isfinite(attachment.station)
+                        || !std::isfinite(attachment.lateralOffset)
+                        || !std::isfinite(attachment.verticalOffset))
+                    {
+                        throw std::invalid_argument(
+                            "Support track attachment values must be finite.");
+                    }
+                }
+                if (node.trackAttachment.has_value()
+                    && node.foundation.has_value())
+                {
+                    throw std::invalid_argument(
+                        "A support node cannot be both track-attached and a foundation.");
                 }
             }
 
