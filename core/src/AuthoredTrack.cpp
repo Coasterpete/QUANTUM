@@ -1017,6 +1017,29 @@ namespace quantum::coaster
         supports_ = std::move(candidate);
     }
 
+    void AuthoredTrack::setSupportMemberEndConnection(
+        const SupportStructureId structureId,
+        const SupportElementId memberId,
+        const SupportMemberEnd end,
+        const SupportMemberEndConnection& connection)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::setSupportMemberEndConnection(
+            candidate, structureId, memberId, end, connection);
+        supports_ = std::move(candidate);
+    }
+
+    void AuthoredTrack::clearSupportMemberEndConnection(
+        const SupportStructureId structureId,
+        const SupportElementId memberId,
+        const SupportMemberEnd end)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::clearSupportMemberEndConnection(
+            candidate, structureId, memberId, end);
+        supports_ = std::move(candidate);
+    }
+
     AuthoredTrackSection createForceDrivenSection(const double length)
     {
         AuthoredTrackSection section = createRateProfileSection(length);

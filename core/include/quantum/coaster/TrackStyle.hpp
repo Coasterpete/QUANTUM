@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/RiderLocalGeometry.hpp>
+#include <quantum/coaster/StaticMeshAsset.hpp>
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
@@ -52,14 +53,6 @@ namespace quantum::coaster
         glm::dvec2 dimensions{0.0, 0.0};
     };
 
-    struct StaticMeshAssetReference
-    {
-        std::string path;
-        // Diagnostic assets are replaceable development stand-ins, not
-        // production Blender-authored track hardware.
-        bool placeholder = false;
-    };
-
     enum class HardwareFrameFollow : std::uint8_t
     {
         TrackFrame,
@@ -99,9 +92,10 @@ namespace quantum::coaster
     [[nodiscard]] TrackStylePreset createStandardDualRailPreset();
 
     // Returns a canonical package-relative identifier for repeating track
-    // hardware. File-backed hardware must live below assets/track and use the
-    // .glb extension. The retained builtin diagnostic placeholder is the only
-    // builtin identifier accepted as authored hardware.
+    // hardware below assets://track/. The retained builtin diagnostic
+    // placeholder is the only builtin identifier accepted as authored
+    // hardware. File-backed paths share normalizeStaticMeshAssetIdentifier
+    // with the support connector assets.
     [[nodiscard]] std::string normalizeTrackHardwareAssetIdentifier(
         std::string_view identifier);
 

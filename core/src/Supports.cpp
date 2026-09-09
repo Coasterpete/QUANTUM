@@ -72,6 +72,163 @@ namespace quantum::coaster
 
             return nextId++;
         }
+
+        [[nodiscard]] bool finite(const glm::dvec3& value) noexcept
+        {
+            return std::isfinite(value.x)
+                && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        }
+
+        [[nodiscard]] bool finite(const glm::dquat& value) noexcept
+        {
+            return std::isfinite(value.w)
+                && std::isfinite(value.x)
+                && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        }
+
+        // True when the quaternion is not the deterministic signed form used
+        // for serialization. Mirrors the AuthoredStartPose convention: the
+        // first nonzero component (w, x, y, z order) must be positive.
+        [[nodiscard]] bool negativeCanonicalSign(
+            const glm::dquat& value) noexcept
+        {
+            return value.w < 0.0
+                || (value.w == 0.0 && value.x < 0.0)
+                || (value.w == 0.0 && value.x == 0.0
+                    && value.y < 0.0)
+                || (value.w == 0.0 && value.x == 0.0
+                    && value.y == 0.0 && value.z < 0.0);
+        }
+
+        [[nodiscard]] glm::dquat canonicalPlacementOrientation(
+            const glm::dquat& orientation)
+        {
+            if (!finite(orientation))
+            {
+                throw std::invalid_argument(
+                    "A member-end connection orientation must be finite.");
+            }
+
+            const double scale = std::max({
+                std::abs(orientation.w),
+                std::abs(orientation.x),
+                std::abs(orientation.y),
+                std::abs(orientation.z)
+            });
+            if (scale == 0.0)
+            {
+                throw std::invalid_argument(
+                    "A member-end connection orientation must be nonzero.");
+            }
+
+            glm::dquat normalized = orientation / scale;
+            const double magnitude = std::hypot(
+                std::hypot(normalized.w, normalized.x),
+                std::hypot(normalized.y, normalized.z)
+            );
+            if (!std::isfinite(magnitude) || magnitude == 0.0)
+            {
+                throw std::invalid_argument(
+                    "A member-end connection orientation could not be normalized.");
+            }
+            normalized /= magnitude;
+
+            // q and -q encode the same rotation. Keeping one canonical sign
+            // makes document serialization deterministic across edit paths.
+            if (negativeCanonicalSign(normalized))
+            {
+                normalized = -normalized;
+            }
+            return normalized;
+        }
+
+        [[nodiscard]] SupportMemberEndPlacement canonicalPlacement(
+            const SupportMemberEndPlacement& placement)
+        {
+            SupportMemberEndPlacement canonical = placement;
+            if (!finite(canonical.position))
+            {
+                throw std::invalid_argument(
+                    "A member-end connection position must be finite.");
+            }
+            canonical.orientation = canonicalPlacementOrientation(
+                placement.orientation);
+            if (!finite(canonical.scale)
+                || canonical.scale.x <= 0.0
+                || canonical.scale.y <= 0.0
+                || canonical.scale.z <= 0.0)
+            {
+                throw std::invalid_argument(
+                    "A member-end connection scale must be finite and positive.");
+            }
+            return canonical;
+        }
+
+        [[nodiscard]] SupportMember& findSupportMember(
+            SupportStructure& structure,
+            const SupportElementId memberId)
+        {
+            const auto member = std::find_if(
+                structure.members.begin(),
+                structure.members.end(),
+                [memberId](const SupportMember& value)
+                {
+                    return value.id == memberId;
+                });
+            if (member == structure.members.end())
+            {
+                throw std::invalid_argument("Unknown support member ID.");
+            }
+            return *member;
+        }
+
+        // Resolves the node that owns the interface context for one member
+        // end. Connections are member metadata and live independently of the
+        // node, but the node's anchor metadata decides whether a track-only
+        // or foundation-only treatment is meaningful there.
+        [[nodiscard]] const SupportNode& findMemberEndNode(
+            const SupportStructure& structure,
+            const SupportElementId endNodeId)
+        {
+            const auto node = std::find_if(
+                structure.nodes.begin(),
+                structure.nodes.end(),
+                [endNodeId](const SupportNode& value)
+                {
+                    return value.id == endNodeId;
+                });
+            if (node == structure.nodes.end())
+            {
+                throw std::invalid_argument("Unknown support node ID.");
+            }
+            return *node;
+        }
+
+        void validateMemberEndNodeContext(
+            const SupportNode& node,
+            const SupportMemberEndTreatment treatment)
+        {
+            const bool requiresTrack = treatment
+                    == SupportMemberEndTreatment::Saddle
+                || treatment == SupportMemberEndTreatment::Clamp;
+            const bool requiresFoundation = treatment
+                    == SupportMemberEndTreatment::Base
+                || treatment == SupportMemberEndTreatment::Footing;
+            if (requiresTrack && !node.trackAttachment.has_value())
+            {
+                throw std::invalid_argument(
+                    "A Saddle or Clamp member-end connection requires a node "
+                    "with a track attachment.");
+            }
+            if (requiresFoundation && !node.foundation.has_value())
+            {
+                throw std::invalid_argument(
+                    "A Base or Footing member-end connection requires a node "
+                    "with a foundation.");
+            }
+        }
     }
 
     SupportStructureId allocateSupportStructureId(
@@ -387,6 +544,197 @@ namespace quantum::coaster
         findSupportNode(collection, structureId, nodeId).foundation.reset();
     }
 
+    std::string normalizeSupportConnectorAssetIdentifier(
+        const std::string_view identifier)
+    {
+        return normalizeStaticMeshAssetIdentifier(identifier, "support");
+    }
+
+    SupportMemberEndConnection normalizeSupportMemberEndConnection(
+        const SupportMemberEndConnection& connection)
+    {
+        SupportMemberEndConnection normalized = connection;
+
+        switch (connection.treatment)
+        {
+        case SupportMemberEndTreatment::MiteredCut:
+        case SupportMemberEndTreatment::EndCap:
+        case SupportMemberEndTreatment::Plate:
+        case SupportMemberEndTreatment::Flange:
+        case SupportMemberEndTreatment::Splice:
+        case SupportMemberEndTreatment::Saddle:
+        case SupportMemberEndTreatment::Clamp:
+        case SupportMemberEndTreatment::Base:
+        case SupportMemberEndTreatment::Footing:
+            break;
+        default:
+            throw std::invalid_argument(
+                "Support member-end treatment is not supported.");
+        }
+
+        if (normalized.asset.has_value())
+        {
+            if (normalized.asset->path.empty())
+            {
+                throw std::invalid_argument(
+                    "A member-end connection asset requires an asset reference.");
+            }
+            normalized.asset->path = normalizeSupportConnectorAssetIdentifier(
+                normalized.asset->path);
+        }
+        if (normalized.localPlacement.has_value())
+        {
+            normalized.localPlacement = canonicalPlacement(
+                *normalized.localPlacement);
+        }
+        return normalized;
+    }
+
+    void validateSupportMemberEndConnection(
+        const SupportMemberEndConnection& connection)
+    {
+        switch (connection.treatment)
+        {
+        case SupportMemberEndTreatment::MiteredCut:
+        case SupportMemberEndTreatment::EndCap:
+        case SupportMemberEndTreatment::Plate:
+        case SupportMemberEndTreatment::Flange:
+        case SupportMemberEndTreatment::Splice:
+        case SupportMemberEndTreatment::Saddle:
+        case SupportMemberEndTreatment::Clamp:
+        case SupportMemberEndTreatment::Base:
+        case SupportMemberEndTreatment::Footing:
+            break;
+        default:
+            throw std::invalid_argument(
+                "Support member-end treatment is not supported.");
+        }
+
+        if (connection.asset.has_value())
+        {
+            const StaticMeshAssetReference& asset = *connection.asset;
+            if (asset.path.empty())
+            {
+                throw std::invalid_argument(
+                    "A member-end connection asset requires an asset reference.");
+            }
+            static_cast<void>(
+                normalizeSupportConnectorAssetIdentifier(asset.path));
+        }
+        if (connection.localPlacement.has_value())
+        {
+            const SupportMemberEndPlacement& placement =
+                *connection.localPlacement;
+            if (!finite(placement.position))
+            {
+                throw std::invalid_argument(
+                    "A member-end connection position must be finite.");
+            }
+            const glm::dquat& orientation = placement.orientation;
+            if (!finite(orientation))
+            {
+                throw std::invalid_argument(
+                    "A member-end connection orientation must be finite.");
+            }
+            const double magnitude = std::hypot(
+                std::hypot(orientation.w, orientation.x),
+                std::hypot(orientation.y, orientation.z)
+            );
+            if (!std::isfinite(magnitude)
+                || std::abs(magnitude - 1.0) > 1.0e-9)
+            {
+                throw std::invalid_argument(
+                    "A member-end connection orientation must be normalized.");
+            }
+            if (negativeCanonicalSign(orientation))
+            {
+                throw std::invalid_argument(
+                    "A stored member-end connection orientation must use "
+                    "the canonical sign.");
+            }
+            if (!finite(placement.scale)
+                || placement.scale.x <= 0.0
+                || placement.scale.y <= 0.0
+                || placement.scale.z <= 0.0)
+            {
+                throw std::invalid_argument(
+                    "A member-end connection scale must be finite and positive.");
+            }
+        }
+    }
+
+    void setSupportMemberEndConnection(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId memberId,
+        const SupportMemberEnd end,
+        const SupportMemberEndConnection& connection)
+    {
+        validateSupportCollection(collection);
+        const SupportMemberEndConnection normalized =
+            normalizeSupportMemberEndConnection(connection);
+
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        SupportMember& member = findSupportMember(*structure, memberId);
+        const SupportElementId endNodeId = end == SupportMemberEnd::Start
+            ? member.startNodeId : member.endNodeId;
+        validateMemberEndNodeContext(
+            findMemberEndNode(*structure, endNodeId),
+            normalized.treatment);
+
+        if (end == SupportMemberEnd::Start)
+        {
+            member.startConnection = normalized;
+        }
+        else
+        {
+            member.endConnection = normalized;
+        }
+        validateSupportCollection(collection);
+    }
+
+    void clearSupportMemberEndConnection(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId memberId,
+        const SupportMemberEnd end)
+    {
+        validateSupportCollection(collection);
+
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        SupportMember& member = findSupportMember(*structure, memberId);
+        if (end == SupportMemberEnd::Start)
+        {
+            member.startConnection.reset();
+        }
+        else
+        {
+            member.endConnection.reset();
+        }
+    }
+
     void validateSupportMemberProfile(const SupportMemberProfile& profile)
     {
         switch (profile.shape)
@@ -515,6 +863,41 @@ namespace quantum::coaster
                 }
 
                 validateSupportMemberProfile(member.profile);
+
+                const auto validateMemberEndConnection =
+                    [&structure](
+                        const SupportMember& memberValue,
+                        const SupportMemberEnd end,
+                        const SupportMemberEndConnection& connection)
+                {
+                    validateSupportMemberEndConnection(connection);
+                    const SupportElementId endNodeId = end
+                        == SupportMemberEnd::Start
+                        ? memberValue.startNodeId : memberValue.endNodeId;
+                    const auto node = std::find_if(
+                        structure.nodes.begin(),
+                        structure.nodes.end(),
+                        [endNodeId](const SupportNode& value)
+                        {
+                            return value.id == endNodeId;
+                        });
+                    validateMemberEndNodeContext(*node, connection.treatment);
+                };
+
+                if (member.startConnection.has_value())
+                {
+                    validateMemberEndConnection(
+                        member,
+                        SupportMemberEnd::Start,
+                        *member.startConnection);
+                }
+                if (member.endConnection.has_value())
+                {
+                    validateMemberEndConnection(
+                        member,
+                        SupportMemberEnd::End,
+                        *member.endConnection);
+                }
             }
 
             validateAllocationCounter(

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <quantum/coaster/StaticMeshAsset.hpp>
+
+#include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
@@ -23,6 +26,63 @@ namespace quantum::coaster
     {
         Circular,
         Rectangular
+    };
+
+    // The two directed ends of a member. Connections are authored per end and
+    // remain independent of the node at that end.
+    enum class SupportMemberEnd : std::uint8_t
+    {
+        Start,
+        End
+    };
+
+    // The fixed set of member-end treatments. Serialization matches these
+    // exact names (never numeric codes) so moving JSON between documents
+    // cannot change treatment semantics.
+    enum class SupportMemberEndTreatment : std::uint8_t
+    {
+        MiteredCut,
+        EndCap,
+        Plate,
+        Flange,
+        // M2B records an unpaired splice marker only; splice partners and
+        // splice pairing are a later milestone.
+        Splice,
+        Saddle,
+        Clamp,
+        Base,
+        Footing
+    };
+
+    // Optional logical placement of the member-end connector mesh relative to
+    // the member's local frame at the affected end. When absent, the renderer
+    // chooses the connector pose from support modeling conventions.
+    struct SupportMemberEndPlacement
+    {
+        glm::dvec3 position{0.0};
+        // Canonical unit quaternion (w, x, y, z), same convention as
+        // AuthoredStartPose::orientation.
+        glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
+        glm::dvec3 scale{1.0};
+
+        [[nodiscard]] friend bool operator==(
+            const SupportMemberEndPlacement&,
+            const SupportMemberEndPlacement&) = default;
+    };
+
+    // Persistent authored connection metadata for one member end. No separate
+    // connection ID exists: identity derives from (structureId, memberId,
+    // SupportMemberEnd), so deleting a member removes both end connections.
+    struct SupportMemberEndConnection
+    {
+        SupportMemberEndTreatment treatment =
+            SupportMemberEndTreatment::MiteredCut;
+        std::optional<StaticMeshAssetReference> asset;
+        std::optional<SupportMemberEndPlacement> localPlacement;
+
+        [[nodiscard]] friend bool operator==(
+            const SupportMemberEndConnection&,
+            const SupportMemberEndConnection&) = default;
     };
 
     // Cross-section geometry only. A zero wall thickness denotes a solid
@@ -81,6 +141,8 @@ namespace quantum::coaster
         SupportElementId startNodeId = invalidSupportElementId;
         SupportElementId endNodeId = invalidSupportElementId;
         SupportMemberProfile profile;
+        std::optional<SupportMemberEndConnection> startConnection;
+        std::optional<SupportMemberEndConnection> endConnection;
 
         [[nodiscard]] friend bool operator==(
             const SupportMember&, const SupportMember&) = default;
@@ -195,6 +257,40 @@ namespace quantum::coaster
         SupportCollection& collection,
         SupportStructureId structureId,
         SupportElementId nodeId);
+
+    // Member-end connection metadata uses the member's existing stable
+    // identity; no separate connection IDs are allocated. Deleting the member
+    // deletes both end connections. The two ends are independent and never
+    // merge with the node's anchor metadata. The supplied connection is
+    // normalized (including its placement quaternion) before publication.
+    // Throws std::invalid_argument for unknown members, malformed connection
+    // values, or a Saddle/Clamp treatment at a node without a track
+    // attachment / Base/Footing treatment at a node without a foundation.
+    void setSupportMemberEndConnection(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId memberId,
+        SupportMemberEnd end,
+        const SupportMemberEndConnection& connection);
+    void clearSupportMemberEndConnection(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId memberId,
+        SupportMemberEnd end);
+
+    // Returns a canonical package-relative identifier for a connector asset
+    // below assets://support/. File-backed connectors must use the .glb
+    // extension.
+    [[nodiscard]] std::string normalizeSupportConnectorAssetIdentifier(
+        std::string_view identifier);
+
+    // Normalizes member-end connection state so that a stored placement
+    // quaternion is finite, unit, and sign-canonical per Core conventions.
+    // Throws std::invalid_argument for malformed values.
+    [[nodiscard]] SupportMemberEndConnection normalizeSupportMemberEndConnection(
+        const SupportMemberEndConnection& connection);
+    void validateSupportMemberEndConnection(
+        const SupportMemberEndConnection& connection);
 
     // Geometric/document consistency only. This does not perform loads,
     // stress, buckling, foundation, or code-compliance analysis.

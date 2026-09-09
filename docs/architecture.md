@@ -231,6 +231,33 @@ unknown nested fields are rejected, and no transient editor or resolved-world
 cache is persisted. Origin/generator metadata, materials, final member meshes,
 terrain, manual anchor tools, and structural analysis remain later milestones.
 
+Each member may additionally own a member-end connection at either end. A
+connection is family-neutral member metadata identified by the stable
+`(structureId, memberId, SupportMemberEnd)` triple — it allocates no element ID
+and is deleted with the member. A connection names one of nine `treatment`s
+(`MiteredCut`, `EndCap`, `Plate`, `Flange`, `Splice`, `Saddle`, `Clamp`, `Base`,
+`Footing`) and optionally carries a logical connector static-mesh asset
+reference and a local `placement` (position/orientation/scale). No splice
+pairing, node-level joint/gusset objects, or tapered member segments are added;
+a `Splice` marker exists for future pairing work. Mutations and deserialization
+canonicalize the placement quaternion (finite, nonzero, unit, canonical sign)
+exactly like the start pose, so `q` and `-q` load identically and document
+round-trips are deterministic. `Saddle`/`Clamp` require the endpoint node to
+carry a `TrackAttachment`; `Base`/`Footing` require a `Foundation`; the others
+are unconstrained. Validation is consistency checking only and applies to
+stored document state.
+
+Connector assets are renderer-neutral logical strings validated by the same
+generic static-mesh-identifier grammar as track hardware, but pinned below a
+`support` package root (`assets://support/...`). End-connection authoring
+stays in Core: the Editor and renderer consume the metadata through the
+existing `SupportCollection`/`SupportVisualization` seams, so no renderer
+changes are needed until actual connector geometry exists. Serialization stays
+at format version 1, adding optional `startConnection`/`endConnection` objects
+to a member; unknown nested fields and malformed treatments are rejected.
+Completion of the mesh for each treatment, splice pairing, and connectors for
+curved members remain later milestones.
+
 ### Support visualization and selection
 
 The Editor derives a transient `SupportVisualization` directly from the

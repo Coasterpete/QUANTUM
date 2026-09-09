@@ -441,6 +441,58 @@ namespace quantum::coaster
             throw std::runtime_error("Unknown support member profile shape.");
         }
 
+        [[nodiscard]] const char* supportMemberEndTreatmentToString(
+            const SupportMemberEndTreatment treatment)
+        {
+            switch (treatment)
+            {
+            case SupportMemberEndTreatment::MiteredCut: return "MiteredCut";
+            case SupportMemberEndTreatment::EndCap: return "EndCap";
+            case SupportMemberEndTreatment::Plate: return "Plate";
+            case SupportMemberEndTreatment::Flange: return "Flange";
+            case SupportMemberEndTreatment::Splice: return "Splice";
+            case SupportMemberEndTreatment::Saddle: return "Saddle";
+            case SupportMemberEndTreatment::Clamp: return "Clamp";
+            case SupportMemberEndTreatment::Base: return "Base";
+            case SupportMemberEndTreatment::Footing: return "Footing";
+            }
+            throw std::runtime_error("Unknown support member-end treatment.");
+        }
+
+        json serializeSupportMemberEndConnection(
+            const SupportMemberEndConnection& connection)
+        {
+            json result{
+                {"treatment", supportMemberEndTreatmentToString(
+                    connection.treatment)}};
+            if (connection.asset.has_value())
+            {
+                result["asset"] = {
+                    {"id", connection.asset->path},
+                    {"placeholder", connection.asset->placeholder}};
+            }
+            if (connection.localPlacement.has_value())
+            {
+                const SupportMemberEndPlacement& placement =
+                    *connection.localPlacement;
+                result["localPlacement"] = {
+                    {"position", {
+                        {"x", placement.position.x},
+                        {"y", placement.position.y},
+                        {"z", placement.position.z}}},
+                    {"orientation", {
+                        {"w", placement.orientation.w},
+                        {"x", placement.orientation.x},
+                        {"y", placement.orientation.y},
+                        {"z", placement.orientation.z}}},
+                    {"scale", {
+                        {"x", placement.scale.x},
+                        {"y", placement.scale.y},
+                        {"z", placement.scale.z}}}};
+            }
+            return result;
+        }
+
         json serializeSupportCollection(const SupportCollection& collection)
         {
             validateSupportCollection(collection);
@@ -474,7 +526,7 @@ namespace quantum::coaster
                 json membersJson = json::array();
                 for (const SupportMember& member : structure.members)
                 {
-                    membersJson.push_back({
+                    json memberJson{
                         {"id", member.id},
                         {"startNodeId", member.startNodeId},
                         {"endNodeId", member.endNodeId},
@@ -484,7 +536,20 @@ namespace quantum::coaster
                             {"outerDimensions", {
                                 {"x", member.profile.outerDimensions.x},
                                 {"y", member.profile.outerDimensions.y}}},
-                            {"wallThickness", member.profile.wallThickness}}}});
+                            {"wallThickness", member.profile.wallThickness}}}};
+                    if (member.startConnection.has_value())
+                    {
+                        memberJson["startConnection"] =
+                            serializeSupportMemberEndConnection(
+                                *member.startConnection);
+                    }
+                    if (member.endConnection.has_value())
+                    {
+                        memberJson["endConnection"] =
+                            serializeSupportMemberEndConnection(
+                                *member.endConnection);
+                    }
+                    membersJson.push_back(std::move(memberJson));
                 }
 
                 structuresJson.push_back({
@@ -876,6 +941,117 @@ namespace quantum::coaster
             return profile;
         }
 
+        SupportMemberEndConnection deserializeSupportMemberEndConnection(
+            const json& object,
+            const std::string& path)
+        {
+            requireNoUnknownFields(
+                object,
+                {"treatment", "asset", "localPlacement"},
+                path);
+            requireString(object, "treatment", path);
+
+            const std::string treatment = object["treatment"].get<std::string>();
+            SupportMemberEndConnection connection;
+            if (treatment == "MiteredCut")
+            {
+                connection.treatment = SupportMemberEndTreatment::MiteredCut;
+            }
+            else if (treatment == "EndCap")
+            {
+                connection.treatment = SupportMemberEndTreatment::EndCap;
+            }
+            else if (treatment == "Plate")
+            {
+                connection.treatment = SupportMemberEndTreatment::Plate;
+            }
+            else if (treatment == "Flange")
+            {
+                connection.treatment = SupportMemberEndTreatment::Flange;
+            }
+            else if (treatment == "Splice")
+            {
+                connection.treatment = SupportMemberEndTreatment::Splice;
+            }
+            else if (treatment == "Saddle")
+            {
+                connection.treatment = SupportMemberEndTreatment::Saddle;
+            }
+            else if (treatment == "Clamp")
+            {
+                connection.treatment = SupportMemberEndTreatment::Clamp;
+            }
+            else if (treatment == "Base")
+            {
+                connection.treatment = SupportMemberEndTreatment::Base;
+            }
+            else if (treatment == "Footing")
+            {
+                connection.treatment = SupportMemberEndTreatment::Footing;
+            }
+            else
+            {
+                throw std::runtime_error(
+                    path + ".treatment: unknown support member-end treatment '"
+                    + treatment + "'");
+            }
+
+            if (object.contains("asset"))
+            {
+                requireObject(object, "asset", path);
+                const json& asset = object["asset"];
+                const std::string assetPath = path + ".asset";
+                requireNoUnknownFields(asset, {"id", "placeholder"}, assetPath);
+                requireString(asset, "id", assetPath);
+                requireBoolean(asset, "placeholder", assetPath);
+                connection.asset = StaticMeshAssetReference{
+                    asset["id"].get<std::string>(),
+                    asset["placeholder"].get<bool>()};
+            }
+
+            if (object.contains("localPlacement"))
+            {
+                requireObject(object, "localPlacement", path);
+                const json& placement = object["localPlacement"];
+                const std::string placementPath = path + ".localPlacement";
+                requireNoUnknownFields(
+                    placement,
+                    {"position", "orientation", "scale"},
+                    placementPath);
+                requireObject(placement, "position", placementPath);
+                requireObject(placement, "orientation", placementPath);
+                requireObject(placement, "scale", placementPath);
+
+                SupportMemberEndPlacement placementValue;
+                placementValue.position = deserializeDvec3(
+                    placement["position"], placementPath + ".position");
+                placementValue.scale = deserializeDvec3(
+                    placement["scale"], placementPath + ".scale");
+
+                const json& orientation = placement["orientation"];
+                const std::string orientationPath =
+                    placementPath + ".orientation";
+                requireNoUnknownFields(
+                    orientation, {"w", "x", "y", "z"}, orientationPath);
+                for (const char* component : {"w", "x", "y", "z"})
+                {
+                    requireNumber(orientation, component, orientationPath);
+                }
+                placementValue.orientation = {
+                    orientation["w"].get<double>(),
+                    orientation["x"].get<double>(),
+                    orientation["y"].get<double>(),
+                    orientation["z"].get<double>()};
+
+                connection.localPlacement = placementValue;
+            }
+
+            // Deserialization canonicalizes like the mutation API, so the
+            // loaded state satisfies the collection's stored-data invariants
+            // (finite, unit, sign-canonical placement quaternion).
+            return normalizeSupportMemberEndConnection(connection);
+        }
+
         SupportCollection deserializeSupportCollection(
             const json& object,
             const std::string& path)
@@ -982,10 +1158,12 @@ namespace quantum::coaster
                             memberPath + ": expected a JSON object");
                     }
                     requireNoUnknownFields(memberJson,
-                        {"id", "startNodeId", "endNodeId", "profile"},
+                        {"id", "startNodeId", "endNodeId", "profile",
+                         "startConnection", "endConnection"},
                         memberPath);
                     requireObject(memberJson, "profile", memberPath);
-                    structure.members.push_back({
+
+                    SupportMember member{
                         deserializeSupportId<SupportElementId>(
                             memberJson, "id", memberPath),
                         deserializeSupportId<SupportElementId>(
@@ -993,7 +1171,24 @@ namespace quantum::coaster
                         deserializeSupportId<SupportElementId>(
                             memberJson, "endNodeId", memberPath),
                         deserializeSupportMemberProfile(
-                            memberJson["profile"], memberPath + ".profile")});
+                            memberJson["profile"], memberPath + ".profile")};
+                    if (memberJson.contains("startConnection"))
+                    {
+                        requireObject(memberJson, "startConnection", memberPath);
+                        member.startConnection =
+                            deserializeSupportMemberEndConnection(
+                                memberJson["startConnection"],
+                                memberPath + ".startConnection");
+                    }
+                    if (memberJson.contains("endConnection"))
+                    {
+                        requireObject(memberJson, "endConnection", memberPath);
+                        member.endConnection =
+                            deserializeSupportMemberEndConnection(
+                                memberJson["endConnection"],
+                                memberPath + ".endConnection");
+                    }
+                    structure.members.push_back(std::move(member));
                 }
 
                 collection.structures.push_back(std::move(structure));
