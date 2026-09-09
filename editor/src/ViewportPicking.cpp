@@ -13,6 +13,7 @@ namespace
     {
         double rayDistance = 0.0;
         double separation = 0.0;
+        double segmentParameter = 0.0;
     };
 
     [[nodiscard]] bool finiteVector(const glm::dvec3& value) noexcept
@@ -99,7 +100,8 @@ namespace
             + rayParameter * ray.direction;
         const glm::dvec3 segmentPoint = segmentBegin
             + segmentParameter * segmentDirection;
-        return {rayParameter, glm::length(rayPoint - segmentPoint)};
+        return {rayParameter, glm::length(rayPoint - segmentPoint),
+            segmentParameter};
     }
 
     [[nodiscard]] glm::dvec3 vertexPosition(
@@ -118,6 +120,35 @@ namespace
 
 namespace quantum::editor
 {
+    std::optional<double> trackStationFromViewportHit(
+        const CenterlineVisualization& visualization,
+        const ViewportPickResult& hit) noexcept
+    {
+        if ((hit.segmentFirstVertex % 2) != 0
+            || !std::isfinite(hit.segmentParameter)
+            || hit.segmentParameter < 0.0
+            || hit.segmentParameter > 1.0)
+        {
+            return std::nullopt;
+        }
+
+        const std::size_t sampleIndex = hit.segmentFirstVertex / 2;
+        if (sampleIndex + 1 >= visualization.samples.size())
+        {
+            return std::nullopt;
+        }
+
+        const double firstDistance =
+            visualization.samples[sampleIndex].distance;
+        const double secondDistance =
+            visualization.samples[sampleIndex + 1].distance;
+        if (!std::isfinite(firstDistance) || !std::isfinite(secondDistance))
+        {
+            return std::nullopt;
+        }
+        return std::lerp(firstDistance, secondDistance, hit.segmentParameter);
+    }
+
     std::optional<ViewportPickResult> pickViewportSection(
         const CenterlineVisualization& visualization,
         const ViewportCamera& camera,
@@ -225,7 +256,8 @@ namespace quantum::editor
                         curve,
                         firstVertex,
                         proximity.rayDistance,
-                        proximity.separation
+                        proximity.separation,
+                        proximity.segmentParameter
                     };
 
                     if (!best.has_value())
