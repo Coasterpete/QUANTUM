@@ -238,7 +238,6 @@ namespace quantum::coaster
     std::string normalizeTrackHardwareAssetIdentifier(
         const std::string_view identifier)
     {
-        constexpr std::string_view assetsScheme = "assets://";
         constexpr std::string_view diagnosticAsset =
             "builtin://diagnostic/track-hardware-placeholder";
 
@@ -254,42 +253,7 @@ namespace quantum::coaster
         {
             return normalized;
         }
-        if (!normalized.starts_with(assetsScheme))
-        {
-            throw std::invalid_argument(
-                "Track hardware asset identifier must use assets://track/... "
-                "or the builtin diagnostic placeholder.");
-        }
-
-        const std::filesystem::path relative = std::filesystem::path(
-            normalized.substr(assetsScheme.size())).lexically_normal();
-        if (relative.empty() || relative.is_absolute()
-            || relative.has_root_name() || relative.has_root_directory())
-        {
-            throw std::invalid_argument(
-                "Track hardware asset identifier must be package-relative.");
-        }
-        for (const std::filesystem::path& part : relative)
-        {
-            if (part == "..")
-            {
-                throw std::invalid_argument(
-                    "Track hardware asset identifier cannot escape the asset root.");
-            }
-        }
-
-        const std::string relativePath = relative.generic_string();
-        if (!relativePath.starts_with("track/"))
-        {
-            throw std::invalid_argument(
-                "Track hardware GLBs must be below assets://track/.");
-        }
-        if (relative.extension() != ".glb")
-        {
-            throw std::invalid_argument(
-                "Track hardware assets must use the .glb extension.");
-        }
-        return std::string(assetsScheme) + relativePath;
+        return normalizeStaticMeshAssetIdentifier(identifier, "track");
     }
 
     void validateTrackStyle(const TrackStylePreset& style)

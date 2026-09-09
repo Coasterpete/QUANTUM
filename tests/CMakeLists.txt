@@ -1585,6 +1585,40 @@ set_tests_properties(
         LABELS "core;coaster;supports;attachment;foundation"
 )
 
+add_executable(
+    QuantumCoreSupportConnectionTests
+    SupportConnectionTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreSupportConnectionTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreSupportConnectionTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreSupportConnectionTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.SupportConnection
+    COMMAND QuantumCoreSupportConnectionTests
+)
+
+set_tests_properties(
+    QuantumCore.SupportConnection
+    PROPERTIES
+        LABELS "core;coaster;supports;connection"
+)
+
 target_link_libraries(
     QuantumCoreSupportSerializationTests
     PRIVATE

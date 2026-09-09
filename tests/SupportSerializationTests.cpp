@@ -6,6 +6,8 @@
 
 #include <stdexcept>
 #include <limits>
+#include <cmath>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -229,16 +231,140 @@ namespace
         require(!deserializeCoasterDocument(invalidStation.dump()).has_value(),
             "non-canonical circuit end stations must be rejected");
     }
+
+    [[nodiscard]] AuthoredTrack connectedMemberTrack()
+    {
+        AuthoredTrack track = createNewDocument();
+        const SupportStructureId structureId =
+            track.createSupportStructure("Connected");
+        const SupportElementId nodeA = track.createSupportNode(
+            structureId, {0.0, 0.0, 0.0});
+        const SupportElementId nodeB = track.createSupportNode(
+            structureId, {0.0, 0.0, 5.0});
+        const SupportElementId memberId = track.createSupportMember(
+            structureId, nodeA, nodeB);
+        track.setSupportMemberEndConnection(
+            structureId, memberId, SupportMemberEnd::Start,
+            {SupportMemberEndTreatment::EndCap,
+             std::nullopt,
+             SupportMemberEndPlacement{
+                 {0.0, 0.0, 0.1},
+                 {0.0, 0.0, 1.0 / std::sqrt(2.0), 1.0 / std::sqrt(2.0)},
+                 {1.0, 1.0, 0.8}}});
+        return track;
+    }
+
+    void memberEndConnectionsRoundTripExactly()
+    {
+        AuthoredTrack track = connectedMemberTrack();
+        const std::string serialized = serializeCoasterDocument(track);
+        const json document = json::parse(serialized);
+        const json& memberJson =
+            document["supports"]["structures"][0]["members"][0];
+        require(memberJson["startConnection"]["treatment"] == "EndCap",
+            "member-end treatment must serialize by stable name");
+        require(memberJson["startConnection"]["localPlacement"]
+                    ["orientation"]["y"] == 1.0 / std::sqrt(2.0),
+            "the canonical placement orientation must be serialized");
+        require(memberJson.contains("endConnection") == false,
+            "an absent end connection must not be serialized");
+        require(!memberJson["startConnection"].contains("asset"),
+            "an absent connector asset must not be serialized");
+
+        const auto restored = deserializeCoasterDocument(serialized);
+        require(restored.has_value(),
+            "member-end connection document must deserialize");
+        require(restored->supports() == track.supports(),
+            "member-end connection metadata must round-trip exactly");
+        require(serializeCoasterDocument(*restored) == serialized,
+            "member-end connection serialization must be deterministic");
+    }
+
+    void nonCanonicalSerializedOrientationCanonicalizesOnLoad()
+    {
+        AuthoredTrack track = connectedMemberTrack();
+        json negated = json::parse(serializeCoasterDocument(track));
+        for (const char* component : {"w", "x", "y", "z"})
+        {
+            json& orientation = negated["supports"]["structures"][0]
+                ["members"][0]["startConnection"]["localPlacement"]
+                ["orientation"];
+            orientation[component] = -orientation[component].get<double>();
+        }
+
+        const auto restored = deserializeCoasterDocument(negated.dump());
+        require(restored.has_value(),
+            "a negated serialized orientation must load through canonicalization");
+        require(restored->supports() == track.supports(),
+            "q and -q must produce the same canonical connection state");
+        require(serializeCoasterDocument(*restored)
+                == serializeCoasterDocument(track),
+            "canonicalization must make the round-trip deterministic");
+    }
+
+    void malformedMemberEndConnectionFieldsAreRejected()
+    {
+        AuthoredTrack track = connectedMemberTrack();
+        const json valid = json::parse(serializeCoasterDocument(track));
+
+        json unknownNested = valid;
+        unknownNested["supports"]["structures"][0]["members"][0]
+            ["startConnection"]["futureField"] = true;
+        require(!deserializeCoasterDocument(unknownNested.dump()).has_value(),
+            "unknown member-end connection fields must be rejected");
+
+        json malformedEnum = valid;
+        malformedEnum["supports"]["structures"][0]["members"][0]
+            ["startConnection"]["treatment"] = "EndGlue";
+        require(!deserializeCoasterDocument(malformedEnum.dump()).has_value(),
+            "malformed member-end treatment strings must be rejected");
+
+        json malformedAsset = valid;
+        malformedAsset["supports"]["structures"][0]["members"][0]
+            ["startConnection"]["asset"] = {
+                {"id", "assets://track/out-of-family.glb"},
+                {"placeholder", false}};
+        require(!deserializeCoasterDocument(malformedAsset.dump()).has_value(),
+            "connector assets outside assets://support/ must be rejected");
+
+        json nonNumericPlacement = valid;
+        nonNumericPlacement["supports"]["structures"][0]["members"][0]
+            ["startConnection"]["localPlacement"]["position"]["z"] = "NaN";
+        require(!deserializeCoasterDocument(nonNumericPlacement.dump()).has_value(),
+            "non-numeric placement values must be rejected");
+
+        json nonPositiveScale = valid;
+        nonPositiveScale["supports"]["structures"][0]["members"][0]
+            ["startConnection"]["localPlacement"]["scale"] = {
+                {"x", 0.0}, {"y", 1.0}, {"z", 1.0}};
+        require(!deserializeCoasterDocument(nonPositiveScale.dump()).has_value(),
+            "non-positive placement scales must be rejected");
+    }
 }
 
 int main()
 {
-    oldV1WithoutSupportsLoadsEmpty();
-    supportsRoundTripDeterministically();
-    malformedReferencesAreRejected();
-    malformedIdsAndCountersAreRejected();
-    unknownSupportFieldsAreRejected();
-    manuallyAuthoredGraphRoundTripsExactly();
-    attachmentAndFoundationRoundTrip();
-    malformedAnchorFieldsAreRejected();
+    try
+    {
+        oldV1WithoutSupportsLoadsEmpty();
+        supportsRoundTripDeterministically();
+        malformedReferencesAreRejected();
+        malformedIdsAndCountersAreRejected();
+        unknownSupportFieldsAreRejected();
+        manuallyAuthoredGraphRoundTripsExactly();
+        attachmentAndFoundationRoundTrip();
+        malformedAnchorFieldsAreRejected();
+        memberEndConnectionsRoundTripExactly();
+        nonCanonicalSerializedOrientationCanonicalizesOnLoad();
+        malformedMemberEndConnectionFieldsAreRejected();
+    }
+    catch (const std::exception& exception)
+    {
+        std::cerr << "Support serialization test failure: " << exception.what()
+                  << '\n';
+        return 1;
+    }
+
+    std::cout << "Support serialization tests passed.\n";
+    return 0;
 }

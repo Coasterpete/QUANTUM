@@ -17,6 +17,12 @@ unknown schemes, and paths containing a surviving `..` component are rejected.
 The default test hardware is
 `assets://track/test-crosstie-placeholder.glb`.
 
+The same generic identifier grammar — `assets://` scheme, package-relative
+path, no surviving `..`, `.glb` extension — also serves logical connector
+assets referenced from support member-end connections. Those connectors are
+pinned below a distinct package root (`assets://support/...`) so a connector
+can never silently resolve inside the track-hardware package, and vice versa.
+
 `StaticMeshAssetCache` owns immutable shared CPU assets. One normalized logical
 identity is parsed once. `VulkanContext` maps that identity to one opaque GPU
 mesh handle, uploads one vertex buffer and two index buffers (triangles and

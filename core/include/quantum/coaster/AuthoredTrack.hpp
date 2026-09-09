@@ -268,6 +268,15 @@ namespace quantum::coaster
         void clearSupportFoundation(
             SupportStructureId structureId,
             SupportElementId nodeId);
+        void setSupportMemberEndConnection(
+            SupportStructureId structureId,
+            SupportElementId memberId,
+            SupportMemberEnd end,
+            const SupportMemberEndConnection& connection);
+        void clearSupportMemberEndConnection(
+            SupportStructureId structureId,
+            SupportElementId memberId,
+            SupportMemberEnd end);
 
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 

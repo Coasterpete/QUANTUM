@@ -18,6 +18,7 @@ target_sources(
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
+        src/StaticMeshAsset.cpp
         src/Supports.cpp
         src/physics/CarPose.cpp
         src/physics/TrainPhysics.cpp
@@ -40,6 +41,7 @@ target_sources(
         include/quantum/coaster/PlanarArcRegion.hpp
         include/quantum/coaster/RiderLoads.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
+        include/quantum/coaster/StaticMeshAsset.hpp
         include/quantum/coaster/Supports.hpp
         include/quantum/coaster/TrackKinematics.hpp
         include/quantum/coaster/TrackTopology.hpp

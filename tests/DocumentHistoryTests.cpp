@@ -418,6 +418,69 @@ namespace
                     .foundation.has_value(),
             "foundation Redo must restore exact authored metadata");
     }
+
+    void supportMemberEndConnectionsUndoRedoIsExact()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        track.setLayoutMode(quantum::coaster::LayoutMode::Shuttle);
+        const auto structureId = track.createSupportStructure("Connected");
+        const auto foundationId = track.createSupportNode(
+            structureId, {0.0, 0.0, 0.0});
+        const auto attachedId = track.createSupportNode(
+            structureId, {1.0, 2.0, 3.0});
+        const auto memberId = track.createSupportMember(
+            structureId, foundationId, attachedId);
+        track.setSupportFoundation(structureId, foundationId);
+        track.setSupportTrackAttachment(
+            structureId, attachedId, {12.0, -1.0, 2.0});
+
+        DocumentHistory history;
+        history.reset(track);
+        const std::string unconnected = snapshot(track);
+
+        const quantum::coaster::SupportMemberEndConnection connection{
+            quantum::coaster::SupportMemberEndTreatment::Footing,
+            std::nullopt,
+            quantum::coaster::SupportMemberEndPlacement{
+                {0.0, 0.1, 0.2}, {1.0, 0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}}};
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            transaction.candidate().setSupportMemberEndConnection(
+                structureId, memberId,
+                quantum::coaster::SupportMemberEnd::Start, connection);
+            transaction.commit(track);
+            history.record(track);
+        }
+        const std::string connected = snapshot(track);
+        require(track.supports().structures[0].members[0]
+                    .startConnection == connection,
+            "the published connection must carry exact normalized metadata");
+
+        AuthoredTrack undone = requireState(
+            history.undo(), "connection Undo missing");
+        require(snapshot(undone) == unconnected,
+            "connection Undo must restore the exact unconnected document");
+        AuthoredTrack redone = requireState(
+            history.redo(), "connection Redo missing");
+        require(snapshot(redone) == connected,
+            "connection Redo must restore the exact published document");
+
+        history.reset(redone);
+        {
+            AuthoredTrackEditTransaction transaction{redone};
+            transaction.candidate().clearSupportMemberEndConnection(
+                structureId, memberId,
+                quantum::coaster::SupportMemberEnd::Start);
+            transaction.commit(redone);
+            history.record(redone);
+        }
+        undone = requireState(history.undo(), "connection-clear Undo missing");
+        require(snapshot(undone) == connected,
+            "clearing a connection must undo back to the connected document");
+        redone = requireState(history.redo(), "connection-clear Redo missing");
+        require(snapshot(redone) == unconnected,
+            "clearing a connection must redo to the unconnected document");
+    }
 }
 
 int main()
@@ -434,6 +497,7 @@ int main()
         supportNodeEditsUseWholeDocumentHistory();
         supportGraphAuthoringUndoRedoIsExact();
         supportAnchorMetadataUsesWholeDocumentHistory();
+        supportMemberEndConnectionsUndoRedoIsExact();
     }
     catch (const std::exception& exception)
     {
