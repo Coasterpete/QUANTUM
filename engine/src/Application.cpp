@@ -1068,6 +1068,10 @@ editorUi.selectSection(restoredSelection, true);
                             editorUi.takeSupportNodePositionEdit();
                         const auto requestedSupportCommand =
                             editorUi.takeSupportEditCommand();
+                        const auto requestedSupportAnchorCommand =
+                            editorUi.takeSupportAnchorCommand();
+                        const auto requestedSupportConnectionCommand =
+                            editorUi.takeSupportMemberEndConnectionCommand();
 
                         // Continuous handle drags queue a changed-value or
                         // changed-boundary edit every motion frame; both
@@ -1083,7 +1087,10 @@ editorUi.selectSection(restoredSelection, true);
                             || (requestedHardwareEdit.has_value()
                                 && requestedHardwareEdit->continuous)
                             || (requestedSupportEdit.has_value()
-                                && requestedSupportEdit->continuous);
+                                && requestedSupportEdit->continuous)
+                            || (requestedSupportAnchorCommand.has_value()
+                                && requestedSupportAnchorCommand
+                                    ->continuous);
                         // A paused pointer can produce no changed value for
                         // one or more frames while the same drag is still
                         // held. Keep that gesture coalesced until the UI
@@ -1365,6 +1372,327 @@ editorUi.selectSection(restoredSelection, true);
                                     quantum::logging::LogLevel::Warning,
                                     "EDIT",
                                     "Support edit rejected: %s",
+                                    error.what());
+                            }
+                        }
+
+                        if (requestedSupportAnchorCommand.has_value())
+                        {
+                            try
+                            {
+                                const auto& command =
+                                    *requestedSupportAnchorCommand;
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    supportTransaction{authoredTrack};
+                                quantum::coaster::AuthoredTrack& candidate =
+                                    supportTransaction.candidate();
+                                switch (command.type)
+                                {
+                                case quantum::editor::
+                                    SupportAnchorEditType::
+                                        SetTrackAttachment:
+                                    // A node carries exactly one anchor kind;
+                                    // replacing a Foundation with a
+                                    // TrackAttachment is atomic inside the
+                                    // same candidate.
+                                    candidate.clearSupportFoundation(
+                                        command.structureId,
+                                        command.nodeId);
+                                    candidate.setSupportTrackAttachment(
+                                        command.structureId,
+                                        command.nodeId,
+                                        command.attachment);
+                                    break;
+                                case quantum::editor::
+                                    SupportAnchorEditType::
+                                        ClearTrackAttachment:
+                                    candidate.clearSupportTrackAttachment(
+                                        command.structureId,
+                                        command.nodeId);
+                                    break;
+                                case quantum::editor::
+                                    SupportAnchorEditType::SetFoundation:
+                                    // Replacing a TrackAttachment with a
+                                    // Foundation is atomic inside the same
+                                    // candidate so both anchor kinds are
+                                    // never exposed at one node.
+                                    candidate.clearSupportTrackAttachment(
+                                        command.structureId,
+                                        command.nodeId);
+                                    candidate.setSupportFoundation(
+                                        command.structureId,
+                                        command.nodeId);
+                                    break;
+                                case quantum::editor::
+                                    SupportAnchorEditType::ClearFoundation:
+                                    candidate.clearSupportFoundation(
+                                        command.structureId,
+                                        command.nodeId);
+                                    break;
+                                }
+                                quantum::editor::SupportVisualization
+                                    candidateSupports = quantum::editor::
+                                        createSupportVisualization(
+                                            candidate, centerline.samples);
+                                vulkan.updateSupportVertices(
+                                    candidateSupports.memberVertices);
+                                supportTransaction.commit(authoredTrack);
+                                supportVisualization =
+                                    std::move(candidateSupports);
+                                editorUi.setSupportVisualization(
+                                    supportVisualization);
+                                documentHistory.record(
+                                    authoredTrack, command.continuous);
+                                synchronizeDirtyState();
+                                for (const auto& structure
+                                    : authoredTrack.supports().structures)
+                                {
+                                    if (structure.id
+                                        != command.structureId)
+                                    {
+                                        continue;
+                                    }
+                                    const auto node = std::find_if(
+                                        structure.nodes.begin(),
+                                        structure.nodes.end(),
+                                        [&](const quantum::coaster::
+                                                SupportNode& value)
+                                        {
+                                            return value.id
+                                                == command.nodeId;
+                                        });
+                                    if (node != structure.nodes.end())
+                                    {
+                                        editorUi.
+                                            synchronizeSupportNodeAnchor(
+                                                *node);
+                                    }
+                                    break;
+                                }
+                                if (!command.continuous)
+                                {
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        "Support node %u:%u anchor updated",
+                                        command.structureId,
+                                        command.nodeId);
+                                }
+                            }
+                            catch (const std::exception& error)
+                            {
+                                editorUi.noteSupportEditFailure(
+                                    error.what());
+                                for (const auto& structure
+                                    : authoredTrack.supports().structures)
+                                {
+                                    if (structure.id
+                                        != requestedSupportAnchorCommand
+                                            ->structureId)
+                                    {
+                                        continue;
+                                    }
+                                    const auto node = std::find_if(
+                                        structure.nodes.begin(),
+                                        structure.nodes.end(),
+                                        [&](const quantum::coaster::
+                                                SupportNode& value)
+                                        {
+                                            return value.id
+                                                == requestedSupportAnchorCommand
+                                                    ->nodeId;
+                                        });
+                                    if (node != structure.nodes.end())
+                                    {
+                                        editorUi.
+                                            synchronizeSupportNodeAnchor(
+                                                *node);
+                                    }
+                                    break;
+                                }
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "EDIT",
+                                    "Support anchor edit rejected: %s",
+                                    error.what());
+                            }
+                        }
+
+                        if (requestedSupportConnectionCommand.has_value())
+                        {
+                            try
+                            {
+                                const auto& command =
+                                    *requestedSupportConnectionCommand;
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    supportTransaction{authoredTrack};
+                                quantum::coaster::AuthoredTrack& candidate =
+                                    supportTransaction.candidate();
+                                switch (command.type)
+                                {
+                                case quantum::editor::
+                                    SupportConnectionEditType::
+                                        SetConnection:
+                                    candidate.setSupportMemberEndConnection(
+                                        command.structureId,
+                                        command.memberId,
+                                        command.end,
+                                        command.connection);
+                                    break;
+                                case quantum::editor::
+                                    SupportConnectionEditType::
+                                        ClearConnection:
+                                    candidate.clearSupportMemberEndConnection(
+                                        command.structureId,
+                                        command.memberId,
+                                        command.end);
+                                    break;
+                                case quantum::editor::
+                                    SupportConnectionEditType::SetAsset:
+                                case quantum::editor::
+                                    SupportConnectionEditType::ClearAsset:
+                                {
+                                    // Locate the current connection for the
+                                    // affected end and swap only its asset,
+                                    // preserving treatment and placement.
+                                    quantum::coaster::
+                                        SupportMemberEndConnection connection;
+                                    bool connectionExists = false;
+                                    for (const auto& structure
+                                        : candidate.supports().structures)
+                                    {
+                                        if (structure.id
+                                            != command.structureId)
+                                        {
+                                            continue;
+                                        }
+                                        for (auto& member
+                                            : structure.members)
+                                        {
+                                            if (member.id
+                                                != command.memberId)
+                                            {
+                                                continue;
+                                            }
+                                            if (command.end
+                                                == quantum::coaster::
+                                                    SupportMemberEnd::Start)
+                                            {
+                                                if (member.startConnection
+                                                        .has_value())
+                                                {
+                                                    connection = *member
+                                                        .startConnection;
+                                                    connectionExists = true;
+                                                }
+                                            }
+                                            else if (member.endConnection
+                                                .has_value())
+                                            {
+                                                connection = *member
+                                                    .endConnection;
+                                                connectionExists = true;
+                                            }
+                                            break;
+                                        }
+                                        break;
+                                    }
+                                    if (!connectionExists)
+                                    {
+                                        throw std::invalid_argument(
+                                            "Choose a connection treatment "
+                                            "before editing its asset.");
+                                    }
+                                    connection.asset = command.assetPath.empty()
+                                        ? std::nullopt
+                                        : std::optional<quantum::coaster::
+                                              StaticMeshAssetReference>{
+                                              quantum::coaster::
+                                                  StaticMeshAssetReference{
+                                                      command.assetPath}};
+                                    candidate.setSupportMemberEndConnection(
+                                        command.structureId,
+                                        command.memberId,
+                                        command.end,
+                                        connection);
+                                    break;
+                                }
+                                }
+                                supportTransaction.commit(authoredTrack);
+                                documentHistory.record(authoredTrack);
+                                synchronizeDirtyState();
+                                for (const auto& structure
+                                    : authoredTrack.supports().structures)
+                                {
+                                    if (structure.id
+                                        != command.structureId)
+                                    {
+                                        continue;
+                                    }
+                                    const auto member = std::find_if(
+                                        structure.members.begin(),
+                                        structure.members.end(),
+                                        [&](const quantum::coaster::
+                                                SupportMember& value)
+                                        {
+                                            return value.id
+                                                == command.memberId;
+                                        });
+                                    if (member != structure.members.end())
+                                    {
+                                        editorUi.
+                                            synchronizeSupportMemberEndConnection(
+                                                *member);
+                                    }
+                                    break;
+                                }
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "EDIT",
+                                    "Support member %u:%u %s-end "
+                                    "connection updated",
+                                    command.structureId,
+                                    command.memberId,
+                                    command.end
+                                            == quantum::coaster::
+                                                SupportMemberEnd::Start
+                                        ? "start" : "end");
+                            }
+                            catch (const std::exception& error)
+                            {
+                                editorUi.noteSupportEditFailure(
+                                    error.what());
+                                for (const auto& structure
+                                    : authoredTrack.supports().structures)
+                                {
+                                    if (structure.id
+                                        != requestedSupportConnectionCommand
+                                            ->structureId)
+                                    {
+                                        continue;
+                                    }
+                                    const auto member = std::find_if(
+                                        structure.members.begin(),
+                                        structure.members.end(),
+                                        [&](const quantum::coaster::
+                                                SupportMember& value)
+                                        {
+                                            return value.id
+                                                == requestedSupportConnectionCommand
+                                                    ->memberId;
+                                        });
+                                    if (member != structure.members.end())
+                                    {
+                                        editorUi.
+                                            synchronizeSupportMemberEndConnection(
+                                                *member);
+                                    }
+                                    break;
+                                }
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "EDIT",
+                                    "Support connection edit rejected: %s",
                                     error.what());
                             }
                         }

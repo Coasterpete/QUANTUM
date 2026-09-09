@@ -4103,6 +4103,136 @@ namespace quantum::editor
                             node->id,
                             supportNodePositionEditBuffer_};
                     }
+                    // Anchor buffers refresh on selection change and on
+                    // accepted/rejected anchor edits reported by Application;
+                    // in-progress numeric edits are never overwritten.
+                    if (anchorEditSelection_ != selectedSupport_)
+                    {
+                        refreshSelectedSupportAnchorState();
+                    }
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Text("Anchor");
+                    if (ImGui::RadioButton(
+                        "None",
+                        selectedAnchorType_ == EditorAnchorType::None))
+                    {
+                        cancelSupportTrackPick();
+                        selectedAnchorType_ = EditorAnchorType::None;
+                        if (node->trackAttachment.has_value())
+                        {
+                            supportAnchorCommand_ = {
+                                SupportAnchorEditType::
+                                    ClearTrackAttachment,
+                                structure.id, node->id, {}};
+                        }
+                        else if (node->foundation.has_value())
+                        {
+                            supportAnchorCommand_ = {
+                                SupportAnchorEditType::ClearFoundation,
+                                structure.id, node->id, {}};
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::RadioButton(
+                        "Track",
+                        selectedAnchorType_ == EditorAnchorType::Track))
+                    {
+                        selectedAnchorType_ = EditorAnchorType::Track;
+                        beginSupportTrackPick(structure.id, node->id);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::RadioButton(
+                        "Foundation",
+                        selectedAnchorType_
+                            == EditorAnchorType::Foundation))
+                    {
+                        cancelSupportTrackPick();
+                        selectedAnchorType_ = EditorAnchorType::Foundation;
+                        supportAnchorCommand_ = {
+                            SupportAnchorEditType::SetFoundation,
+                            structure.id, node->id, {}};
+                    }
+                    if (supportTrackPickActive_
+                        && supportTrackPickIntent_.structureId
+                            == structure.id
+                        && supportTrackPickIntent_.nodeId == node->id)
+                    {
+                        ImGui::Spacing();
+                        ImGui::TextColored(
+                            palette::viewportAnchor,
+                            "Pick a track location in the viewport.");
+                        if (ImGui::Button("Cancel"))
+                        {
+                            cancelSupportTrackPick();
+                        }
+                    }
+                    if (node->trackAttachment.has_value())
+                    {
+                        ImGui::Spacing();
+                        if (ImGui::Button("Pick Track Location"))
+                        {
+                            beginSupportTrackPick(structure.id, node->id);
+                        }
+                        ImGui::SameLine();
+                        ImGui::TextDisabled(
+                            "Track frame origin; offsets zero on first pick.");
+                        const coaster::TrackAttachment committedAttachment =
+                            node->trackAttachment.value();
+                        bool gestureChanged = false;
+                        const double step = 0.1;
+                        const double stepFast = 1.0;
+                        auto editAnchorField =
+                            [&](const char* label, double& value)
+                        {
+                            ImGui::SetNextItemWidth(-1.0F);
+                            ImGui::InputScalar(
+                                label, ImGuiDataType_Double,
+                                &value, &step, &stepFast, "%.6f");
+                            if (ImGui::IsItemActive())
+                            {
+                                supportAnchorDragActive_ = true;
+                                if (anchorEditBuffer_
+                                    != committedAttachment)
+                                {
+                                    supportAnchorCommand_ = {
+                                        SupportAnchorEditType::
+                                            SetTrackAttachment,
+                                        structure.id, node->id,
+                                        anchorEditBuffer_, true};
+                                    gestureChanged = true;
+                                }
+                            }
+                            else if (ImGui::IsItemDeactivated())
+                            {
+                                supportAnchorDragActive_ = false;
+                                if (gestureChanged)
+                                {
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        "completed support-node anchor edit "
+                                        "node=%u:%u",
+                                        structure.id, node->id);
+                                }
+                                gestureChanged = false;
+                            }
+                        };
+                        editAnchorField("Station", anchorEditBuffer_.station);
+                        editAnchorField(
+                            "Lateral Offset",
+                            anchorEditBuffer_.lateralOffset);
+                        editAnchorField(
+                            "Vertical Offset",
+                            anchorEditBuffer_.verticalOffset);
+                    }
+                    else if (node->foundation.has_value())
+                    {
+                        ImGui::Spacing();
+                        ImGui::TextDisabled(
+                            "Foundation marks a base/ground anchor; the node "
+                            "position stays authoritative.");
+                    }
                 }
             }
             else if (selectedSupport_.has_value()
@@ -4132,6 +4262,158 @@ namespace quantum::editor
                         member->profile.outerDimensions.x,
                         member->profile.outerDimensions.y,
                         member->profile.wallThickness);
+
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Text("Connections");
+                    if (connectionEditSelection_ != selectedSupport_)
+                    {
+                        refreshSelectedMemberEndConnectionState();
+                    }
+                    const auto endpointContext =
+                        [&structure](const coaster::SupportElementId nodeId)
+                    {
+                        char buffer[192];
+                        const auto node = std::find_if(
+                            structure.nodes.begin(), structure.nodes.end(),
+                            [nodeId](const coaster::SupportNode& value)
+                            {
+                                return value.id == nodeId;
+                            });
+                        if (node == structure.nodes.end())
+                        {
+                            std::snprintf(
+                                buffer, sizeof(buffer), "Unknown node %u",
+                                nodeId);
+                            return std::string{buffer};
+                        }
+                        if (node->trackAttachment.has_value())
+                        {
+                            std::snprintf(
+                                buffer, sizeof(buffer),
+                                "Track (node %u, station %.6f)",
+                                node->id,
+                                node->trackAttachment->station);
+                        }
+                        else if (node->foundation.has_value())
+                        {
+                            std::snprintf(
+                                buffer, sizeof(buffer),
+                                "Foundation (node %u)",
+                                node->id);
+                        }
+                        else
+                        {
+                            std::snprintf(
+                                buffer, sizeof(buffer), "Plain (node %u)",
+                                node->id);
+                        }
+                        return std::string{buffer};
+                    };
+                    ImGui::Text("Start endpoint: %s",
+                        endpointContext(member->startNodeId).c_str());
+                    ImGui::Text("End endpoint: %s",
+                        endpointContext(member->endNodeId).c_str());
+                    ImGui::Spacing();
+                    if (ImGui::RadioButton(
+                        "Start",
+                        activeMemberEnd_ == coaster::SupportMemberEnd::Start))
+                    {
+                        activeMemberEnd_ = coaster::SupportMemberEnd::Start;
+                        synchronizeSupportMemberEndConnection(*member);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::RadioButton(
+                        "End",
+                        activeMemberEnd_ == coaster::SupportMemberEnd::End))
+                    {
+                        activeMemberEnd_ = coaster::SupportMemberEnd::End;
+                        synchronizeSupportMemberEndConnection(*member);
+                    }
+                    const coaster::SupportMemberEndConnection* activeCommitted =
+                        activeMemberEnd_ == coaster::SupportMemberEnd::Start
+                        ? (member->startConnection.has_value()
+                            ? &*member->startConnection : nullptr)
+                        : (member->endConnection.has_value()
+                            ? &*member->endConnection : nullptr);
+                    ImGui::Spacing();
+                    static const char* const treatmentNames[] = {
+                        "None", "Mitered Cut", "End Cap", "Plate",
+                        "Flange", "Splice", "Saddle", "Clamp",
+                        "Base", "Footing"};
+                    if (ImGui::Combo(
+                        "Treatment",
+                        &memberEndTreatmentIndex_,
+                        treatmentNames,
+                        static_cast<int>(
+                            std::size(treatmentNames))))
+                    {
+                        if (memberEndTreatmentIndex_ == 0)
+                        {
+                            supportMemberEndConnectionCommand_ = {
+                                SupportConnectionEditType::ClearConnection,
+                                structure.id, member->id,
+                                activeMemberEnd_, {}, {}};
+                        }
+                        else
+                        {
+                            coaster::SupportMemberEndConnection connection =
+                                activeCommitted != nullptr ? *activeCommitted
+                                : coaster::SupportMemberEndConnection{};
+                            connection.treatment = static_cast<
+                                coaster::SupportMemberEndTreatment>(
+                                    memberEndTreatmentIndex_ - 1);
+                            supportMemberEndConnectionCommand_ = {
+                                SupportConnectionEditType::SetConnection,
+                                structure.id, member->id,
+                                activeMemberEnd_, connection, {}};
+                        }
+                    }
+                    ImGui::BeginDisabled(activeCommitted == nullptr);
+                    ImGui::SetNextItemWidth(-1.0F);
+                    const bool assetSubmitted = ImGui::InputText(
+                        "Connector Asset",
+                        memberEndAssetBuffer_.data(),
+                        memberEndAssetBuffer_.size(),
+                        ImGuiInputTextFlags_EnterReturnsTrue);
+                    const bool assetDeactivated =
+                        ImGui::IsItemDeactivatedAfterEdit();
+                    ImGui::EndDisabled();
+                    if (activeCommitted != nullptr
+                        && (assetSubmitted || assetDeactivated))
+                    {
+                        commitMemberEndAssetEdit(
+                            structure.id, member->id, *member);
+                    }
+                    if (activeCommitted == nullptr)
+                    {
+                        ImGui::TextDisabled(
+                            "Choose a treatment before assigning an asset.");
+                    }
+                    if (activeCommitted != nullptr
+                        && activeCommitted->localPlacement.has_value())
+                    {
+                        ImGui::Spacing();
+                        ImGui::TextDisabled("Local placement is set.");
+                        if (ImGui::Button("Clear Placement"))
+                        {
+                            coaster::SupportMemberEndConnection connection =
+                                *activeCommitted;
+                            connection.localPlacement.reset();
+                            supportMemberEndConnectionCommand_ = {
+                                SupportConnectionEditType::SetConnection,
+                                structure.id, member->id,
+                                activeMemberEnd_, connection, {}};
+                        }
+                    }
+                    ImGui::Spacing();
+                    if (ImGui::Button("Clear Connection"))
+                    {
+                        supportMemberEndConnectionCommand_ = {
+                            SupportConnectionEditType::ClearConnection,
+                            structure.id, member->id,
+                            activeMemberEnd_, {}, {}};
+                    }
                 }
             }
         }
@@ -4551,6 +4833,7 @@ namespace quantum::editor
             SupportNodeManipulation& manipulation =
                 *supportNodeManipulation_;
             if (io.AppFocusLost
+                || supportTrackPickActive_
                 || supportConnectState_
                     == SupportConnectState::WaitingForSecondNode
                 || supportVisualization_ == nullptr
@@ -4654,6 +4937,7 @@ namespace quantum::editor
         }
 
         if (!viewportHovered || io.AppFocusLost
+            || supportTrackPickActive_
             || supportConnectState_
                 == SupportConnectState::WaitingForSecondNode
             || cameraGesture_ != CameraGesture::None
@@ -5127,6 +5411,12 @@ namespace quantum::editor
         ImGuiIO& io = ImGui::GetIO();
         const float presentationScale = editorPresentationScale();
 
+        if (supportTrackPickActive_
+            && ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+            cancelSupportTrackPick();
+        }
+
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)
             || ImGui::IsMouseClicked(ImGuiMouseButton_Right)
             || ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
@@ -5145,11 +5435,13 @@ namespace quantum::editor
             == SupportConnectState::WaitingForSecondNode;
         const bool startPoseManipulationCaptured =
             supportManipulationCaptured
-                || (!supportConnectWaiting && updateStartPoseManipulation(
-                viewportHovered,
-                logicalWidth,
-                logicalHeight
-            ));
+                || (!supportConnectWaiting
+                    && !supportTrackPickActive_
+                    && updateStartPoseManipulation(
+                    viewportHovered,
+                    logicalWidth,
+                    logicalHeight
+                ));
 
         if (io.AppFocusLost)
         {
@@ -5201,6 +5493,70 @@ namespace quantum::editor
                     normalizedY,
                     aspectRatio
                 );
+                // Track Pick mode narrows viewport picking to the track
+                // itself. A successful click derives the exact cumulative
+                // station from the solved samples and requests a zero-offset
+                // TrackAttachment; empty-space clicks never mutate.
+                if (supportTrackPickActive_ && authoredTrack_ != nullptr)
+                {
+                    const std::uint32_t rails =
+                        (1u << renderer::viewportLeftRailCurve)
+                            | (1u << renderer::viewportRightRailCurve);
+                    const std::uint32_t pickingCurveMask =
+                        viewportSettings_.trackPresentation.mode()
+                                == renderer::TrackPresentationMode::
+                                    CenterlineDebug
+                            ? visibleTrackCurveMask(viewportSettings_)
+                            : rails;
+                    const auto trackHit = centerlineVisualization_ != nullptr
+                        ? pickViewportSection(
+                            *centerlineVisualization_,
+                            viewportCamera_,
+                            ray,
+                            pixelHeight,
+                            pickingCurveMask,
+                            viewportSelectionTolerancePixels
+                                * presentationScale)
+                        : std::nullopt;
+                    if (trackHit.has_value())
+                    {
+                        hoveredSection = trackHit->sectionIndex;
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (!supportSelectionExists(
+                                authoredTrack_->supports(),
+                                {supportTrackPickIntent_.structureId,
+                                 SupportSelectionKind::Node,
+                                 supportTrackPickIntent_.nodeId}))
+                            {
+                                cancelSupportTrackPick();
+                            }
+                            else
+                            {
+                                const auto station =
+                                    trackStationFromViewportHit(
+                                        *centerlineVisualization_, *trackHit);
+                                if (station.has_value())
+                                {
+                                    const coaster::TrackAttachment
+                                        pickedAttachment{*station, 0.0, 0.0};
+                                    anchorEditBuffer_ = pickedAttachment;
+                                    selectedAnchorType_ =
+                                        EditorAnchorType::Track;
+                                    supportAnchorCommand_ = {
+                                        SupportAnchorEditType::
+                                            SetTrackAttachment,
+                                        supportTrackPickIntent_.structureId,
+                                        supportTrackPickIntent_.nodeId,
+                                        pickedAttachment};
+                                    cancelSupportTrackPick();
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
                 const auto supportHit = supportVisualization_ != nullptr
                     ? pickSupport(
                         *supportVisualization_,
@@ -5332,12 +5688,14 @@ namespace quantum::editor
                         }
                     }
                 }
+                }
             }
         }
 
         if (cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
+            && !supportTrackPickActive_
             && viewportHovered
             && !startPoseManipulationCaptured)
         {
@@ -8166,6 +8524,40 @@ ImGui::MenuItem(
                 center, radius,
                 isSelected ? selected : isHovered ? hovered : normal,
                 16);
+            if (isSelected && authoredTrack_ != nullptr)
+            {
+                const char* anchorLabel = nullptr;
+                for (const coaster::SupportStructure& structure
+                    : authoredTrack_->supports().structures)
+                {
+                    if (structure.id != node.selection.structureId)
+                    {
+                        continue;
+                    }
+                    const auto authoredNode = std::find_if(
+                        structure.nodes.begin(), structure.nodes.end(),
+                        [&node](const coaster::SupportNode& value)
+                        {
+                            return value.id == node.selection.elementId;
+                        });
+                    if (authoredNode != structure.nodes.end())
+                    {
+                        anchorLabel = authoredNode->trackAttachment.has_value()
+                            ? "TRACK"
+                            : (authoredNode->foundation.has_value()
+                                ? "FOUNDATION" : nullptr);
+                    }
+                    break;
+                }
+                if (anchorLabel != nullptr)
+                {
+                    drawList->AddText(
+                        {center.x + 9.0F * scale,
+                            center.y - 0.5F * ImGui::GetFontSize()},
+                        selected,
+                        anchorLabel);
+                }
+            }
         }
 
         if (supportNodeManipulation_.has_value()
@@ -8203,6 +8595,7 @@ ImGui::MenuItem(
         // the established world-space Move gizmo and never expose Rotate or
         // Scale handles.
         if (supportConnectState_ == SupportConnectState::Inactive
+            && !supportTrackPickActive_
             && selectedSupport_.has_value()
             && selectedSupport_->kind == SupportSelectionKind::Node)
         {
@@ -8370,6 +8763,31 @@ ImGui::MenuItem(
                 {panelMinimum.x + padding, panelMinimum.y + padding},
                 selected,
                 connectMessage);
+        }
+        else if (supportTrackPickActive_)
+        {
+            constexpr char pickMessage[] =
+                "Pick track location... (Cancel in Support Workspace)";
+            const float margin = viewportStyle::overlayMargin * scale;
+            const float padding = viewportStyle::overlayPadding * scale;
+            const ImVec2 messageSize = ImGui::CalcTextSize(pickMessage);
+            const ImVec2 panelMinimum{
+                imageMinimum.x + margin,
+                imageMinimum.y + margin};
+            const ImVec2 panelMaximum{
+                panelMinimum.x + messageSize.x + 2.0F * padding,
+                panelMinimum.y + messageSize.y + 2.0F * padding};
+            drawList->AddRectFilled(
+                panelMinimum,
+                panelMaximum,
+                ImGui::ColorConvertFloat4ToU32(palette::surfaceRaised),
+                padding);
+            drawList->AddText(
+                ImGui::GetFont(),
+                ImGui::GetFontSize(),
+                {panelMinimum.x + padding, panelMinimum.y + padding},
+                selected,
+                pickMessage);
         }
     }
 
@@ -8736,6 +9154,13 @@ ImGui::MenuItem(
         supportConnectState_ = SupportConnectState::Inactive;
         supportConnectFirstNode_ = {};
         supportEditMessage_.clear();
+        supportTrackPickActive_ = false;
+        supportTrackPickIntent_ = {};
+        supportAnchorCommand_.reset();
+        supportAnchorDragActive_ = false;
+        supportMemberEndConnectionCommand_.reset();
+        anchorEditSelection_.reset();
+        connectionEditSelection_.reset();
         riderLoadDiagnostics_.clear();
         selectedSection_ = 0;
         startPoseManipulation_.reset();
@@ -8817,6 +9242,12 @@ ImGui::MenuItem(
             {
                 supportNodePositionEditBuffer_ = node->position;
             }
+            refreshSelectedSupportAnchorState();
+        }
+        else if (selectedSupport_.has_value()
+            && selectedSupport_->kind == SupportSelectionKind::Member)
+        {
+            refreshSelectedMemberEndConnectionState();
         }
         // The Connect tool keeps its first endpoint only while that node
         // still exists in the committed document.
@@ -8827,12 +9258,171 @@ ImGui::MenuItem(
         {
             cancelSupportConnect();
         }
+        if (supportTrackPickActive_)
+        {
+            if (authoredTrack_ == nullptr
+                || !supportSelectionExists(
+                    authoredTrack_->supports(),
+                    {supportTrackPickIntent_.structureId,
+                     SupportSelectionKind::Node,
+                     supportTrackPickIntent_.nodeId}))
+            {
+                cancelSupportTrackPick();
+            }
+        }
     }
 
     void EditorUi::synchronizeSupportNodePosition(
         const glm::dvec3& position) noexcept
     {
         supportNodePositionEditBuffer_ = position;
+    }
+
+    void EditorUi::synchronizeSupportNodeAnchor(
+        const coaster::SupportNode& node) noexcept
+    {
+        selectedAnchorType_ = node.trackAttachment.has_value()
+            ? EditorAnchorType::Track
+            : (node.foundation.has_value()
+                ? EditorAnchorType::Foundation
+                : EditorAnchorType::None);
+        anchorEditBuffer_ = node.trackAttachment.value_or(
+            coaster::TrackAttachment{});
+    }
+
+    void EditorUi::synchronizeSupportMemberEndConnection(
+        const coaster::SupportMember& member) noexcept
+    {
+        const coaster::SupportMemberEndConnection* connection =
+            activeMemberEnd_ == coaster::SupportMemberEnd::Start
+            ? (member.startConnection.has_value()
+                ? &*member.startConnection : nullptr)
+            : (member.endConnection.has_value()
+                ? &*member.endConnection : nullptr);
+        memberEndTreatmentIndex_ = connection
+            ? static_cast<int>(connection->treatment) + 1
+            : 0;
+        memberEndAssetBuffer_.fill('\0');
+        if (connection != nullptr && connection->asset.has_value())
+        {
+            const std::string& path = connection->asset->path;
+            if (path.size() < memberEndAssetBuffer_.size())
+            {
+                std::copy(
+                    path.begin(), path.end(),
+                    memberEndAssetBuffer_.begin());
+            }
+        }
+    }
+
+    void EditorUi::refreshSelectedSupportAnchorState() noexcept
+    {
+        if (authoredTrack_ == nullptr || !selectedSupport_.has_value())
+        {
+            anchorEditSelection_.reset();
+            return;
+        }
+        for (const coaster::SupportStructure& structure
+            : authoredTrack_->supports().structures)
+        {
+            if (structure.id != selectedSupport_->structureId)
+            {
+                continue;
+            }
+            const auto node = std::find_if(
+                structure.nodes.begin(), structure.nodes.end(),
+                [this](const coaster::SupportNode& value)
+                {
+                    return value.id == selectedSupport_->elementId;
+                });
+            if (node != structure.nodes.end())
+            {
+                anchorEditSelection_ = selectedSupport_;
+                synchronizeSupportNodeAnchor(*node);
+            }
+            else
+            {
+                anchorEditSelection_.reset();
+            }
+            return;
+        }
+        anchorEditSelection_.reset();
+    }
+
+    void EditorUi::refreshSelectedMemberEndConnectionState() noexcept
+    {
+        if (authoredTrack_ == nullptr || !selectedSupport_.has_value())
+        {
+            connectionEditSelection_.reset();
+            return;
+        }
+        for (const coaster::SupportStructure& structure
+            : authoredTrack_->supports().structures)
+        {
+            if (structure.id != selectedSupport_->structureId)
+            {
+                continue;
+            }
+            const auto member = std::find_if(
+                structure.members.begin(), structure.members.end(),
+                [this](const coaster::SupportMember& value)
+                {
+                    return value.id == selectedSupport_->elementId;
+                });
+            if (member != structure.members.end())
+            {
+                connectionEditSelection_ = selectedSupport_;
+                synchronizeSupportMemberEndConnection(*member);
+            }
+            else
+            {
+                connectionEditSelection_.reset();
+            }
+            return;
+        }
+        connectionEditSelection_.reset();
+    }
+
+    void EditorUi::commitMemberEndAssetEdit(
+        const coaster::SupportStructureId structureId,
+        const coaster::SupportElementId memberId,
+        const coaster::SupportMember& committedMember) noexcept
+    {
+        std::string trimmed{memberEndAssetBuffer_.data()};
+        const std::size_t first = trimmed.find_first_not_of(" \t");
+        const std::size_t last = trimmed.find_last_not_of(" \t");
+        trimmed = (first == std::string::npos)
+            ? std::string{}
+            : trimmed.substr(first, last - first + 1);
+        if (trimmed.empty())
+        {
+            supportMemberEndConnectionCommand_ = {
+                SupportConnectionEditType::ClearAsset,
+                structureId, memberId, activeMemberEnd_, {}, {}};
+            return;
+        }
+        std::string normalized;
+        try
+        {
+            normalized = coaster::normalizeSupportConnectorAssetIdentifier(
+                trimmed);
+        }
+        catch (const std::exception& error)
+        {
+            memberEndAssetBuffer_.fill('\0');
+            noteSupportEditFailure(error.what());
+            synchronizeSupportMemberEndConnection(committedMember);
+            return;
+        }
+        if (normalized.size() < memberEndAssetBuffer_.size())
+        {
+            std::copy(
+                normalized.begin(), normalized.end(),
+                memberEndAssetBuffer_.begin());
+        }
+        supportMemberEndConnectionCommand_ = {
+            SupportConnectionEditType::SetAsset,
+            structureId, memberId, activeMemberEnd_, {}, normalized};
     }
 
     void EditorUi::rejectSupportNodeManipulation() noexcept
@@ -8870,6 +9460,7 @@ ImGui::MenuItem(
             return;
         }
 
+        cancelSupportTrackPick();
         supportConnectFirstNode_ = *selectedSupport_;
         supportConnectState_ = SupportConnectState::WaitingForSecondNode;
         supportNodeManipulation_.reset();
@@ -8892,6 +9483,79 @@ ImGui::MenuItem(
     void EditorUi::noteSupportEditFailure(const std::string& message) noexcept
     {
         supportEditMessage_ = message;
+    }
+
+    void EditorUi::beginSupportTrackPick(
+        const coaster::SupportStructureId structureId,
+        const coaster::SupportElementId nodeId)
+    {
+        if (authoredTrack_ == nullptr
+            || !supportSelectionExists(
+                authoredTrack_->supports(),
+                {structureId, SupportSelectionKind::Node, nodeId}))
+        {
+            return;
+        }
+        supportTrackPickActive_ = true;
+        supportTrackPickIntent_ = {structureId, nodeId};
+        cameraGesture_ = CameraGesture::None;
+        viewportNavigationActive_ = false;
+        supportNodeManipulation_.reset();
+        startPoseManipulation_.reset();
+        cancelSupportConnect();
+    }
+
+    void EditorUi::cancelSupportTrackPick() noexcept
+    {
+        const SupportTrackPickIntent cancelled = supportTrackPickIntent_;
+        supportTrackPickActive_ = false;
+        supportTrackPickIntent_ = {};
+        if (authoredTrack_ == nullptr)
+        {
+            return;
+        }
+        for (const coaster::SupportStructure& structure
+            : authoredTrack_->supports().structures)
+        {
+            if (structure.id != cancelled.structureId)
+            {
+                continue;
+            }
+            const auto node = std::find_if(
+                structure.nodes.begin(), structure.nodes.end(),
+                [&cancelled](const coaster::SupportNode& value)
+                {
+                    return value.id == cancelled.nodeId;
+                });
+            if (node != structure.nodes.end())
+            {
+                synchronizeSupportNodeAnchor(*node);
+            }
+            break;
+        }
+    }
+
+    bool EditorUi::supportTrackPickActive() const noexcept
+    {
+        return supportTrackPickActive_;
+    }
+
+    std::optional<SupportAnchorCommand>
+    EditorUi::takeSupportAnchorCommand() noexcept
+    {
+        std::optional<SupportAnchorCommand> command =
+            std::move(supportAnchorCommand_);
+        supportAnchorCommand_.reset();
+        return command;
+    }
+
+    std::optional<SupportMemberEndConnectionCommand>
+    EditorUi::takeSupportMemberEndConnectionCommand() noexcept
+    {
+        std::optional<SupportMemberEndConnectionCommand> command =
+            std::move(supportMemberEndConnectionCommand_);
+        supportMemberEndConnectionCommand_.reset();
+        return command;
     }
 
     void EditorUi::selectSupportStructure(
@@ -8944,6 +9608,7 @@ ImGui::MenuItem(
         return startPoseManipulation_.has_value()
             || supportNodeManipulation_.has_value()
             || hardwareDragActive_
+            || supportAnchorDragActive_
             || firstActiveEndpoint(endpointDrags_)
                 != ScalarProfileEndpoint::None;
     }
@@ -8986,6 +9651,18 @@ std::optional<coaster::LayoutMode>
         supportConnectState_ = SupportConnectState::Inactive;
         supportConnectFirstNode_ = {};
         supportEditMessage_.clear();
+        selectedAnchorType_ = EditorAnchorType::None;
+        anchorEditBuffer_ = {};
+        supportAnchorCommand_.reset();
+        anchorEditSelection_.reset();
+        supportAnchorDragActive_ = false;
+        supportTrackPickActive_ = false;
+        supportTrackPickIntent_ = {};
+        supportMemberEndConnectionCommand_.reset();
+        connectionEditSelection_.reset();
+        activeMemberEnd_ = coaster::SupportMemberEnd::Start;
+        memberEndTreatmentIndex_ = 0;
+        memberEndAssetBuffer_.fill('\0');
         startPoseTransformMode_ = StartPoseTransformMode::Move;
         startPoseManipulation_.reset();
         startPoseEdit_.reset();

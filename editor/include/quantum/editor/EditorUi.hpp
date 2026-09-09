@@ -200,6 +200,69 @@ namespace quantum::editor
         glm::dvec3 nodePosition{0.0};
     };
 
+    // Anchor type exposed by the Editor for a selected SupportNode. None
+    // means no TrackAttachment and no Foundation.
+    enum class EditorAnchorType : std::uint8_t
+    {
+        None,
+        Track,
+        Foundation
+    };
+
+    // One-shot anchor edit command issued by the Support Workspace.
+    enum class SupportAnchorEditType : std::uint8_t
+    {
+        SetTrackAttachment,
+        ClearTrackAttachment,
+        SetFoundation,
+        ClearFoundation
+    };
+
+    struct SupportAnchorCommand
+    {
+        SupportAnchorEditType type =
+            SupportAnchorEditType::SetTrackAttachment;
+        coaster::SupportStructureId structureId =
+            coaster::invalidSupportStructureId;
+        coaster::SupportElementId nodeId =
+            coaster::invalidSupportElementId;
+        coaster::TrackAttachment attachment;
+        // Continuous numeric-drag flag for history coalescing.
+        bool continuous = false;
+    };
+
+    // Track-pick intent for attaching a node to a track location.
+    struct SupportTrackPickIntent
+    {
+        coaster::SupportStructureId structureId =
+            coaster::invalidSupportStructureId;
+        coaster::SupportElementId nodeId =
+            coaster::invalidSupportElementId;
+    };
+
+    // One-shot member-end connection edit command.
+    enum class SupportConnectionEditType : std::uint8_t
+    {
+        SetConnection,
+        ClearConnection,
+        SetAsset,
+        ClearAsset
+    };
+
+    struct SupportMemberEndConnectionCommand
+    {
+        SupportConnectionEditType type =
+            SupportConnectionEditType::SetConnection;
+        coaster::SupportStructureId structureId =
+            coaster::invalidSupportStructureId;
+        coaster::SupportElementId memberId =
+            coaster::invalidSupportElementId;
+        coaster::SupportMemberEnd end = coaster::SupportMemberEnd::Start;
+        coaster::SupportMemberEndConnection connection;
+        // For SetAsset: the logical connector asset identifier.
+        std::string assetPath;
+    };
+
     enum class TrackHardwareEditType
     {
         SetConfiguration,
@@ -418,6 +481,28 @@ namespace quantum::editor
         void setSupportVisualization(
             const SupportVisualization& visualization) noexcept;
         void synchronizeSupportNodePosition(const glm::dvec3& position) noexcept;
+        // Refreshes the anchor radio state and edit buffers from committed
+        // node state after an accepted or rejected anchor edit.
+        void synchronizeSupportNodeAnchor(
+            const coaster::SupportNode& node) noexcept;
+        // Refreshes the member-end connection buffers from committed member
+        // state after an accepted or rejected connection edit.
+        void synchronizeSupportMemberEndConnection(
+            const coaster::SupportMember& member) noexcept;
+        // Internally refreshes anchor buffers from the committed document for
+        // the currently selected node; no-op without a live node selection.
+        void refreshSelectedSupportAnchorState() noexcept;
+        // Internally refreshes member-end connection buffers from the
+        // committed document for the currently selected member; no-op without
+        // a live member selection.
+        void refreshSelectedMemberEndConnectionState() noexcept;
+        // Commits the member-end connector asset text field: normalizes and
+        // queues SetAsset/ClearAsset, or restores the committed buffer and
+        // reports when the identifier is malformed.
+        void commitMemberEndAssetEdit(
+            coaster::SupportStructureId structureId,
+            coaster::SupportElementId memberId,
+            const coaster::SupportMember& committedMember) noexcept;
         // Cancels a rejected viewport candidate while retaining the last
         // committed node position and visualization.
         void rejectSupportNodeManipulation() noexcept;
@@ -428,6 +513,11 @@ namespace quantum::editor
         // command is accepted or rejected.
         [[nodiscard]] std::optional<SupportEditCommand>
         takeSupportEditCommand() noexcept;
+        // Anchor and member-end connection commands.
+        [[nodiscard]] std::optional<SupportAnchorCommand>
+        takeSupportAnchorCommand() noexcept;
+        [[nodiscard]] std::optional<SupportMemberEndConnectionCommand>
+        takeSupportMemberEndConnectionCommand() noexcept;
         // Starts the Connect Nodes workflow using the currently selected
         // node. No-op unless a live node is selected. The stored first node
         // uses its stable ID and is re-resolved against the committed
@@ -435,6 +525,12 @@ namespace quantum::editor
         void beginSupportConnect();
         void cancelSupportConnect() noexcept;
         [[nodiscard]] bool supportConnectWaiting() const noexcept;
+        // Track-pick mode for node-to-track attachment.
+        void beginSupportTrackPick(
+            coaster::SupportStructureId structureId,
+            coaster::SupportElementId nodeId);
+        void cancelSupportTrackPick() noexcept;
+        [[nodiscard]] bool supportTrackPickActive() const noexcept;
         // Displays a concise reason after a support mutation or second-node
         // click was rejected. Leaves the Connect tool state intact so the
         // user can retry.
@@ -700,6 +796,33 @@ void drawSimulationTelemetry();
         SupportConnectState supportConnectState_ = SupportConnectState::Inactive;
         SupportSelection supportConnectFirstNode_;
         std::string supportEditMessage_;
+        // Anchor editing state for selected nodes.
+        EditorAnchorType selectedAnchorType_ = EditorAnchorType::None;
+        coaster::TrackAttachment anchorEditBuffer_{};
+        std::optional<SupportAnchorCommand> supportAnchorCommand_;
+        // The node selection the anchor buffers correspond to. Buffers are
+        // refreshed only when the selection changes or Application reports an
+        // accepted/rejected anchor edit, so in-progress edits are never
+        // overwritten by frame reflection.
+        std::optional<SupportSelection> anchorEditSelection_;
+        // True while a numeric anchor field is being dragged; keeps the
+        // history coalescing span open from Application.
+        bool supportAnchorDragActive_ = false;
+        // Track-pick mode state.
+        bool supportTrackPickActive_ = false;
+        SupportTrackPickIntent supportTrackPickIntent_{};
+        // Member-end connection editing state.
+        std::optional<SupportMemberEndConnectionCommand>
+            supportMemberEndConnectionCommand_;
+        // The member selection the connection buffers correspond to; see
+        // anchorEditSelection_ for the buffer-refresh policy.
+        std::optional<SupportSelection> connectionEditSelection_;
+        // Active member-end being edited (Start or End tab).
+        coaster::SupportMemberEnd activeMemberEnd_ =
+            coaster::SupportMemberEnd::Start;
+        // Member-end connection edit buffers.
+        int memberEndTreatmentIndex_ = 0;
+        std::array<char, 256> memberEndAssetBuffer_{};
         RiderLoadDiagnosticsModel riderLoadDiagnostics_;
         bool riderLoadDiagnosticsWindowOpen_ = true;
         double sectionLengthEditBuffer_ = 0.0;

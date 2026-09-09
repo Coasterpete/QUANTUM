@@ -21,6 +21,10 @@ namespace quantum::editor
         std::uint32_t segmentFirstVertex = 0;
         double rayDistance = 0.0;
         double distanceToSegment = 0.0;
+        // Interpolation parameter (0..1) of the closest segment point,
+        // matching the segment's authored distance pair for station
+        // derivation.
+        double segmentParameter = 0.0;
     };
 
     // Tests every visible reference-curve segment in the exact authored
@@ -36,4 +40,12 @@ namespace quantum::editor
         std::uint32_t visibleCurveMask,
         double tolerancePixels = viewportSelectionTolerancePixels
     );
+
+    // Converts a hit on one generated line-list segment back to the
+    // authoritative whole-track distance domain. The renderer vertex index is
+    // used only to address the matching pair of retained double-precision
+    // solved samples; it is never persisted as attachment state.
+    [[nodiscard]] std::optional<double> trackStationFromViewportHit(
+        const CenterlineVisualization& visualization,
+        const ViewportPickResult& hit) noexcept;
 }

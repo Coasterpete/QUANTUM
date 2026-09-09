@@ -21,6 +21,7 @@ namespace
     using quantum::editor::ViewportCamera;
     using quantum::editor::ViewportCameraPose;
     using quantum::editor::ViewportCameraPreset;
+    using quantum::editor::ViewportPickResult;
     using quantum::editor::ViewportProjection;
     using quantum::editor::ViewportRay;
 
@@ -213,6 +214,40 @@ namespace
         ).has_value(), "hidden curves must not be selectable");
     }
 
+    void trackStationUsesRetainedDoublePrecisionSamples()
+    {
+        CenterlineVisualization visualization;
+        visualization.samples.resize(3);
+        visualization.samples[0].distance = 10.000000000001;
+        visualization.samples[1].distance = 20.000000000003;
+        visualization.samples[2].distance = 35.000000000007;
+
+        ViewportPickResult hit;
+        hit.segmentFirstVertex = 2;
+        hit.segmentParameter = 0.123456789012345;
+        const auto station = quantum::editor::trackStationFromViewportHit(
+            visualization, hit);
+        const double expected = visualization.samples[1].distance
+            + hit.segmentParameter
+                * (visualization.samples[2].distance
+                    - visualization.samples[1].distance);
+        require(station.has_value()
+                && std::abs(*station - expected) <= 1.0e-14,
+            "track picks must interpolate cumulative authored distance in "
+            "double precision");
+
+        hit.segmentFirstVertex = 1;
+        require(!quantum::editor::trackStationFromViewportHit(
+                visualization, hit).has_value(),
+            "a non-segment renderer vertex must not become persistent "
+            "station state");
+        hit.segmentFirstVertex = 2;
+        hit.segmentParameter = 1.01;
+        require(!quantum::editor::trackStationFromViewportHit(
+                visualization, hit).has_value(),
+            "an invalid segment fraction must not become persistent station state");
+    }
+
     void selectionMutationMappingPreservesIdentity()
     {
         using quantum::editor::selectionAfterInsertion;
@@ -246,6 +281,7 @@ int main()
         frontmostValidHitWins();
         sharedBoundaryUsesDeterministicOrdering();
         toleranceAndVisibilityAreRespected();
+        trackStationUsesRetainedDoublePrecisionSamples();
         selectionMutationMappingPreservesIdentity();
     }
     catch (const std::exception& exception)
