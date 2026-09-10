@@ -53,6 +53,13 @@ set_target_properties(QuantumCoreTrainPhysicsTests PROPERTIES CXX_EXTENSIONS OFF
 add_test(NAME QuantumCore.TrainPhysics COMMAND QuantumCoreTrainPhysicsTests)
 set_tests_properties(QuantumCore.TrainPhysics PROPERTIES LABELS "core;coaster;physics")
 
+add_executable(QuantumCoreTrainPhysicsPerfBenchmark TrainPhysicsPerfBenchmark.cpp)
+target_link_libraries(QuantumCoreTrainPhysicsPerfBenchmark PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreTrainPhysicsPerfBenchmark PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreTrainPhysicsPerfBenchmark PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.TrainPhysicsPerfBenchmark COMMAND QuantumCoreTrainPhysicsPerfBenchmark)
+set_tests_properties(QuantumCore.TrainPhysicsPerfBenchmark PROPERTIES LABELS "core;coaster;physics;perf")
+
 add_executable(QuantumCoreConnectorLoadPhysicsTests ConnectorLoadPhysicsTests.cpp)
 target_link_libraries(QuantumCoreConnectorLoadPhysicsTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreConnectorLoadPhysicsTests PRIVATE cxx_std_23)

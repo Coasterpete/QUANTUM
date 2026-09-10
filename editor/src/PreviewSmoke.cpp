@@ -409,12 +409,18 @@ namespace quantum::editor
             sample.solverCounters.rigidBogieSolveCalls;
         totals_.solverCounters.rigidBogieRefinementIterations +=
             sample.solverCounters.rigidBogieRefinementIterations;
+        totals_.solverCounters.rigidBogieBracketExpansions +=
+            sample.solverCounters.rigidBogieBracketExpansions;
         totals_.solverCounters.connectionCandidateEvaluations +=
             sample.solverCounters.connectionCandidateEvaluations;
+        totals_.solverCounters.connectorRefinementIterations +=
+            sample.solverCounters.connectorRefinementIterations;
         totals_.solverCounters.connectorFallbackUses +=
             sample.solverCounters.connectorFallbackUses;
         totals_.solverCounters.trackSampleCalls +=
             sample.solverCounters.trackSampleCalls;
+        totals_.solverCounters.intervalHintMisses +=
+            sample.solverCounters.intervalHintMisses;
 
         if (sample.frameTimeMilliseconds >= options_.spikeFrameMilliseconds
             || sample.previewFrameSlotWaitMilliseconds >= options_.spikeFrameMilliseconds
@@ -553,9 +559,12 @@ namespace quantum::editor
                 {"solve_car_geometry_calls", report.solverCounters.solveCarGeometryCalls},
                 {"rigid_bogie_solve_calls", report.solverCounters.rigidBogieSolveCalls},
                 {"rigid_bogie_refinement_iterations", report.solverCounters.rigidBogieRefinementIterations},
+                {"rigid_bogie_bracket_expansions", report.solverCounters.rigidBogieBracketExpansions},
                 {"connection_candidate_evaluations", report.solverCounters.connectionCandidateEvaluations},
+                {"connector_refinement_iterations", report.solverCounters.connectorRefinementIterations},
                 {"connector_fallback_uses", report.solverCounters.connectorFallbackUses},
-                {"track_sample_calls", report.solverCounters.trackSampleCalls}}},
+                {"track_sample_calls", report.solverCounters.trackSampleCalls},
+                {"interval_hint_misses", report.solverCounters.intervalHintMisses}}},
             {"interpolation", {
                 {"average_cpu_ms", report.averageInterpolationMilliseconds},
                 {"maximum_cpu_ms", report.maximumInterpolationMilliseconds},
@@ -614,9 +623,12 @@ namespace quantum::editor
             << " geometry=" << report.solverCounters.solveCarGeometryCalls
             << " rigidsolve=" << report.solverCounters.rigidBogieSolveCalls
             << " refinement=" << report.solverCounters.rigidBogieRefinementIterations
+            << " brackexp=" << report.solverCounters.rigidBogieBracketExpansions
             << " candidates=" << report.solverCounters.connectionCandidateEvaluations
+            << " connref=" << report.solverCounters.connectorRefinementIterations
             << " fallbacks=" << report.solverCounters.connectorFallbackUses
-            << " track_samples=" << report.solverCounters.trackSampleCalls << '\n'
+            << " track_samples=" << report.solverCounters.trackSampleCalls
+            << " hintmisses=" << report.solverCounters.intervalHintMisses << '\n'
             << "Catch-up requested/executed max: "
             << report.maximumRequestedStepCount << " / "
             << report.maximumExecutedStepCount << '\n'

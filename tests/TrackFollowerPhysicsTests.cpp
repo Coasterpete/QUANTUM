@@ -1,3 +1,4 @@
+#include <quantum/physics/CarPose.hpp>
 #include <quantum/physics/TrackFollower.hpp>
 
 #include <glm/geometric.hpp>
@@ -24,6 +25,7 @@ namespace
     using quantum::physics::SingleFollowerDefinition;
     using quantum::physics::TrackFollowerState;
     using quantum::physics::TrackLocation;
+    using quantum::physics::TrainSolveCounters;
     using quantum::physics::TravelDirection;
     using quantum::physics::detail::TrackSampleIntervalHint;
     using quantum::physics::primaryTrackPathId;
@@ -224,6 +226,33 @@ namespace
             seamHint.sample(closed, wrapped),
             closed.sample(wrapped),
             "closed-track seam fallback parity");
+    }
+
+    void intervalHintMissesCountOnlyGeneralSearches()
+    {
+        const CompiledPhysicsTrack track = intervalHintTrack(
+            TopologyKind::OpenLinear);
+        TrackSampleIntervalHint hint;
+        TrainSolveCounters counters;
+        const auto sample = [&](const double station)
+        {
+            static_cast<void>(hint.sample(
+                track,
+                {primaryTrackPathId, station,
+                    TravelDirection::IncreasingStation},
+                &counters));
+        };
+
+        sample(1.2);
+        require(counters.intervalHintMisses == 1,
+            "an uninitialized hint uses the general search");
+        sample(1.3);
+        sample(2.1);
+        require(counters.intervalHintMisses == 1,
+            "same and adjacent intervals are resolved locally");
+        sample(4.2);
+        require(counters.intervalHintMisses == 2,
+            "a non-adjacent interval falls back to the general search");
     }
 
     [[nodiscard]] TrackFollowerState stateAt(
@@ -761,6 +790,8 @@ int main()
     run("flat track keeps constant velocity", flatTrackKeepsConstantVelocity);
     run("interval hints match authoritative sampling",
         intervalHintsMatchAuthoritativeSamplingExactly);
+    run("interval hint miss diagnostics",
+        intervalHintMissesCountOnlyGeneralSearches);
     run("downhill gravity accelerates", downhillGravityAccelerates);
     run("uphill gravity decelerates", uphillGravityDecelerates);
     run("reverse motion uses gravity projection", reverseMotionUsesTheSameGravityProjection);

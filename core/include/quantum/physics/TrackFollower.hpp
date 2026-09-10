@@ -13,6 +13,8 @@
 
 namespace quantum::physics
 {
+    struct TrainSolveCounters;
+
     namespace detail
     {
         class TrackSampleIntervalHint;
@@ -123,7 +125,8 @@ namespace quantum::physics
         [[nodiscard]] PhysicsTrackSample sampleWithIntervalHint(
             const TrackLocation& location,
             std::size_t& upperSampleIndex,
-            bool& hintValid) const;
+            bool& hintValid,
+            TrainSolveCounters* const counters = nullptr) const;
         [[nodiscard]] PhysicsTrackSample sampleAtUpperIndex(
             const TrackLocation& location,
             std::size_t upperSampleIndex) const;
@@ -145,10 +148,11 @@ namespace quantum::physics
         public:
             [[nodiscard]] PhysicsTrackSample sample(
                 const CompiledPhysicsTrack& track,
-                const TrackLocation& location)
+                const TrackLocation& location,
+                TrainSolveCounters* const counters = nullptr)
             {
                 return track.sampleWithIntervalHint(
-                    location, upperSampleIndex_, valid_);
+                    location, upperSampleIndex_, valid_, counters);
             }
 
         private:

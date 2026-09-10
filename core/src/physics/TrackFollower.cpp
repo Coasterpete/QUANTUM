@@ -1,4 +1,5 @@
 #include <quantum/physics/TrackFollower.hpp>
+#include <quantum/physics/CarPose.hpp>
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -317,7 +318,8 @@ namespace quantum::physics
     PhysicsTrackSample CompiledPhysicsTrack::sampleWithIntervalHint(
         const TrackLocation& location,
         std::size_t& upperSampleIndex,
-        bool& hintValid) const
+        bool& hintValid,
+        TrainSolveCounters* const counters) const
     {
         validateLocation(location);
 
@@ -355,6 +357,10 @@ namespace quantum::physics
             }
             else
             {
+                if (counters)
+                {
+                    ++counters->intervalHintMisses;
+                }
                 const auto upper = std::lower_bound(
                     samples_.begin(),
                     samples_.end(),

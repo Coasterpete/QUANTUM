@@ -128,6 +128,9 @@ namespace
         first.drawFrameCpuMilliseconds = 1.5;
         first.acquireCallMilliseconds = 0.5;
         first.presentCallMilliseconds = 0.6;
+        first.solverCounters.rigidBogieBracketExpansions = 2;
+        first.solverCounters.connectorRefinementIterations = 3;
+        first.solverCounters.intervalHintMisses = 4;
         collector.record(first);
 
         auto second = first;
@@ -143,6 +146,9 @@ namespace
         second.discardedWallTimeMilliseconds = 2.0;
         second.maximumPhysicsStepsHit = true;
         second.renderPoseFailureCount = 1;
+        second.solverCounters.rigidBogieBracketExpansions = 5;
+        second.solverCounters.connectorRefinementIterations = 6;
+        second.solverCounters.intervalHintMisses = 7;
         collector.record(second);
 
         const auto report = collector.finish(1.0, true, false);
@@ -166,6 +172,10 @@ namespace
             "interpolation failure count");
         requireNear(report.totalDiscardedWallTimeMilliseconds, 2.0,
             1.0e-12, "discarded time sum");
+        require(report.solverCounters.rigidBogieBracketExpansions == 7
+                && report.solverCounters.connectorRefinementIterations == 9
+                && report.solverCounters.intervalHintMisses == 11,
+            "solver diagnostics aggregate without per-iteration reporting");
     }
 
     void spikeRetentionIsBounded()
