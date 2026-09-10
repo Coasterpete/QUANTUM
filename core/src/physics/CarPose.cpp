@@ -440,7 +440,7 @@ namespace quantum::physics
                 ++counters->trackSampleCalls;
             }
             const PhysicsTrackSample sample = intervalHint.sample(
-                track, location);
+                track, location, counters);
             return {
                 definitionIndex,
                 location,
@@ -557,6 +557,10 @@ namespace quantum::physics
             while (upperResidual < -tolerance
                 && upperAdjustment < maximumAddedSeparation)
             {
+                if (counters)
+                {
+                    ++counters->rigidBogieBracketExpansions;
+                }
                 lowerAdjustment = upperAdjustment;
                 lowerResidual = upperResidual;
                 lowerStations = std::move(upperStations);

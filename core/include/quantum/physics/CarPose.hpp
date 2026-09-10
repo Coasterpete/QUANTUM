@@ -27,9 +27,15 @@ namespace quantum::physics
         std::uint64_t solveCarGeometryCalls = 0;
         std::uint64_t rigidBogieSolveCalls = 0;
         std::uint64_t rigidBogieRefinementIterations = 0;
+        // Exponential upper-bound expansions, excluding the initial bracket.
+        std::uint64_t rigidBogieBracketExpansions = 0;
         std::uint64_t connectionCandidateEvaluations = 0;
+        // Connector candidates evaluated inside refinement loops.
+        std::uint64_t connectorRefinementIterations = 0;
         std::uint64_t connectorFallbackUses = 0;
         std::uint64_t trackSampleCalls = 0;
+        // General searches after a hint cannot resolve locally.
+        std::uint64_t intervalHintMisses = 0;
     };
 
     // Contact roles describe intended mechanical function only. The authored

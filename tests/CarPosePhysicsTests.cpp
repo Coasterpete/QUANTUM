@@ -498,12 +498,18 @@ namespace
                             == fullCounters.rigidBogieSolveCalls
                         && hitchCounters.rigidBogieRefinementIterations
                             == fullCounters.rigidBogieRefinementIterations
+                        && hitchCounters.rigidBogieBracketExpansions
+                            == fullCounters.rigidBogieBracketExpansions
                         && hitchCounters.connectionCandidateEvaluations
                             == fullCounters.connectionCandidateEvaluations
+                        && hitchCounters.connectorRefinementIterations
+                            == fullCounters.connectorRefinementIterations
                         && hitchCounters.connectorFallbackUses
                             == fullCounters.connectorFallbackUses
                         && hitchCounters.trackSampleCalls
-                            == fullCounters.trackSampleCalls,
+                            == fullCounters.trackSampleCalls
+                        && hitchCounters.intervalHintMisses
+                            == fullCounters.intervalHintMisses,
                     "front-hitch-only solve must preserve geometry counters");
             }
         }
@@ -821,6 +827,22 @@ namespace
             end, definition, "open-end rigid bogie pivots");
         requireOrthonormal(start.bodyFrame(), "open-start body frame");
         requireOrthonormal(end.bodyFrame(), "open-end body frame");
+
+        const CompiledPhysicsTrack curvedEndpointTrack =
+            verticalArcTrack(true);
+        TrainSolveCounters endpointCounters;
+        static_cast<void>(quantum::physics::detail::
+            solveCarPoseForValidatedDefinition(
+                curvedEndpointTrack, definition, locationAt(0.0), {},
+                &endpointCounters));
+        require(endpointCounters.rigidBogieBracketExpansions > 0,
+            "endpoint clamping requires actual bracket expansion");
+        TrainSolveCounters interiorCounters;
+        static_cast<void>(quantum::physics::detail::
+            solveCarPoseForValidatedDefinition(
+                track, definition, locationAt(10.0), {}, &interiorCounters));
+        require(interiorCounters.rigidBogieBracketExpansions == 0,
+            "interior straight placement does not expand the bracket");
 
         const CompiledPhysicsTrack tooShort = straightTrack(2.0);
         std::string firstError;

@@ -884,6 +884,10 @@ namespace quantum::physics
                     {
                         break;
                     }
+                    if (counters)
+                    {
+                        ++counters->connectorRefinementIterations;
+                    }
 const double midpoint = 0.5
                         * (lower.backwardOffsetMeters
                             + upper.backwardOffsetMeters);
@@ -1177,6 +1181,10 @@ if (std::abs(bestCandidate->residualMeters)
             for (; iterations < connectorRefinementIterationCount;
                 ++iterations)
             {
+                if (counters)
+                {
+                    ++counters->connectorRefinementIterations;
+                }
                 if (std::abs(left.residualMeters)
                     < std::abs(right.residualMeters))
                 {

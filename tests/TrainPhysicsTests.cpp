@@ -1012,6 +1012,86 @@ namespace
             "connector bracket diagnostics");
     }
 
+    void trainSolveCountersHaveStableSemantics()
+    {
+        TrainSolveCounters counters;
+        require(counters.solveTrainPoseCalls == 0
+                && counters.solveCarGeometryCalls == 0
+                && counters.rigidBogieSolveCalls == 0
+                && counters.rigidBogieRefinementIterations == 0
+                && counters.rigidBogieBracketExpansions == 0
+                && counters.connectionCandidateEvaluations == 0
+                && counters.connectorRefinementIterations == 0
+                && counters.connectorFallbackUses == 0
+                && counters.trackSampleCalls == 0
+                && counters.intervalHintMisses == 0,
+            "default counters initialize to zero");
+
+        const TrainDefinition oneCar = trainOf(1);
+        static_cast<void>(solveTrainPose(
+            straightTrack(), oneCar, locationAt(50.0), &counters));
+        require(counters.solveTrainPoseCalls == 1
+                && counters.solveCarGeometryCalls == 1
+                && counters.rigidBogieSolveCalls == 1
+                && counters.rigidBogieRefinementIterations == 0
+                && counters.rigidBogieBracketExpansions == 0
+                && counters.connectionCandidateEvaluations == 0
+                && counters.connectorRefinementIterations == 0
+                && counters.connectorFallbackUses == 0
+                && counters.trackSampleCalls == 3
+                && counters.intervalHintMisses == 2,
+            "one-car straight solve counter semantics");
+
+        counters = {};
+        const TrainDefinition twoCars = trainOf(2);
+        static_cast<void>(solveTrainPose(
+            horizontalCircleTrack(), twoCars, locationAt(30.0), &counters));
+        require(counters.solveTrainPoseCalls == 1
+                && counters.solveCarGeometryCalls > twoCars.cars.size()
+                && counters.rigidBogieRefinementIterations > 0
+                && counters.rigidBogieBracketExpansions == 0
+                && counters.connectionCandidateEvaluations > 0
+                && counters.connectorRefinementIterations > 0
+                && counters.connectorFallbackUses == 0
+                && counters.trackSampleCalls > 0
+                && counters.intervalHintMisses > 0,
+            "curved solve counter semantics");
+
+        const CompiledPhysicsTrack stepTrack = horizontalCircleTrack();
+        const TrainDefinition stepDefinition = trainOf(4);
+        const TrainDynamicsState stepState = dynamicsState(30.0, 20.0);
+        const TrainStepResult reference = stepTrain(
+            stepTrack, stepDefinition, PhysicsEnvironment{}, stepState);
+        counters = {};
+        const TrainStepResult instrumented = stepTrain(
+            stepTrack, stepDefinition, PhysicsEnvironment{}, stepState,
+            FixedStepSettings{}, {}, &counters);
+        require(counters.solveTrainPoseCalls == 4,
+            "ordinary train step uses center, two finite-difference, and committed poses");
+        require(reference.state.generalizedReferenceLocation
+                    == instrumented.state.generalizedReferenceLocation
+                && reference.state.signedVelocityMetersPerSecond
+                    == instrumented.state.signedVelocityMetersPerSecond
+                && reference.state.generalizedAccelerationMetersPerSecondSquared
+                    == instrumented.state.generalizedAccelerationMetersPerSecondSquared
+                && reference.state.tick == instrumented.state.tick
+                && reference.state.runState == instrumented.state.runState
+                && reference.telemetry.pose.maximumAbsoluteConnectorResidualMeters()
+                    == instrumented.telemetry.pose.maximumAbsoluteConnectorResidualMeters(),
+            "instrumentation does not alter train state or connector closure");
+        for (std::size_t index = 0;
+            index < reference.telemetry.pose.carCount(); ++index)
+        {
+            requireNear(
+                reference.telemetry.pose.cars()[index]
+                    .carPose().bodyWorldPositionMeters(),
+                instrumented.telemetry.pose.cars()[index]
+                    .carPose().bodyWorldPositionMeters(),
+                0.0,
+                "instrumentation does not alter car poses");
+        }
+    }
+
     void fourCarTrainNaturallyRollsBackFromSpike()
     {
         constexpr double fixedStepSeconds = 1.0 / 240.0;
@@ -1380,6 +1460,7 @@ int main()
     run("track-family independence", canonicalTrackQueriesAreTheOnlyGeometryDependency);
     run("invalid dynamics state", invalidDynamicsStateIsRejected);
     run("solver diagnostics", solverDiagnosticsArePopulated);
+    run("train solve counters", trainSolveCountersHaveStableSemantics);
     run("four-car spike rollback", fourCarTrainNaturallyRollsBackFromSpike);
 
     std::fprintf(stdout, "%d passed, %d failed\n", passed, failed);

@@ -830,6 +830,36 @@ complete coaster operations simulation. Physics consumes the canonical
 does not depend on rendered `TrackGeometryFamily` or `TrackStylePreset` rail,
 mesh, tube, or hardware details.
 
+### Train-solver performance diagnostics
+
+The CPU train solver remains the reference and correctness implementation for
+regression testing, debugging, and comparison with the intended production
+Vulkan-compute train simulation. The retained `TrainSolveCounters` and
+`QuantumCoreTrainPhysicsPerfBenchmark` exercise the real four-car `stepTrain`
+path at the fixed 240 Hz timestep; no GPU physics is implemented yet.
+
+On the diagnostic machine, the original advancing-state reproduction measured
+about 0.34 ms per straight step and about 3.4--3.7 ms per ordinary curved step.
+These wall-clock values are reference measurements, not portable performance
+limits. Each ordinary step performs four full train-pose solves: the center
+pose, two finite-difference poses, and the committed pose.
+
+The counters identify rigid-bogie refinement on curved geometry as the dominant
+work multiplier and connector candidate/refinement evaluation as the secondary
+multiplier. Their repeated geometry evaluation causes roughly 20--23 times as
+many track samples as the straight baseline. Representative cases did not use
+the connector fallback, and interval-hint misses scaled with the extra solver
+work rather than identifying a separate primary cause. The initial vertical
+crest benchmark also reached its short open-track boundary and repeatedly ran
+boundary refinement; the maintained benchmark uses independent valid states so
+that boundary intervention is not conflated with steady curved-geometry cost.
+
+The measured bulk track sampling, rigid-bogie residual/refinement work,
+connector candidate/refinement work, repeated car geometry, and nearby
+finite-difference poses define reference workloads for a future GPU Physics M0.
+That milestone may design GPU-resident state and Vulkan compute kernels; it does
+not change the CPU solver's present role as the regression oracle.
+
 ### Phase 1: track follower
 
 `TrackLocation` identifies the current path, station, and travel direction.
