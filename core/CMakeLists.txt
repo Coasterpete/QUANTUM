@@ -21,6 +21,7 @@ target_sources(
         src/StaticMeshAsset.cpp
         src/Supports.cpp
         src/physics/CarPose.cpp
+        src/physics/TrainSolveDiagnostics.hpp
         src/physics/TrainPhysics.cpp
         src/physics/TrackFollower.cpp
         src/RiderLoads.cpp

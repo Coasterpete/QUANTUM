@@ -1,5 +1,7 @@
 #include <quantum/physics/CarPose.hpp>
 
+#include "TrainSolveDiagnostics.hpp"
+
 #include <glm/geometric.hpp>
 #include <glm/mat3x3.hpp>
 #include <glm/matrix.hpp>
@@ -19,6 +21,48 @@ namespace quantum::physics
         inline constexpr std::size_t bogieStationRefinementIterationCount = 64;
         inline constexpr double directionalResolution =
             128.0 * std::numeric_limits<double>::epsilon();
+
+        class RigidBogieWorkObservation
+        {
+        public:
+            explicit RigidBogieWorkObservation(
+                TrainSolveCounters* const counters) noexcept
+                : counters_(counters),
+                  refinementBegin_(counters
+                        ? counters->rigidBogieRefinementIterations : 0),
+                  samplesBegin_(counters ? counters->trackSampleCalls : 0)
+            {
+            }
+
+            ~RigidBogieWorkObservation()
+            {
+                if (!counters_)
+                {
+                    return;
+                }
+                const std::uint64_t refinements =
+                    counters_->rigidBogieRefinementIterations
+                    - refinementBegin_;
+                const std::uint64_t samples = counters_->trackSampleCalls
+                    - samplesBegin_;
+                counters_->rigidBogieTrackSamples += samples;
+                counters_->rigidBogieRefinementIterationsMinimum = std::min(
+                    counters_->rigidBogieRefinementIterationsMinimum,
+                    refinements);
+                counters_->rigidBogieRefinementIterationsMaximum = std::max(
+                    counters_->rigidBogieRefinementIterationsMaximum,
+                    refinements);
+                counters_->rigidBogieTrackSamplesMinimum = std::min(
+                    counters_->rigidBogieTrackSamplesMinimum, samples);
+                counters_->rigidBogieTrackSamplesMaximum = std::max(
+                    counters_->rigidBogieTrackSamplesMaximum, samples);
+            }
+
+        private:
+            TrainSolveCounters* counters_ = nullptr;
+            std::uint64_t refinementBegin_ = 0;
+            std::uint64_t samplesBegin_ = 0;
+        };
 
         [[nodiscard]] bool finite(const glm::dvec3& value) noexcept
         {
@@ -482,6 +526,10 @@ namespace quantum::physics
             const double travelSign,
             TrainSolveCounters* const counters = nullptr)
         {
+            detail::ScopedCounterTimer timer{
+                counters,
+                counters ? &counters->rigidBogieSolveNanoseconds : nullptr};
+            RigidBogieWorkObservation workObservation{counters};
             if (counters)
             {
                 ++counters->rigidBogieSolveCalls;
@@ -666,6 +714,9 @@ namespace quantum::physics
             const TrackLocation& referenceLocation,
             TrainSolveCounters* const counters = nullptr)
         {
+            detail::ScopedCounterTimer timer{
+                counters,
+                counters ? &counters->solveCarGeometryNanoseconds : nullptr};
             if (counters)
             {
                 ++counters->solveCarGeometryCalls;
