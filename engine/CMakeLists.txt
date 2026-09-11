@@ -19,6 +19,8 @@ set(QUANTUM_TRACK_FRAGMENT_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/track.frag.spv")
 set(QUANTUM_HARDWARE_VERTEX_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/hardware.vert.spv")
+set(QUANTUM_PHYSICS_COMPUTE_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/track_sample.comp.spv")
 
 add_custom_command(
     OUTPUT
@@ -27,6 +29,7 @@ add_custom_command(
         "${QUANTUM_TRACK_VERTEX_SHADER}"
         "${QUANTUM_TRACK_FRAGMENT_SHADER}"
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
+        "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
     COMMAND
         ${CMAKE_COMMAND} -E make_directory
         "${QUANTUM_SHADER_BINARY_DIR}"
@@ -60,12 +63,19 @@ add_custom_command(
         --target-env vulkan1.3
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/hardware.vert"
         -o "${QUANTUM_HARDWARE_VERTEX_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V
+        --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/physics/track_sample.comp"
+        -o "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
     DEPENDS
         shaders/centerline.vert
         shaders/centerline.frag
         shaders/track.vert
         shaders/track.frag
         shaders/hardware.vert
+        shaders/physics/track_sample.comp
     VERBATIM
 )
 
@@ -77,6 +87,7 @@ add_custom_target(
         "${QUANTUM_TRACK_VERTEX_SHADER}"
         "${QUANTUM_TRACK_FRAGMENT_SHADER}"
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
+        "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
 )
 
 install(
@@ -86,6 +97,7 @@ install(
         "${QUANTUM_TRACK_VERTEX_SHADER}"
         "${QUANTUM_TRACK_FRAGMENT_SHADER}"
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
+        "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
     DESTINATION shaders
     COMPONENT Runtime
 )
@@ -97,11 +109,13 @@ target_sources(
         src/StaticMeshAssets.cpp
         src/VulkanContext.cpp
         src/ViewportAids.cpp
+        src/physics/gpu/GpuPhysicsContext.cpp
         include/quantum/renderer/ViewportAids.hpp
         include/quantum/renderer/ViewportTrackPresentation.hpp
         include/quantum/engine/Logging.hpp
         include/quantum/renderer/StaticMeshAssets.hpp
         include/quantum/renderer/VulkanContext.hpp
+        include/quantum/physics/gpu/GpuPhysicsContext.hpp
 )
 
 target_include_directories(

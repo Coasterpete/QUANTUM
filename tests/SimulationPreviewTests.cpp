@@ -46,6 +46,22 @@ namespace
         }
     }
 
+    void requireSameVertices(
+        const std::span<const quantum::renderer::LineVertex> actual,
+        const std::span<const quantum::renderer::LineVertex> expected,
+        const std::string& message)
+    {
+        require(actual.size() == expected.size(), message + " size");
+        for (std::size_t index = 0; index < actual.size(); ++index)
+        {
+            require(actual[index].x == expected[index].x
+                    && actual[index].y == expected[index].y
+                    && actual[index].z == expected[index].z
+                    && actual[index].color == expected[index].color,
+                message + " vertex " + std::to_string(index));
+        }
+    }
+
     [[nodiscard]] quantum::coaster::AuthoredTrack straightTrack(
         const double length = 60.0,
         const double initialSpeed = 20.0,
@@ -508,6 +524,64 @@ namespace
             "failed rebuild must clear every stale track-dependent value");
     }
 
+    void gpuPreviewUploadAndInterpolationCacheAreSafe()
+    {
+        quantum::physics::gpu::GpuPhysicsContext::HeadlessHandles handles;
+        try
+        {
+            handles = quantum::physics::gpu::GpuPhysicsContext::
+                createHeadlessHandles();
+        }
+        catch (const std::exception& exception)
+        {
+            std::cout << "GPU preview production-path test skipped: "
+                << exception.what() << '\n';
+            return;
+        }
+
+        quantum::physics::gpu::GpuPhysicsContext gpu(std::move(handles));
+        if (!gpu.gpuAvailable())
+        {
+            std::cout << "GPU preview production-path test skipped: "
+                "compute pipeline unavailable\n";
+            return;
+        }
+
+        SimulationPreview gpuPreview;
+        SimulationPreview cpuPreview;
+        gpuPreview.setGpuContext(&gpu);
+        const auto initialTrack = straightTrack();
+        require(gpuPreview.rebuild(initialTrack)
+                && cpuPreview.rebuild(initialTrack),
+            "GPU preview upload fixture");
+        require(gpu.hasUploadedTrack() && gpu.gpuTrackReady(),
+            "preview rebuild must upload the active track");
+
+        gpuPreview.play();
+        cpuPreview.play();
+        constexpr double dt = defaultFixedTimeStepSeconds;
+        gpuPreview.update(dt);
+        cpuPreview.update(dt);
+        require(gpu.lastSampleUsedGpu(),
+            "preview update must execute the bogie batch on GPU");
+        requireNear(gpuPreview.interpolationAlpha(), 0.0, 1e-12,
+            "GPU preview stale-cache fixture alpha");
+        requireSameVertices(gpuPreview.vertices(), cpuPreview.vertices(),
+            "interpolated render pose must reject committed-pose GPU samples");
+
+        auto replacementTrack = straightTrack();
+        replacementTrack.setStartPose({
+            {5.0, -2.0, 1.0}, replacementTrack.startPose().orientation});
+        require(gpuPreview.rebuild(replacementTrack)
+                && cpuPreview.rebuild(replacementTrack),
+            "GPU preview replacement fixture");
+        require(gpu.hasUploadedTrack() && gpu.gpuTrackReady(),
+            "replacement preview track must refresh the GPU upload");
+        requireSameVertices(gpuPreview.vertices(), cpuPreview.vertices(),
+            "track rebuild must invalidate old cached GPU markers");
+        std::cout << "GPU preview production-path test EXECUTED\n";
+    }
+
     void openTrackPausesAtItsLegalEndpoint()
     {
         SimulationPreview preview;
@@ -880,6 +954,7 @@ int main()
         timingDiscontinuityPreservesFractionalTick();
         rendererVerticesRespectDocumentScale();
         rebuildAndShortTrackInvalidationAreSafe();
+        gpuPreviewUploadAndInterpolationCacheAreSafe();
         openTrackPausesAtItsLegalEndpoint();
         transitionPlaybackKeepsEveryCommittedCarRigid();
     }

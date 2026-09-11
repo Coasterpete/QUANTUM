@@ -1,0 +1,223 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : enable
+
+layout(local_size_x = 64) in;
+
+struct GpuTrackSample
+{
+    double stationMeters;
+    double positionMeters[3];
+    double tangent[3];
+    double lateral[3];
+    double up[3];
+    double curvaturePerMeter[3];
+};
+
+struct GpuCoasterRecord
+{
+    uint trackOffset;
+    uint trackCount;
+    uint topology;
+    uint _pad;
+    double trackLength;
+};
+
+struct GpuTrackQuery
+{
+    uint coasterIndex;
+    uint path;
+    int direction;
+    uint _reserved;
+    double stationMeters;
+};
+
+struct PhysicsTrackSample
+{
+    GpuTrackQuery location;
+    uint _pad0;
+    uint _pad1;
+    double position[4];
+    double tangent[4];
+    double lateral[4];
+    double up[4];
+    double curvature[4];
+};
+
+layout(set = 0, binding = 0) readonly buffer TrackSamplesBuffer
+{
+    GpuTrackSample samples[];
+} trackSamples;
+
+layout(set = 0, binding = 1) readonly buffer CoasterRecordsBuffer
+{
+    GpuCoasterRecord records[];
+} coasterRecords;
+
+layout(set = 1, binding = 0) readonly buffer QueryBuffer
+{
+    GpuTrackQuery queries[];
+} queries;
+
+layout(set = 1, binding = 1) buffer ResultBuffer
+{
+    PhysicsTrackSample results[];
+} resultBuffer;
+
+GpuTrackSample interpolateSample(GpuTrackSample before, GpuTrackSample after, double t)
+{
+    GpuTrackSample result;
+    result.stationMeters = mix(before.stationMeters, after.stationMeters, t);
+    for (int i = 0; i < 3; ++i)
+    {
+        result.positionMeters[i] = mix(before.positionMeters[i], after.positionMeters[i], t);
+        result.curvaturePerMeter[i] = mix(before.curvaturePerMeter[i], after.curvaturePerMeter[i], t);
+    }
+    // FRAME MISMATCH (M0): CPU uses quaternion slerp via glm::slerp on dquat.
+    // GLSL here uses mix + Gram-Schmidt (nlerp) because portable dquat slerp
+    // is not available in all glslangValidator configurations for Vulkan 1.3 + shaderFloat64.
+    dvec3 bt = dvec3(before.tangent[0], before.tangent[1], before.tangent[2]);
+    dvec3 bl = dvec3(before.lateral[0], before.lateral[1], before.lateral[2]);
+    dvec3 at = dvec3(after.tangent[0], after.tangent[1], after.tangent[2]);
+    dvec3 al = dvec3(after.lateral[0], after.lateral[1], after.lateral[2]);
+    dvec3 tangent = normalize(mix(bt, at, t));
+    dvec3 lateral = normalize(mix(bl, al, t));
+    lateral = normalize(lateral - dot(lateral, tangent) * tangent);
+    dvec3 up = cross(tangent, lateral);
+    result.tangent[0] = tangent.x; result.tangent[1] = tangent.y; result.tangent[2] = tangent.z;
+    result.lateral[0] = lateral.x; result.lateral[1] = lateral.y; result.lateral[2] = lateral.z;
+    result.up[0] = up.x; result.up[1] = up.y; result.up[2] = up.z;
+    return result;
+}
+
+void main()
+{
+    uint queryIndex = gl_GlobalInvocationID.x;
+
+    if (queryIndex >= queries.queries.length())
+    {
+        return;
+    }
+
+    GpuTrackQuery query = queries.queries[queryIndex];
+
+    GpuCoasterRecord record = coasterRecords.records[query.coasterIndex];
+
+    uint trackStart = record.trackOffset;
+    uint trackEnd = record.trackOffset + record.trackCount;
+
+    if (trackStart >= trackEnd || trackEnd > trackSamples.samples.length())
+    {
+        PhysicsTrackSample emptySample;
+        emptySample.location = query;
+        emptySample._pad0 = 0u;
+        emptySample._pad1 = 0u;
+        for (int i = 0; i < 4; ++i)
+        {
+            emptySample.position[i] = 0.0;
+            emptySample.tangent[i] = 0.0;
+            emptySample.lateral[i] = 0.0;
+            emptySample.up[i] = 0.0;
+            emptySample.curvature[i] = 0.0;
+        }
+        resultBuffer.results[queryIndex] = emptySample;
+        return;
+    }
+
+    double station = query.stationMeters;
+    double segLength = record.trackLength;
+    uint topology = record.topology;
+
+    if (!isinf(segLength) && segLength > 0.0 && topology == 1u)
+    {
+        if (station < 0.0)
+        {
+            station = mod(station, segLength);
+            if (station < 0.0) station += segLength;
+        }
+        else if (station >= segLength)
+        {
+            station = mod(station, segLength);
+        }
+    }
+    else
+    {
+        if (station < 0.0) station = 0.0;
+        if (station > segLength) station = segLength;
+    }
+
+    GpuTrackQuery adjustedQuery = query;
+    adjustedQuery.stationMeters = station;
+
+    uint low = trackStart;
+    uint high = trackEnd;
+
+    while (low < high)
+    {
+        uint mid = (low + high) >> 1;
+        if (trackSamples.samples[mid].stationMeters < station)
+        {
+            low = mid + 1;
+        }
+        else
+        {
+            high = mid;
+        }
+    }
+
+    uint upperIndex = low;
+
+    GpuTrackSample sampled;
+
+    if (upperIndex == trackStart)
+    {
+        sampled = trackSamples.samples[trackStart];
+    }
+    else if (upperIndex >= trackEnd)
+    {
+        sampled = trackSamples.samples[trackEnd - 1];
+    }
+    else
+    {
+        GpuTrackSample before = trackSamples.samples[upperIndex - 1];
+        GpuTrackSample after = trackSamples.samples[upperIndex];
+
+        double denom = after.stationMeters - before.stationMeters;
+        double t = (denom > 0.0) ? (station - before.stationMeters) / denom : 0.0;
+        t = clamp(t, 0.0, 1.0);
+
+        sampled = interpolateSample(before, after, t);
+    }
+
+    PhysicsTrackSample result;
+    result.location = adjustedQuery;
+    result._pad0 = 0u;
+    result._pad1 = 0u;
+
+    result.position[0] = sampled.positionMeters[0];
+    result.position[1] = sampled.positionMeters[1];
+    result.position[2] = sampled.positionMeters[2];
+    result.position[3] = 0.0;
+
+    result.tangent[0] = sampled.tangent[0];
+    result.tangent[1] = sampled.tangent[1];
+    result.tangent[2] = sampled.tangent[2];
+    result.tangent[3] = 0.0;
+
+    result.lateral[0] = sampled.lateral[0];
+    result.lateral[1] = sampled.lateral[1];
+    result.lateral[2] = sampled.lateral[2];
+    result.lateral[3] = 0.0;
+
+    result.up[0] = sampled.up[0];
+    result.up[1] = sampled.up[1];
+    result.up[2] = sampled.up[2];
+    result.up[3] = 0.0;
+
+    result.curvature[0] = sampled.curvaturePerMeter[0];
+    result.curvature[1] = sampled.curvaturePerMeter[1];
+    result.curvature[2] = sampled.curvaturePerMeter[2];
+    result.curvature[3] = 0.0;
+
+    resultBuffer.results[queryIndex] = result;
+}

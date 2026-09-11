@@ -15,6 +15,7 @@
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/SimulationPreview.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
+#include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
@@ -374,6 +375,7 @@ namespace quantum::engine
                 );
 
                 quantum::renderer::VulkanContext vulkan;
+                std::optional<quantum::physics::gpu::GpuPhysicsContext> gpuContext;
                 vulkan.initialize(
                     window,
                     centerline.vertices,
@@ -382,6 +384,12 @@ namespace quantum::engine
                 );
                 vulkan.updateSupportVertices(
                     supportVisualization.memberVertices);
+                // M2: batched GPU sampling for SimulationPreview (8 bogies per pose)
+                gpuContext.emplace(vulkan);
+                if (!gpuContext->gpuAvailable())
+                {
+                    quantum::logging::logMessage(quantum::logging::LogLevel::Info, "SIM", "GPU batched sampling not available – CPU fallback");
+                }
 
                 quantum::editor::EditorUi editorUi;
                 editorUi.initialize(
@@ -404,6 +412,7 @@ namespace quantum::engine
                     documentHistory.canRedo());
 
                 quantum::editor::SimulationPreview simulationPreview;
+                simulationPreview.setGpuContext(gpuContext ? &*gpuContext : nullptr);
                 std::uint64_t simulationTrackGeneration =
                     centerlineCache.generation();
                 quantum::coaster::LayoutMode simulationLayoutMode =
