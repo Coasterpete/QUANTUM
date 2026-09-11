@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cmath>
 #include <cstring>
@@ -466,10 +467,15 @@ namespace quantum::physics::gpu
             if (f.readbackBuffer) vmaDestroyBuffer(allocator_, f.readbackBuffer, f.readbackAllocation);
             f.readbackMapped = nullptr;
         }
+        if (rigidBogie_.jobBuffer) vmaDestroyBuffer(allocator_, rigidBogie_.jobBuffer, rigidBogie_.jobAllocation);
+        if (rigidBogie_.resultBuffer) vmaDestroyBuffer(allocator_, rigidBogie_.resultBuffer, rigidBogie_.resultAllocation);
+        if (rigidBogie_.readbackBuffer) vmaDestroyBuffer(allocator_, rigidBogie_.readbackBuffer, rigidBogie_.readbackAllocation);
+        rigidBogie_.readbackMapped = nullptr;
         if (validationFence_) vkDestroyFence(device_, validationFence_, nullptr);
         for (auto f : computeFences_) if (f) vkDestroyFence(device_, f, nullptr);
         if (commandPool_) vkDestroyCommandPool(device_, commandPool_, nullptr);
         if (computePipeline_) vkDestroyPipeline(device_, computePipeline_, nullptr);
+        if (rigidBogiePipeline_) vkDestroyPipeline(device_, rigidBogiePipeline_, nullptr);
         if (pipelineLayout_) vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
         if (transientSetLayout_) vkDestroyDescriptorSetLayout(device_, transientSetLayout_, nullptr);
         if (persistentSetLayout_) vkDestroyDescriptorSetLayout(device_, persistentSetLayout_, nullptr);
@@ -800,80 +806,72 @@ namespace quantum::physics::gpu
         if (vkCreatePipelineLayout(device_, &plInfo, nullptr, &pipelineLayout_) != VK_SUCCESS)
             throw std::runtime_error("vkCreatePipelineLayout failed");
 
-        // Load SPIR-V for track_sample.comp (built by QuantumShaders target).
-        // Use path derived from this source file (absolute) to avoid hard-coded machine paths.
-        std::vector<std::filesystem::path> candidates;
-        try {
-            // __FILE__ is absolute like C:/DEV1/QUANTUM/engine/src/physics/gpu/GpuPhysicsContext.cpp
-            // 5 parent_path: gpu->physics->src->engine->QUANTUM
-            auto derived = std::filesystem::absolute(
-                std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path().parent_path()
-            ) / "build" / "shaders" / "track_sample.comp.spv";
-            candidates.push_back(derived);
-        } catch (...) {}
-        try { candidates.push_back(std::filesystem::absolute(std::filesystem::path("build/shaders/track_sample.comp.spv"))); } catch (...) {}
-        try { candidates.push_back(std::filesystem::absolute(std::filesystem::path("shaders/track_sample.comp.spv"))); } catch (...) {}
-        // Fallback to exe-relative only if SDL video is initialized
-        if (SDL_WasInit(SDL_INIT_VIDEO))
+        const auto createComputePipeline = [&](const char* fileName,
+                                               VkPipeline& pipeline) -> bool
         {
-            try { candidates.push_back(gpuShaderPath()); } catch (...) {}
-        }
-
-        std::vector<std::uint32_t> code;
-        std::filesystem::path tried;
-        bool found = false;
-        std::string lastError;
-        for (auto& p : candidates)
-        {
+            std::vector<std::filesystem::path> candidates;
             try
             {
-                if (std::filesystem::exists(p))
-                {
-                    code = readSpirvFile(p);
-                    tried = p;
-                    found = true;
-                    break;
-                }
+                const auto root = std::filesystem::absolute(
+                    std::filesystem::path(__FILE__).parent_path().parent_path()
+                        .parent_path().parent_path().parent_path());
+                candidates.push_back(root / "build" / "shaders" / fileName);
             }
-            catch (const std::exception& e) { lastError = e.what(); tried = p; }
-        }
-        if (!found)
-        {
-            quantum::logging::logMessagef(
-                quantum::logging::LogLevel::Info, "VK",
-                "GpuPhysicsContext: track_sample.comp.spv not found (tried %s): %s – GPU sampling disabled",
-                tried.string().c_str(), lastError.c_str());
-            std::cout << "createPipeline: SPIR-V not found\n" << std::flush;
-            return;
-        }
-        VkShaderModule mod = VK_NULL_HANDLE;
-        try
-        {
-            mod = createShaderModuleLocal(device_, code);
+            catch (...) {}
+            try { candidates.push_back(std::filesystem::absolute(std::filesystem::path("build/shaders") / fileName)); } catch (...) {}
+            try { candidates.push_back(std::filesystem::absolute(std::filesystem::path("shaders") / fileName)); } catch (...) {}
+            if (SDL_WasInit(SDL_INIT_VIDEO))
+            {
+                try
+                {
+                    const auto samplePath = gpuShaderPath();
+                    candidates.push_back(samplePath.parent_path() / fileName);
+                }
+                catch (...) {}
+            }
+
+            std::vector<std::uint32_t> code;
+            for (const auto& path : candidates)
+            {
+                if (!std::filesystem::exists(path)) continue;
+                code = readSpirvFile(path);
+                break;
+            }
+            if (code.empty())
+            {
+                quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                    "VK", "GpuPhysicsContext: %s not found", fileName);
+                return false;
+            }
+
+            VkShaderModule module = createShaderModuleLocal(device_, code);
             VkPipelineShaderStageCreateInfo stage{};
             stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
             stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-            stage.module = mod;
+            stage.module = module;
             stage.pName = "main";
+            VkComputePipelineCreateInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+            info.stage = stage;
+            info.layout = pipelineLayout_;
+            const VkResult result = vkCreateComputePipelines(
+                device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
+            vkDestroyShaderModule(device_, module, nullptr);
+            if (result != VK_SUCCESS)
+                throw std::runtime_error(std::string("vkCreateComputePipelines failed for ") + fileName);
+            return true;
+        };
 
-            VkComputePipelineCreateInfo ci{};
-            ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-            ci.stage = stage;
-            ci.layout = pipelineLayout_;
-
-            const VkResult r = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &ci, nullptr, &computePipeline_);
-            vkDestroyShaderModule(device_, mod, nullptr);
-            mod = VK_NULL_HANDLE;
-            if (r != VK_SUCCESS)
-                throw std::runtime_error("vkCreateComputePipelines failed for track_sample.comp");
-            gpuPipelineReady_ = true;
-            quantum::logging::logMessagef(quantum::logging::LogLevel::Info, "VK", "GpuPhysicsContext: compute pipeline ready");
-        }
-        catch (...)
-        {
-            if (mod != VK_NULL_HANDLE) vkDestroyShaderModule(device_, mod, nullptr);
-            throw;
-        }
+        gpuPipelineReady_ = createComputePipeline(
+            "track_sample.comp.spv", computePipeline_);
+        rigidBogiePipelineReady_ = createComputePipeline(
+            "rigid_bogie.comp.spv", rigidBogiePipeline_);
+        if (gpuPipelineReady_)
+            quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                "VK", "GpuPhysicsContext: track sampling pipeline ready");
+        if (rigidBogiePipelineReady_)
+            quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                "VK", "GpuPhysicsContext: rigid-bogie prototype pipeline ready");
     }
 
     void GpuPhysicsContext::allocateDescriptorSets()
@@ -898,6 +896,13 @@ namespace quantum::physics::gpu
             if (vkAllocateDescriptorSets(device_, &a, &frame.descriptorSet) != VK_SUCCESS)
                 throw std::runtime_error("vkAllocateDescriptorSets transient failed");
         }
+        VkDescriptorSetAllocateInfo rigidAlloc{};
+        rigidAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        rigidAlloc.descriptorPool = descriptorPool_;
+        rigidAlloc.descriptorSetCount = 1;
+        rigidAlloc.pSetLayouts = &transientSetLayout_;
+        if (vkAllocateDescriptorSets(device_, &rigidAlloc, &rigidBogie_.descriptorSet) != VK_SUCCESS)
+            throw std::runtime_error("vkAllocateDescriptorSets rigid bogie failed");
     }
 
     void GpuPhysicsContext::updatePersistentDescriptors()
@@ -1079,6 +1084,73 @@ namespace quantum::physics::gpu
         updateFrameDescriptors(slot);
     }
 
+    void GpuPhysicsContext::ensureRigidBogieBuffers(const std::size_t jobCount)
+    {
+        if (jobCount == 0 || jobCount <= rigidBogie_.capacityJobs) return;
+        const VkDeviceSize jobBytes = jobCount * sizeof(GpuRigidBogieJob);
+        const VkDeviceSize resultBytes = jobCount * sizeof(GpuRigidBogieResult);
+
+        if (rigidBogie_.jobBuffer)
+            vmaDestroyBuffer(allocator_, rigidBogie_.jobBuffer, rigidBogie_.jobAllocation);
+        if (rigidBogie_.resultBuffer)
+            vmaDestroyBuffer(allocator_, rigidBogie_.resultBuffer, rigidBogie_.resultAllocation);
+        if (rigidBogie_.readbackBuffer)
+            vmaDestroyBuffer(allocator_, rigidBogie_.readbackBuffer, rigidBogie_.readbackAllocation);
+        rigidBogie_.readbackMapped = nullptr;
+
+        VkBufferCreateInfo jobInfo = makeStorageBufferInfo(jobBytes);
+        VmaAllocationCreateInfo jobAllocationInfo{};
+        jobAllocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        jobAllocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        if (vmaCreateBuffer(allocator_, &jobInfo, &jobAllocationInfo,
+                &rigidBogie_.jobBuffer, &rigidBogie_.jobAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("Unable to allocate rigid-bogie job buffer");
+
+        VkBufferCreateInfo resultInfo = makeStorageBufferInfo(resultBytes);
+        VmaAllocationCreateInfo resultAllocationInfo{};
+        resultAllocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        if (vmaCreateBuffer(allocator_, &resultInfo, &resultAllocationInfo,
+                &rigidBogie_.resultBuffer, &rigidBogie_.resultAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("Unable to allocate rigid-bogie result buffer");
+
+        VmaAllocationCreateInfo readbackAllocationInfo{};
+        readbackAllocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        readbackAllocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT
+            | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo mappedInfo{};
+        if (vmaCreateBuffer(allocator_, &resultInfo, &readbackAllocationInfo,
+                &rigidBogie_.readbackBuffer, &rigidBogie_.readbackAllocation,
+                &mappedInfo) != VK_SUCCESS)
+            throw std::runtime_error("Unable to allocate rigid-bogie readback buffer");
+        rigidBogie_.readbackMapped = mappedInfo.pMappedData;
+        rigidBogie_.capacityJobs = jobCount;
+    }
+
+    void GpuPhysicsContext::updateRigidBogieDescriptors(const std::size_t jobCount)
+    {
+        if (rigidBogie_.descriptorSet == VK_NULL_HANDLE || jobCount == 0) return;
+        VkDescriptorBufferInfo jobInfo{};
+        jobInfo.buffer = rigidBogie_.jobBuffer;
+        jobInfo.range = jobCount * sizeof(GpuRigidBogieJob);
+        VkDescriptorBufferInfo resultInfo{};
+        resultInfo.buffer = rigidBogie_.resultBuffer;
+        resultInfo.range = jobCount * sizeof(GpuRigidBogieResult);
+        VkWriteDescriptorSet writes[2]{};
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = rigidBogie_.descriptorSet;
+        writes[0].dstBinding = 0;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[0].pBufferInfo = &jobInfo;
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = rigidBogie_.descriptorSet;
+        writes[1].dstBinding = 1;
+        writes[1].descriptorCount = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[1].pBufferInfo = &resultInfo;
+        vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    }
+
     void GpuPhysicsContext::uploadTrackData(std::span<const coaster::TrackKinematicState>, double) {}
     void GpuPhysicsContext::uploadQueries(std::uint32_t slot, std::span<const GpuTrackQuery> queries)
     {
@@ -1114,6 +1186,125 @@ namespace quantum::physics::gpu
     bool GpuPhysicsContext::lastSampleUsedGpu() const noexcept
     {
         return lastSampleUsedGpu_;
+    }
+
+    bool GpuPhysicsContext::gpuRigidBogieReady() const noexcept
+    {
+        return device_ != VK_NULL_HANDLE && shaderFloat64Enabled_
+            && rigidBogiePipelineReady_ && rigidBogiePipeline_ != VK_NULL_HANDLE
+            && gpuTrackReady_;
+    }
+
+    std::vector<GpuRigidBogieResult> GpuPhysicsContext::solveRigidBogiesGpu(
+        const std::span<const GpuRigidBogieJob> jobs,
+        GpuRigidBogieBatchTimings* const timings)
+    {
+        using Clock = std::chrono::steady_clock;
+        if (timings) *timings = {};
+        if (jobs.empty()) return {};
+        if (!gpuRigidBogieReady() || validationFence_ == VK_NULL_HANDLE)
+            return {};
+
+        const auto totalBegin = Clock::now();
+        const auto uploadBegin = totalBegin;
+        ensureRigidBogieBuffers(jobs.size());
+        updatePersistentDescriptors();
+        updateRigidBogieDescriptors(jobs.size());
+        void* mapped = nullptr;
+        if (vmaMapMemory(allocator_, rigidBogie_.jobAllocation, &mapped) != VK_SUCCESS)
+            throw std::runtime_error("Unable to map rigid-bogie job buffer");
+        std::memcpy(mapped, jobs.data(), jobs.size_bytes());
+        vmaFlushAllocation(allocator_, rigidBogie_.jobAllocation, 0, jobs.size_bytes());
+        vmaUnmapMemory(allocator_, rigidBogie_.jobAllocation);
+        const auto uploadEnd = Clock::now();
+
+        const auto submitBegin = uploadEnd;
+        vkResetFences(device_, 1, &validationFence_);
+        VkCommandBuffer commandBuffer = commandBuffers_[0];
+        vkResetCommandBuffer(commandBuffer, 0);
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+            throw std::runtime_error("Unable to begin rigid-bogie command buffer");
+
+        VkMemoryBarrier hostToShader{};
+        hostToShader.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        hostToShader.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        hostToShader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &hostToShader,
+            0, nullptr, 0, nullptr);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            rigidBogiePipeline_);
+        const VkDescriptorSet descriptorSets[] = {
+            persistentDescriptorSet_, rigidBogie_.descriptorSet};
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipelineLayout_, 0, 2, descriptorSets, 0, nullptr);
+        vkCmdDispatch(commandBuffer,
+            static_cast<std::uint32_t>((jobs.size() + 63) / 64), 1, 1);
+
+        VkMemoryBarrier shaderToTransfer{};
+        shaderToTransfer.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        shaderToTransfer.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        shaderToTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &shaderToTransfer,
+            0, nullptr, 0, nullptr);
+        VkBufferCopy copy{};
+        copy.size = jobs.size() * sizeof(GpuRigidBogieResult);
+        vkCmdCopyBuffer(commandBuffer, rigidBogie_.resultBuffer,
+            rigidBogie_.readbackBuffer, 1, &copy);
+        VkMemoryBarrier transferToHost{};
+        transferToHost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        transferToHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        transferToHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &transferToHost,
+            0, nullptr, 0, nullptr);
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+            throw std::runtime_error("Unable to end rigid-bogie command buffer");
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        if (vkQueueSubmit(computeQueue_, 1, &submitInfo, validationFence_) != VK_SUCCESS)
+            throw std::runtime_error("Unable to submit rigid-bogie dispatch");
+        const auto submitEnd = Clock::now();
+
+        const auto waitBegin = submitEnd;
+        if (vkWaitForFences(device_, 1, &validationFence_, VK_TRUE,
+                5'000'000'000ULL) != VK_SUCCESS)
+            throw std::runtime_error("Rigid-bogie dispatch fence wait failed");
+        const auto waitEnd = Clock::now();
+
+        const auto readbackBegin = waitEnd;
+        vmaInvalidateAllocation(allocator_, rigidBogie_.readbackAllocation,
+            0, copy.size);
+        std::vector<GpuRigidBogieResult> results(jobs.size());
+        if (rigidBogie_.readbackMapped)
+            std::memcpy(results.data(), rigidBogie_.readbackMapped, copy.size);
+        else
+        {
+            void* readback = nullptr;
+            vmaMapMemory(allocator_, rigidBogie_.readbackAllocation, &readback);
+            std::memcpy(results.data(), readback, copy.size);
+            vmaUnmapMemory(allocator_, rigidBogie_.readbackAllocation);
+        }
+        const auto readbackEnd = Clock::now();
+        if (timings)
+        {
+            const auto microseconds = [](const auto begin, const auto end)
+            {
+                return std::chrono::duration<double, std::micro>(end - begin).count();
+            };
+            timings->packingUploadMicroseconds = microseconds(uploadBegin, uploadEnd);
+            timings->submitDispatchMicroseconds = microseconds(submitBegin, submitEnd);
+            timings->fenceWaitMicroseconds = microseconds(waitBegin, waitEnd);
+            timings->readbackMicroseconds = microseconds(readbackBegin, readbackEnd);
+            timings->totalMicroseconds = microseconds(totalBegin, readbackEnd);
+        }
+        return results;
     }
 
     std::vector<PhysicsTrackSample> GpuPhysicsContext::sampleTrackGpu(std::span<const GpuTrackQuery> queries)
