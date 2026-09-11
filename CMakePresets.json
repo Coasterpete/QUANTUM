@@ -12,6 +12,34 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static"
       }
+    },
+    {
+      "name": "linux-clang-debug",
+      "displayName": "Linux Clang Debug (core)",
+      "description": "Core-only Debug build with Clang + Ninja using distro glm/nlohmann_json.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-clang-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "QUANTUM_ENABLE_ENGINE": "OFF",
+        "QUANTUM_ENABLE_EDITOR": "OFF",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "linux-gcc-debug",
+      "displayName": "Linux GCC Debug (core)",
+      "description": "Core-only Debug build with GCC + Ninja using distro glm/nlohmann_json.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-gcc-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "g++",
+        "QUANTUM_ENABLE_ENGINE": "OFF",
+        "QUANTUM_ENABLE_EDITOR": "OFF",
+        "BUILD_TESTING": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -19,6 +47,30 @@
       "name": "windows-msvc-debug",
       "configurePreset": "windows-msvc-debug",
       "configuration": "Debug"
+    },
+    {
+      "name": "linux-clang-debug",
+      "configurePreset": "linux-clang-debug"
+    },
+    {
+      "name": "linux-gcc-debug",
+      "configurePreset": "linux-gcc-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "linux-clang-debug",
+      "configurePreset": "linux-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-debug",
+      "configurePreset": "linux-gcc-debug",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

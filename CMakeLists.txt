@@ -21,29 +21,61 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 # ------------------------------------------------------------
-# Dependencies
+# Component options
+#
+# QuantumCore is the portable simulation core and has no
+# windowing/rendering dependencies. QuantumEngine adds the
+# Vulkan/SDL3 renderer and audio. QUANTUM (editor) builds on
+# top of the engine. The editor implies the engine.
 # ------------------------------------------------------------
 
-find_package(
-    Vulkan
-    REQUIRED
-    COMPONENTS
-        glslangValidator
-)
+option(QUANTUM_ENABLE_ENGINE "Build the QuantumEngine renderer/audio target" ON)
+option(QUANTUM_ENABLE_EDITOR "Build the QUANTUM editor application" ON)
 
-find_package(SDL3 CONFIG REQUIRED)
-find_package(VulkanMemoryAllocator CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
+if(QUANTUM_ENABLE_EDITOR AND NOT QUANTUM_ENABLE_ENGINE)
+    set(QUANTUM_ENABLE_ENGINE ON)
+endif()
+
+# ------------------------------------------------------------
+# Dependencies
+#
+# Core always needs glm and nlohmann_json. They are resolved
+# with plain CONFIG find_package, so a core-only Linux build can
+# use distro packages instead of the full vcpkg manifest.
+# Vulkan, SDL3, VMA, and imgui are only required when the engine
+# or editor is built.
+# ------------------------------------------------------------
+
 find_package(glm CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+
+if(QUANTUM_ENABLE_ENGINE)
+    find_package(
+        Vulkan
+        REQUIRED
+        COMPONENTS
+            glslangValidator
+    )
+    find_package(SDL3 CONFIG REQUIRED)
+    find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+    if(QUANTUM_ENABLE_EDITOR)
+        find_package(imgui CONFIG REQUIRED)
+    endif()
+endif()
 
 # ------------------------------------------------------------
 # Project targets
 # ------------------------------------------------------------
 
 add_subdirectory(core)
-add_subdirectory(engine)
-add_subdirectory(editor)
+
+if(QUANTUM_ENABLE_ENGINE)
+    add_subdirectory(engine)
+endif()
+
+if(QUANTUM_ENABLE_EDITOR)
+    add_subdirectory(editor)
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
@@ -53,9 +85,11 @@ endif()
 # Configuration information
 # ------------------------------------------------------------
 
-message(STATUS "Vulkan version: ${Vulkan_VERSION}")
-message(STATUS "Vulkan include directory: ${Vulkan_INCLUDE_DIRS}")
-message(
-    STATUS
-    "glslangValidator: ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
-)
+if(QUANTUM_ENABLE_ENGINE)
+    message(STATUS "Vulkan version: ${Vulkan_VERSION}")
+    message(STATUS "Vulkan include directory: ${Vulkan_INCLUDE_DIRS}")
+    message(
+        STATUS
+        "glslangValidator: ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+    )
+endif()

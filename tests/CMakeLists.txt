@@ -1,36 +1,40 @@
-add_executable(
-    QuantumEngineLoggingTests
-    LoggingTests.cpp
-)
+if(QUANTUM_ENABLE_ENGINE)
+    add_executable(
+        QuantumEngineLoggingTests
+        LoggingTests.cpp
+    )
+endif()
 
-add_executable(
-    QuantumEditorPreviewSmokeTests
-    PreviewSmokeTests.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/PreviewSmoke.cpp
-)
-target_include_directories(
-    QuantumEditorPreviewSmokeTests
-    PRIVATE ${PROJECT_SOURCE_DIR}/editor/include
-        ${PROJECT_SOURCE_DIR}/engine/include
-)
-target_link_libraries(
-    QuantumEditorPreviewSmokeTests
-    PRIVATE Quantum::Core
-)
-target_compile_features(
-    QuantumEditorPreviewSmokeTests PRIVATE cxx_std_23
-)
-set_target_properties(
-    QuantumEditorPreviewSmokeTests PROPERTIES CXX_EXTENSIONS OFF
-)
-add_test(
-    NAME QuantumEditor.PreviewSmoke
-    COMMAND QuantumEditorPreviewSmokeTests
-)
-set_tests_properties(
-    QuantumEditor.PreviewSmoke
-    PROPERTIES LABELS "editor;diagnostics;preview-smoke"
-)
+if(QUANTUM_ENABLE_EDITOR)
+    add_executable(
+        QuantumEditorPreviewSmokeTests
+        PreviewSmokeTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/PreviewSmoke.cpp
+    )
+    target_include_directories(
+        QuantumEditorPreviewSmokeTests
+        PRIVATE ${PROJECT_SOURCE_DIR}/editor/include
+            ${PROJECT_SOURCE_DIR}/engine/include
+    )
+    target_link_libraries(
+        QuantumEditorPreviewSmokeTests
+        PRIVATE Quantum::Core
+    )
+    target_compile_features(
+        QuantumEditorPreviewSmokeTests PRIVATE cxx_std_23
+    )
+    set_target_properties(
+        QuantumEditorPreviewSmokeTests PROPERTIES CXX_EXTENSIONS OFF
+    )
+    add_test(
+        NAME QuantumEditor.PreviewSmoke
+        COMMAND QuantumEditorPreviewSmokeTests
+    )
+    set_tests_properties(
+        QuantumEditor.PreviewSmoke
+        PROPERTIES LABELS "editor;diagnostics;preview-smoke"
+    )
+endif()
 
 add_executable(QuantumCoreTrackFollowerPhysicsTests TrackFollowerPhysicsTests.cpp)
 target_link_libraries(QuantumCoreTrackFollowerPhysicsTests PRIVATE Quantum::Core)
@@ -102,31 +106,33 @@ set_target_properties(QuantumCoreRotationalPhysicsTests PROPERTIES CXX_EXTENSION
 add_test(NAME QuantumCore.RotationalPhysics COMMAND QuantumCoreRotationalPhysicsTests)
 set_tests_properties(QuantumCore.RotationalPhysics PROPERTIES LABELS "core;coaster;physics")
 
-add_executable(
-    QuantumEditorSimulationPreviewTests
-    SimulationPreviewTests.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
-)
-target_include_directories(
-    QuantumEditorSimulationPreviewTests
-    PRIVATE ${PROJECT_SOURCE_DIR}/editor/include
-)
-target_link_libraries(
-    QuantumEditorSimulationPreviewTests
-    PRIVATE Quantum::Engine Quantum::Core
-)
-target_compile_features(
-    QuantumEditorSimulationPreviewTests PRIVATE cxx_std_23)
-set_target_properties(
-    QuantumEditorSimulationPreviewTests PROPERTIES CXX_EXTENSIONS OFF)
-add_test(
-    NAME QuantumEditor.SimulationPreview
-    COMMAND QuantumEditorSimulationPreviewTests
-)
-set_tests_properties(
-    QuantumEditor.SimulationPreview
-    PROPERTIES LABELS "editor;physics;simulation-preview"
-)
+if(QUANTUM_ENABLE_EDITOR)
+    add_executable(
+        QuantumEditorSimulationPreviewTests
+        SimulationPreviewTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+    )
+    target_include_directories(
+        QuantumEditorSimulationPreviewTests
+        PRIVATE ${PROJECT_SOURCE_DIR}/editor/include
+    )
+    target_link_libraries(
+        QuantumEditorSimulationPreviewTests
+        PRIVATE Quantum::Engine Quantum::Core
+    )
+    target_compile_features(
+        QuantumEditorSimulationPreviewTests PRIVATE cxx_std_23)
+    set_target_properties(
+        QuantumEditorSimulationPreviewTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(
+        NAME QuantumEditor.SimulationPreview
+        COMMAND QuantumEditorSimulationPreviewTests
+    )
+    set_tests_properties(
+        QuantumEditor.SimulationPreview
+        PROPERTIES LABELS "editor;physics;simulation-preview"
+    )
+endif()
 
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
@@ -142,54 +148,58 @@ set_target_properties(QuantumCoreTrackHardwarePlacementTests PROPERTIES CXX_EXTE
 add_test(NAME QuantumCore.TrackHardwarePlacement COMMAND QuantumCoreTrackHardwarePlacementTests)
 set_tests_properties(QuantumCore.TrackHardwarePlacement PROPERTIES LABELS "core;coaster;track-style;hardware")
 
-add_executable(QuantumEngineStaticMeshAssetTests StaticMeshAssetTests.cpp)
-target_link_libraries(QuantumEngineStaticMeshAssetTests PRIVATE Quantum::Engine)
-target_compile_features(QuantumEngineStaticMeshAssetTests PRIVATE cxx_std_23)
-set_target_properties(QuantumEngineStaticMeshAssetTests PROPERTIES CXX_EXTENSIONS OFF)
-add_test(NAME QuantumEngine.StaticMeshAssets COMMAND QuantumEngineStaticMeshAssetTests
-    "${PROJECT_SOURCE_DIR}")
-set_tests_properties(QuantumEngine.StaticMeshAssets PROPERTIES
-    LABELS "engine;renderer;assets;hardware")
+if(QUANTUM_ENABLE_ENGINE)
+    add_executable(QuantumEngineStaticMeshAssetTests StaticMeshAssetTests.cpp)
+    target_link_libraries(QuantumEngineStaticMeshAssetTests PRIVATE Quantum::Engine)
+    target_compile_features(QuantumEngineStaticMeshAssetTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineStaticMeshAssetTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEngine.StaticMeshAssets COMMAND QuantumEngineStaticMeshAssetTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEngine.StaticMeshAssets PROPERTIES
+        LABELS "engine;renderer;assets;hardware")
+endif()
 
-add_executable(QuantumEditorReadmeCaptureTests
-    ReadmeCaptureTests.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/ReadmeCapture.cpp
-)
-target_include_directories(QuantumEditorReadmeCaptureTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
-target_link_libraries(QuantumEditorReadmeCaptureTests PRIVATE Quantum::Core)
-target_compile_features(QuantumEditorReadmeCaptureTests PRIVATE cxx_std_23)
-set_target_properties(QuantumEditorReadmeCaptureTests PROPERTIES CXX_EXTENSIONS OFF)
-add_test(NAME QuantumEditor.ReadmeCapture COMMAND QuantumEditorReadmeCaptureTests)
-set_tests_properties(QuantumEditor.ReadmeCapture PROPERTIES LABELS "editor;capture")
+if(QUANTUM_ENABLE_EDITOR)
+    add_executable(QuantumEditorReadmeCaptureTests
+        ReadmeCaptureTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ReadmeCapture.cpp
+    )
+    target_include_directories(QuantumEditorReadmeCaptureTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorReadmeCaptureTests PRIVATE Quantum::Core)
+    target_compile_features(QuantumEditorReadmeCaptureTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorReadmeCaptureTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.ReadmeCapture COMMAND QuantumEditorReadmeCaptureTests)
+    set_tests_properties(QuantumEditor.ReadmeCapture PROPERTIES LABELS "editor;capture")
 
-add_executable(QuantumEditorViewportPresentationTests
-    ViewportPresentationTests.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/EditorStyle.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
-)
-target_include_directories(QuantumEditorViewportPresentationTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
-target_link_libraries(QuantumEditorViewportPresentationTests PRIVATE Quantum::Core Quantum::Engine SDL3::SDL3 imgui::imgui)
-target_compile_features(QuantumEditorViewportPresentationTests PRIVATE cxx_std_23)
-set_target_properties(QuantumEditorViewportPresentationTests PROPERTIES CXX_EXTENSIONS OFF)
-add_dependencies(QuantumEditorViewportPresentationTests QUANTUMEditorFont)
-add_test(NAME QuantumEditor.ViewportPresentation COMMAND QuantumEditorViewportPresentationTests
-    "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
-set_tests_properties(QuantumEditor.ViewportPresentation PROPERTIES LABELS "editor;camera;viewport;typography")
+    add_executable(QuantumEditorViewportPresentationTests
+        ViewportPresentationTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/EditorStyle.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+    )
+    target_include_directories(QuantumEditorViewportPresentationTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorViewportPresentationTests PRIVATE Quantum::Core Quantum::Engine SDL3::SDL3 imgui::imgui)
+    target_compile_features(QuantumEditorViewportPresentationTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorViewportPresentationTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_dependencies(QuantumEditorViewportPresentationTests QUANTUMEditorFont)
+    add_test(NAME QuantumEditor.ViewportPresentation COMMAND QuantumEditorViewportPresentationTests
+        "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
+    set_tests_properties(QuantumEditor.ViewportPresentation PROPERTIES LABELS "editor;camera;viewport;typography")
 
-add_executable(QuantumEditorIconsTests
-    EditorIconsTests.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/EditorIcons.cpp
-)
-target_include_directories(QuantumEditorIconsTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
-target_link_libraries(QuantumEditorIconsTests PRIVATE imgui::imgui)
-target_compile_features(QuantumEditorIconsTests PRIVATE cxx_std_23)
-set_target_properties(QuantumEditorIconsTests PROPERTIES CXX_EXTENSIONS OFF)
-add_dependencies(QuantumEditorIconsTests QUANTUMEditorIcons)
-add_test(NAME QuantumEditor.Icons COMMAND QuantumEditorIconsTests
-    "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
-set_tests_properties(QuantumEditor.Icons PROPERTIES LABELS "editor;icons")
+    add_executable(QuantumEditorIconsTests
+        EditorIconsTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/EditorIcons.cpp
+    )
+    target_include_directories(QuantumEditorIconsTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorIconsTests PRIVATE imgui::imgui)
+    target_compile_features(QuantumEditorIconsTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorIconsTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_dependencies(QuantumEditorIconsTests QUANTUMEditorIcons)
+    add_test(NAME QuantumEditor.Icons COMMAND QuantumEditorIconsTests
+        "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
+    set_tests_properties(QuantumEditor.Icons PROPERTIES LABELS "editor;icons")
+endif()
 
 add_executable(QuantumCoreForceDrivenRegionTests ForceDrivenRegionTests.cpp)
 target_link_libraries(QuantumCoreForceDrivenRegionTests PRIVATE Quantum::Core)
@@ -198,48 +208,52 @@ set_target_properties(QuantumCoreForceDrivenRegionTests PROPERTIES CXX_EXTENSION
 add_test(NAME QuantumCore.ForceDrivenRegion COMMAND QuantumCoreForceDrivenRegionTests)
 set_tests_properties(QuantumCore.ForceDrivenRegion PROPERTIES LABELS "core;coaster;physics;force")
 
-add_executable(QuantumEditorForceDrivenAcceptanceTests
-    ForceDrivenAcceptanceTests.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
-    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
-)
-target_include_directories(QuantumEditorForceDrivenAcceptanceTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
-target_link_libraries(QuantumEditorForceDrivenAcceptanceTests PRIVATE Quantum::Core Quantum::Engine)
-target_compile_features(QuantumEditorForceDrivenAcceptanceTests PRIVATE cxx_std_23)
-set_target_properties(QuantumEditorForceDrivenAcceptanceTests PROPERTIES CXX_EXTENSIONS OFF)
-add_test(NAME QuantumEditor.ForceDrivenAcceptance COMMAND QuantumEditorForceDrivenAcceptanceTests)
-set_tests_properties(QuantumEditor.ForceDrivenAcceptance PROPERTIES LABELS "editor;force;transaction;physics")
+if(QUANTUM_ENABLE_EDITOR)
+    add_executable(QuantumEditorForceDrivenAcceptanceTests
+        ForceDrivenAcceptanceTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+    )
+    target_include_directories(QuantumEditorForceDrivenAcceptanceTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorForceDrivenAcceptanceTests PRIVATE Quantum::Core Quantum::Engine)
+    target_compile_features(QuantumEditorForceDrivenAcceptanceTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorForceDrivenAcceptanceTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.ForceDrivenAcceptance COMMAND QuantumEditorForceDrivenAcceptanceTests)
+    set_tests_properties(QuantumEditor.ForceDrivenAcceptance PROPERTIES LABELS "editor;force;transaction;physics")
+endif()
 
-target_link_libraries(
-    QuantumEngineLoggingTests
-    PRIVATE
-        Quantum::Engine
-)
+if(QUANTUM_ENABLE_ENGINE)
+    target_link_libraries(
+        QuantumEngineLoggingTests
+        PRIVATE
+            Quantum::Engine
+    )
 
-target_compile_features(
-    QuantumEngineLoggingTests
-    PRIVATE
-        cxx_std_23
-)
+    target_compile_features(
+        QuantumEngineLoggingTests
+        PRIVATE
+            cxx_std_23
+    )
 
-set_target_properties(
-    QuantumEngineLoggingTests
-    PROPERTIES
-        CXX_EXTENSIONS OFF
-)
+    set_target_properties(
+        QuantumEngineLoggingTests
+        PROPERTIES
+            CXX_EXTENSIONS OFF
+    )
 
-add_test(
-    NAME QuantumEngine.Logging
-    COMMAND QuantumEngineLoggingTests
-)
+    add_test(
+        NAME QuantumEngine.Logging
+        COMMAND QuantumEngineLoggingTests
+    )
 
-set_tests_properties(
-    QuantumEngine.Logging
-    PROPERTIES
-        LABELS "engine;logging"
-)
+    set_tests_properties(
+        QuantumEngine.Logging
+        PROPERTIES
+            LABELS "engine;logging"
+    )
+endif()
 
 add_executable(
     QuantumCoreTests
@@ -819,6 +833,7 @@ set_tests_properties(
         LABELS "core;coaster;geometry;math"
 )
 
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QuantumEditorViewportCameraTests
     ViewportCameraTests.cpp
@@ -986,12 +1001,14 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;coaster;transaction;selection"
 )
+endif()
 
 add_executable(
     QuantumCoreAuthoredTrackTests
     AuthoredTrackTests.cpp
 )
 
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QuantumEditorAuthoredStartPoseTests
     AuthoredStartPoseTests.cpp
@@ -1037,6 +1054,7 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;core;coaster;transaction;camera;physics;serialization"
 )
+endif()
 
 target_link_libraries(
     QuantumCoreAuthoredTrackTests
@@ -1237,46 +1255,42 @@ set_tests_properties(
         LABELS "core;coaster;physics"
 )
 
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QuantumEditorRiderLoadDiagnosticsTests
     RiderLoadDiagnosticsTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
 )
-
 target_include_directories(
     QuantumEditorRiderLoadDiagnosticsTests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/editor/include
 )
-
 target_link_libraries(
     QuantumEditorRiderLoadDiagnosticsTests
     PRIVATE
         Quantum::Core
 )
-
 target_compile_features(
     QuantumEditorRiderLoadDiagnosticsTests
     PRIVATE
         cxx_std_23
 )
-
 set_target_properties(
     QuantumEditorRiderLoadDiagnosticsTests
     PROPERTIES
         CXX_EXTENSIONS OFF
 )
-
 add_test(
     NAME QuantumEditor.RiderLoadDiagnostics
     COMMAND QuantumEditorRiderLoadDiagnosticsTests
 )
-
 set_tests_properties(
     QuantumEditor.RiderLoadDiagnostics
     PROPERTIES
         LABELS "editor;coaster;physics;diagnostics"
 )
+endif()
 
 add_executable(
     QuantumCoreRegionAuthoringWorkflowTests
@@ -1312,6 +1326,7 @@ set_tests_properties(
         LABELS "core;coaster"
 )
 
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QuantumEditorRegionSummaryTests
     RegionSummaryTests.cpp
@@ -1479,6 +1494,7 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;coaster;visualization"
 )
+endif()
 
 add_executable(
     QuantumCoreAuthoredTrackStructureTests
@@ -1655,6 +1671,7 @@ set_tests_properties(
         LABELS "core;coaster;supports;serialization"
 )
 
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QuantumEditorSupportVisualizationTests
     SupportVisualizationTests.cpp
@@ -1788,6 +1805,7 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;coaster;supports;authoring;connection;history"
 )
+endif()
 
 target_link_libraries(
     QuantumCoreCoasterDocumentTests
@@ -1818,6 +1836,7 @@ set_tests_properties(
         LABELS "core;coaster;serialization"
 )
 
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QuantumEditorCoasterSetupTests
     CoasterSetupTests.cpp
@@ -1940,6 +1959,7 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;document;history;transaction"
 )
+endif()
 
 add_executable(
     QuantumCoreTrackTopologyTests
@@ -2266,6 +2286,7 @@ set_target_properties(
         CXX_EXTENSIONS OFF
 )
 
+if(QUANTUM_ENABLE_ENGINE)
 add_executable(
     QuantumEngineGpuPhysicsTrackSamplingValidationTests
     GpuPhysicsTrackSamplingValidationTests.cpp
@@ -2459,3 +2480,4 @@ add_dependencies(
     QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
     QuantumShaders
 )
+endif()
