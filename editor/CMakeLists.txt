@@ -90,11 +90,11 @@ set(quantum_editor_font_files
 set(quantum_editor_font_outputs)
 foreach(font_file IN LISTS quantum_editor_font_files)
     set(font_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/${font_file}")
-    set(font_destination "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/fonts/Overpass/${font_file}")
+    set(font_destination "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/fonts/Overpass/${font_file}")
     add_custom_command(
         OUTPUT "${font_destination}"
         COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/fonts/Overpass"
+            "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/fonts/Overpass"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${font_source}" "${font_destination}"
         DEPENDS "${font_source}"
@@ -134,11 +134,11 @@ set(quantum_editor_icon_files
 set(quantum_editor_icon_outputs)
 foreach(icon_file IN LISTS quantum_editor_icon_files)
     set(icon_source "${PROJECT_SOURCE_DIR}/assets/icons/lucide/${icon_file}")
-    set(icon_destination "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/icons/lucide/${icon_file}")
+    set(icon_destination "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/icons/lucide/${icon_file}")
     add_custom_command(
         OUTPUT "${icon_destination}"
         COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/icons/lucide"
+            "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/icons/lucide"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${icon_source}" "${icon_destination}"
         DEPENDS "${icon_source}"
@@ -153,11 +153,11 @@ add_dependencies(QUANTUM QUANTUMEditorIcons)
 set(quantum_track_asset_source
     "${PROJECT_SOURCE_DIR}/assets/track/test-crosstie-placeholder.glb")
 set(quantum_track_asset_destination
-    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/track/test-crosstie-placeholder.glb")
+    "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/track/test-crosstie-placeholder.glb")
 add_custom_command(
     OUTPUT "${quantum_track_asset_destination}"
     COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/track"
+        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/track"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${quantum_track_asset_source}"
         "${quantum_track_asset_destination}"

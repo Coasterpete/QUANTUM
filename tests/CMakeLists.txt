@@ -184,7 +184,7 @@ if(QUANTUM_ENABLE_EDITOR)
     set_target_properties(QuantumEditorViewportPresentationTests PROPERTIES CXX_EXTENSIONS OFF)
     add_dependencies(QuantumEditorViewportPresentationTests QUANTUMEditorFont)
     add_test(NAME QuantumEditor.ViewportPresentation COMMAND QuantumEditorViewportPresentationTests
-        "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
+        "${PROJECT_BINARY_DIR}/editor${QUANTUM_ASSET_CONFIG_SUBDIR}")
     set_tests_properties(QuantumEditor.ViewportPresentation PROPERTIES LABELS "editor;camera;viewport;typography")
 
     add_executable(QuantumEditorIconsTests
@@ -197,7 +197,7 @@ if(QUANTUM_ENABLE_EDITOR)
     set_target_properties(QuantumEditorIconsTests PROPERTIES CXX_EXTENSIONS OFF)
     add_dependencies(QuantumEditorIconsTests QUANTUMEditorIcons)
     add_test(NAME QuantumEditor.Icons COMMAND QuantumEditorIconsTests
-        "${PROJECT_BINARY_DIR}/editor/$<CONFIG>")
+        "${PROJECT_BINARY_DIR}/editor${QUANTUM_ASSET_CONFIG_SUBDIR}")
     set_tests_properties(QuantumEditor.Icons PROPERTIES LABELS "editor;icons")
 endif()
 

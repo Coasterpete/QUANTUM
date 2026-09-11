@@ -37,6 +37,21 @@ if(QUANTUM_ENABLE_EDITOR AND NOT QUANTUM_ENABLE_ENGINE)
 endif()
 
 # ------------------------------------------------------------
+# Asset staging layout
+#
+# Multi-config generators (Visual Studio) place each runtime in a
+# per-config subdirectory, so staged editor assets follow ../$<CONFIG>.
+# Single-config generators (Ninja/Make) place the runtime directly in
+# the binary directory, so assets must be staged a level up.
+# ------------------------------------------------------------
+
+if(CMAKE_CONFIGURATION_TYPES)
+    set(QUANTUM_ASSET_CONFIG_SUBDIR "/$<CONFIG>")
+else()
+    set(QUANTUM_ASSET_CONFIG_SUBDIR "")
+endif()
+
+# ------------------------------------------------------------
 # Dependencies
 #
 # Core always needs glm and nlohmann_json. They are resolved
@@ -50,6 +65,28 @@ find_package(glm CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 if(QUANTUM_ENABLE_ENGINE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # vcpkg's VulkanLoader is compiled without the platform WSI surface
+        # extensions, so it cannot present under X11 or Wayland. Linux
+        # distros ship the WSI-capable loader as a system component; link
+        # that loader while continuing to use vcpkg's Vulkan headers.
+        block(SCOPE_FOR VARIABLES)
+            set(CMAKE_FIND_USE_CMAKE_PATH OFF)
+            set(CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH OFF)
+            set(CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH OFF)
+            set(CMAKE_FIND_ROOT_PATH "")
+            set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY NEVER)
+            unset(QUANTUM_VULKAN_SYSTEM_LIBRARY CACHE)
+            find_library(QUANTUM_VULKAN_SYSTEM_LIBRARY NAMES vulkan)
+        endblock()
+        if(QUANTUM_VULKAN_SYSTEM_LIBRARY)
+            set(
+                Vulkan_LIBRARY
+                "${QUANTUM_VULKAN_SYSTEM_LIBRARY}"
+                CACHE FILEPATH "System Vulkan loader" FORCE
+            )
+        endif()
+    endif()
     find_package(
         Vulkan
         REQUIRED

@@ -14,6 +14,22 @@
       }
     },
     {
+      "name": "linux-clang-full-debug",
+      "displayName": "Linux Clang Full Debug (engine + editor)",
+      "description": "Requires the VCPKG_ROOT environment variable to point at a bootstrapped vcpkg checkout. Full engine+editor Debug build with Clang + Ninja using the vcpkg x64-linux triplet.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-clang-full-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "QUANTUM_ENABLE_ENGINE": "ON",
+        "QUANTUM_ENABLE_EDITOR": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
       "name": "linux-clang-debug",
       "displayName": "Linux Clang Debug (core)",
       "description": "Core-only Debug build with Clang + Ninja using distro glm/nlohmann_json.",
@@ -49,6 +65,10 @@
       "configuration": "Debug"
     },
     {
+      "name": "linux-clang-full-debug",
+      "configurePreset": "linux-clang-full-debug"
+    },
+    {
       "name": "linux-clang-debug",
       "configurePreset": "linux-clang-debug"
     },
@@ -58,6 +78,13 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "linux-clang-full-debug",
+      "configurePreset": "linux-clang-full-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
     {
       "name": "linux-clang-debug",
       "configurePreset": "linux-clang-debug",
