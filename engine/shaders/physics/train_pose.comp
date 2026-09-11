@@ -1,0 +1,618 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_ARB_gpu_shader_fp64 : require
+
+// One invocation owns one complete dependency-ordered train pose.  A local
+// size of one is intentional: cars and connector refinements are serial, and
+// independent center/before/after poses supply the dispatch width.
+layout(local_size_x = 1) in;
+
+const uint MAX_CARS = 8u;
+const uint MAX_CONNECTIONS = 7u;
+const uint CONNECTOR_SAMPLES = 160u;
+const uint CONNECTOR_REFINEMENTS = 80u;
+const uint RIGID_REFINEMENTS = 64u;
+const double DOUBLE_EPSILON = 2.2204460492503130808472633361816e-16;
+const double DIRECTIONAL_RESOLUTION = 128.0 * DOUBLE_EPSILON;
+const double CONNECTOR_TOLERANCE = 1.0e-8;
+
+const uint STATUS_SOLVED = 0u;
+const uint STATUS_INVALID_JOB = 1u;
+const uint STATUS_NON_FINITE = 2u;
+const uint STATUS_OPEN_TRACK_PLACEMENT = 3u;
+const uint STATUS_RIGID_NOMINAL_OVEREXTENDED = 4u;
+const uint STATUS_RIGID_NO_LOCAL_INTERVAL = 5u;
+const uint STATUS_RIGID_NO_FEASIBLE_ROOT = 6u;
+const uint STATUS_RIGID_DID_NOT_CONVERGE = 7u;
+const uint STATUS_CONNECTOR_NO_SEARCH_INTERVAL = 8u;
+const uint STATUS_CONNECTOR_NO_LEGAL_PLACEMENT = 9u;
+const uint STATUS_CONNECTOR_OPEN_ENDPOINT = 10u;
+const uint STATUS_CONNECTOR_CANNOT_CLOSE = 11u;
+const uint STATUS_CONNECTOR_CLOSURE_ERROR = 12u;
+const uint STATUS_POSE_CONSTRUCTION_ERROR = 13u;
+const uint STATUS_MASS_PROPERTIES_ERROR = 14u;
+
+struct GpuTrackSample {
+    double stationMeters;
+    double positionMeters[3];
+    double tangent[3];
+    double lateral[3];
+    double up[3];
+    double curvaturePerMeter[3];
+};
+struct GpuCoasterRecord {
+    uint trackOffset; uint trackCount; uint topology; uint _pad;
+    double trackLength;
+};
+struct GpuResidentTrainDefinition {
+    uint firstCar; uint carCount; uint firstConnection; uint connectionCount;
+};
+struct GpuResidentCarDefinition {
+    uint sourceCarIndex; uint _reserved0; uint _reserved1; uint _reserved2;
+    double totalMassKilograms; double _massPadding;
+    double bogie0ReferencePositionMeters[4];
+    double bogie1ReferencePositionMeters[4];
+    double bodyDimensionsMeters[4];
+    double frontHitchPositionMeters[4];
+    double rearHitchPositionMeters[4];
+    double loadedCenterOfGravityMeters[4];
+};
+struct GpuResidentConnectionDefinition {
+    double rigidLengthMeters; double _reserved;
+};
+struct GpuTrainPoseJob {
+    uint coasterIndex; uint path; int direction; uint jobId;
+    uint trainDefinitionIndex; uint _reserved0;
+    double referenceStationMeters;
+};
+struct GpuTrainCarPose {
+    uint carIndex; uint frontBogieDefinitionIndex;
+    uint rearBogieDefinitionIndex; uint _reserved;
+    double referenceStationMeters; double frontBogieStationMeters;
+    double rearBogieStationMeters; double totalMassKilograms;
+    double bodyWorldPositionMeters[4];
+    double bodyTangent[4]; double bodyLateral[4]; double bodyUp[4];
+    double bodyOrientationWxyz[4];
+    double localCenterOfGravityMeters[4];
+    double worldCenterOfGravityMeters[4];
+    double frontHitchWorldPositionMeters[4];
+    double rearHitchWorldPositionMeters[4];
+    double frontBogieWorldPositionMeters[4];
+    double frontBogieTrackTangent[4];
+    double frontBogieTrackLateral[4];
+    double frontBogieTrackUp[4];
+    double frontBogieRelativeOrientationWxyz[4];
+    double rearBogieWorldPositionMeters[4];
+    double rearBogieTrackTangent[4];
+    double rearBogieTrackLateral[4];
+    double rearBogieTrackUp[4];
+    double rearBogieRelativeOrientationWxyz[4];
+    double frontBogieRelativeYawRadians;
+    double rearBogieRelativeYawRadians;
+};
+struct GpuTrainConnectionPose {
+    uint connectionIndex; uint leadingCarIndex; uint followingCarIndex;
+    uint solverIterationCount; uint usedExhaustiveSearchFallback;
+    uint candidateEvaluationCount; uint rigidRefinementCount; uint _reserved;
+    double authoredRigidLengthMeters; double actualEndpointDistanceMeters;
+    double signedLengthResidualMeters; double finalBracketSizeMeters;
+    double leadingEndpointWorldPositionMeters[4];
+    double followingEndpointWorldPositionMeters[4];
+    double worldDirection[4]; double directionInLeadingBody[4];
+    double directionInFollowingBody[4];
+    double followingBodyRelativeOrientationWxyz[4];
+    double relativeYawPitchRollRadians[4];
+};
+struct GpuTrainPoseResult {
+    uint jobId; uint status; uint carCount; uint connectionCount;
+    uint failureCarIndex; uint failureConnectionIndex;
+    uint rigidSolveCount; uint rigidRefinementCount;
+    uint rigidBracketExpansionCount; uint connectorCandidateEvaluationCount;
+    uint connectorRefinementCount; uint connectorFallbackCount;
+    uint connectorCandidateMinimum; uint connectorCandidateMaximum;
+    uint connectorRefinementMinimum; uint connectorRefinementMaximum;
+    double referenceStationMeters; double totalMassKilograms;
+    double maximumAbsoluteConnectorResidualMeters; double _reservedDouble;
+    double aggregateWorldCenterOfGravityMeters[4];
+    GpuTrainCarPose cars[MAX_CARS];
+    GpuTrainConnectionPose connections[MAX_CONNECTIONS];
+};
+
+struct Frame { dvec3 tangent; dvec3 lateral; dvec3 up; };
+struct Sample { double station; dvec3 position; Frame frame; };
+struct BogiePair { Sample front; Sample rear; };
+struct CarPoseLocal {
+    double referenceStation; uint frontIndex; uint rearIndex;
+    Sample front; Sample rear; Frame bodyFrame; dvec4 bodyOrientation;
+    dvec3 bodyPosition; dvec3 localCog; dvec3 worldCog;
+    dvec3 frontHitch; dvec3 rearHitch; double mass;
+};
+struct Candidate { double offset; double distance; double residual; };
+
+layout(set=0, binding=0) readonly buffer TrackSamplesBuffer {
+    GpuTrackSample samples[];
+} trackSamples;
+layout(set=0, binding=1) readonly buffer CoasterRecordsBuffer {
+    GpuCoasterRecord records[];
+} coasterRecords;
+layout(set=1, binding=0) readonly buffer DefinitionBuffer {
+    GpuResidentTrainDefinition definitions[];
+} trainDefinitions;
+layout(set=1, binding=1) readonly buffer CarDefinitionBuffer {
+    GpuResidentCarDefinition cars[];
+} carDefinitions;
+layout(set=1, binding=2) readonly buffer ConnectionDefinitionBuffer {
+    GpuResidentConnectionDefinition connections[];
+} connectionDefinitions;
+layout(set=1, binding=3) readonly buffer JobBuffer {
+    GpuTrainPoseJob jobs[];
+} jobBuffer;
+layout(set=1, binding=4) buffer ResultBuffer {
+    GpuTrainPoseResult results[];
+} resultBuffer;
+
+bool finiteValue(double v) { return !isnan(v) && !isinf(v); }
+bool finiteValue(dvec3 v) { return !any(isnan(v)) && !any(isinf(v)); }
+bool finiteValue(dvec4 v) { return !any(isnan(v)) && !any(isinf(v)); }
+#define ARRAY3(v) dvec3((v)[0], (v)[1], (v)[2])
+void store3(inout double target[4], dvec3 v) {
+    target[0]=v.x; target[1]=v.y; target[2]=v.z; target[3]=0.0;
+}
+void store4(inout double target[4], dvec4 v) {
+    target[0]=v.x; target[1]=v.y; target[2]=v.z; target[3]=v.w;
+}
+double magnitude(dvec3 v) { return length(v); }
+dvec3 transformPoint(dvec3 origin, Frame frame, dvec3 local) {
+    return origin + local.x*frame.tangent + local.y*frame.lateral + local.z*frame.up;
+}
+dvec3 inFrame(dvec3 v, Frame frame) {
+    return dvec3(dot(v,frame.tangent),dot(v,frame.lateral),dot(v,frame.up));
+}
+Frame orientedFrame(Frame frame, int direction) {
+    if (direction < 0) return Frame(-frame.tangent,-frame.lateral,frame.up);
+    return frame;
+}
+
+dvec4 quatNormalizeCanonical(dvec4 q) {
+    q /= length(q);
+    if (q.x < 0.0 || (q.x == 0.0 && q.y < 0.0)
+        || (q.x == 0.0 && q.y == 0.0 && q.z < 0.0)
+        || (q.x == 0.0 && q.y == 0.0 && q.z == 0.0 && q.w < 0.0)) q=-q;
+    return q;
+}
+dvec4 quatConjugate(dvec4 q) { return dvec4(q.x,-q.y,-q.z,-q.w); }
+dvec4 quatMultiply(dvec4 a, dvec4 b) {
+    return dvec4(a.x*b.x-dot(a.yzw,b.yzw),
+        a.x*b.yzw+b.x*a.yzw+cross(a.yzw,b.yzw));
+}
+dvec4 quatFromFrame(Frame f) {
+    // Quaternion is stored w,x,y,z in dvec4 components x,y,z,w.
+    double m00=f.tangent.x, m01=f.lateral.x, m02=f.up.x;
+    double m10=f.tangent.y, m11=f.lateral.y, m12=f.up.y;
+    double m20=f.tangent.z, m21=f.lateral.z, m22=f.up.z;
+    dvec4 q;
+    double trace=m00+m11+m22;
+    if (trace > 0.0) {
+        double s=sqrt(trace+1.0)*2.0;
+        q=dvec4(0.25*s,(m21-m12)/s,(m02-m20)/s,(m10-m01)/s);
+    } else if (m00 > m11 && m00 > m22) {
+        double s=sqrt(1.0+m00-m11-m22)*2.0;
+        q=dvec4((m21-m12)/s,0.25*s,(m01+m10)/s,(m02+m20)/s);
+    } else if (m11 > m22) {
+        double s=sqrt(1.0+m11-m00-m22)*2.0;
+        q=dvec4((m02-m20)/s,(m01+m10)/s,0.25*s,(m12+m21)/s);
+    } else {
+        double s=sqrt(1.0+m22-m00-m11)*2.0;
+        q=dvec4((m10-m01)/s,(m02+m20)/s,(m12+m21)/s,0.25*s);
+    }
+    return quatNormalizeCanonical(q);
+}
+Frame frameFromQuat(dvec4 q) {
+    q=quatNormalizeCanonical(q);
+    double w=q.x,x=q.y,y=q.z,z=q.w;
+    return Frame(
+        dvec3(1.0-2.0*(y*y+z*z),2.0*(x*y+w*z),2.0*(x*z-w*y)),
+        dvec3(2.0*(x*y-w*z),1.0-2.0*(x*x+z*z),2.0*(y*z+w*x)),
+        dvec3(2.0*(x*z+w*y),2.0*(y*z-w*x),1.0-2.0*(x*x+y*y)));
+}
+double sin64(double x) {
+    double term=x,sum=x,xx=x*x;
+    for(int n=1;n<12;++n){term*=-xx/double((2*n)*(2*n+1));sum+=term;}
+    return sum;
+}
+double atanSeries64(double x) {
+    double xx=x*x,term=x,sum=x;
+    for(int n=1;n<16;++n){term*=-xx;sum+=term/double(2*n+1);}
+    return sum;
+}
+double atan64(double x) {
+    const double piOver2=1.57079632679489661923132169163975144;
+    const double piOver4=0.785398163397448309615660845819875721;
+    bool negative=x<0.0;x=abs(x);bool reciprocal=x>1.0;if(reciprocal)x=1.0/x;
+    double result=x>0.4142135623730950488
+        ?piOver4+atanSeries64((x-1.0)/(x+1.0)):atanSeries64(x);
+    if(reciprocal)result=piOver2-result;
+    return negative?-result:result;
+}
+double atan2_64(double y,double x) {
+    const double pi=3.14159265358979323846264338327950288;
+    const double piOver2=1.57079632679489661923132169163975144;
+    if(x>0.0)return atan64(y/x);if(x<0.0)return y>=0.0?atan64(y/x)+pi:atan64(y/x)-pi;
+    if(y>0.0)return piOver2;if(y<0.0)return -piOver2;return 0.0;
+}
+double asin64(double x){return atan2_64(x,sqrt(max(0.0,1.0-x*x)));}
+dvec4 quatSlerp(dvec4 a, dvec4 b, double t) {
+    a=quatNormalizeCanonical(a); b=quatNormalizeCanonical(b);
+    double c=dot(a,b); if (c<0.0) { b=-b; c=-c; }
+    c=clamp(c,-1.0,1.0);
+    if (c>0.9995) return quatNormalizeCanonical(mix(a,b,t));
+    double theta=atan2_64(sqrt(max(0.0,1.0-c*c)),c); double s=sin64(theta);
+    return quatNormalizeCanonical((sin64((1.0-t)*theta)/s)*a+(sin64(t*theta)/s)*b);
+}
+
+double normalizeStation(double station, double trackLength, uint topology) {
+    if (topology==1u) {
+        station=mod(station,trackLength); if (station<0.0) station+=trackLength;
+        if (station==trackLength || station==-0.0) station=0.0;
+    } else station=clamp(station,0.0,trackLength);
+    return station;
+}
+Frame frameOf(GpuTrackSample s) {
+    return Frame(dvec3(s.tangent[0],s.tangent[1],s.tangent[2]),
+        dvec3(s.lateral[0],s.lateral[1],s.lateral[2]),
+        dvec3(s.up[0],s.up[1],s.up[2]));
+}
+Sample sampleTrack(GpuCoasterRecord record, double station) {
+    uint first=record.trackOffset,end=first+record.trackCount,low=first,high=end;
+    while(low<high){uint mid=(low+high)>>1;if(trackSamples.samples[mid].stationMeters<station)low=mid+1u;else high=mid;}
+    if(low==first){GpuTrackSample s=trackSamples.samples[first];return Sample(station,ARRAY3(s.positionMeters),frameOf(s));}
+    if(low>=end){GpuTrackSample s=trackSamples.samples[end-1u];return Sample(station,ARRAY3(s.positionMeters),frameOf(s));}
+    GpuTrackSample before=trackSamples.samples[low-1u],after=trackSamples.samples[low];
+    double amount=clamp((station-before.stationMeters)/(after.stationMeters-before.stationMeters),0.0,1.0);
+    Frame frame=frameFromQuat(quatSlerp(quatFromFrame(frameOf(before)),quatFromFrame(frameOf(after)),amount));
+    return Sample(station,mix(ARRAY3(before.positionMeters),ARRAY3(after.positionMeters),amount),frame);
+}
+
+dvec3 leastAlignedProjection(dvec3 forward) {
+    double x=abs(forward.x),y=abs(forward.y),z=abs(forward.z); dvec3 axis;
+    if(x<=y && x<=z) axis=dvec3(1,0,0); else if(y<=z) axis=dvec3(0,1,0); else axis=dvec3(0,0,1);
+    return axis-dot(axis,forward)*forward;
+}
+bool normalizeChecked(dvec3 value, out dvec3 result) {
+    double n=length(value); if(!finiteValue(n)||n==0.0){result=dvec3(0);return false;} result=value/n;return finiteValue(result);
+}
+bool bodyFrameFromBogies(dvec3 rearPosition,dvec3 frontPosition,Frame rearFrame,Frame frontFrame,
+    dvec3 rearReference,dvec3 frontReference,out Frame result) {
+    dvec3 chord=frontPosition-rearPosition; double chordLength=length(chord);
+    double positionScale=max(1.0,max(length(frontPosition),length(rearPosition)));
+    if(!finiteValue(chordLength)||chordLength<=DIRECTIONAL_RESOLUTION*positionScale)return false;
+    dvec3 worldForward=chord/chordLength,localForward;
+    if(!normalizeChecked(frontReference-rearReference,localForward))return false;
+    dvec3 projectedUp=rearFrame.up+frontFrame.up;
+    projectedUp-=dot(projectedUp,worldForward)*worldForward;
+    if(!(finiteValue(length(projectedUp))&&length(projectedUp)>DIRECTIONAL_RESOLUTION)){
+        projectedUp=frontFrame.up-dot(frontFrame.up,worldForward)*worldForward;
+    }
+    if(!(finiteValue(length(projectedUp))&&length(projectedUp)>DIRECTIONAL_RESOLUTION)){
+        projectedUp=rearFrame.up-dot(rearFrame.up,worldForward)*worldForward;
+    }
+    if(!(finiteValue(length(projectedUp))&&length(projectedUp)>DIRECTIONAL_RESOLUTION))projectedUp=leastAlignedProjection(worldForward);
+    dvec3 worldUp,worldLateral;
+    if(!normalizeChecked(projectedUp,worldUp)||!normalizeChecked(cross(worldUp,worldForward),worldLateral)
+        ||!normalizeChecked(cross(worldForward,worldLateral),worldUp))return false;
+    dvec3 localProjectedUp=dvec3(0,0,1)-localForward.z*localForward;
+    if(!(finiteValue(length(localProjectedUp))&&length(localProjectedUp)>DIRECTIONAL_RESOLUTION))
+        localProjectedUp=dvec3(0,1,0)-localForward.y*localForward;
+    if(!(finiteValue(length(localProjectedUp))&&length(localProjectedUp)>DIRECTIONAL_RESOLUTION))localProjectedUp=leastAlignedProjection(localForward);
+    dvec3 localUp,localLateral;
+    if(!normalizeChecked(localProjectedUp,localUp)||!normalizeChecked(cross(localUp,localForward),localLateral)
+        ||!normalizeChecked(cross(localForward,localLateral),localUp))return false;
+    // world basis * transpose(local basis), applied to canonical axes.
+    result.tangent=worldForward*localForward.x+worldLateral*localLateral.x+worldUp*localUp.x;
+    result.lateral=worldForward*localForward.y+worldLateral*localLateral.y+worldUp*localUp.y;
+    result.up=worldForward*localForward.z+worldLateral*localLateral.z+worldUp*localUp.z;
+    return finiteValue(result.tangent)&&finiteValue(result.lateral)&&finiteValue(result.up);
+}
+
+bool legalOpenPlacement(GpuCoasterRecord record,GpuResidentCarDefinition car,double referenceStation,int direction){
+    if(record.topology!=0u)return true; double sign=direction<0?-1.0:1.0;
+    double s0=referenceStation+sign*car.bogie0ReferencePositionMeters[0];
+    double s1=referenceStation+sign*car.bogie1ReferencePositionMeters[0];
+    return finiteValue(s0)&&finiteValue(s1)&&s0>=0.0&&s0<=record.trackLength&&s1>=0.0&&s1<=record.trackLength;
+}
+double rigidTolerance(BogiePair pair,double separation){
+    return max(1.0e-10,512.0*DOUBLE_EPSILON*max(max(1.0,separation),max(length(pair.front.position),length(pair.rear.position))));
+}
+BogiePair rigidSampleAt(GpuCoasterRecord record,double referenceStation,int direction,dvec3 frontRef,dvec3 rearRef,double added){
+    double sign=direction<0?-1.0:1.0;
+    double fs=normalizeStation(referenceStation+sign*(frontRef.x+0.5*added),record.trackLength,record.topology);
+    double rs=normalizeStation(referenceStation+sign*(rearRef.x-0.5*added),record.trackLength,record.topology);
+    return BogiePair(sampleTrack(record,fs),sampleTrack(record,rs));
+}
+bool solveRigid(uint resultIndex,GpuCoasterRecord record,double referenceStation,int direction,dvec3 frontRef,dvec3 rearRef,
+    out BogiePair solved,out uint status){
+    resultBuffer.results[resultIndex].rigidSolveCount++;
+    double nominal=frontRef.x-rearRef.x,pivot=length(frontRef-rearRef);
+    BogiePair lower=rigidSampleAt(record,referenceStation,direction,frontRef,rearRef,0.0);
+    double lr=length(lower.front.position-lower.rear.position)-pivot,tol=rigidTolerance(lower,pivot);
+    if(!finiteValue(lr)||!finiteValue(tol)){solved=lower;status=STATUS_NON_FINITE;return false;}
+    if(abs(lr)<=tol){solved=lower;status=STATUS_SOLVED;return true;}
+    if(lr>0.0){solved=lower;status=STATUS_RIGID_NOMINAL_OVEREXTENDED;return false;}
+    double maximum=2.0*pivot;if(record.topology==1u)maximum=min(maximum,0.5*record.trackLength-nominal);
+    if(!(maximum>0.0)){solved=lower;status=STATUS_RIGID_NO_LOCAL_INTERVAL;return false;}
+    double la=0.0,ua=min(maximum,max(2.0*-lr,1.0e-8*max(1.0,pivot)));
+    BogiePair upper=rigidSampleAt(record,referenceStation,direction,frontRef,rearRef,ua);
+    double ur=length(upper.front.position-upper.rear.position)-pivot;tol=rigidTolerance(upper,pivot);
+    while(ur < -tol && ua < maximum){
+        resultBuffer.results[resultIndex].rigidBracketExpansionCount++;
+        la=ua;lr=ur;lower=upper;ua=min(maximum,2.0*ua);
+        upper=rigidSampleAt(record,referenceStation,direction,frontRef,rearRef,ua);
+        ur=length(upper.front.position-upper.rear.position)-pivot;tol=rigidTolerance(upper,pivot);
+    }
+    if(!finiteValue(ur)||!finiteValue(tol)){solved=upper;status=STATUS_NON_FINITE;return false;}
+    if(abs(ur)<=tol){solved=upper;status=STATUS_SOLVED;return true;}
+    if(ur<0.0){solved=upper;status=STATUS_RIGID_NO_FEASIBLE_ROOT;return false;}
+    for(uint iteration=0u;iteration<RIGID_REFINEMENTS;++iteration){
+        resultBuffer.results[resultIndex].rigidRefinementCount++;
+        double fraction=-lr/(ur-lr);double adjustment=finiteValue(fraction)&&fraction>=0.01&&fraction<=0.99?mix(la,ua,fraction):la+0.5*(ua-la);
+        BogiePair candidate=rigidSampleAt(record,referenceStation,direction,frontRef,rearRef,adjustment);
+        double cr=length(candidate.front.position-candidate.rear.position)-pivot;tol=rigidTolerance(candidate,pivot);
+        if(!finiteValue(cr)||!finiteValue(tol)){solved=candidate;status=STATUS_NON_FINITE;return false;}
+        if(abs(cr)<=tol){solved=candidate;status=STATUS_SOLVED;return true;}
+        if(cr<0.0){la=adjustment;lr=cr;lower=candidate;}else{ua=adjustment;ur=cr;upper=candidate;}
+    }
+    if(abs(lr)<abs(ur)){solved=lower;tol=rigidTolerance(lower,pivot);status=abs(lr)<=tol?STATUS_SOLVED:STATUS_RIGID_DID_NOT_CONVERGE;}
+    else{solved=upper;tol=rigidTolerance(upper,pivot);status=abs(ur)<=tol?STATUS_SOLVED:STATUS_RIGID_DID_NOT_CONVERGE;}
+    return status==STATUS_SOLVED;
+}
+
+bool solveCar(uint resultIndex,GpuCoasterRecord record,GpuResidentCarDefinition car,double referenceStation,int direction,
+    out CarPoseLocal pose,out uint status){
+    dvec3 b0=ARRAY3(car.bogie0ReferencePositionMeters),b1=ARRAY3(car.bogie1ReferencePositionMeters);
+    uint frontIndex=b0.x>b1.x?0u:1u,rearIndex=frontIndex==0u?1u:0u;
+    dvec3 frontRef=frontIndex==0u?b0:b1,rearRef=frontIndex==0u?b1:b0;
+    BogiePair pair;if(!solveRigid(resultIndex,record,referenceStation,direction,frontRef,rearRef,pair,status))return false;
+    Frame frontOriented=orientedFrame(pair.front.frame,direction),rearOriented=orientedFrame(pair.rear.frame,direction),body;
+    if(!bodyFrameFromBogies(pair.rear.position,pair.front.position,rearOriented,frontOriented,rearRef,frontRef,body)){
+        status=STATUS_POSE_CONSTRUCTION_ERROR;return false;
+    }
+    dvec3 localMid=0.5*(frontRef+rearRef),worldMid=0.5*(pair.front.position+pair.rear.position);
+    dvec3 bodyPosition=transformPoint(worldMid,body,-localMid);
+    double pivot=length(frontRef-rearRef),tol=rigidTolerance(pair,pivot);
+    if(length(transformPoint(bodyPosition,body,frontRef)-pair.front.position)>tol
+        ||length(transformPoint(bodyPosition,body,rearRef)-pair.rear.position)>tol){status=STATUS_POSE_CONSTRUCTION_ERROR;return false;}
+    pose.referenceStation=referenceStation;pose.frontIndex=frontIndex;pose.rearIndex=rearIndex;
+    pose.front=pair.front;pose.rear=pair.rear;pose.bodyFrame=body;pose.bodyOrientation=quatFromFrame(body);
+    pose.bodyPosition=bodyPosition;pose.localCog=ARRAY3(car.loadedCenterOfGravityMeters);
+    pose.worldCog=transformPoint(bodyPosition,body,pose.localCog);pose.mass=car.totalMassKilograms;
+    pose.frontHitch=transformPoint(bodyPosition,body,ARRAY3(car.frontHitchPositionMeters));
+    pose.rearHitch=transformPoint(bodyPosition,body,ARRAY3(car.rearHitchPositionMeters));
+    if(!finiteValue(bodyPosition)||!finiteValue(pose.worldCog)||!finiteValue(pose.frontHitch)||!finiteValue(pose.rearHitch)
+        ||!finiteValue(pose.bodyOrientation)){status=STATUS_POSE_CONSTRUCTION_ERROR;return false;}
+    status=STATUS_SOLVED;return true;
+}
+
+void writeCar(uint resultIndex,uint carIndex,CarPoseLocal pose,int direction){
+    resultBuffer.results[resultIndex].cars[carIndex].carIndex=carIndex;
+    resultBuffer.results[resultIndex].cars[carIndex].frontBogieDefinitionIndex=pose.frontIndex;
+    resultBuffer.results[resultIndex].cars[carIndex].rearBogieDefinitionIndex=pose.rearIndex;
+    resultBuffer.results[resultIndex].cars[carIndex].referenceStationMeters=pose.referenceStation;
+    resultBuffer.results[resultIndex].cars[carIndex].frontBogieStationMeters=pose.front.station;
+    resultBuffer.results[resultIndex].cars[carIndex].rearBogieStationMeters=pose.rear.station;
+    resultBuffer.results[resultIndex].cars[carIndex].totalMassKilograms=pose.mass;
+    store3(resultBuffer.results[resultIndex].cars[carIndex].bodyWorldPositionMeters,pose.bodyPosition);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].bodyTangent,pose.bodyFrame.tangent);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].bodyLateral,pose.bodyFrame.lateral);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].bodyUp,pose.bodyFrame.up);
+    store4(resultBuffer.results[resultIndex].cars[carIndex].bodyOrientationWxyz,pose.bodyOrientation);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].localCenterOfGravityMeters,pose.localCog);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].worldCenterOfGravityMeters,pose.worldCog);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].frontHitchWorldPositionMeters,pose.frontHitch);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].rearHitchWorldPositionMeters,pose.rearHitch);
+    Frame frontOriented=orientedFrame(pose.front.frame,direction),rearOriented=orientedFrame(pose.rear.frame,direction);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].frontBogieWorldPositionMeters,pose.front.position);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].frontBogieTrackTangent,pose.front.frame.tangent);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].frontBogieTrackLateral,pose.front.frame.lateral);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].frontBogieTrackUp,pose.front.frame.up);
+    dvec4 fq=quatNormalizeCanonical(quatMultiply(quatConjugate(pose.bodyOrientation),quatFromFrame(frontOriented)));
+    store4(resultBuffer.results[resultIndex].cars[carIndex].frontBogieRelativeOrientationWxyz,fq);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].rearBogieWorldPositionMeters,pose.rear.position);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].rearBogieTrackTangent,pose.rear.frame.tangent);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].rearBogieTrackLateral,pose.rear.frame.lateral);
+    store3(resultBuffer.results[resultIndex].cars[carIndex].rearBogieTrackUp,pose.rear.frame.up);
+    dvec4 rq=quatNormalizeCanonical(quatMultiply(quatConjugate(pose.bodyOrientation),quatFromFrame(rearOriented)));
+    store4(resultBuffer.results[resultIndex].cars[carIndex].rearBogieRelativeOrientationWxyz,rq);
+    resultBuffer.results[resultIndex].cars[carIndex].frontBogieRelativeYawRadians=atan2_64(dot(frontOriented.tangent,pose.bodyFrame.lateral),dot(frontOriented.tangent,pose.bodyFrame.tangent));
+    resultBuffer.results[resultIndex].cars[carIndex].rearBogieRelativeYawRadians=atan2_64(dot(rearOriented.tangent,pose.bodyFrame.lateral),dot(rearOriented.tangent,pose.bodyFrame.tangent));
+}
+
+double longitudinalScale(GpuResidentCarDefinition car){
+    return max(max(abs(car.bodyDimensionsMeters[0]),abs(car.frontHitchPositionMeters[0])),
+        max(abs(car.rearHitchPositionMeters[0]),max(abs(car.bogie0ReferencePositionMeters[0]),abs(car.bogie1ReferencePositionMeters[0]))));
+}
+double offsetAt(double begin,double end,uint index){return index==CONNECTOR_SAMPLES?end:mix(begin,end,double(index)/double(CONNECTOR_SAMPLES));}
+bool negativeSign(double value){return (unpackDouble2x32(value).y & 0x80000000u)!=0u;}
+uint evaluateCandidate(uint resultIndex,GpuCoasterRecord record,GpuResidentCarDefinition following,CarPoseLocal leading,
+    double connectorLength,double offset,int direction,out Candidate candidate){
+    double sign=direction<0?-1.0:1.0;
+    double station=normalizeStation(leading.referenceStation-sign*offset,record.trackLength,record.topology);
+    if(!legalOpenPlacement(record,following,station,direction))return STATUS_OPEN_TRACK_PLACEMENT;
+    resultBuffer.results[resultIndex].connectorCandidateEvaluationCount++;
+    CarPoseLocal pose;uint status;if(!solveCar(resultIndex,record,following,station,direction,pose,status))return status;
+    double distance=length(pose.frontHitch-leading.rearHitch),residual=distance-connectorLength;
+    if(!finiteValue(distance)||!finiteValue(residual))return STATUS_NON_FINITE;
+    candidate=Candidate(offset,distance,residual);return STATUS_SOLVED;
+}
+bool refineBracket(uint resultIndex,GpuCoasterRecord record,GpuResidentCarDefinition following,CarPoseLocal leading,
+    double connectorLength,int direction,Candidate initialLower,Candidate initialUpper,
+    out CarPoseLocal solvedPose,out uint iterations,out double bracketSize,out uint status){
+    Candidate lower=initialLower,upper=initialUpper;iterations=0u;
+    for(;iterations<CONNECTOR_REFINEMENTS;++iterations){
+        if(abs(lower.residual)<=CONNECTOR_TOLERANCE||abs(upper.residual)<=CONNECTOR_TOLERANCE)break;
+        resultBuffer.results[resultIndex].connectorRefinementCount++;
+        Candidate middle;status=evaluateCandidate(resultIndex,record,following,leading,connectorLength,0.5*(lower.offset+upper.offset),direction,middle);
+        if(status!=STATUS_SOLVED)return false;
+        if(negativeSign(lower.residual)==negativeSign(middle.residual))lower=middle;else upper=middle;
+    }
+    bracketSize=abs(upper.offset-lower.offset);Candidate solved=abs(lower.residual)<=abs(upper.residual)?lower:upper;
+    if(abs(solved.residual)>CONNECTOR_TOLERANCE){status=STATUS_CONNECTOR_CANNOT_CLOSE;return false;}
+    double sign=direction<0?-1.0:1.0;double station=normalizeStation(leading.referenceStation-sign*solved.offset,record.trackLength,record.topology);
+    if(!solveCar(resultIndex,record,following,station,direction,solvedPose,status))return false;
+    return true;
+}
+
+void finishConnectorStats(uint resultIndex,uint candidateBegin,uint refineBegin,uint rigidBegin){
+    uint candidates=resultBuffer.results[resultIndex].connectorCandidateEvaluationCount-candidateBegin;
+    uint refinements=resultBuffer.results[resultIndex].connectorRefinementCount-refineBegin;
+    uint rigidRefinements=resultBuffer.results[resultIndex].rigidRefinementCount-rigidBegin;
+    resultBuffer.results[resultIndex].connectorCandidateMinimum=min(resultBuffer.results[resultIndex].connectorCandidateMinimum,candidates);
+    resultBuffer.results[resultIndex].connectorCandidateMaximum=max(resultBuffer.results[resultIndex].connectorCandidateMaximum,candidates);
+    resultBuffer.results[resultIndex].connectorRefinementMinimum=min(resultBuffer.results[resultIndex].connectorRefinementMinimum,refinements);
+    resultBuffer.results[resultIndex].connectorRefinementMaximum=max(resultBuffer.results[resultIndex].connectorRefinementMaximum,refinements);
+    uint connectionIndex=resultBuffer.results[resultIndex].connectionCount;
+    resultBuffer.results[resultIndex].connections[connectionIndex].candidateEvaluationCount=candidates;
+    resultBuffer.results[resultIndex].connections[connectionIndex].rigidRefinementCount=rigidRefinements;
+}
+
+bool solveFollowing(uint resultIndex,GpuCoasterRecord record,GpuResidentCarDefinition leadingDefinition,
+    CarPoseLocal leading,GpuResidentCarDefinition following,GpuResidentConnectionDefinition connection,int direction,
+    out CarPoseLocal solvedPose,out uint iterations,out double bracketSize,out bool usedFallback,out uint status){
+    uint candidateBegin=resultBuffer.results[resultIndex].connectorCandidateEvaluationCount;
+    uint rigidBegin=resultBuffer.results[resultIndex].rigidRefinementCount;
+    uint refineBegin=resultBuffer.results[resultIndex].connectorRefinementCount;
+    double base=following.frontHitchPositionMeters[0]-leadingDefinition.rearHitchPositionMeters[0];
+    double expected=max(0.0,base+connection.rigidLengthMeters);
+    double scale=max(max(max(1.0,abs(base)),connection.rigidLengthMeters),max(longitudinalScale(leadingDefinition),longitudinalScale(following)));
+    double halfExtent=max(0.5,1.1*scale),begin=max(0.0,expected-halfExtent),end=expected+halfExtent;
+    if(record.topology==1u)end=min(end,record.trackLength-max(4.9406564584124654e-324,DOUBLE_EPSILON*record.trackLength));
+    else {double available=direction>0?leading.referenceStation:record.trackLength-leading.referenceStation;end=min(end,available);}
+    if(!finiteValue(begin)||!finiteValue(end)||end<begin){status=STATUS_CONNECTOR_NO_SEARCH_INTERVAL;return false;}
+    double spacing=(end-begin)/double(CONNECTOR_SAMPLES);usedFallback=false;
+    if(spacing>0.0&&expected>=begin&&expected<=end){
+        double gp=(expected-begin)/spacing;uint upperIndex=uint(clamp(ceil(gp),1.0,double(CONNECTOR_SAMPLES))),lowerIndex=upperIndex-1u;
+        Candidate lower,upper;uint ls=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,offsetAt(begin,end,lowerIndex),direction,lower);
+        uint us=ls==STATUS_SOLVED?evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,offsetAt(begin,end,upperIndex),direction,upper):ls;
+        if(ls==STATUS_SOLVED&&us==STATUS_SOLVED){
+            if(negativeSign(lower.residual)!=negativeSign(upper.residual)){
+                if(refineBracket(resultIndex,record,following,leading,connection.rigidLengthMeters,direction,lower,upper,solvedPose,iterations,bracketSize,status)){finishConnectorStats(resultIndex,candidateBegin,refineBegin,rigidBegin);status=STATUS_SOLVED;return true;}
+                if(status!=STATUS_CONNECTOR_CANNOT_CLOSE)return false;
+            }
+            for(uint expansion=0u;expansion<16u&&negativeSign(lower.residual)==negativeSign(upper.residual);++expansion){
+                if(lowerIndex==0u&&upperIndex==CONNECTOR_SAMPLES)break;
+                double ld=lowerIndex==0u?1.0/0.0:abs(0.5*(offsetAt(begin,end,lowerIndex-1u)+offsetAt(begin,end,lowerIndex))-expected);
+                double ud=upperIndex==CONNECTOR_SAMPLES?1.0/0.0:abs(0.5*(offsetAt(begin,end,upperIndex)+offsetAt(begin,end,upperIndex+1u))-expected);
+                Candidate a,b,next;uint cs;
+                if(ld<=ud){--lowerIndex;cs=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,offsetAt(begin,end,lowerIndex),direction,next);a=next;b=lower;lower=next;}
+                else{++upperIndex;cs=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,offsetAt(begin,end,upperIndex),direction,next);a=upper;b=next;upper=next;}
+                if(cs==STATUS_OPEN_TRACK_PLACEMENT)break;if(cs!=STATUS_SOLVED){status=cs;return false;}
+                if(negativeSign(a.residual)!=negativeSign(b.residual)){
+                    if(refineBracket(resultIndex,record,following,leading,connection.rigidLengthMeters,direction,a,b,solvedPose,iterations,bracketSize,status)){finishConnectorStats(resultIndex,candidateBegin,refineBegin,rigidBegin);status=STATUS_SOLVED;return true;}
+                    if(status!=STATUS_CONNECTOR_CANNOT_CLOSE)return false;break;
+                }
+            }
+        } else if(ls!=STATUS_OPEN_TRACK_PLACEMENT&&ls!=STATUS_SOLVED){status=ls;return false;}
+        else if(us!=STATUS_OPEN_TRACK_PLACEMENT&&us!=STATUS_SOLVED){status=us;return false;}
+    }
+    {
+        Candidate best,previous,selectedLower,selectedUpper;bool haveBest=false,havePrevious=false,haveBracket=false;
+        for(uint i=0u;i<=CONNECTOR_SAMPLES;++i){
+            Candidate c;uint cs=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,offsetAt(begin,end,i),direction,c);
+            if(cs==STATUS_OPEN_TRACK_PLACEMENT){havePrevious=false;continue;}if(cs!=STATUS_SOLVED){status=cs;return false;}
+            if(!haveBest||abs(c.residual)<abs(best.residual)||(abs(c.residual)==abs(best.residual)&&abs(c.offset-expected)<abs(best.offset-expected))){best=c;haveBest=true;}
+            if(havePrevious&&negativeSign(previous.residual)!=negativeSign(c.residual)){
+                double mid=0.5*(previous.offset+c.offset);
+                if(!haveBracket||abs(mid-expected)<abs(0.5*(selectedLower.offset+selectedUpper.offset)-expected)){
+                    selectedLower=previous;selectedUpper=c;haveBracket=true;
+                }
+            }previous=c;havePrevious=true;
+        }
+        if(!haveBest){status=STATUS_CONNECTOR_NO_LEGAL_PLACEMENT;return false;}
+        if(haveBracket){
+            if(refineBracket(resultIndex,record,following,leading,connection.rigidLengthMeters,direction,selectedLower,selectedUpper,solvedPose,iterations,bracketSize,status)){
+                usedFallback=true;resultBuffer.results[resultIndex].connectorFallbackCount++;finishConnectorStats(resultIndex,candidateBegin,refineBegin,rigidBegin);status=STATUS_SOLVED;return true;
+            }if(status!=STATUS_CONNECTOR_CANNOT_CLOSE)return false;
+        }
+        if(abs(best.residual)<=CONNECTOR_TOLERANCE){
+            double sign=direction<0?-1.0:1.0,station=normalizeStation(leading.referenceStation-sign*best.offset,record.trackLength,record.topology);
+            if(!solveCar(resultIndex,record,following,station,direction,solvedPose,status))return false;
+            iterations=0u;bracketSize=spacing;usedFallback=true;resultBuffer.results[resultIndex].connectorFallbackCount++;finishConnectorStats(resultIndex,candidateBegin,refineBegin,rigidBegin);status=STATUS_SOLVED;return true;
+        }
+        double lo=max(begin,best.offset-spacing),hi=min(end,best.offset+spacing);const double g=0.6180339887498948482;
+        Candidate left,right;status=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,hi-g*(hi-lo),direction,left);if(status!=STATUS_SOLVED)return false;
+        status=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,lo+g*(hi-lo),direction,right);if(status!=STATUS_SOLVED)return false;
+        for(iterations=0u;iterations<CONNECTOR_REFINEMENTS;++iterations){
+            resultBuffer.results[resultIndex].connectorRefinementCount++;
+            if(abs(left.residual)<abs(right.residual)){hi=right.offset;right=left;status=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,hi-g*(hi-lo),direction,left);}
+            else{lo=left.offset;left=right;status=evaluateCandidate(resultIndex,record,following,leading,connection.rigidLengthMeters,lo+g*(hi-lo),direction,right);}
+            if(status!=STATUS_SOLVED)return false;
+        }
+        Candidate solved=abs(left.residual)<=abs(right.residual)?left:right;
+        if(abs(solved.residual)<=CONNECTOR_TOLERANCE){
+            double sign=direction<0?-1.0:1.0,station=normalizeStation(leading.referenceStation-sign*solved.offset,record.trackLength,record.topology);
+            if(!solveCar(resultIndex,record,following,station,direction,solvedPose,status))return false;
+            bracketSize=hi-lo;usedFallback=true;resultBuffer.results[resultIndex].connectorFallbackCount++;finishConnectorStats(resultIndex,candidateBegin,refineBegin,rigidBegin);status=STATUS_SOLVED;return true;
+        }
+    }
+    status=record.topology==0u&&end<expected+halfExtent?STATUS_CONNECTOR_OPEN_ENDPOINT:STATUS_CONNECTOR_CANNOT_CLOSE;return false;
+}
+
+void writeConnection(uint resultIndex,uint connectionIndex,double lengthValue,CarPoseLocal leading,CarPoseLocal following,
+    uint iterations,double bracketSize,bool fallback){
+    dvec3 vector=following.frontHitch-leading.rearHitch;double distance=length(vector),residual=distance-lengthValue;
+    GpuTrainConnectionPose value=resultBuffer.results[resultIndex].connections[connectionIndex];
+    value.connectionIndex=connectionIndex;value.leadingCarIndex=connectionIndex;value.followingCarIndex=connectionIndex+1u;
+    value.solverIterationCount=iterations;value.usedExhaustiveSearchFallback=fallback?1u:0u;
+    value.authoredRigidLengthMeters=lengthValue;value.actualEndpointDistanceMeters=distance;
+    value.signedLengthResidualMeters=residual;value.finalBracketSizeMeters=bracketSize;
+    store3(value.leadingEndpointWorldPositionMeters,leading.rearHitch);store3(value.followingEndpointWorldPositionMeters,following.frontHitch);
+    dvec3 worldDirection=lengthValue>0.0?vector/distance:dvec3(0.0);
+    store3(value.worldDirection,worldDirection);store3(value.directionInLeadingBody,lengthValue>0.0?inFrame(worldDirection,leading.bodyFrame):dvec3(0));
+    store3(value.directionInFollowingBody,lengthValue>0.0?inFrame(worldDirection,following.bodyFrame):dvec3(0));
+    dvec4 relative=quatNormalizeCanonical(quatMultiply(quatConjugate(leading.bodyOrientation),following.bodyOrientation));
+    store4(value.followingBodyRelativeOrientationWxyz,relative);
+    dvec3 articulation=dvec3(atan2_64(dot(following.bodyFrame.tangent,leading.bodyFrame.lateral),dot(following.bodyFrame.tangent,leading.bodyFrame.tangent)),
+        asin64(clamp(dot(following.bodyFrame.tangent,leading.bodyFrame.up),-1.0,1.0)),
+        atan2_64(dot(following.bodyFrame.up,leading.bodyFrame.lateral),dot(following.bodyFrame.up,leading.bodyFrame.up)));
+    store3(value.relativeYawPitchRollRadians,articulation);resultBuffer.results[resultIndex].connections[connectionIndex]=value;
+}
+
+void main(){
+    uint index=gl_GlobalInvocationID.x;if(index>=jobBuffer.jobs.length())return;GpuTrainPoseJob job=jobBuffer.jobs[index];
+    resultBuffer.results[index].jobId=job.jobId;resultBuffer.results[index].status=STATUS_INVALID_JOB;
+    resultBuffer.results[index].carCount=0u;resultBuffer.results[index].connectionCount=0u;
+    resultBuffer.results[index].failureCarIndex=0xffffffffu;resultBuffer.results[index].failureConnectionIndex=0xffffffffu;
+    resultBuffer.results[index].rigidSolveCount=0u;resultBuffer.results[index].rigidRefinementCount=0u;resultBuffer.results[index].rigidBracketExpansionCount=0u;
+    resultBuffer.results[index].connectorCandidateEvaluationCount=0u;resultBuffer.results[index].connectorRefinementCount=0u;resultBuffer.results[index].connectorFallbackCount=0u;
+    resultBuffer.results[index].connectorCandidateMinimum=0xffffffffu;resultBuffer.results[index].connectorCandidateMaximum=0u;
+    resultBuffer.results[index].connectorRefinementMinimum=0xffffffffu;resultBuffer.results[index].connectorRefinementMaximum=0u;
+    resultBuffer.results[index].referenceStationMeters=job.referenceStationMeters;resultBuffer.results[index].totalMassKilograms=0.0;
+    resultBuffer.results[index].maximumAbsoluteConnectorResidualMeters=0.0;store3(resultBuffer.results[index].aggregateWorldCenterOfGravityMeters,dvec3(0));
+    if(job.coasterIndex>=coasterRecords.records.length()||job.trainDefinitionIndex>=trainDefinitions.definitions.length()||job.path!=0u||(job.direction!=1&&job.direction!=-1)||!finiteValue(job.referenceStationMeters)){resultBuffer.results[index].status=STATUS_INVALID_JOB;return;}
+    GpuCoasterRecord record=coasterRecords.records[job.coasterIndex];GpuResidentTrainDefinition train=trainDefinitions.definitions[job.trainDefinitionIndex];
+    if(record.trackCount<2u||record.trackOffset+record.trackCount>trackSamples.samples.length()||!(record.trackLength>0.0)
+        ||train.carCount==0u||train.carCount>MAX_CARS||train.connectionCount+1u!=train.carCount
+        ||train.firstCar+train.carCount>carDefinitions.cars.length()||train.firstConnection+train.connectionCount>connectionDefinitions.connections.length()
+        ||job.referenceStationMeters<0.0||(record.topology==1u?job.referenceStationMeters>=record.trackLength:job.referenceStationMeters>record.trackLength))return;
+    GpuResidentCarDefinition leadDef=carDefinitions.cars[train.firstCar];
+    if(!legalOpenPlacement(record,leadDef,job.referenceStationMeters,job.direction)){resultBuffer.results[index].status=STATUS_OPEN_TRACK_PLACEMENT;return;}
+    CarPoseLocal leading;uint status;if(!solveCar(index,record,leadDef,job.referenceStationMeters,job.direction,leading,status)){resultBuffer.results[index].status=status;resultBuffer.results[index].failureCarIndex=0u;return;}
+    writeCar(index,0u,leading,job.direction);resultBuffer.results[index].carCount=1u;
+    double totalMass=leading.mass;dvec3 weighted=leading.mass*leading.worldCog;
+    for(uint ci=0u;ci<train.connectionCount;++ci){
+        GpuResidentCarDefinition followingDef=carDefinitions.cars[train.firstCar+ci+1u];GpuResidentConnectionDefinition connection=connectionDefinitions.connections[train.firstConnection+ci];
+        CarPoseLocal following;uint iterations;double bracketSize;bool fallback;
+        if(!solveFollowing(index,record,leadDef,leading,followingDef,connection,job.direction,following,iterations,bracketSize,fallback,status)){
+            resultBuffer.results[index].status=status;resultBuffer.results[index].failureCarIndex=ci+1u;resultBuffer.results[index].failureConnectionIndex=ci;return;
+        }
+        double actual=length(following.frontHitch-leading.rearHitch),residual=actual-connection.rigidLengthMeters;
+        if(!finiteValue(actual)||!finiteValue(residual)||abs(residual)>CONNECTOR_TOLERANCE){resultBuffer.results[index].status=STATUS_CONNECTOR_CLOSURE_ERROR;resultBuffer.results[index].failureConnectionIndex=ci;return;}
+        writeConnection(index,ci,connection.rigidLengthMeters,leading,following,iterations,bracketSize,fallback);
+        resultBuffer.results[index].connectionCount=ci+1u;writeCar(index,ci+1u,following,job.direction);resultBuffer.results[index].carCount=ci+2u;
+        resultBuffer.results[index].maximumAbsoluteConnectorResidualMeters=max(resultBuffer.results[index].maximumAbsoluteConnectorResidualMeters,abs(residual));
+        totalMass+=following.mass;weighted+=following.mass*following.worldCog;leading=following;leadDef=followingDef;
+    }
+    dvec3 aggregate=weighted/totalMass;if(!finiteValue(totalMass)||!(totalMass>0.0)||!finiteValue(aggregate)){resultBuffer.results[index].status=STATUS_MASS_PROPERTIES_ERROR;return;}
+    resultBuffer.results[index].totalMassKilograms=totalMass;store3(resultBuffer.results[index].aggregateWorldCenterOfGravityMeters,aggregate);
+    if(train.connectionCount==0u){resultBuffer.results[index].connectorCandidateMinimum=0u;resultBuffer.results[index].connectorRefinementMinimum=0u;}
+    resultBuffer.results[index].status=STATUS_SOLVED;
+}

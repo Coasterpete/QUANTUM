@@ -2379,6 +2379,50 @@ add_test(
     COMMAND QuantumEngineGpuRigidBogiePrototypeTests
 )
 
+add_executable(
+    QuantumEngineGpuTrainPoseResidencyTests
+    GpuTrainPoseResidencyTests.cpp
+)
+
+target_link_libraries(
+    QuantumEngineGpuTrainPoseResidencyTests
+    PRIVATE
+        Quantum::Engine
+        Quantum::Core
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+        SDL3::SDL3
+)
+
+target_compile_features(
+    QuantumEngineGpuTrainPoseResidencyTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineGpuTrainPoseResidencyTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_dependencies(
+    QuantumEngineGpuTrainPoseResidencyTests
+    QuantumShaders
+)
+
+add_test(
+    NAME QuantumEngine.GpuTrainPoseResidency
+    COMMAND QuantumEngineGpuTrainPoseResidencyTests
+)
+
+set_tests_properties(
+    QuantumEngine.GpuTrainPoseResidency
+    PROPERTIES
+        DISABLED TRUE
+        LABELS "engine;physics;gpu;validation;performance"
+)
+
 set_tests_properties(
     QuantumEngine.GpuRigidBogiePrototype
     PROPERTIES

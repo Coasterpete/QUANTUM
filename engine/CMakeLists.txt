@@ -23,6 +23,8 @@ set(QUANTUM_PHYSICS_COMPUTE_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/track_sample.comp.spv")
 set(QUANTUM_RIGID_BOGIE_COMPUTE_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/rigid_bogie.comp.spv")
+set(QUANTUM_TRAIN_POSE_COMPUTE_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/train_pose.comp.spv")
 
 add_custom_command(
     OUTPUT
@@ -33,6 +35,7 @@ add_custom_command(
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
         "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
         "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
+        "${QUANTUM_TRAIN_POSE_COMPUTE_SHADER}"
     COMMAND
         ${CMAKE_COMMAND} -E make_directory
         "${QUANTUM_SHADER_BINARY_DIR}"
@@ -78,6 +81,12 @@ add_custom_command(
         --target-env vulkan1.3
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/physics/rigid_bogie.comp"
         -o "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V
+        --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/physics/train_pose.comp"
+        -o "${QUANTUM_TRAIN_POSE_COMPUTE_SHADER}"
     DEPENDS
         shaders/centerline.vert
         shaders/centerline.frag
@@ -86,6 +95,7 @@ add_custom_command(
         shaders/hardware.vert
         shaders/physics/track_sample.comp
         shaders/physics/rigid_bogie.comp
+        shaders/physics/train_pose.comp
     VERBATIM
 )
 
@@ -99,6 +109,7 @@ add_custom_target(
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
         "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
         "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
+        "${QUANTUM_TRAIN_POSE_COMPUTE_SHADER}"
 )
 
 install(
@@ -110,6 +121,7 @@ install(
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
         "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
         "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
+        "${QUANTUM_TRAIN_POSE_COMPUTE_SHADER}"
     DESTINATION shaders
     COMPONENT Runtime
 )
