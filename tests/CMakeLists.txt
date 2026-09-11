@@ -2343,6 +2343,49 @@ set_tests_properties(
 )
 
 add_executable(
+    QuantumEngineGpuRigidBogiePrototypeTests
+    GpuRigidBogiePrototypeTests.cpp
+)
+
+target_link_libraries(
+    QuantumEngineGpuRigidBogiePrototypeTests
+    PRIVATE
+        Quantum::Engine
+        Quantum::Core
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+        SDL3::SDL3
+)
+
+target_compile_features(
+    QuantumEngineGpuRigidBogiePrototypeTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineGpuRigidBogiePrototypeTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_dependencies(
+    QuantumEngineGpuRigidBogiePrototypeTests
+    QuantumShaders
+)
+
+add_test(
+    NAME QuantumEngine.GpuRigidBogiePrototype
+    COMMAND QuantumEngineGpuRigidBogiePrototypeTests
+)
+
+set_tests_properties(
+    QuantumEngine.GpuRigidBogiePrototype
+    PROPERTIES
+        LABELS "engine;physics;gpu;validation"
+)
+
+add_executable(
     QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
     GpuPhysicsTrackSamplingPerfBenchmark.cpp
 )

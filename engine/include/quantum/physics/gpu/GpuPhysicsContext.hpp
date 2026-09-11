@@ -46,6 +46,65 @@ namespace quantum::physics::gpu
     static_assert(offsetof(PhysicsTrackSample, tangent) == 64, "PhysicsTrackSample tangent offset");
     static_assert(offsetof(PhysicsTrackSample, curvature) == 160, "PhysicsTrackSample curvature offset");
 
+    enum class GpuRigidBogieStatus : std::uint32_t
+    {
+        Solved = 0,
+        NominalOverextended = 1,
+        NoLocalInterval = 2,
+        NoFeasibleRoot = 3,
+        DidNotConverge = 4,
+        NonFinite = 5
+    };
+
+    struct GpuRigidBogieJob
+    {
+        std::uint32_t coasterIndex = 0;
+        std::uint32_t path = 0;
+        std::int32_t direction = 1;
+        std::uint32_t jobId = 0;
+        double referenceStationMeters = 0.0;
+        double frontReferencePositionMeters[4] = {0.0, 0.0, 0.0, 0.0};
+        double rearReferencePositionMeters[4] = {0.0, 0.0, 0.0, 0.0};
+    };
+    static_assert(sizeof(GpuRigidBogieJob) == 88, "GpuRigidBogieJob must be 88 bytes std430");
+    static_assert(alignof(GpuRigidBogieJob) == 8, "GpuRigidBogieJob align 8");
+    static_assert(offsetof(GpuRigidBogieJob, coasterIndex) == 0, "GpuRigidBogieJob coaster offset 0");
+    static_assert(offsetof(GpuRigidBogieJob, path) == 4, "GpuRigidBogieJob path offset 4");
+    static_assert(offsetof(GpuRigidBogieJob, direction) == 8, "GpuRigidBogieJob direction offset 8");
+    static_assert(offsetof(GpuRigidBogieJob, jobId) == 12, "GpuRigidBogieJob id offset 12");
+    static_assert(offsetof(GpuRigidBogieJob, referenceStationMeters) == 16, "GpuRigidBogieJob station offset 16");
+    static_assert(offsetof(GpuRigidBogieJob, frontReferencePositionMeters) == 24, "GpuRigidBogieJob front offset 24");
+    static_assert(offsetof(GpuRigidBogieJob, rearReferencePositionMeters) == 56, "GpuRigidBogieJob rear offset 56");
+
+    struct GpuRigidBogieResult
+    {
+        std::uint32_t jobId = 0;
+        GpuRigidBogieStatus status = GpuRigidBogieStatus::NonFinite;
+        std::uint32_t refinementIterations = 0;
+        std::uint32_t bracketExpansions = 0;
+        double frontStationMeters = 0.0;
+        double rearStationMeters = 0.0;
+        double finalResidualMeters = 0.0;
+    };
+    static_assert(sizeof(GpuRigidBogieResult) == 40, "GpuRigidBogieResult must be 40 bytes std430");
+    static_assert(alignof(GpuRigidBogieResult) == 8, "GpuRigidBogieResult align 8");
+    static_assert(offsetof(GpuRigidBogieResult, jobId) == 0, "GpuRigidBogieResult id offset 0");
+    static_assert(offsetof(GpuRigidBogieResult, status) == 4, "GpuRigidBogieResult status offset 4");
+    static_assert(offsetof(GpuRigidBogieResult, refinementIterations) == 8, "GpuRigidBogieResult refinement offset 8");
+    static_assert(offsetof(GpuRigidBogieResult, bracketExpansions) == 12, "GpuRigidBogieResult expansion offset 12");
+    static_assert(offsetof(GpuRigidBogieResult, frontStationMeters) == 16, "GpuRigidBogieResult front offset 16");
+    static_assert(offsetof(GpuRigidBogieResult, rearStationMeters) == 24, "GpuRigidBogieResult rear offset 24");
+    static_assert(offsetof(GpuRigidBogieResult, finalResidualMeters) == 32, "GpuRigidBogieResult residual offset 32");
+
+    struct GpuRigidBogieBatchTimings
+    {
+        double packingUploadMicroseconds = 0.0;
+        double submitDispatchMicroseconds = 0.0;
+        double fenceWaitMicroseconds = 0.0;
+        double readbackMicroseconds = 0.0;
+        double totalMicroseconds = 0.0;
+    };
+
     class GpuPhysicsContext
     {
     public:
@@ -100,6 +159,10 @@ namespace quantum::physics::gpu
         [[nodiscard]] bool lastSampleUsedGpu() const noexcept;
         [[nodiscard]] std::vector<PhysicsTrackSample> sampleTrackGpu(
             std::span<const GpuTrackQuery> queries);
+        [[nodiscard]] bool gpuRigidBogieReady() const noexcept;
+        [[nodiscard]] std::vector<GpuRigidBogieResult> solveRigidBogiesGpu(
+            std::span<const GpuRigidBogieJob> jobs,
+            GpuRigidBogieBatchTimings* timings = nullptr);
         // Validates GPU vs CPU for given queries, returns max errors. Throws on GPU
         // unavailable. Uses same tolerances as GpuPhysicsTrackSamplingValidation test.
         struct GpuValidationResult
@@ -150,6 +213,19 @@ namespace quantum::physics::gpu
             std::uint32_t queryCount = 0;
         };
 
+        struct RigidBogieData
+        {
+            VkBuffer jobBuffer = VK_NULL_HANDLE;
+            VmaAllocation jobAllocation = VK_NULL_HANDLE;
+            VkBuffer resultBuffer = VK_NULL_HANDLE;
+            VmaAllocation resultAllocation = VK_NULL_HANDLE;
+            VkBuffer readbackBuffer = VK_NULL_HANDLE;
+            VmaAllocation readbackAllocation = VK_NULL_HANDLE;
+            void* readbackMapped = nullptr;
+            VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+            VkDeviceSize capacityJobs = 0;
+        };
+
         renderer::VulkanContext* vulkan_ = nullptr;
         HeadlessHandles headless_;
         bool useHeadless_ = false;
@@ -174,6 +250,8 @@ namespace quantum::physics::gpu
         std::array<TransientFrameData, 2> frames_{};
         VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline computePipeline_ = VK_NULL_HANDLE;
+        VkPipeline rigidBogiePipeline_ = VK_NULL_HANDLE;
+        RigidBogieData rigidBogie_;
 
         VkCommandPool commandPool_ = VK_NULL_HANDLE;
         std::array<VkCommandBuffer, 2> commandBuffers_{};
@@ -187,6 +265,7 @@ namespace quantum::physics::gpu
         std::uint32_t trackOffset_ = 0;
         std::uint32_t currentSlot_ = 0;
         bool gpuPipelineReady_ = false;
+        bool rigidBogiePipelineReady_ = false;
         bool trackUploaded_ = false;
         bool gpuTrackReady_ = false;
         bool lastSampleUsedGpu_ = false;
@@ -199,6 +278,8 @@ namespace quantum::physics::gpu
         void ensureTrackBufferCapacity(std::uint32_t requiredSamples);
         void ensureCoasterRecordCapacity(std::uint32_t requiredCount);
         void ensureFrameBuffers(std::uint32_t slot, std::size_t queryCount);
+        void ensureRigidBogieBuffers(std::size_t jobCount);
+        void updateRigidBogieDescriptors(std::size_t jobCount);
         void allocateDescriptorSets();
         void updatePersistentDescriptors();
         void updateFrameDescriptors(std::uint32_t slot);

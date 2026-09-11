@@ -1,0 +1,342 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+
+layout(local_size_x = 64) in;
+
+const uint STATUS_SOLVED = 0u;
+const uint STATUS_NOMINAL_OVEREXTENDED = 1u;
+const uint STATUS_NO_LOCAL_INTERVAL = 2u;
+const uint STATUS_NO_FEASIBLE_ROOT = 3u;
+const uint STATUS_DID_NOT_CONVERGE = 4u;
+const uint STATUS_NON_FINITE = 5u;
+const double DOUBLE_EPSILON = 2.2204460492503130808472633361816e-16;
+
+struct GpuTrackSample
+{
+    double stationMeters;
+    double positionMeters[3];
+    double tangent[3];
+    double lateral[3];
+    double up[3];
+    double curvaturePerMeter[3];
+};
+
+struct GpuCoasterRecord
+{
+    uint trackOffset;
+    uint trackCount;
+    uint topology;
+    uint _pad;
+    double trackLength;
+};
+
+// std430 offsets: scalars 0..23, front 24, rear 56, stride 88.
+struct GpuRigidBogieJob
+{
+    uint coasterIndex;
+    uint path;
+    int direction;
+    uint jobId;
+    double referenceStationMeters;
+    double frontReferencePositionMeters[4];
+    double rearReferencePositionMeters[4];
+};
+
+// std430 offsets: counters 0..15, doubles 16/24/32, stride 40.
+struct GpuRigidBogieResult
+{
+    uint jobId;
+    uint status;
+    uint refinementIterations;
+    uint bracketExpansions;
+    double frontStationMeters;
+    double rearStationMeters;
+    double finalResidualMeters;
+};
+
+struct StationPair
+{
+    double frontStation;
+    double rearStation;
+    dvec3 frontPosition;
+    dvec3 rearPosition;
+};
+
+layout(set = 0, binding = 0) readonly buffer TrackSamplesBuffer
+{
+    GpuTrackSample samples[];
+} trackSamples;
+
+layout(set = 0, binding = 1) readonly buffer CoasterRecordsBuffer
+{
+    GpuCoasterRecord records[];
+} coasterRecords;
+
+layout(set = 1, binding = 0) readonly buffer JobBuffer
+{
+    GpuRigidBogieJob jobs[];
+} jobBuffer;
+
+layout(set = 1, binding = 1) buffer ResultBuffer
+{
+    GpuRigidBogieResult results[];
+} resultBuffer;
+
+bool finiteValue(double value)
+{
+    return !isnan(value) && !isinf(value);
+}
+
+bool finiteValue(dvec3 value)
+{
+    return !any(isnan(value)) && !any(isinf(value));
+}
+
+double normalizeStation(double station, double trackLength, uint topology)
+{
+    if (topology == 1u && finiteValue(trackLength) && trackLength > 0.0)
+    {
+        if (station < 0.0)
+        {
+            station = mod(station, trackLength);
+            if (station < 0.0) station += trackLength;
+        }
+        else if (station >= trackLength)
+        {
+            station = mod(station, trackLength);
+        }
+    }
+    else
+    {
+        station = clamp(station, 0.0, trackLength);
+    }
+    return station;
+}
+
+dvec3 samplePosition(GpuCoasterRecord record, double station)
+{
+    uint first = record.trackOffset;
+    uint end = first + record.trackCount;
+    uint low = first;
+    uint high = end;
+    while (low < high)
+    {
+        uint mid = (low + high) >> 1;
+        if (trackSamples.samples[mid].stationMeters < station) low = mid + 1u;
+        else high = mid;
+    }
+    if (low == first)
+    {
+        GpuTrackSample value = trackSamples.samples[first];
+        return dvec3(value.positionMeters[0], value.positionMeters[1], value.positionMeters[2]);
+    }
+    if (low >= end)
+    {
+        GpuTrackSample value = trackSamples.samples[end - 1u];
+        return dvec3(value.positionMeters[0], value.positionMeters[1], value.positionMeters[2]);
+    }
+    GpuTrackSample before = trackSamples.samples[low - 1u];
+    GpuTrackSample after = trackSamples.samples[low];
+    double denominator = after.stationMeters - before.stationMeters;
+    double fraction = denominator > 0.0 ? (station - before.stationMeters) / denominator : 0.0;
+    fraction = clamp(fraction, 0.0, 1.0);
+    return mix(
+        dvec3(before.positionMeters[0], before.positionMeters[1], before.positionMeters[2]),
+        dvec3(after.positionMeters[0], after.positionMeters[1], after.positionMeters[2]),
+        fraction);
+}
+
+StationPair sampleAt(
+    GpuRigidBogieJob job,
+    GpuCoasterRecord record,
+    double frontX,
+    double rearX,
+    double addedStationSeparation)
+{
+    double travelSign = job.direction < 0 ? -1.0 : 1.0;
+    StationPair pair;
+    pair.frontStation = normalizeStation(
+        job.referenceStationMeters + travelSign * (frontX + 0.5 * addedStationSeparation),
+        record.trackLength, record.topology);
+    pair.rearStation = normalizeStation(
+        job.referenceStationMeters + travelSign * (rearX - 0.5 * addedStationSeparation),
+        record.trackLength, record.topology);
+    pair.frontPosition = samplePosition(record, pair.frontStation);
+    pair.rearPosition = samplePosition(record, pair.rearStation);
+    return pair;
+}
+
+double residual(StationPair pair, double pivotSeparation)
+{
+    return length(pair.frontPosition - pair.rearPosition) - pivotSeparation;
+}
+
+double tolerance(StationPair pair, double pivotSeparation)
+{
+    double scale = max(max(1.0, pivotSeparation),
+        max(length(pair.frontPosition), length(pair.rearPosition)));
+    return max(1.0e-10, 512.0 * DOUBLE_EPSILON * scale);
+}
+
+void publish(
+    uint index, GpuRigidBogieJob job, uint status, uint refinements,
+    uint expansions, StationPair pair, double finalResidual)
+{
+    GpuRigidBogieResult result;
+    result.jobId = job.jobId;
+    result.status = status;
+    result.refinementIterations = refinements;
+    result.bracketExpansions = expansions;
+    result.frontStationMeters = pair.frontStation;
+    result.rearStationMeters = pair.rearStation;
+    result.finalResidualMeters = finalResidual;
+    resultBuffer.results[index] = result;
+}
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= jobBuffer.jobs.length()) return;
+    GpuRigidBogieJob job = jobBuffer.jobs[index];
+    StationPair emptyPair = StationPair(0.0, 0.0, dvec3(0.0), dvec3(0.0));
+
+    if (job.coasterIndex >= coasterRecords.records.length())
+    {
+        publish(index, job, STATUS_NON_FINITE, 0u, 0u, emptyPair, 0.0);
+        return;
+    }
+    GpuCoasterRecord record = coasterRecords.records[job.coasterIndex];
+    if (record.trackCount < 2u
+        || record.trackOffset + record.trackCount > trackSamples.samples.length()
+        || !finiteValue(record.trackLength) || !(record.trackLength > 0.0)
+        || !finiteValue(job.referenceStationMeters))
+    {
+        publish(index, job, STATUS_NON_FINITE, 0u, 0u, emptyPair, 0.0);
+        return;
+    }
+
+    dvec3 frontReference = dvec3(job.frontReferencePositionMeters[0],
+        job.frontReferencePositionMeters[1], job.frontReferencePositionMeters[2]);
+    dvec3 rearReference = dvec3(job.rearReferencePositionMeters[0],
+        job.rearReferencePositionMeters[1], job.rearReferencePositionMeters[2]);
+    double frontX = frontReference.x;
+    double rearX = rearReference.x;
+    double nominalStationSeparation = frontX - rearX;
+    double pivotSeparation = length(frontReference - rearReference);
+    if (!finiteValue(frontReference) || !finiteValue(rearReference)
+        || !(nominalStationSeparation > 1.0e-9) || !finiteValue(pivotSeparation))
+    {
+        publish(index, job, STATUS_NON_FINITE, 0u, 0u, emptyPair, 0.0);
+        return;
+    }
+
+    StationPair lowerPair = sampleAt(job, record, frontX, rearX, 0.0);
+    double lowerResidual = residual(lowerPair, pivotSeparation);
+    double currentTolerance = tolerance(lowerPair, pivotSeparation);
+    if (!finiteValue(lowerResidual) || !finiteValue(currentTolerance))
+    {
+        publish(index, job, STATUS_NON_FINITE, 0u, 0u, lowerPair, 0.0);
+        return;
+    }
+    if (abs(lowerResidual) <= currentTolerance)
+    {
+        publish(index, job, STATUS_SOLVED, 0u, 0u, lowerPair, lowerResidual);
+        return;
+    }
+    if (lowerResidual > 0.0)
+    {
+        publish(index, job, STATUS_NOMINAL_OVEREXTENDED, 0u, 0u, lowerPair, lowerResidual);
+        return;
+    }
+
+    double maximumAddedSeparation = 2.0 * pivotSeparation;
+    if (record.topology == 1u)
+    {
+        maximumAddedSeparation = min(maximumAddedSeparation,
+            0.5 * record.trackLength - nominalStationSeparation);
+    }
+    if (!(maximumAddedSeparation > 0.0) || !finiteValue(maximumAddedSeparation))
+    {
+        publish(index, job, STATUS_NO_LOCAL_INTERVAL, 0u, 0u, lowerPair, lowerResidual);
+        return;
+    }
+
+    double lowerAdjustment = 0.0;
+    double upperAdjustment = min(maximumAddedSeparation,
+        max(2.0 * -lowerResidual, 1.0e-8 * max(1.0, pivotSeparation)));
+    StationPair upperPair = sampleAt(job, record, frontX, rearX, upperAdjustment);
+    double upperResidual = residual(upperPair, pivotSeparation);
+    currentTolerance = tolerance(upperPair, pivotSeparation);
+    uint expansions = 0u;
+    while (upperResidual < -currentTolerance && upperAdjustment < maximumAddedSeparation)
+    {
+        ++expansions;
+        lowerAdjustment = upperAdjustment;
+        lowerResidual = upperResidual;
+        lowerPair = upperPair;
+        upperAdjustment = min(maximumAddedSeparation, 2.0 * upperAdjustment);
+        upperPair = sampleAt(job, record, frontX, rearX, upperAdjustment);
+        upperResidual = residual(upperPair, pivotSeparation);
+        currentTolerance = tolerance(upperPair, pivotSeparation);
+    }
+    if (!finiteValue(upperResidual) || !finiteValue(currentTolerance))
+    {
+        publish(index, job, STATUS_NON_FINITE, 0u, expansions, upperPair, 0.0);
+        return;
+    }
+    if (abs(upperResidual) <= currentTolerance)
+    {
+        publish(index, job, STATUS_SOLVED, 0u, expansions, upperPair, upperResidual);
+        return;
+    }
+    if (upperResidual < 0.0)
+    {
+        publish(index, job, STATUS_NO_FEASIBLE_ROOT, 0u, expansions, upperPair, upperResidual);
+        return;
+    }
+
+    for (uint iteration = 0u; iteration < 64u; ++iteration)
+    {
+        double bracketWidth = upperAdjustment - lowerAdjustment;
+        double secantFraction = -lowerResidual / (upperResidual - lowerResidual);
+        double adjustment = finiteValue(secantFraction)
+                && secantFraction >= 0.01 && secantFraction <= 0.99
+            ? mix(lowerAdjustment, upperAdjustment, secantFraction)
+            : lowerAdjustment + 0.5 * bracketWidth;
+        StationPair candidate = sampleAt(job, record, frontX, rearX, adjustment);
+        double candidateResidual = residual(candidate, pivotSeparation);
+        currentTolerance = tolerance(candidate, pivotSeparation);
+        if (!finiteValue(candidateResidual) || !finiteValue(currentTolerance))
+        {
+            publish(index, job, STATUS_NON_FINITE, iteration + 1u,
+                expansions, candidate, 0.0);
+            return;
+        }
+        if (abs(candidateResidual) <= currentTolerance)
+        {
+            publish(index, job, STATUS_SOLVED, iteration + 1u,
+                expansions, candidate, candidateResidual);
+            return;
+        }
+        if (candidateResidual < 0.0)
+        {
+            lowerAdjustment = adjustment;
+            lowerResidual = candidateResidual;
+            lowerPair = candidate;
+        }
+        else
+        {
+            upperAdjustment = adjustment;
+            upperResidual = candidateResidual;
+            upperPair = candidate;
+        }
+    }
+
+    bool chooseLower = abs(lowerResidual) < abs(upperResidual);
+    StationPair bestPair = chooseLower ? lowerPair : upperPair;
+    double bestResidual = chooseLower ? lowerResidual : upperResidual;
+    currentTolerance = tolerance(bestPair, pivotSeparation);
+    publish(index, job,
+        abs(bestResidual) <= currentTolerance ? STATUS_SOLVED : STATUS_DID_NOT_CONVERGE,
+        64u, expansions, bestPair, bestResidual);
+}
