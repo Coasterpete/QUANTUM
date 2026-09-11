@@ -472,13 +472,23 @@ namespace quantum::physics::gpu
         if (rigidBogie_.resultBuffer) vmaDestroyBuffer(allocator_, rigidBogie_.resultBuffer, rigidBogie_.resultAllocation);
         if (rigidBogie_.readbackBuffer) vmaDestroyBuffer(allocator_, rigidBogie_.readbackBuffer, rigidBogie_.readbackAllocation);
         rigidBogie_.readbackMapped = nullptr;
+        if (trainPose_.definitionBuffer) vmaDestroyBuffer(allocator_, trainPose_.definitionBuffer, trainPose_.definitionAllocation);
+        if (trainPose_.carBuffer) vmaDestroyBuffer(allocator_, trainPose_.carBuffer, trainPose_.carAllocation);
+        if (trainPose_.connectionBuffer) vmaDestroyBuffer(allocator_, trainPose_.connectionBuffer, trainPose_.connectionAllocation);
+        if (trainPose_.jobBuffer) vmaDestroyBuffer(allocator_, trainPose_.jobBuffer, trainPose_.jobAllocation);
+        if (trainPose_.resultBuffer) vmaDestroyBuffer(allocator_, trainPose_.resultBuffer, trainPose_.resultAllocation);
+        if (trainPose_.readbackBuffer) vmaDestroyBuffer(allocator_, trainPose_.readbackBuffer, trainPose_.readbackAllocation);
+        trainPose_.readbackMapped = nullptr;
         if (validationFence_) vkDestroyFence(device_, validationFence_, nullptr);
         for (auto f : computeFences_) if (f) vkDestroyFence(device_, f, nullptr);
         if (commandPool_) vkDestroyCommandPool(device_, commandPool_, nullptr);
         if (computePipeline_) vkDestroyPipeline(device_, computePipeline_, nullptr);
         for (const VkPipeline pipeline : rigidBogiePipelines_)
             if (pipeline) vkDestroyPipeline(device_, pipeline, nullptr);
+        if (trainPosePipeline_) vkDestroyPipeline(device_, trainPosePipeline_, nullptr);
+        if (trainPosePipelineLayout_) vkDestroyPipelineLayout(device_, trainPosePipelineLayout_, nullptr);
         if (pipelineLayout_) vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
+        if (trainPoseSetLayout_) vkDestroyDescriptorSetLayout(device_, trainPoseSetLayout_, nullptr);
         if (transientSetLayout_) vkDestroyDescriptorSetLayout(device_, transientSetLayout_, nullptr);
         if (persistentSetLayout_) vkDestroyDescriptorSetLayout(device_, persistentSetLayout_, nullptr);
         if (descriptorPool_) vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
@@ -763,11 +773,11 @@ namespace quantum::physics::gpu
     void GpuPhysicsContext::createDescriptorResources()
     {
         VkDescriptorPoolSize poolSizes[] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 13},
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.maxSets = 4;
+        poolInfo.maxSets = 5;
         poolInfo.poolSizeCount = 1;
         poolInfo.pPoolSizes = poolSizes;
         if (vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS)
@@ -795,6 +805,21 @@ namespace quantum::physics::gpu
         if (vkCreateDescriptorSetLayout(device_, &tlInfo, nullptr, &transientSetLayout_) != VK_SUCCESS)
             throw std::runtime_error("vkCreateDescriptorSetLayout transient failed");
 
+        VkDescriptorSetLayoutBinding trainBindings[] = {
+            {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+            {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+            {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+            {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+            {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        };
+        VkDescriptorSetLayoutCreateInfo trainLayoutInfo{};
+        trainLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        trainLayoutInfo.bindingCount = static_cast<std::uint32_t>(std::size(trainBindings));
+        trainLayoutInfo.pBindings = trainBindings;
+        if (vkCreateDescriptorSetLayout(device_, &trainLayoutInfo, nullptr,
+                &trainPoseSetLayout_) != VK_SUCCESS)
+            throw std::runtime_error("vkCreateDescriptorSetLayout train pose failed");
+
         allocateDescriptorSets();
     }
 
@@ -808,9 +833,20 @@ namespace quantum::physics::gpu
         if (vkCreatePipelineLayout(device_, &plInfo, nullptr, &pipelineLayout_) != VK_SUCCESS)
             throw std::runtime_error("vkCreatePipelineLayout failed");
 
+        const VkDescriptorSetLayout trainLayouts[] = {
+            persistentSetLayout_, trainPoseSetLayout_};
+        VkPipelineLayoutCreateInfo trainPipelineLayoutInfo{};
+        trainPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        trainPipelineLayoutInfo.setLayoutCount = 2;
+        trainPipelineLayoutInfo.pSetLayouts = trainLayouts;
+        if (vkCreatePipelineLayout(device_, &trainPipelineLayoutInfo, nullptr,
+                &trainPosePipelineLayout_) != VK_SUCCESS)
+            throw std::runtime_error("vkCreatePipelineLayout train pose failed");
+
         const auto createComputePipeline = [&](const char* fileName,
                                                VkPipeline& pipeline,
-                                               const std::uint32_t* localSize = nullptr) -> bool
+                                               const std::uint32_t* localSize = nullptr,
+                                               VkPipelineLayout layout = VK_NULL_HANDLE) -> bool
         {
             std::vector<std::filesystem::path> candidates;
             try
@@ -869,7 +905,7 @@ namespace quantum::physics::gpu
             VkComputePipelineCreateInfo info{};
             info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
             info.stage = stage;
-            info.layout = pipelineLayout_;
+            info.layout = layout != VK_NULL_HANDLE ? layout : pipelineLayout_;
             const VkResult result = vkCreateComputePipelines(
                 device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
             vkDestroyShaderModule(device_, module, nullptr);
@@ -895,6 +931,64 @@ namespace quantum::physics::gpu
         if (rigidBogiePipelineReady_)
             quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
                 "VK", "GpuPhysicsContext: rigid-bogie prototype pipeline ready");
+    }
+
+    void GpuPhysicsContext::createTrainPosePipeline()
+    {
+        if (trainPosePipelineReady_ || trainPosePipeline_ != VK_NULL_HANDLE)
+            return;
+        std::vector<std::filesystem::path> candidates;
+        try
+        {
+            const auto root = std::filesystem::absolute(
+                std::filesystem::path(__FILE__).parent_path().parent_path()
+                    .parent_path().parent_path().parent_path());
+            candidates.push_back(root / "build" / "shaders"
+                / "train_pose.comp.spv");
+        }
+        catch (...) {}
+        try
+        {
+            candidates.push_back(std::filesystem::absolute(
+                "build/shaders/train_pose.comp.spv"));
+            candidates.push_back(std::filesystem::absolute(
+                "shaders/train_pose.comp.spv"));
+        }
+        catch (...) {}
+        std::vector<std::uint32_t> code;
+        for (const auto& path : candidates)
+        {
+            if (!std::filesystem::exists(path)) continue;
+            code = readSpirvFile(path);
+            break;
+        }
+        if (code.empty())
+            throw std::runtime_error("train_pose.comp.spv not found");
+        VkShaderModule module = createShaderModuleLocal(device_, code);
+        VkPipelineShaderStageCreateInfo stage{};
+        stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stage.module = module;
+        stage.pName = "main";
+        VkComputePipelineCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        info.stage = stage;
+        info.layout = trainPosePipelineLayout_;
+#if defined(QUANTUM_ENABLE_VULKAN_VALIDATION)
+        // The full parity shader triggers pathological optimization time on the
+        // current NVIDIA driver. Debug validation needs executable code, not a
+        // production timing binary; Release deliberately retains optimization.
+        info.flags = VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+#endif
+        const VkResult result = vkCreateComputePipelines(device_,
+            VK_NULL_HANDLE, 1, &info, nullptr, &trainPosePipeline_);
+        vkDestroyShaderModule(device_, module, nullptr);
+        if (result != VK_SUCCESS)
+            throw std::runtime_error(
+                "vkCreateComputePipelines failed for train_pose.comp.spv");
+        trainPosePipelineReady_ = true;
+        quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+            "VK", "GpuPhysicsContext: train-pose residency prototype pipeline ready");
     }
 
     void GpuPhysicsContext::allocateDescriptorSets()
@@ -926,6 +1020,14 @@ namespace quantum::physics::gpu
         rigidAlloc.pSetLayouts = &transientSetLayout_;
         if (vkAllocateDescriptorSets(device_, &rigidAlloc, &rigidBogie_.descriptorSet) != VK_SUCCESS)
             throw std::runtime_error("vkAllocateDescriptorSets rigid bogie failed");
+        VkDescriptorSetAllocateInfo trainAlloc{};
+        trainAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        trainAlloc.descriptorPool = descriptorPool_;
+        trainAlloc.descriptorSetCount = 1;
+        trainAlloc.pSetLayouts = &trainPoseSetLayout_;
+        if (vkAllocateDescriptorSets(device_, &trainAlloc,
+                &trainPose_.descriptorSet) != VK_SUCCESS)
+            throw std::runtime_error("vkAllocateDescriptorSets train pose failed");
     }
 
     void GpuPhysicsContext::updatePersistentDescriptors()
@@ -1207,6 +1309,80 @@ namespace quantum::physics::gpu
         vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
     }
 
+    void GpuPhysicsContext::ensureTrainPoseBuffers(const std::size_t jobCount)
+    {
+        if (jobCount == 0 || jobCount <= trainPose_.capacityJobs) return;
+        const VkDeviceSize jobBytes = jobCount * sizeof(GpuTrainPoseJob);
+        const VkDeviceSize resultBytes = jobCount * sizeof(GpuTrainPoseResult);
+        if (trainPose_.jobBuffer)
+            vmaDestroyBuffer(allocator_, trainPose_.jobBuffer, trainPose_.jobAllocation);
+        if (trainPose_.resultBuffer)
+            vmaDestroyBuffer(allocator_, trainPose_.resultBuffer, trainPose_.resultAllocation);
+        if (trainPose_.readbackBuffer)
+            vmaDestroyBuffer(allocator_, trainPose_.readbackBuffer, trainPose_.readbackAllocation);
+        trainPose_.readbackMapped = nullptr;
+
+        VkBufferCreateInfo jobInfo = makeStorageBufferInfo(jobBytes);
+        VmaAllocationCreateInfo uploadInfo{};
+        uploadInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        uploadInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        if (vmaCreateBuffer(allocator_, &jobInfo, &uploadInfo,
+                &trainPose_.jobBuffer, &trainPose_.jobAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("Unable to allocate train-pose job buffer");
+
+        VkBufferCreateInfo resultInfo = makeStorageBufferInfo(resultBytes);
+        VmaAllocationCreateInfo deviceInfo{};
+        deviceInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        if (vmaCreateBuffer(allocator_, &resultInfo, &deviceInfo,
+                &trainPose_.resultBuffer, &trainPose_.resultAllocation, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("Unable to allocate train-pose result buffer");
+
+        VmaAllocationCreateInfo readbackInfo{};
+        readbackInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        readbackInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT
+            | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo mapped{};
+        if (vmaCreateBuffer(allocator_, &resultInfo, &readbackInfo,
+                &trainPose_.readbackBuffer, &trainPose_.readbackAllocation,
+                &mapped) != VK_SUCCESS)
+            throw std::runtime_error("Unable to allocate train-pose readback buffer");
+        trainPose_.readbackMapped = mapped.pMappedData;
+        trainPose_.capacityJobs = jobCount;
+    }
+
+    void GpuPhysicsContext::updateTrainPoseDescriptors(const std::size_t jobCount)
+    {
+        if (trainPose_.descriptorSet == VK_NULL_HANDLE || jobCount == 0
+            || trainPose_.definitionBuffer == VK_NULL_HANDLE
+            || trainPose_.carBuffer == VK_NULL_HANDLE
+            || trainPose_.connectionBuffer == VK_NULL_HANDLE)
+            return;
+        VkDescriptorBufferInfo infos[5]{};
+        infos[0].buffer = trainPose_.definitionBuffer;
+        infos[0].range = trainPose_.definitions.size()
+            * sizeof(GpuResidentTrainDefinition);
+        infos[1].buffer = trainPose_.carBuffer;
+        infos[1].range = trainPose_.cars.size() * sizeof(GpuResidentCarDefinition);
+        infos[2].buffer = trainPose_.connectionBuffer;
+        infos[2].range = std::max<std::size_t>(1, trainPose_.connections.size())
+            * sizeof(GpuResidentConnectionDefinition);
+        infos[3].buffer = trainPose_.jobBuffer;
+        infos[3].range = jobCount * sizeof(GpuTrainPoseJob);
+        infos[4].buffer = trainPose_.resultBuffer;
+        infos[4].range = jobCount * sizeof(GpuTrainPoseResult);
+        VkWriteDescriptorSet writes[5]{};
+        for (std::uint32_t index = 0; index < 5; ++index)
+        {
+            writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[index].dstSet = trainPose_.descriptorSet;
+            writes[index].dstBinding = index;
+            writes[index].descriptorCount = 1;
+            writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[index].pBufferInfo = &infos[index];
+        }
+        vkUpdateDescriptorSets(device_, 5, writes, 0, nullptr);
+    }
+
     void GpuPhysicsContext::uploadTrackData(std::span<const coaster::TrackKinematicState>, double) {}
     void GpuPhysicsContext::uploadQueries(std::uint32_t slot, std::span<const GpuTrackQuery> queries)
     {
@@ -1254,6 +1430,101 @@ namespace quantum::physics::gpu
     GpuComputeDeviceInfo GpuPhysicsContext::computeDeviceInfo() const noexcept
     {
         return computeDeviceInfo_;
+    }
+
+    void GpuPhysicsContext::uploadTrainDefinition(
+        const std::uint32_t trainDefinitionIndex,
+        const TrainDefinition& definition)
+    {
+        validateTrainDefinition(definition);
+        if (definition.cars.size() > gpuTrainPoseMaximumCarCount)
+            throw std::invalid_argument(
+                "GPU train-pose prototype supports at most eight cars");
+        if (device_ == VK_NULL_HANDLE)
+            return;
+        createTrainPosePipeline();
+
+        GpuResidentTrainDefinition resident;
+        resident.firstCar = static_cast<std::uint32_t>(trainPose_.cars.size());
+        resident.carCount = static_cast<std::uint32_t>(definition.cars.size());
+        resident.firstConnection = static_cast<std::uint32_t>(
+            trainPose_.connections.size());
+        resident.connectionCount = static_cast<std::uint32_t>(
+            definition.connections.size());
+        if (trainDefinitionIndex >= trainPose_.definitions.size())
+            trainPose_.definitions.resize(trainDefinitionIndex + 1);
+        trainPose_.definitions[trainDefinitionIndex] = resident;
+
+        const auto copy3 = [](double (&target)[4], const glm::dvec3& source)
+        {
+            target[0] = source.x;
+            target[1] = source.y;
+            target[2] = source.z;
+            target[3] = 0.0;
+        };
+        for (std::size_t index = 0; index < definition.cars.size(); ++index)
+        {
+            const TrainCarDefinition& source = definition.cars[index];
+            if (source.car.bogies.size() != 2)
+                throw std::invalid_argument(
+                    "GPU train-pose prototype requires exactly two bogies per car");
+            GpuResidentCarDefinition car;
+            car.sourceCarIndex = static_cast<std::uint32_t>(index);
+            car.totalMassKilograms = totalCarMassKilograms(
+                source.car, source.loadout);
+            copy3(car.bogie0ReferencePositionMeters,
+                source.car.bogies[0].referencePositionMeters);
+            copy3(car.bogie1ReferencePositionMeters,
+                source.car.bogies[1].referencePositionMeters);
+            copy3(car.bodyDimensionsMeters, source.car.bodyDimensionsMeters);
+            copy3(car.frontHitchPositionMeters,
+                source.car.frontHitchPositionMeters);
+            copy3(car.rearHitchPositionMeters,
+                source.car.rearHitchPositionMeters);
+            copy3(car.loadedCenterOfGravityMeters,
+                loadedCarCenterOfGravityMeters(source.car, source.loadout));
+            trainPose_.cars.push_back(car);
+        }
+        for (const InterCarConnectionDefinition& source : definition.connections)
+            trainPose_.connections.push_back({source.rigidLengthMeters, 0.0});
+
+        const auto replaceBuffer = [this](VkBuffer& buffer,
+            VmaAllocation& allocation, const void* data, const VkDeviceSize bytes)
+        {
+            if (buffer) vmaDestroyBuffer(allocator_, buffer, allocation);
+            VkBufferCreateInfo bufferInfo = makeStorageBufferInfo(bytes);
+            VmaAllocationCreateInfo allocationInfo{};
+            allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+            allocationInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+            if (vmaCreateBuffer(allocator_, &bufferInfo, &allocationInfo,
+                    &buffer, &allocation, nullptr) != VK_SUCCESS)
+                throw std::runtime_error("Unable to allocate resident train-definition buffer");
+            void* mapped = nullptr;
+            if (vmaMapMemory(allocator_, allocation, &mapped) != VK_SUCCESS)
+                throw std::runtime_error("Unable to map resident train-definition buffer");
+            std::memcpy(mapped, data, static_cast<std::size_t>(bytes));
+            vmaFlushAllocation(allocator_, allocation, 0, bytes);
+            vmaUnmapMemory(allocator_, allocation);
+        };
+        replaceBuffer(trainPose_.definitionBuffer, trainPose_.definitionAllocation,
+            trainPose_.definitions.data(), trainPose_.definitions.size()
+                * sizeof(GpuResidentTrainDefinition));
+        replaceBuffer(trainPose_.carBuffer, trainPose_.carAllocation,
+            trainPose_.cars.data(), trainPose_.cars.size()
+                * sizeof(GpuResidentCarDefinition));
+        const GpuResidentConnectionDefinition dummy{};
+        replaceBuffer(trainPose_.connectionBuffer, trainPose_.connectionAllocation,
+            trainPose_.connections.empty() ? static_cast<const void*>(&dummy)
+                                           : trainPose_.connections.data(),
+            std::max<std::size_t>(1, trainPose_.connections.size())
+                * sizeof(GpuResidentConnectionDefinition));
+    }
+
+    bool GpuPhysicsContext::gpuTrainPoseReady() const noexcept
+    {
+        return device_ != VK_NULL_HANDLE && shaderFloat64Enabled_
+            && trainPosePipelineReady_ && trainPosePipeline_ != VK_NULL_HANDLE
+            && gpuTrackReady_ && trainPose_.definitionBuffer != VK_NULL_HANDLE;
     }
 
     std::vector<GpuRigidBogieResult> GpuPhysicsContext::solveRigidBogiesGpu(
@@ -1393,6 +1664,141 @@ namespace quantum::physics::gpu
             timings->submitDispatchMicroseconds = microseconds(submitBegin, submitEnd);
             timings->fenceWaitMicroseconds = microseconds(waitBegin, waitEnd);
             timings->readbackMicroseconds = microseconds(readbackBegin, readbackEnd);
+            timings->gpuExecutionMicroseconds = gpuExecutionMicroseconds;
+            timings->totalMicroseconds = microseconds(totalBegin, readbackEnd);
+        }
+        return results;
+    }
+
+    std::vector<GpuTrainPoseResult> GpuPhysicsContext::solveTrainPosesGpu(
+        const std::span<const GpuTrainPoseJob> jobs,
+        GpuTrainPoseBatchTimings* const timings)
+    {
+        using Clock = std::chrono::steady_clock;
+        if (timings) *timings = {};
+        if (jobs.empty()) return {};
+        if (!gpuTrainPoseReady() || validationFence_ == VK_NULL_HANDLE)
+            return {};
+
+        const auto totalBegin = Clock::now();
+        const auto uploadBegin = totalBegin;
+        ensureTrainPoseBuffers(jobs.size());
+        updatePersistentDescriptors();
+        updateTrainPoseDescriptors(jobs.size());
+        void* mapped = nullptr;
+        if (vmaMapMemory(allocator_, trainPose_.jobAllocation, &mapped) != VK_SUCCESS)
+            throw std::runtime_error("Unable to map train-pose job buffer");
+        std::memcpy(mapped, jobs.data(), jobs.size_bytes());
+        vmaFlushAllocation(allocator_, trainPose_.jobAllocation, 0,
+            jobs.size_bytes());
+        vmaUnmapMemory(allocator_, trainPose_.jobAllocation);
+        const auto uploadEnd = Clock::now();
+
+        const auto submitBegin = uploadEnd;
+        vkResetFences(device_, 1, &validationFence_);
+        VkCommandBuffer commandBuffer = commandBuffers_[0];
+        vkResetCommandBuffer(commandBuffer, 0);
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+            throw std::runtime_error("Unable to begin train-pose command buffer");
+        if (timestampSupported_)
+            vkCmdResetQueryPool(commandBuffer, timestampPool_, 0, 2);
+        VkMemoryBarrier hostToShader{};
+        hostToShader.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        hostToShader.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        hostToShader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &hostToShader,
+            0, nullptr, 0, nullptr);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            trainPosePipeline_);
+        const VkDescriptorSet descriptorSets[] = {
+            persistentDescriptorSet_, trainPose_.descriptorSet};
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            trainPosePipelineLayout_, 0, 2, descriptorSets, 0, nullptr);
+        if (timestampSupported_)
+            vkCmdWriteTimestamp(commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampPool_, 0);
+        vkCmdDispatch(commandBuffer, static_cast<std::uint32_t>(jobs.size()), 1, 1);
+        if (timestampSupported_)
+            vkCmdWriteTimestamp(commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampPool_, 1);
+        VkMemoryBarrier shaderToTransfer{};
+        shaderToTransfer.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        shaderToTransfer.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        shaderToTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &shaderToTransfer,
+            0, nullptr, 0, nullptr);
+        VkBufferCopy copy{};
+        copy.size = jobs.size() * sizeof(GpuTrainPoseResult);
+        vkCmdCopyBuffer(commandBuffer, trainPose_.resultBuffer,
+            trainPose_.readbackBuffer, 1, &copy);
+        VkMemoryBarrier transferToHost{};
+        transferToHost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        transferToHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        transferToHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &transferToHost,
+            0, nullptr, 0, nullptr);
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+            throw std::runtime_error("Unable to end train-pose command buffer");
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        if (vkQueueSubmit(computeQueue_, 1, &submitInfo, validationFence_)
+            != VK_SUCCESS)
+            throw std::runtime_error("Unable to submit train-pose dispatch");
+        const auto submitEnd = Clock::now();
+
+        const auto waitBegin = submitEnd;
+        if (vkWaitForFences(device_, 1, &validationFence_, VK_TRUE,
+                5'000'000'000ULL) != VK_SUCCESS)
+            throw std::runtime_error("Train-pose dispatch fence wait failed");
+        const auto waitEnd = Clock::now();
+        double gpuExecutionMicroseconds = 0.0;
+        if (timestampSupported_)
+        {
+            std::uint64_t timestamps[2]{};
+            if (vkGetQueryPoolResults(device_, timestampPool_, 0, 2,
+                    sizeof(timestamps), timestamps, sizeof(std::uint64_t),
+                    VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT)
+                == VK_SUCCESS)
+                gpuExecutionMicroseconds = static_cast<double>(
+                    timestamps[1] - timestamps[0]) * timestampPeriod_ / 1000.0;
+        }
+        const auto readbackBegin = waitEnd;
+        vmaInvalidateAllocation(allocator_, trainPose_.readbackAllocation,
+            0, copy.size);
+        std::vector<GpuTrainPoseResult> results(jobs.size());
+        if (trainPose_.readbackMapped)
+            std::memcpy(results.data(), trainPose_.readbackMapped, copy.size);
+        else
+        {
+            void* readback = nullptr;
+            vmaMapMemory(allocator_, trainPose_.readbackAllocation, &readback);
+            std::memcpy(results.data(), readback, copy.size);
+            vmaUnmapMemory(allocator_, trainPose_.readbackAllocation);
+        }
+        const auto readbackEnd = Clock::now();
+        if (timings)
+        {
+            const auto microseconds = [](const auto begin, const auto end)
+            {
+                return std::chrono::duration<double, std::micro>(end - begin)
+                    .count();
+            };
+            timings->packingUploadMicroseconds = microseconds(
+                uploadBegin, uploadEnd);
+            timings->submitDispatchMicroseconds = microseconds(
+                submitBegin, submitEnd);
+            timings->fenceWaitMicroseconds = microseconds(waitBegin, waitEnd);
+            timings->readbackMicroseconds = microseconds(
+                readbackBegin, readbackEnd);
             timings->gpuExecutionMicroseconds = gpuExecutionMicroseconds;
             timings->totalMicroseconds = microseconds(totalBegin, readbackEnd);
         }
