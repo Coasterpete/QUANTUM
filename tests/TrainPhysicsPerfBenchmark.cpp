@@ -177,6 +177,7 @@ namespace
         std::string_view name;
         TrainSolveCounters counters;
         double averageStepMilliseconds = 0.0;
+        double averageProfiledStepMilliseconds = 0.0;
     };
 
     [[nodiscard]] BenchmarkResult runBenchmark(
@@ -185,7 +186,15 @@ namespace
     {
         const TrainDynamicsState initialState = dynamicsState(
             benchmark.stationMeters);
-        TrainSolveCounters counters;
+        for (std::size_t index = 0; index < 20; ++index)
+        {
+            static_cast<void>(stepTrain(
+                benchmark.track,
+                train,
+                PhysicsEnvironment{},
+                initialState,
+                FixedStepSettings{}));
+        }
         const auto begin = std::chrono::steady_clock::now();
         for (std::size_t index = 0; index < benchmarkStepCount; ++index)
         {
@@ -197,16 +206,34 @@ namespace
                 PhysicsEnvironment{},
                 initialState,
                 FixedStepSettings{},
-                {},
-                &counters));
+                {}));
         }
         const double elapsedMilliseconds =
             std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - begin).count();
+
+        TrainSolveCounters counters;
+        const auto profiledBegin = std::chrono::steady_clock::now();
+        for (std::size_t index = 0; index < benchmarkStepCount; ++index)
+        {
+            static_cast<void>(stepTrain(
+                benchmark.track,
+                train,
+                PhysicsEnvironment{},
+                initialState,
+                FixedStepSettings{},
+                {},
+                &counters));
+        }
+        const double profiledElapsedMilliseconds =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - profiledBegin).count();
         return {
             benchmark.name,
             counters,
-            elapsedMilliseconds / static_cast<double>(benchmarkStepCount)
+            elapsedMilliseconds / static_cast<double>(benchmarkStepCount),
+            profiledElapsedMilliseconds
+                / static_cast<double>(benchmarkStepCount)
         };
     }
 
@@ -223,6 +250,81 @@ namespace
         return baseline == 0
             ? 0.0
             : static_cast<double>(comparison) / static_cast<double>(baseline);
+    }
+
+    [[nodiscard]] double millisecondsPerStep(
+        const std::uint64_t nanoseconds) noexcept
+    {
+        return static_cast<double>(nanoseconds)
+            / (1'000'000.0 * static_cast<double>(benchmarkStepCount));
+    }
+
+    [[nodiscard]] double averagePerCall(
+        const std::uint64_t total,
+        const std::uint64_t calls) noexcept
+    {
+        return calls == 0
+            ? 0.0
+            : static_cast<double>(total) / static_cast<double>(calls);
+    }
+
+    void printProfile(const BenchmarkResult& result)
+    {
+        const TrainSolveCounters& counters = result.counters;
+        const std::uint64_t minimumIterations =
+            counters.rigidBogieSolveCalls == 0
+            ? 0 : counters.rigidBogieRefinementIterationsMinimum;
+        const std::uint64_t minimumSamples =
+            counters.rigidBogieSolveCalls == 0
+            ? 0 : counters.rigidBogieTrackSamplesMinimum;
+        std::printf("\n%.*s detailed profile (per step)\n",
+            static_cast<int>(result.name.size()), result.name.data());
+        std::printf("  uninstrumented step:       %9.4f ms\n",
+            result.averageStepMilliseconds);
+        std::printf("  instrumented step:         %9.4f ms\n",
+            result.averageProfiledStepMilliseconds);
+        std::printf("  solveTrainPose inclusive:  %9.4f ms\n",
+            millisecondsPerStep(counters.solveTrainPoseNanoseconds));
+        std::printf("  solveCarGeometry inclusive:%9.4f ms\n",
+            millisecondsPerStep(counters.solveCarGeometryNanoseconds));
+        std::printf("  rigid-bogie inclusive:     %9.4f ms\n",
+            millisecondsPerStep(counters.rigidBogieSolveNanoseconds));
+        std::printf("  connector candidates:      %9.4f ms\n",
+            millisecondsPerStep(counters.connectionCandidateNanoseconds));
+        std::printf("  track sampling:            %9.4f ms\n",
+            millisecondsPerStep(counters.trackSampleNanoseconds));
+        std::printf("  rigid refinements/call:    %6llu / %6.2f / %6llu min/avg/max\n",
+            static_cast<unsigned long long>(minimumIterations),
+            averagePerCall(counters.rigidBogieRefinementIterations,
+                counters.rigidBogieSolveCalls),
+            static_cast<unsigned long long>(
+                counters.rigidBogieRefinementIterationsMaximum));
+        std::printf("  rigid track samples/call:  %6llu / %6.2f / %6llu min/avg/max\n",
+            static_cast<unsigned long long>(minimumSamples),
+            averagePerCall(counters.rigidBogieTrackSamples,
+                counters.rigidBogieSolveCalls),
+            static_cast<unsigned long long>(
+                counters.rigidBogieTrackSamplesMaximum));
+        std::printf("  connector candidates/step: %9.2f\n",
+            perStep(counters.connectionCandidateEvaluations));
+        const std::uint64_t minimumConnectorCandidates =
+            counters.connectorSolveCalls == 0
+            ? 0 : counters.connectorCandidateEvaluationsMinimum;
+        const std::uint64_t minimumConnectorRefinements =
+            counters.connectorSolveCalls == 0
+            ? 0 : counters.connectorRefinementIterationsMinimum;
+        std::printf("  candidates/connector:      %6llu / %6.2f / %6llu min/avg/max\n",
+            static_cast<unsigned long long>(minimumConnectorCandidates),
+            averagePerCall(counters.connectionCandidateEvaluations,
+                counters.connectorSolveCalls),
+            static_cast<unsigned long long>(
+                counters.connectorCandidateEvaluationsMaximum));
+        std::printf("  refinements/connector:     %6llu / %6.2f / %6llu min/avg/max\n",
+            static_cast<unsigned long long>(minimumConnectorRefinements),
+            averagePerCall(counters.connectorRefinementIterations,
+                counters.connectorSolveCalls),
+            static_cast<unsigned long long>(
+                counters.connectorRefinementIterationsMaximum));
     }
 
     void printCounterRow(
@@ -325,6 +427,11 @@ int main()
         straight.intervalHintMisses, curved.intervalHintMisses);
     std::printf("\nVertical crest rigid-bogie bracket expansions: %.2f /step\n",
         perStep(results.back().counters.rigidBogieBracketExpansions));
+
+    for (const BenchmarkResult& result : results)
+    {
+        printProfile(result);
+    }
 
     return verifyDeterministicWorkCounts(results) ? 0 : 1;
 }

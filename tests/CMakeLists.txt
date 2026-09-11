@@ -2341,3 +2341,34 @@ set_tests_properties(
     PROPERTIES
         LABELS "engine;physics;gpu;validation"
 )
+
+add_executable(
+    QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
+    GpuPhysicsTrackSamplingPerfBenchmark.cpp
+)
+
+target_link_libraries(
+    QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
+    PRIVATE
+        Quantum::Engine
+        Quantum::Core
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+)
+
+target_compile_features(
+    QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_dependencies(
+    QuantumEngineGpuPhysicsTrackSamplingPerfBenchmark
+    QuantumShaders
+)

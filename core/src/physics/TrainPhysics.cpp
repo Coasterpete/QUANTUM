@@ -1,5 +1,7 @@
 #include <quantum/physics/TrainPhysics.hpp>
 
+#include "TrainSolveDiagnostics.hpp"
+
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
@@ -35,6 +37,55 @@ namespace quantum::physics
         inline constexpr std::size_t connectorSearchSampleCount = 160;
         inline constexpr std::size_t connectorRefinementIterationCount = 80;
         inline constexpr std::size_t boundaryRefinementIterationCount = 64;
+
+        class ConnectorWorkObservation
+        {
+        public:
+            explicit ConnectorWorkObservation(
+                TrainSolveCounters* const counters) noexcept
+                : counters_(counters),
+                  candidatesBegin_(counters
+                        ? counters->connectionCandidateEvaluations : 0),
+                  refinementsBegin_(counters
+                        ? counters->connectorRefinementIterations : 0)
+            {
+                if (counters_)
+                {
+                    ++counters_->connectorSolveCalls;
+                }
+            }
+
+            ~ConnectorWorkObservation()
+            {
+                if (!counters_)
+                {
+                    return;
+                }
+                const std::uint64_t candidates =
+                    counters_->connectionCandidateEvaluations
+                    - candidatesBegin_;
+                const std::uint64_t refinements =
+                    counters_->connectorRefinementIterations
+                    - refinementsBegin_;
+                counters_->connectorCandidateEvaluationsMinimum = std::min(
+                    counters_->connectorCandidateEvaluationsMinimum,
+                    candidates);
+                counters_->connectorCandidateEvaluationsMaximum = std::max(
+                    counters_->connectorCandidateEvaluationsMaximum,
+                    candidates);
+                counters_->connectorRefinementIterationsMinimum = std::min(
+                    counters_->connectorRefinementIterationsMinimum,
+                    refinements);
+                counters_->connectorRefinementIterationsMaximum = std::max(
+                    counters_->connectorRefinementIterationsMaximum,
+                    refinements);
+            }
+
+        private:
+            TrainSolveCounters* counters_ = nullptr;
+            std::uint64_t candidatesBegin_ = 0;
+            std::uint64_t refinementsBegin_ = 0;
+        };
 
         class OpenConsistBoundaryError final : public std::domain_error
         {
@@ -740,6 +791,9 @@ namespace quantum::physics
             const double backwardOffsetMeters,
             TrainSolveCounters* const counters = nullptr)
         {
+            detail::ScopedCounterTimer timer{
+                counters,
+                counters ? &counters->connectionCandidateNanoseconds : nullptr};
             if (!std::isfinite(backwardOffsetMeters)
                 || backwardOffsetMeters < 0.0)
             {
@@ -807,6 +861,7 @@ namespace quantum::physics
             const InterCarConnectionDefinition& connection,
             TrainSolveCounters* const counters = nullptr)
         {
+            ConnectorWorkObservation workObservation{counters};
             const double baseSeparation =
                 followingDefinition.car.frontHitchPositionMeters.x
                 - leadingDefinition.car.rearHitchPositionMeters.x;
@@ -2494,12 +2549,20 @@ if (std::abs(solved.residualMeters)
         const TrackLocation& generalizedReferenceLocation,
         TrainSolveCounters* const counters)
     {
+        detail::ScopedCounterTimer timer{
+            counters,
+            counters ? &counters->solveTrainPoseNanoseconds : nullptr};
         if (counters)
         {
             ++counters->solveTrainPoseCalls;
         }
         // sample() is the authoritative public location validation seam.
-        static_cast<void>(track.sample(generalizedReferenceLocation));
+        {
+            detail::ScopedCounterTimer sampleTimer{
+                counters,
+                counters ? &counters->trackSampleNanoseconds : nullptr};
+            static_cast<void>(track.sample(generalizedReferenceLocation));
+        }
         if (counters)
         {
             ++counters->trackSampleCalls;

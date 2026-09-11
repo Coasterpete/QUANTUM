@@ -1,6 +1,8 @@
 #include <quantum/physics/TrackFollower.hpp>
 #include <quantum/physics/CarPose.hpp>
 
+#include "TrainSolveDiagnostics.hpp"
+
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -321,6 +323,9 @@ namespace quantum::physics
         bool& hintValid,
         TrainSolveCounters* const counters) const
     {
+        detail::ScopedCounterTimer timer{
+            counters,
+            counters ? &counters->trackSampleNanoseconds : nullptr};
         validateLocation(location);
 
         const auto isExactInterval = [this, &location](

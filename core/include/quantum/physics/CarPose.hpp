@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace quantum::physics
@@ -30,12 +31,39 @@ namespace quantum::physics
         // Exponential upper-bound expansions, excluding the initial bracket.
         std::uint64_t rigidBogieBracketExpansions = 0;
         std::uint64_t connectionCandidateEvaluations = 0;
+        std::uint64_t connectorSolveCalls = 0;
         // Connector candidates evaluated inside refinement loops.
         std::uint64_t connectorRefinementIterations = 0;
         std::uint64_t connectorFallbackUses = 0;
         std::uint64_t trackSampleCalls = 0;
         // General searches after a hint cannot resolve locally.
         std::uint64_t intervalHintMisses = 0;
+
+        // Inclusive timings are collected only when this diagnostics object is
+        // supplied. Nested totals intentionally overlap so callers can compare
+        // solver stages without changing production behavior when diagnostics
+        // are disabled.
+        std::uint64_t solveTrainPoseNanoseconds = 0;
+        std::uint64_t solveCarGeometryNanoseconds = 0;
+        std::uint64_t rigidBogieSolveNanoseconds = 0;
+        std::uint64_t connectionCandidateNanoseconds = 0;
+        std::uint64_t trackSampleNanoseconds = 0;
+
+        // Per rigid-bogie call distributions. The minimum retains its sentinel
+        // when no rigid-bogie solve was observed.
+        std::uint64_t rigidBogieRefinementIterationsMinimum =
+            std::numeric_limits<std::uint64_t>::max();
+        std::uint64_t rigidBogieRefinementIterationsMaximum = 0;
+        std::uint64_t rigidBogieTrackSamplesMinimum =
+            std::numeric_limits<std::uint64_t>::max();
+        std::uint64_t rigidBogieTrackSamplesMaximum = 0;
+        std::uint64_t rigidBogieTrackSamples = 0;
+        std::uint64_t connectorCandidateEvaluationsMinimum =
+            std::numeric_limits<std::uint64_t>::max();
+        std::uint64_t connectorCandidateEvaluationsMaximum = 0;
+        std::uint64_t connectorRefinementIterationsMinimum =
+            std::numeric_limits<std::uint64_t>::max();
+        std::uint64_t connectorRefinementIterationsMaximum = 0;
     };
 
     // Contact roles describe intended mechanical function only. The authored
