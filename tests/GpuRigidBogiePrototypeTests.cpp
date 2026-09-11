@@ -243,10 +243,11 @@ namespace
         GpuPhysicsContext& gpu,
         const Fixture& fixture,
         const std::vector<GpuRigidBogieJob>& jobs,
-        ValidationTotals& totals)
+        ValidationTotals& totals,
+        const std::uint32_t localSize = 64)
     {
         upload(gpu, fixture);
-        const auto gpuResults = gpu.solveRigidBogiesGpu(jobs);
+        const auto gpuResults = gpu.solveRigidBogiesGpu(jobs, nullptr, localSize);
         if (gpuResults.size() != jobs.size())
             throw std::runtime_error("GPU rigid-bogie dispatch returned wrong result count");
         for (std::size_t index = 0; index < jobs.size(); ++index)
@@ -342,6 +343,9 @@ namespace
         const double circleLength = circle.samples.back().distance;
         for (const std::size_t count : batchSizes)
             compareBatch(gpu, circle, ordinaryJobs(count, circleLength), totals);
+        for (const std::uint32_t localSize : {32u, 128u, 256u})
+            compareBatch(gpu, circle, ordinaryJobs(256, circleLength), totals,
+                localSize);
 
         compareBatch(gpu, straightFixture(), {
             makeJob(10'001, 20.0),
@@ -405,8 +409,16 @@ namespace
             fixture.samples, 1.0, fixture.topology};
         std::printf("PERFORMANCE ABI upload_bytes_per_job=%zu readback_bytes_per_job=%zu\n",
             sizeof(GpuRigidBogieJob), sizeof(GpuRigidBogieResult));
+        const auto device = gpu.computeDeviceInfo();
+        std::printf("DEVICE subgroup=%u max_workgroup_x=%u max_invocations=%u timestamp_bits=%u timestamp_period_ns=%.3f\n",
+            device.subgroupSize, device.maxWorkgroupSizeX,
+            device.maxWorkgroupInvocations, device.timestampValidBits,
+            device.timestampPeriodNanoseconds);
+        for (const std::uint32_t localSize : {32u, 64u, 128u, 256u})
+        {
+        std::printf("LOCAL_SIZE %u\n", localSize);
         std::printf("%6s %10s %10s %10s %10s %10s %10s %10s %10s %10s %10s %9s\n",
-            "jobs", "CPU_us", "CPU_us/j", "CPU_j/s", "upload", "submit",
+            "jobs", "CPU_us", "CPU_us/j", "GPU_exec", "upload", "submit",
             "wait", "readback", "GPU_us", "GPU_us/j", "GPU_j/s", "speedup");
         for (const std::size_t count : batchSizes)
         {
@@ -423,7 +435,16 @@ namespace
                     job.direction < 0 ? TravelDirection::DecreasingStation
                                       : TravelDirection::IncreasingStation});
             }
-            static_cast<void>(gpu.solveRigidBogiesGpu(jobs));
+            const auto warmupResults = gpu.solveRigidBogiesGpu(jobs, nullptr, localSize);
+            if (localSize == 32 && count == 65)
+            {
+                for (std::size_t index = 0; index < warmupResults.size(); ++index)
+                    if (warmupResults[index].refinementIterations > 1)
+                        std::printf("DIVERGENT_JOB index=%zu station=%.6f direction=%d refinements=%u expansions=%u\n",
+                            index, jobs[index].referenceStationMeters, jobs[index].direction,
+                            warmupResults[index].refinementIterations,
+                            warmupResults[index].bracketExpansions);
+            }
             const std::size_t iterations = count <= 128 ? 100 : 25;
             const double cpuMicroseconds = averageMicroseconds(iterations, [&]
             {
@@ -438,21 +459,23 @@ namespace
             for (std::size_t iteration = 0; iteration < iterations; ++iteration)
             {
                 GpuRigidBogieBatchTimings current;
-                static_cast<void>(gpu.solveRigidBogiesGpu(jobs, &current));
+                static_cast<void>(gpu.solveRigidBogiesGpu(jobs, &current, localSize));
                 accumulated.packingUploadMicroseconds += current.packingUploadMicroseconds;
                 accumulated.submitDispatchMicroseconds += current.submitDispatchMicroseconds;
                 accumulated.fenceWaitMicroseconds += current.fenceWaitMicroseconds;
                 accumulated.readbackMicroseconds += current.readbackMicroseconds;
+                accumulated.gpuExecutionMicroseconds += current.gpuExecutionMicroseconds;
                 accumulated.totalMicroseconds += current.totalMicroseconds;
             }
             accumulated.packingUploadMicroseconds /= iterations;
             accumulated.submitDispatchMicroseconds /= iterations;
             accumulated.fenceWaitMicroseconds /= iterations;
             accumulated.readbackMicroseconds /= iterations;
+            accumulated.gpuExecutionMicroseconds /= iterations;
             accumulated.totalMicroseconds /= iterations;
             std::printf("%6zu %10.2f %10.3f %10.0f %10.2f %10.2f %10.2f "
                 "%10.2f %10.2f %10.3f %10.0f %9.3f\n", count, cpuMicroseconds,
-                cpuMicroseconds / count, 1.0e6 * count / cpuMicroseconds,
+                cpuMicroseconds / count, accumulated.gpuExecutionMicroseconds,
                 accumulated.packingUploadMicroseconds,
                 accumulated.submitDispatchMicroseconds,
                 accumulated.fenceWaitMicroseconds,
@@ -461,6 +484,7 @@ namespace
                 accumulated.totalMicroseconds / count,
                 1.0e6 * count / accumulated.totalMicroseconds,
                 cpuMicroseconds / accumulated.totalMicroseconds);
+        }
         }
     }
 }

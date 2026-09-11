@@ -212,7 +212,6 @@ namespace quantum::physics::gpu
             if (basePath == nullptr)
                 return std::filesystem::path("shaders") / "track_sample.comp.spv";
             std::filesystem::path p(basePath);
-            SDL_free((void*)basePath);
             return p / "shaders" / "track_sample.comp.spv";
         }
 
@@ -372,7 +371,8 @@ namespace quantum::physics::gpu
             f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
             f2.pNext = &v13;
             vkGetPhysicalDeviceFeatures2(pd, &f2);
-            if (v13.dynamicRendering != VK_TRUE) continue;
+            if (v13.dynamicRendering != VK_TRUE
+                || v13.maintenance4 != VK_TRUE) continue;
             if (f2.features.shaderFloat64 != VK_TRUE) continue;
 
             uint32_t qCount = 0;
@@ -406,6 +406,7 @@ namespace quantum::physics::gpu
         VkPhysicalDeviceVulkan13Features v13e{};
         v13e.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         v13e.dynamicRendering = VK_TRUE;
+        v13e.maintenance4 = VK_TRUE;
         VkPhysicalDeviceFeatures2 f2e{};
         f2e.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         f2e.features.shaderFloat64 = VK_TRUE;
@@ -475,7 +476,8 @@ namespace quantum::physics::gpu
         for (auto f : computeFences_) if (f) vkDestroyFence(device_, f, nullptr);
         if (commandPool_) vkDestroyCommandPool(device_, commandPool_, nullptr);
         if (computePipeline_) vkDestroyPipeline(device_, computePipeline_, nullptr);
-        if (rigidBogiePipeline_) vkDestroyPipeline(device_, rigidBogiePipeline_, nullptr);
+        for (const VkPipeline pipeline : rigidBogiePipelines_)
+            if (pipeline) vkDestroyPipeline(device_, pipeline, nullptr);
         if (pipelineLayout_) vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
         if (transientSetLayout_) vkDestroyDescriptorSetLayout(device_, transientSetLayout_, nullptr);
         if (persistentSetLayout_) vkDestroyDescriptorSetLayout(device_, persistentSetLayout_, nullptr);
@@ -807,7 +809,8 @@ namespace quantum::physics::gpu
             throw std::runtime_error("vkCreatePipelineLayout failed");
 
         const auto createComputePipeline = [&](const char* fileName,
-                                               VkPipeline& pipeline) -> bool
+                                               VkPipeline& pipeline,
+                                               const std::uint32_t* localSize = nullptr) -> bool
         {
             std::vector<std::filesystem::path> candidates;
             try
@@ -850,6 +853,19 @@ namespace quantum::physics::gpu
             stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
             stage.module = module;
             stage.pName = "main";
+            VkSpecializationMapEntry localSizeEntry{};
+            VkSpecializationInfo specialization{};
+            if (localSize)
+            {
+                localSizeEntry.constantID = 0;
+                localSizeEntry.offset = 0;
+                localSizeEntry.size = sizeof(*localSize);
+                specialization.mapEntryCount = 1;
+                specialization.pMapEntries = &localSizeEntry;
+                specialization.dataSize = sizeof(*localSize);
+                specialization.pData = localSize;
+                stage.pSpecializationInfo = &specialization;
+            }
             VkComputePipelineCreateInfo info{};
             info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
             info.stage = stage;
@@ -858,14 +874,21 @@ namespace quantum::physics::gpu
                 device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
             vkDestroyShaderModule(device_, module, nullptr);
             if (result != VK_SUCCESS)
+            {
+                if (localSize)
+                    return false;
                 throw std::runtime_error(std::string("vkCreateComputePipelines failed for ") + fileName);
+            }
             return true;
         };
 
         gpuPipelineReady_ = createComputePipeline(
             "track_sample.comp.spv", computePipeline_);
-        rigidBogiePipelineReady_ = createComputePipeline(
-            "rigid_bogie.comp.spv", rigidBogiePipeline_);
+        for (std::size_t index = 0; index < rigidBogieLocalSizes_.size(); ++index)
+            static_cast<void>(createComputePipeline(
+                "rigid_bogie.comp.spv", rigidBogiePipelines_[index],
+                &rigidBogieLocalSizes_[index]));
+        rigidBogiePipelineReady_ = rigidBogiePipelines_[1] != VK_NULL_HANDLE;
         if (gpuPipelineReady_)
             quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
                 "VK", "GpuPhysicsContext: track sampling pipeline ready");
@@ -979,6 +1002,39 @@ namespace quantum::physics::gpu
     void GpuPhysicsContext::createTimestampPool()
     {
         timestampSupported_ = false;
+        const VkPhysicalDevice physicalDevice = useHeadless_
+            ? headless_.physicalDevice : (vulkan_ ? vulkan_->physicalDevice() : VK_NULL_HANDLE);
+        if (physicalDevice == VK_NULL_HANDLE) return;
+
+        VkPhysicalDeviceSubgroupProperties subgroup{};
+        subgroup.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+        VkPhysicalDeviceProperties2 properties{};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &subgroup;
+        vkGetPhysicalDeviceProperties2(physicalDevice, &properties);
+        computeDeviceInfo_.subgroupSize = subgroup.subgroupSize;
+        computeDeviceInfo_.maxWorkgroupSizeX = properties.properties.limits.maxComputeWorkGroupSize[0];
+        computeDeviceInfo_.maxWorkgroupInvocations = properties.properties.limits.maxComputeWorkGroupInvocations;
+        timestampPeriod_ = properties.properties.limits.timestampPeriod;
+        computeDeviceInfo_.timestampPeriodNanoseconds = timestampPeriod_;
+
+        std::uint32_t familyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> families(familyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, families.data());
+        if (computeQueueFamily_ >= families.size()) return;
+        computeDeviceInfo_.timestampValidBits = families[computeQueueFamily_].timestampValidBits;
+        if (computeDeviceInfo_.timestampValidBits == 0) return;
+
+        VkQueryPoolCreateInfo queryInfo{};
+        queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        queryInfo.queryCount = 2;
+        if (vkCreateQueryPool(device_, &queryInfo, nullptr, &timestampPool_) == VK_SUCCESS)
+        {
+            timestampSupported_ = true;
+            computeDeviceInfo_.timestampsSupported = true;
+        }
     }
 
     void GpuPhysicsContext::ensureTrackBufferCapacity(std::uint32_t requiredSamples)
@@ -1191,19 +1247,33 @@ namespace quantum::physics::gpu
     bool GpuPhysicsContext::gpuRigidBogieReady() const noexcept
     {
         return device_ != VK_NULL_HANDLE && shaderFloat64Enabled_
-            && rigidBogiePipelineReady_ && rigidBogiePipeline_ != VK_NULL_HANDLE
+            && rigidBogiePipelineReady_ && rigidBogiePipelines_[1] != VK_NULL_HANDLE
             && gpuTrackReady_;
+    }
+
+    GpuComputeDeviceInfo GpuPhysicsContext::computeDeviceInfo() const noexcept
+    {
+        return computeDeviceInfo_;
     }
 
     std::vector<GpuRigidBogieResult> GpuPhysicsContext::solveRigidBogiesGpu(
         const std::span<const GpuRigidBogieJob> jobs,
-        GpuRigidBogieBatchTimings* const timings)
+        GpuRigidBogieBatchTimings* const timings,
+        const std::uint32_t localSize)
     {
         using Clock = std::chrono::steady_clock;
         if (timings) *timings = {};
         if (jobs.empty()) return {};
         if (!gpuRigidBogieReady() || validationFence_ == VK_NULL_HANDLE)
             return {};
+        const auto localSizeIterator = std::find(
+            rigidBogieLocalSizes_.begin(), rigidBogieLocalSizes_.end(), localSize);
+        if (localSizeIterator == rigidBogieLocalSizes_.end())
+            throw std::invalid_argument("Unsupported rigid-bogie benchmark local size");
+        const std::size_t pipelineIndex = static_cast<std::size_t>(
+            localSizeIterator - rigidBogieLocalSizes_.begin());
+        if (rigidBogiePipelines_[pipelineIndex] == VK_NULL_HANDLE)
+            throw std::invalid_argument("Rigid-bogie local size is unsupported by this device");
 
         const auto totalBegin = Clock::now();
         const auto uploadBegin = totalBegin;
@@ -1227,6 +1297,10 @@ namespace quantum::physics::gpu
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
             throw std::runtime_error("Unable to begin rigid-bogie command buffer");
+        if (timestampSupported_)
+        {
+            vkCmdResetQueryPool(commandBuffer, timestampPool_, 0, 2);
+        }
 
         VkMemoryBarrier hostToShader{};
         hostToShader.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1236,13 +1310,19 @@ namespace quantum::physics::gpu
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &hostToShader,
             0, nullptr, 0, nullptr);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-            rigidBogiePipeline_);
+            rigidBogiePipelines_[pipelineIndex]);
         const VkDescriptorSet descriptorSets[] = {
             persistentDescriptorSet_, rigidBogie_.descriptorSet};
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
             pipelineLayout_, 0, 2, descriptorSets, 0, nullptr);
+        if (timestampSupported_)
+            vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                timestampPool_, 0);
         vkCmdDispatch(commandBuffer,
-            static_cast<std::uint32_t>((jobs.size() + 63) / 64), 1, 1);
+            static_cast<std::uint32_t>((jobs.size() + localSize - 1) / localSize), 1, 1);
+        if (timestampSupported_)
+            vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                timestampPool_, 1);
 
         VkMemoryBarrier shaderToTransfer{};
         shaderToTransfer.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1278,6 +1358,17 @@ namespace quantum::physics::gpu
             throw std::runtime_error("Rigid-bogie dispatch fence wait failed");
         const auto waitEnd = Clock::now();
 
+        double gpuExecutionMicroseconds = 0.0;
+        if (timestampSupported_)
+        {
+            std::uint64_t timestamps[2]{};
+            if (vkGetQueryPoolResults(device_, timestampPool_, 0, 2,
+                    sizeof(timestamps), timestamps, sizeof(std::uint64_t),
+                    VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+                gpuExecutionMicroseconds = static_cast<double>(timestamps[1] - timestamps[0])
+                    * timestampPeriod_ / 1000.0;
+        }
+
         const auto readbackBegin = waitEnd;
         vmaInvalidateAllocation(allocator_, rigidBogie_.readbackAllocation,
             0, copy.size);
@@ -1302,6 +1393,7 @@ namespace quantum::physics::gpu
             timings->submitDispatchMicroseconds = microseconds(submitBegin, submitEnd);
             timings->fenceWaitMicroseconds = microseconds(waitBegin, waitEnd);
             timings->readbackMicroseconds = microseconds(readbackBegin, readbackEnd);
+            timings->gpuExecutionMicroseconds = gpuExecutionMicroseconds;
             timings->totalMicroseconds = microseconds(totalBegin, readbackEnd);
         }
         return results;

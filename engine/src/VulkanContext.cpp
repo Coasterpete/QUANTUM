@@ -1358,7 +1358,8 @@ namespace quantum::renderer
             features.pNext = &vulkan13Features;
             vkGetPhysicalDeviceFeatures2(device, &features);
 
-            if (vulkan13Features.dynamicRendering != VK_TRUE)
+            if (vulkan13Features.dynamicRendering != VK_TRUE
+                || vulkan13Features.maintenance4 != VK_TRUE)
             {
                 continue;
             }
@@ -1401,8 +1402,8 @@ namespace quantum::renderer
 
         throw std::runtime_error(
             "No Vulkan physical device supports graphics, presentation, "
-            "dynamic rendering, swapchain color attachments, and the "
-            "Editor viewport color/depth formats for this window."
+            "dynamic rendering, maintenance4, swapchain color attachments, "
+            "and the Editor viewport color/depth formats for this window."
         );
     }
 
@@ -1446,6 +1447,7 @@ namespace quantum::renderer
         vulkan13Features.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         vulkan13Features.dynamicRendering = VK_TRUE;
+        vulkan13Features.maintenance4 = VK_TRUE;
 
         VkPhysicalDeviceFeatures2 deviceFeatures2{};
         deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;

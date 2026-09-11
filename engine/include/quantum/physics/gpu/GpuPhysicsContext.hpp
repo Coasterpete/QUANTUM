@@ -102,7 +102,18 @@ namespace quantum::physics::gpu
         double submitDispatchMicroseconds = 0.0;
         double fenceWaitMicroseconds = 0.0;
         double readbackMicroseconds = 0.0;
+        double gpuExecutionMicroseconds = 0.0;
         double totalMicroseconds = 0.0;
+    };
+
+    struct GpuComputeDeviceInfo
+    {
+        std::uint32_t subgroupSize = 0;
+        std::uint32_t maxWorkgroupSizeX = 0;
+        std::uint32_t maxWorkgroupInvocations = 0;
+        std::uint32_t timestampValidBits = 0;
+        bool timestampsSupported = false;
+        double timestampPeriodNanoseconds = 0.0;
     };
 
     class GpuPhysicsContext
@@ -160,9 +171,11 @@ namespace quantum::physics::gpu
         [[nodiscard]] std::vector<PhysicsTrackSample> sampleTrackGpu(
             std::span<const GpuTrackQuery> queries);
         [[nodiscard]] bool gpuRigidBogieReady() const noexcept;
+        [[nodiscard]] GpuComputeDeviceInfo computeDeviceInfo() const noexcept;
         [[nodiscard]] std::vector<GpuRigidBogieResult> solveRigidBogiesGpu(
             std::span<const GpuRigidBogieJob> jobs,
-            GpuRigidBogieBatchTimings* timings = nullptr);
+            GpuRigidBogieBatchTimings* timings = nullptr,
+            std::uint32_t localSize = 64);
         // Validates GPU vs CPU for given queries, returns max errors. Throws on GPU
         // unavailable. Uses same tolerances as GpuPhysicsTrackSamplingValidation test.
         struct GpuValidationResult
@@ -250,7 +263,8 @@ namespace quantum::physics::gpu
         std::array<TransientFrameData, 2> frames_{};
         VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline computePipeline_ = VK_NULL_HANDLE;
-        VkPipeline rigidBogiePipeline_ = VK_NULL_HANDLE;
+        static constexpr std::array<std::uint32_t, 4> rigidBogieLocalSizes_{32, 64, 128, 256};
+        std::array<VkPipeline, rigidBogieLocalSizes_.size()> rigidBogiePipelines_{};
         RigidBogieData rigidBogie_;
 
         VkCommandPool commandPool_ = VK_NULL_HANDLE;
@@ -261,6 +275,7 @@ namespace quantum::physics::gpu
         VkQueryPool timestampPool_ = VK_NULL_HANDLE;
         bool timestampSupported_ = false;
         double timestampPeriod_ = 0.0;
+        GpuComputeDeviceInfo computeDeviceInfo_{};
 
         std::uint32_t trackOffset_ = 0;
         std::uint32_t currentSlot_ = 0;
