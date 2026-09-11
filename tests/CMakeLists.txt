@@ -2265,3 +2265,79 @@ set_target_properties(
     PROPERTIES
         CXX_EXTENSIONS OFF
 )
+
+add_executable(
+    QuantumEngineGpuPhysicsTrackSamplingValidationTests
+    GpuPhysicsTrackSamplingValidationTests.cpp
+)
+
+target_link_libraries(
+    QuantumEngineGpuPhysicsTrackSamplingValidationTests
+    PRIVATE
+        Quantum::Engine
+        Quantum::Core
+        SDL3::SDL3
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+)
+
+target_compile_features(
+    QuantumEngineGpuPhysicsTrackSamplingValidationTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineGpuPhysicsTrackSamplingValidationTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEngine.GpuPhysicsTrackSamplingValidation
+    COMMAND QuantumEngineGpuPhysicsTrackSamplingValidationTests
+)
+
+set_tests_properties(
+    QuantumEngine.GpuPhysicsTrackSamplingValidation
+    PROPERTIES
+        LABELS "engine;physics;gpu;validation"
+)
+
+add_executable(
+    QuantumEngineGpuPhysicsBatchedSamplingTests
+    GpuPhysicsBatchedSamplingTests.cpp
+)
+
+target_link_libraries(
+    QuantumEngineGpuPhysicsBatchedSamplingTests
+    PRIVATE
+        Quantum::Engine
+        Quantum::Core
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+        SDL3::SDL3
+)
+
+target_compile_features(
+    QuantumEngineGpuPhysicsBatchedSamplingTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumEngineGpuPhysicsBatchedSamplingTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumEngine.GpuPhysicsBatchedSampling
+    COMMAND QuantumEngineGpuPhysicsBatchedSamplingTests
+)
+
+set_tests_properties(
+    QuantumEngine.GpuPhysicsBatchedSampling
+    PROPERTIES
+        LABELS "engine;physics;gpu;validation"
+)

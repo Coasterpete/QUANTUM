@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/TrackTopology.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/engine/Logging.hpp>
 
 #include <algorithm>
 #include <array>
@@ -238,6 +239,62 @@ namespace quantum::editor
                 pose.transformLocalPoint({forwardLengthMeters, 0.0, 0.0}),
                 coordinateUnitsPerMeter, bogieColor);
         }
+
+        void appendBogieMarkerFromGpuSample(
+            std::vector<renderer::LineVertex>& vertices,
+            const physics::gpu::PhysicsTrackSample& sample,
+            double coordinateUnitsPerMeter)
+        {
+            glm::dvec3 pos{sample.position[0], sample.position[1], sample.position[2]};
+            glm::dvec3 tangent{sample.tangent[0], sample.tangent[1], sample.tangent[2]};
+            glm::dvec3 lateral{sample.lateral[0], sample.lateral[1], sample.lateral[2]};
+            glm::dvec3 up{sample.up[0], sample.up[1], sample.up[2]};
+            // GPU samples are already validated against CPU within tight tolerances
+            geometry::CurveFrame frame{tangent, lateral, up};
+            constexpr double halfWidthMeters = 0.4;
+            constexpr double halfHeightMeters = 0.3;
+            constexpr double forwardLengthMeters = 0.55;
+            auto transform = [&](const glm::dvec3& local) {
+                return pos + local.x * frame.tangent + local.y * frame.lateral + local.z * frame.up;
+            };
+            appendLine(vertices, transform({0.0, -halfWidthMeters, 0.0}), transform({0.0, halfWidthMeters, 0.0}), coordinateUnitsPerMeter, bogieColor);
+            appendLine(vertices, transform({0.0, 0.0, -halfHeightMeters}), transform({0.0, 0.0, halfHeightMeters}), coordinateUnitsPerMeter, bogieColor);
+            appendLine(vertices, pos, transform({forwardLengthMeters, 0.0, 0.0}), coordinateUnitsPerMeter, bogieColor);
+        }
+
+        [[nodiscard]] bool gpuQueriesMatchPose(
+            const std::span<const physics::gpu::GpuTrackQuery> queries,
+            const physics::TrainPose& pose) noexcept
+        {
+            if (queries.size() != pose.carCount() * 2)
+            {
+                return false;
+            }
+
+            std::size_t queryIndex = 0;
+            for (const auto& car : pose.cars())
+            {
+                for (const auto* bogie : {
+                    &car.carPose().frontBogie(),
+                    &car.carPose().rearBogie()})
+                {
+                    const auto& query = queries[queryIndex++];
+                    const auto& location = bogie->location();
+                    const std::int32_t direction = location.direction
+                            == physics::TravelDirection::IncreasingStation
+                        ? 1
+                        : -1;
+                    if (query.coasterIndex != 0
+                        || query.path != location.path.value
+                        || query.direction != direction
+                        || query.stationMeters != location.stationMeters)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
     }
 
     physics::TrainPose interpolateTrainPreviewPose(
@@ -305,11 +362,13 @@ namespace quantum::editor
                 coaster::integrateAuthoredTrackKinematics(
                     authoredTrack,
                     centerlineVisualizationSampleSpacing);
+            const coaster::TopologyKind derivedTopology =
+                coaster::computeTrackTopology(authoredTrack).kind;
             compiledTrack_.emplace(
                 kinematics,
                 authoredTrack.physicalSettings(),
                 authoredTrack.layoutMode(),
-                coaster::computeTrackTopology(authoredTrack).kind);
+                derivedTopology);
             environment_ = physics::physicsEnvironmentFrom(
                 authoredTrack.physicalSettings());
             coordinateUnitsPerMeter_ = 1.0
@@ -328,6 +387,34 @@ namespace quantum::editor
                     ? physics::FollowerRunState::Resting
                     : physics::FollowerRunState::Running;
             initialState_.emplace(initialState);
+
+            // rebuild() is the preview's track-change boundary. Reuse the
+            // kinematics that compiled the CPU track so the GPU receives the
+            // same representation once per rebuild, never once per frame.
+            gpuTrackReady_ = false;
+            if (gpuContext_)
+            {
+                try
+                {
+                    gpuContext_->uploadTrack(
+                        0,
+                        kinematics,
+                        authoredTrack.physicalSettings()
+                            .metersPerCoordinateUnit,
+                        physics::physicsTopologyForLayout(
+                            authoredTrack.layoutMode(), derivedTopology),
+                        authoredTrack.layoutMode());
+                    gpuTrackReady_ = gpuContext_->gpuTrackReady();
+                }
+                catch (const std::exception& exception)
+                {
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Warning,
+                        "SIM",
+                        "GPU preview track upload failed; using CPU markers: %s",
+                        exception.what());
+                }
+            }
             error_.clear();
             reset();
             return true;
@@ -368,6 +455,8 @@ namespace quantum::editor
         accumulatorSeconds_ = 0.0;
         consecutiveCatchUpFrameCount_ = 0;
         renderAlpha_ = 0.0;
+        lastGpuBogieSamples_.clear();
+        lastGpuBogieQueries_.clear();
         if (!initialState_ || !initialPose_)
         {
             return;
@@ -493,6 +582,99 @@ namespace quantum::editor
                     accumulatorSeconds_ = 0.0;
                     break;
                 }
+            }
+            // M2: batched GPU sampling for current pose's bogies (8 queries) – single production use
+            // Collects all bogie TrackLocations for the committed pose before interpolation,
+            // dispatches once via GpuPhysicsContext, validates against CPU.
+            if (gpuContext_ && gpuTrackReady_ && pose_ && compiledTrack_ && poseChanged)
+            {
+                std::vector<physics::gpu::GpuTrackQuery> queries;
+                queries.reserve(pose_->carCount() * 2);
+                for (const auto& car : pose_->cars())
+                {
+                    for (const auto* bogie : {&car.carPose().frontBogie(), &car.carPose().rearBogie()})
+                    {
+                        const auto& loc = bogie->location();
+                        physics::gpu::GpuTrackQuery q{};
+                        q.coasterIndex = 0;
+                        q.path = loc.path.value;
+                        q.direction = (loc.direction == physics::TravelDirection::IncreasingStation ? 1 : -1);
+                        q.stationMeters = loc.stationMeters;
+                        queries.push_back(q);
+                    }
+                }
+                if (!queries.empty())
+                {
+                    const auto gpuStart = std::chrono::steady_clock::now();
+                    bool usedGpu = false;
+                    std::vector<physics::gpu::PhysicsTrackSample> gpuSamples;
+                    try
+                    {
+                        gpuSamples = gpuContext_->sampleTrackGpu(queries);
+                        usedGpu = gpuContext_->lastSampleUsedGpu();
+                    }
+                    catch (...) { usedGpu = false; }
+                    const double gpuMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gpuStart).count();
+                    if (usedGpu && gpuSamples.size() == queries.size())
+                    {
+                        ++gpuDispatchCount_;
+                        gpuBatchedSampleCount_ += queries.size();
+                        // M2 real consumption: retain GPU samples for rebuildVertices
+                        lastGpuBogieSamples_ = gpuSamples;
+                        lastGpuBogieQueries_ = queries;
+                        auto cpuSamples = gpuContext_->sampleTrackForValidation(queries);
+                        double maxPosErr = 0.0, maxStationErr = 0.0, maxCurvErr = 0.0;
+                        double maxTdeg = 0.0, maxLdeg = 0.0, maxUdeg = 0.0;
+                        for (size_t i = 0; i < gpuSamples.size(); ++i)
+                        {
+                            maxStationErr = std::max(maxStationErr, std::abs(gpuSamples[i].location.stationMeters - cpuSamples[i].location.stationMeters));
+                            glm::dvec3 gp{gpuSamples[i].position[0], gpuSamples[i].position[1], gpuSamples[i].position[2]};
+                            glm::dvec3 cp{cpuSamples[i].position[0], cpuSamples[i].position[1], cpuSamples[i].position[2]};
+                            maxPosErr = std::max(maxPosErr, glm::length(gp - cp));
+                            glm::dvec3 gcur{gpuSamples[i].curvature[0], gpuSamples[i].curvature[1], gpuSamples[i].curvature[2]};
+                            glm::dvec3 ccur{cpuSamples[i].curvature[0], cpuSamples[i].curvature[1], cpuSamples[i].curvature[2]};
+                            maxCurvErr = std::max(maxCurvErr, glm::length(gcur - ccur));
+                            auto angleDeg = [](const glm::dvec3& a, const glm::dvec3& b) {
+                                double la = glm::length(a), lb = glm::length(b);
+                                if (la == 0 || lb == 0) return 0.0;
+                                double c = glm::dot(a,b)/(la*lb);
+                                c = std::clamp(c, -1.0, 1.0);
+                                return glm::degrees(std::acos(c));
+                            };
+                            glm::dvec3 gt{gpuSamples[i].tangent[0], gpuSamples[i].tangent[1], gpuSamples[i].tangent[2]};
+                            glm::dvec3 ct{cpuSamples[i].tangent[0], cpuSamples[i].tangent[1], cpuSamples[i].tangent[2]};
+                            glm::dvec3 gl{gpuSamples[i].lateral[0], gpuSamples[i].lateral[1], gpuSamples[i].lateral[2]};
+                            glm::dvec3 cl{cpuSamples[i].lateral[0], cpuSamples[i].lateral[1], cpuSamples[i].lateral[2]};
+                            glm::dvec3 gu{gpuSamples[i].up[0], gpuSamples[i].up[1], gpuSamples[i].up[2]};
+                            glm::dvec3 cu{cpuSamples[i].up[0], cpuSamples[i].up[1], cpuSamples[i].up[2]};
+                            maxTdeg = std::max(maxTdeg, angleDeg(gt, ct));
+                            maxLdeg = std::max(maxLdeg, angleDeg(gl, cl));
+                            maxUdeg = std::max(maxUdeg, angleDeg(gu, cu));
+                        }
+                        if (maxPosErr > 1e-6 || maxStationErr > 1e-9 || maxCurvErr > 1e-9 || maxTdeg > 0.01 || maxLdeg > 0.01 || maxUdeg > 0.01)
+                        {
+                            quantum::logging::logMessagef(quantum::logging::LogLevel::Warning, "SIM",
+                                "GPU batch mismatch pos=%.3e station=%.3e curv=%.3e t=%.4fdeg l=%.4fdeg u=%.4fdeg gpuMs=%.2f",
+                                maxPosErr, maxStationErr, maxCurvErr, maxTdeg, maxLdeg, maxUdeg, gpuMs);
+                        }
+                    }
+                    else
+                    {
+                        ++cpuFallbackCount_;
+                        lastGpuBogieSamples_.clear();
+                        lastGpuBogieQueries_.clear();
+                    }
+                }
+                else
+                {
+                    lastGpuBogieSamples_.clear();
+                    lastGpuBogieQueries_.clear();
+                }
+            }
+            else
+            {
+                lastGpuBogieSamples_.clear();
+                lastGpuBogieQueries_.clear();
             }
             const auto physicsEnd = std::chrono::steady_clock::now();
             frameTelemetry_.fixedStepCount += stepCount;
@@ -632,6 +814,9 @@ namespace quantum::editor
         playbackState_ = PlaybackState::Stopped;
         accumulatorSeconds_ = 0.0;
         consecutiveCatchUpFrameCount_ = 0;
+        lastGpuBogieSamples_.clear();
+        lastGpuBogieQueries_.clear();
+        gpuTrackReady_ = false;
         error_ = std::move(error);
     }
 
@@ -647,6 +832,10 @@ namespace quantum::editor
 
         vertices_.reserve(
             renderPose_->carCount() * 36 + renderPose_->connectionCount() * 2);
+        // M2: GPU samples are actually consumed for bogie markers when available
+        const bool useGpuBogieMarkers = gpuContext_ && gpuTrackReady_
+            && lastGpuBogieSamples_.size() == renderPose_->carCount() * 2
+            && gpuQueriesMatchPose(lastGpuBogieQueries_, *renderPose_);
         for (std::size_t index = 0; index < renderPose_->carCount(); ++index)
         {
             const physics::CarPose& carPose =
@@ -657,10 +846,18 @@ namespace quantum::editor
                 trainDefinition_.cars[index].car.bodyDimensionsMeters,
                 coordinateUnitsPerMeter_,
                 carColors[index % carColors.size()]);
-            appendBogieMarker(
-                vertices_, carPose.frontBogie(), coordinateUnitsPerMeter_);
-            appendBogieMarker(
-                vertices_, carPose.rearBogie(), coordinateUnitsPerMeter_);
+            if (useGpuBogieMarkers)
+            {
+                appendBogieMarkerFromGpuSample(vertices_, lastGpuBogieSamples_[index * 2], coordinateUnitsPerMeter_);
+                appendBogieMarkerFromGpuSample(vertices_, lastGpuBogieSamples_[index * 2 + 1], coordinateUnitsPerMeter_);
+            }
+            else
+            {
+                appendBogieMarker(
+                    vertices_, carPose.frontBogie(), coordinateUnitsPerMeter_);
+                appendBogieMarker(
+                    vertices_, carPose.rearBogie(), coordinateUnitsPerMeter_);
+            }
         }
 
         for (const physics::InterCarConnectionPose& connection
@@ -677,5 +874,18 @@ namespace quantum::editor
         frameTelemetry_.vertexPreparationMilliseconds +=
             std::chrono::duration<double, std::milli>(
                 preparationEnd - preparationBegin).count();
+    }
+
+    void SimulationPreview::setGpuContext(physics::gpu::GpuPhysicsContext* gpu) noexcept
+    {
+        gpuContext_ = gpu;
+        gpuTrackReady_ = false;
+        lastGpuBogieSamples_.clear();
+        lastGpuBogieQueries_.clear();
+    }
+
+    bool SimulationPreview::hasGpuContext() const noexcept
+    {
+        return gpuContext_ != nullptr;
     }
 }

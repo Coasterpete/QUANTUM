@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
+#include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <cstddef>
@@ -96,6 +97,11 @@ namespace quantum::editor
         [[nodiscard]] const physics::TrainPose* renderPose() const noexcept;
         [[nodiscard]] double interpolationAlpha() const noexcept;
 
+        // Attach before rebuild(). The context must outlive SimulationPreview;
+        // each successful track rebuild refreshes its uploaded track data.
+        void setGpuContext(physics::gpu::GpuPhysicsContext* gpu) noexcept;
+        [[nodiscard]] bool hasGpuContext() const noexcept;
+
         static constexpr std::size_t maximumStepsPerFrame = 60;
         // Eight steps is 33.3 ms of demand at 240 Hz and is deliberately
         // diagnostic only; it never changes accumulator or playback behavior.
@@ -124,5 +130,15 @@ namespace quantum::editor
         SimulationPreviewFrameTelemetry frameTelemetry_;
         std::size_t consecutiveCatchUpFrameCount_ = 0;
         std::string error_;
+        physics::gpu::GpuPhysicsContext* gpuContext_ = nullptr;
+        bool gpuTrackReady_ = false;
+        // M2 telemetry for batched GPU sampling (8 bogies per pose)
+        std::size_t gpuBatchedSampleCount_ = 0;
+        std::size_t gpuDispatchCount_ = 0;
+        std::size_t cpuFallbackCount_ = 0;
+        // M2: last GPU-batched bogie samples actually consumed by rebuildVertices
+        // (8 per pose, order: car0 front/rear, car1 front/rear, ...)
+        std::vector<physics::gpu::PhysicsTrackSample> lastGpuBogieSamples_;
+        std::vector<physics::gpu::GpuTrackQuery> lastGpuBogieQueries_;
     };
 }

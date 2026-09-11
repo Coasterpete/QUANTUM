@@ -1363,6 +1363,8 @@ namespace quantum::renderer
                 continue;
             }
 
+            bool shaderFloat64Supported = features.features.shaderFloat64 == VK_TRUE;
+
             const SwapchainSupport support = querySwapchainSupport(
                 device,
                 surface_
@@ -1381,11 +1383,18 @@ namespace quantum::renderer
             presentQueueFamily_ = *indices.present;
             fillModeNonSolidSupported_ =
                 features.features.fillModeNonSolid == VK_TRUE;
+            shaderFloat64Supported_ = shaderFloat64Supported;
             quantum::logging::logMessagef(
                 quantum::logging::LogLevel::Info,
                 "VK",
                 "fillModeNonSolid=%d; track wireframe uses portable explicit mesh edges",
                 fillModeNonSolidSupported_ ? 1 : 0
+            );
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Info,
+                "VK",
+                "shaderFloat64=%d",
+                shaderFloat64Supported_ ? 1 : 0
             );
             return;
         }
@@ -1438,9 +1447,14 @@ namespace quantum::renderer
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         vulkan13Features.dynamicRendering = VK_TRUE;
 
+        VkPhysicalDeviceFeatures2 deviceFeatures2{};
+        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures2.features.shaderFloat64 = shaderFloat64Supported_ ? VK_TRUE : VK_FALSE;
+        deviceFeatures2.pNext = &vulkan13Features;
+
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        createInfo.pNext = &vulkan13Features;
+        createInfo.pNext = &deviceFeatures2;
         createInfo.queueCreateInfoCount =
             static_cast<std::uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
@@ -1459,6 +1473,8 @@ namespace quantum::renderer
         {
             throwVulkanError("vkCreateDevice", result);
         }
+
+        shaderFloat64Enabled_ = shaderFloat64Supported_;
 
         vkGetDeviceQueue(device_, graphicsQueueFamily_, 0, &graphicsQueue_);
         vkGetDeviceQueue(device_, presentQueueFamily_, 0, &presentQueue_);
@@ -4497,5 +4513,15 @@ namespace quantum::renderer
             }
         }
         return std::nullopt;
+    }
+
+    VmaAllocator VulkanContext::allocator() const noexcept
+    {
+        return allocator_;
+    }
+
+    bool VulkanContext::shaderFloat64Enabled() const noexcept
+    {
+        return shaderFloat64Enabled_;
     }
 }

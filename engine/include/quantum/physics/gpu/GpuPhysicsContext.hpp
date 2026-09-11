@@ -1,0 +1,211 @@
+#pragma once
+
+#include <quantum/coaster/TrackKinematics.hpp>
+#include <quantum/coaster/TrackTopology.hpp>
+#include <quantum/renderer/VulkanContext.hpp>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
+namespace quantum::physics::gpu
+{
+    struct GpuTrackQuery
+    {
+        std::uint32_t coasterIndex = 0;
+        std::uint32_t path = 0;
+        std::int32_t direction = 1;
+        std::uint32_t _reserved = 0;
+        double stationMeters = 0.0;
+    };
+    static_assert(sizeof(GpuTrackQuery) == 24, "GpuTrackQuery must be 24 bytes");
+    static_assert(alignof(GpuTrackQuery) == 8, "GpuTrackQuery align 8");
+    static_assert(offsetof(GpuTrackQuery, stationMeters) == 16, "GpuTrackQuery station offset 16 std430");
+
+    struct PhysicsTrackSample
+    {
+        // Layout must match std430 in track_sample.comp:
+        //   GpuTrackQuery (24) + 2x uint (8) = 32, then 5x double[4] (32 each) = 192.
+        // C++ over-aligns each array to 32 to guarantee std430 stride 32, even though
+        // GLSL base alignment is 8. Both produce stride 32 because 24+8=32.
+        GpuTrackQuery location;
+        std::uint32_t _pad0 = 0;
+        std::uint32_t _pad1 = 0;
+        alignas(32) double position[4] = {0.0, 0.0, 0.0, 0.0};
+        alignas(32) double tangent[4] = {0.0, 0.0, 0.0, 0.0};
+        alignas(32) double lateral[4] = {0.0, 0.0, 0.0, 0.0};
+        alignas(32) double up[4] = {0.0, 0.0, 0.0, 0.0};
+        alignas(32) double curvature[4] = {0.0, 0.0, 0.0, 0.0};
+    };
+    static_assert(sizeof(PhysicsTrackSample) == 192, "PhysicsTrackSample 192 bytes");
+    static_assert(alignof(PhysicsTrackSample) == 32, "PhysicsTrackSample align 32 due to arrays");
+    static_assert(offsetof(PhysicsTrackSample, _pad0) == 24, "PhysicsTrackSample pad0 offset");
+    static_assert(offsetof(PhysicsTrackSample, position) == 32, "PhysicsTrackSample position offset 32 std430");
+    static_assert(offsetof(PhysicsTrackSample, tangent) == 64, "PhysicsTrackSample tangent offset");
+    static_assert(offsetof(PhysicsTrackSample, curvature) == 160, "PhysicsTrackSample curvature offset");
+
+    class GpuPhysicsContext
+    {
+    public:
+        struct HeadlessHandles
+        {
+            VkInstance instance = VK_NULL_HANDLE;
+            VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+            VkDevice device = VK_NULL_HANDLE;
+            VmaAllocator allocator = VK_NULL_HANDLE;
+            VkQueue queue = VK_NULL_HANDLE;
+            std::uint32_t queueFamily = 0;
+            bool shaderFloat64Enabled = false;
+            bool ownsInstance = false;
+            bool ownsDevice = false;
+            bool ownsAllocator = false;
+        };
+        explicit GpuPhysicsContext(renderer::VulkanContext& vulkan);
+        explicit GpuPhysicsContext(HeadlessHandles handles);
+        ~GpuPhysicsContext();
+
+        GpuPhysicsContext(const GpuPhysicsContext&) = delete;
+        GpuPhysicsContext& operator=(const GpuPhysicsContext&) = delete;
+
+        // Factory for headless compute-only validation (no SDL window).
+        [[nodiscard]] static HeadlessHandles createHeadlessHandles();
+
+        // M0: single-coaster only (coasterIndex must be 0). Multi-coaster is deferred to M1.
+        // Throws std::invalid_argument if coasterIndex != 0.
+        void uploadTrack(
+            std::uint32_t coasterIndex,
+            std::span<const coaster::TrackKinematicState> kinematics,
+            double metersPerCoordinateUnit,
+            coaster::TopologyKind topology,
+            coaster::LayoutMode layoutMode);
+
+        // M0: no real GPU dispatch. Validates slot and records currentSlot_ for
+        // future M1 async path. Use sampleTrackForValidation for CPU reference results.
+        void sampleTrack(std::uint32_t slot, std::span<const GpuTrackQuery> queries);
+
+        // CPU reference sampler matching track_sample.comp logic for M0 validation.
+        // NOTE: CPU uses quaternion slerp (glm::slerp) for frame interpolation;
+        //       GLSL uses mix + Gram-Schmidt (nlerp) due to lack of portable dquat slerp.
+        //       The mismatch is documented and deferred to M1 for exact equivalence.
+        [[nodiscard]] std::vector<PhysicsTrackSample> sampleTrackForValidation(
+            std::span<const GpuTrackQuery> queries);
+
+        // M1: real GPU dispatch (synchronous). Returns GPU results when available;
+        // falls back to CPU when device/shaderFloat64/pipeline unavailable.
+        [[nodiscard]] bool gpuAvailable() const noexcept;
+        [[nodiscard]] bool hasUploadedTrack() const noexcept;
+        [[nodiscard]] bool gpuTrackReady() const noexcept;
+        [[nodiscard]] bool lastSampleUsedGpu() const noexcept;
+        [[nodiscard]] std::vector<PhysicsTrackSample> sampleTrackGpu(
+            std::span<const GpuTrackQuery> queries);
+        // Validates GPU vs CPU for given queries, returns max errors. Throws on GPU
+        // unavailable. Uses same tolerances as GpuPhysicsTrackSamplingValidation test.
+        struct GpuValidationResult
+        {
+            bool gpuExecuted = false;
+            std::size_t queryCount = 0;
+            double maxStationError = 0.0;
+            double maxPositionError = 0.0;
+            double maxTangentAngleDeg = 0.0;
+            double maxLateralAngleDeg = 0.0;
+            double maxUpAngleDeg = 0.0;
+            double maxCurvatureError = 0.0;
+        };
+        [[nodiscard]] GpuValidationResult validateGpuAgainstCpu(
+            std::span<const GpuTrackQuery> queries);
+
+    private:
+        struct TrackBuffer
+        {
+            VkBuffer buffer = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkDeviceSize capacity = 0;
+            std::uint32_t sampleCount = 0;
+        };
+
+        struct CoasterRecord
+        {
+            std::uint32_t trackOffset = 0;
+            std::uint32_t trackCount = 0;
+            std::uint32_t topology = 0;
+            std::uint32_t _pad = 0;
+            double length = 0.0;
+        };
+        static_assert(sizeof(CoasterRecord) == 24, "CoasterRecord must be 24 bytes std430");
+        static_assert(alignof(CoasterRecord) == 8, "CoasterRecord align 8");
+        static_assert(offsetof(CoasterRecord, length) == 16, "CoasterRecord length offset 16");
+
+        struct TransientFrameData
+        {
+            VkBuffer queryBuffer = VK_NULL_HANDLE;
+            VmaAllocation queryAllocation = VK_NULL_HANDLE;
+            VkBuffer resultBuffer = VK_NULL_HANDLE;
+            VmaAllocation resultAllocation = VK_NULL_HANDLE;
+            VkBuffer readbackBuffer = VK_NULL_HANDLE;
+            VmaAllocation readbackAllocation = VK_NULL_HANDLE;
+            void* readbackMapped = nullptr;
+            VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+            std::uint32_t queryCount = 0;
+        };
+
+        renderer::VulkanContext* vulkan_ = nullptr;
+        HeadlessHandles headless_;
+        bool useHeadless_ = false;
+        VkDevice device_ = VK_NULL_HANDLE;
+        VmaAllocator allocator_ = VK_NULL_HANDLE;
+        VkQueue computeQueue_ = VK_NULL_HANDLE;
+        std::uint32_t computeQueueFamily_ = 0;
+        bool shaderFloat64Enabled_ = false;
+
+        TrackBuffer trackBuffer_;
+        std::vector<CoasterRecord> coasterRecords_;
+        std::vector<CoasterRecord> coasterRecordsHost_;
+        VkBuffer coasterRecordBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation coasterRecordAllocation_ = VK_NULL_HANDLE;
+        void* coasterRecordMapped_ = nullptr;
+        VkDeviceSize coasterRecordCapacity_ = 0;
+
+        VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+        VkDescriptorSetLayout persistentSetLayout_ = VK_NULL_HANDLE;
+        VkDescriptorSet persistentDescriptorSet_ = VK_NULL_HANDLE;
+        VkDescriptorSetLayout transientSetLayout_ = VK_NULL_HANDLE;
+        std::array<TransientFrameData, 2> frames_{};
+        VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
+        VkPipeline computePipeline_ = VK_NULL_HANDLE;
+
+        VkCommandPool commandPool_ = VK_NULL_HANDLE;
+        std::array<VkCommandBuffer, 2> commandBuffers_{};
+        std::array<VkFence, 2> computeFences_{};
+        VkFence validationFence_ = VK_NULL_HANDLE;
+
+        VkQueryPool timestampPool_ = VK_NULL_HANDLE;
+        bool timestampSupported_ = false;
+        double timestampPeriod_ = 0.0;
+
+        std::uint32_t trackOffset_ = 0;
+        std::uint32_t currentSlot_ = 0;
+        bool gpuPipelineReady_ = false;
+        bool trackUploaded_ = false;
+        bool gpuTrackReady_ = false;
+        bool lastSampleUsedGpu_ = false;
+
+        void createCommandPool();
+        void createDescriptorResources();
+        void createPipeline();
+        void createSyncResources();
+        void createTimestampPool();
+        void ensureTrackBufferCapacity(std::uint32_t requiredSamples);
+        void ensureCoasterRecordCapacity(std::uint32_t requiredCount);
+        void ensureFrameBuffers(std::uint32_t slot, std::size_t queryCount);
+        void allocateDescriptorSets();
+        void updatePersistentDescriptors();
+        void updateFrameDescriptors(std::uint32_t slot);
+        void uploadTrackData(std::span<const coaster::TrackKinematicState> kinematics,
+                             double metersPerCoordinateUnit);
+        void uploadQueries(std::uint32_t slot, std::span<const GpuTrackQuery> queries);
+        VkCommandBuffer beginSingleTimeCommands();
+        void endSingleTimeCommands(VkCommandBuffer cmd);
+    };
+}

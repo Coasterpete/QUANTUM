@@ -169,6 +169,9 @@ namespace quantum::renderer
         [[nodiscard]] std::optional<HardwareAssetLoadStatus>
         hardwareAssetLoadStatus(std::string_view identifier) const;
 
+        [[nodiscard]] VmaAllocator allocator() const noexcept;
+        [[nodiscard]] bool shaderFloat64Enabled() const noexcept;
+
     private:
         void selectPhysicalDevice();
         void createDevice();
@@ -369,5 +372,8 @@ namespace quantum::renderer
         DrawFrameCpuTelemetry lastDrawFrameCpuTelemetry_;
         std::array<FrameSubmissionTelemetry, maxFramesInFlight> frameSubmissions_{};
         std::uint64_t drawAttemptId_ = 0;
+
+        bool shaderFloat64Supported_ = false;
+        bool shaderFloat64Enabled_ = false;
     };
 }
