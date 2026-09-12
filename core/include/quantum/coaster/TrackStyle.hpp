@@ -42,15 +42,16 @@ namespace quantum::coaster
         Box
     };
 
-    // This pass records the future continuous-spine intent but generates no
-    // spine. Keeping the parameters in the preset avoids renderer constants
-    // when a later geometry-family milestone implements one.
     struct ContinuousSpineStyle
     {
         bool enabled = false;
         ContinuousSpineType type = ContinuousSpineType::None;
         RailOffset offset{};
+        // Tubular profiles use lateral/vertical diameters. Box profiles use
+        // lateral width and vertical height.
         glm::dvec2 dimensions{0.0, 0.0};
+        std::uint32_t radialSegments = 12;
+        TrackMaterial material;
     };
 
     enum class HardwareFrameFollow : std::uint8_t
@@ -90,6 +91,7 @@ namespace quantum::coaster
     };
 
     [[nodiscard]] TrackStylePreset createStandardDualRailPreset();
+    [[nodiscard]] TrackStylePreset createModernSteelPreset();
 
     // Returns a canonical package-relative identifier for repeating track
     // hardware below assets://track/. The retained builtin diagnostic

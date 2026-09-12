@@ -7222,6 +7222,8 @@ ImGui::MenuItem(
                     bottomFraction = 0.76F;
                 else if (captureScenario_->kind == ReadmeCaptureKind::TransitionEditor)
                     bottomFraction = 0.52F;
+                else if (captureScenario_->kind == ReadmeCaptureKind::ModernSteel)
+                    bottomFraction = 0.12F;
             }
             buildDefaultDockLayout(dockspaceId, defaultDockspaceSize, bottomFraction,
                 captureScenario_ != nullptr);

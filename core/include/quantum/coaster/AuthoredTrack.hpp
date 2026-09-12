@@ -320,7 +320,7 @@ namespace quantum::coaster
         LayoutMode layoutMode_ = LayoutMode::Circuit;
         AuthoredStartPose startPose_;
         TrackPhysicalSettings physicalSettings_;
-        TrackStylePreset trackStyle_ = createStandardDualRailPreset();
+        TrackStylePreset trackStyle_ = createModernSteelPreset();
         CoasterSetup coasterSetup_ =
             createCoasterSetupForStyle(defaultCoasterStyleId);
         SupportCollection supports_;

@@ -1,0 +1,111 @@
+{
+  "formatVersion": 1,
+  "layoutMode": "Shuttle",
+  "physicalSettings": {
+    "initialSpeed": 6.0,
+    "metersPerCoordinateUnit": 1.0,
+    "gravityAcceleration": 9.80665
+  },
+  "startPose": {
+    "position": {"x": 0.0, "y": 0.0, "z": 4.0},
+    "orientation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}
+  },
+  "trackStyle": {
+    "name": "ModernSteel",
+    "geometryFamily": "DualRailTubular",
+    "railCount": 2,
+    "railOffsets": [
+      {"lateral": -0.55, "vertical": 0.0},
+      {"lateral": 0.55, "vertical": 0.0}
+    ],
+    "railRadius": 0.075,
+    "railRadialSegments": 16,
+    "railMaterial": {
+      "baseColor": {"r": 0.72, "g": 0.16, "b": 0.08, "a": 1.0}
+    },
+    "spine": {
+      "enabled": true,
+      "type": "Box",
+      "offset": {"lateral": 0.0, "vertical": -0.46},
+      "dimensions": {"x": 0.32, "y": 0.42},
+      "radialSegments": 12,
+      "material": {
+        "baseColor": {"r": 0.20, "g": 0.23, "b": 0.27, "a": 1.0}
+      }
+    },
+    "repeatingHardware": [
+      {
+        "enabled": true,
+        "asset": {
+          "id": "assets://track/test-crosstie-placeholder.glb",
+          "placeholder": true
+        },
+        "spacing": 0.75,
+        "startOffset": 0.0,
+        "localPosition": {"x": 0.0, "y": 0.0, "z": -0.12},
+        "localRotationRadians": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "localScale": {"x": 1.0, "y": 1.0, "z": 1.0},
+        "frameFollow": "TrackFrame",
+        "materialOverride": {
+          "baseColor": {"r": 0.36, "g": 0.39, "b": 0.43, "a": 1.0}
+        }
+      }
+    ]
+  },
+  "sections": [
+    {
+      "kind": "RateProfiles",
+      "length": 8.0,
+      "rateProfiles": {
+        "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 8.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]},
+        "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 8.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]},
+        "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 8.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]}
+      }
+    },
+    {
+      "kind": "RateProfiles",
+      "length": 10.0,
+      "rateProfiles": {
+        "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]},
+        "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": -0.08, "type": "Smootherstep"}}]},
+        "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]}
+      }
+    },
+    {
+      "kind": "RateProfiles",
+      "length": 10.0,
+      "rateProfiles": {
+        "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]},
+        "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": -0.08, "valueEnd": 0.08, "type": "CosineEaseInOut"}}]},
+        "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]}
+      }
+    },
+    {
+      "kind": "RateProfiles",
+      "length": 10.0,
+      "rateProfiles": {
+        "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.10, "type": "Smootherstep"}}]},
+        "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.08, "valueEnd": 0.0, "type": "Smoothstep"}}]},
+        "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.08, "type": "Smootherstep"}}]}
+      }
+    },
+    {
+      "kind": "RateProfiles",
+      "length": 10.0,
+      "rateProfiles": {
+        "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.10, "valueEnd": -0.12, "type": "CosineEaseInOut"}}]},
+        "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": -0.04, "type": "CosineEaseInOut"}}]},
+        "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.08, "valueEnd": -0.08, "type": "CosineEaseInOut"}}]}
+      }
+    },
+    {
+      "kind": "RateProfiles",
+      "length": 10.0,
+      "rateProfiles": {
+        "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": -0.12, "valueEnd": 0.0, "type": "Smootherstep"}}]},
+        "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": -0.04, "valueEnd": 0.0, "type": "Smoothstep"}}]},
+        "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": -0.08, "valueEnd": 0.0, "type": "Smootherstep"}}]}
+      }
+    }
+  ]
+}

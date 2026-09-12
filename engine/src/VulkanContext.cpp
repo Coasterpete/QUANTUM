@@ -234,6 +234,23 @@ namespace
                 );
             }
         }
+        if (mesh.submeshes.empty())
+        {
+            throw std::invalid_argument(
+                "VulkanContext requires at least one track submesh.");
+        }
+        for (const auto& submesh : mesh.submeshes)
+        {
+            if (submesh.indexCount == 0
+                || submesh.firstIndex > mesh.triangleIndices.size()
+                || submesh.indexCount
+                    > mesh.triangleIndices.size() - submesh.firstIndex
+                || submesh.materialIndex >= track.materials.size())
+            {
+                throw std::invalid_argument(
+                    "A track submesh has an invalid draw or material range.");
+            }
+        }
         for (const auto& batch : track.hardwareBatches)
         {
             if (batch.asset.path.empty())
@@ -3010,12 +3027,17 @@ namespace quantum::renderer
             trackEdgeIndexCount_,
             "track edge-index upload"
         );
-        trackBaseColor_ = {
-            renderableTrack.materials.front().baseColor.r,
-            renderableTrack.materials.front().baseColor.g,
-            renderableTrack.materials.front().baseColor.b,
-            renderableTrack.materials.front().baseColor.a
-        };
+        trackDrawBatches_.clear();
+        trackDrawBatches_.reserve(mesh.submeshes.size());
+        for (const coaster::TrackSubmesh& submesh : mesh.submeshes)
+        {
+            const glm::vec4 color =
+                renderableTrack.materials[submesh.materialIndex].baseColor;
+            trackDrawBatches_.push_back({
+                submesh.firstIndex,
+                submesh.indexCount,
+                {color.r, color.g, color.b, color.a}});
+        }
 
         std::vector<coaster::HardwareInstance> instances;
         std::size_t totalInstanceCount = 0;
@@ -3408,9 +3430,12 @@ namespace quantum::renderer
                     &trackMeshVertexBuffer_, &vertexOffset);
                 vkCmdBindIndexBuffer(commandBuffer,
                     trackTriangleIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
-                pushTrackDraw(trackBaseColor_, noTrackOverride);
-                vkCmdDrawIndexed(commandBuffer, trackTriangleIndexCount_,
-                    1, 0, 0, 0);
+                for (const TrackDrawBatch& batch : trackDrawBatches_)
+                {
+                    pushTrackDraw(batch.baseColor, noTrackOverride);
+                    vkCmdDrawIndexed(commandBuffer, batch.indexCount,
+                        1, batch.firstIndex, 0, 0);
+                }
 
                 if (hardwareInstanceCount_ > 0)
                 {
@@ -4317,6 +4342,7 @@ namespace quantum::renderer
             trackEdgeIndexCapacity_ = 0;
             hardwareInstanceCapacity_ = 0;
             trackMeshVertexCount_ = 0;
+            trackDrawBatches_.clear();
             trackTriangleIndexCount_ = 0;
             trackEdgeIndexCount_ = 0;
             hardwareInstanceCount_ = 0;

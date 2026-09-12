@@ -13,9 +13,9 @@ namespace quantum::editor
 {
     namespace
     {
-        constexpr std::array<std::string_view, 5> names{
+        constexpr std::array<std::string_view, 6> names{
             "editor-overview", "transition-editor", "geometry-regions",
-            "track-start-gizmo", "force-diagnostics"
+            "track-start-gizmo", "force-diagnostics", "modern-steel"
         };
 
         void requireKeys(const nlohmann::json& object,
@@ -191,6 +191,17 @@ namespace quantum::editor
                     varying |= segment.transition.valueBegin != segment.transition.valueEnd;
             if (!varying)
                 throw std::invalid_argument(name + ": supply a region with a varying authored profile curve.");
+        }
+        if (scenario.kind == ReadmeCaptureKind::ModernSteel)
+        {
+            const auto& style = track.trackStyle();
+            if (style.name != "ModernSteel" || !style.spine.enabled
+                || style.repeatingHardware.empty()
+                || !style.repeatingHardware.front().enabled)
+            {
+                throw std::invalid_argument(
+                    name + ": supply a ModernSteel document with an enabled spine and crossties.");
+            }
         }
     }
 }

@@ -325,8 +325,13 @@ namespace quantum::renderer
         void* trackEdgeIndexMappedData_ = nullptr;
         VkDeviceSize trackEdgeIndexCapacity_ = 0;
         std::uint32_t trackEdgeIndexCount_ = 0;
-        std::array<float, 4> trackBaseColor_{
-            0.20F, 0.34F, 0.48F, 1.0F};
+        struct TrackDrawBatch
+        {
+            std::uint32_t firstIndex = 0;
+            std::uint32_t indexCount = 0;
+            std::array<float, 4> baseColor{0.20F, 0.34F, 0.48F, 1.0F};
+        };
+        std::vector<TrackDrawBatch> trackDrawBatches_;
 
         struct GpuStaticMesh
         {

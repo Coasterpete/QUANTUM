@@ -75,6 +75,27 @@ namespace
             "default hardware is the explicit file-backed test placeholder");
     }
 
+    void modernSteelDefaultsValidate()
+    {
+        const TrackStylePreset style = createModernSteelPreset();
+        validateTrackStyle(style);
+        require(style.name == "ModernSteel", "Modern Steel preset name");
+        require(style.railOffsets.size() == 2
+                && style.railOffsets[0].lateral == -0.55
+                && style.railOffsets[1].lateral == 0.55,
+            "Modern Steel rail spacing is centralized in the preset");
+        require(style.railRadius == 0.075
+                && style.railRadialSegments == 16,
+            "Modern Steel rail profile defaults");
+        require(style.spine.enabled
+                && style.spine.type == ContinuousSpineType::Box
+                && style.spine.dimensions == glm::dvec2{0.32, 0.42},
+            "Modern Steel spine profile defaults");
+        require(style.repeatingHardware.size() == 1
+                && style.repeatingHardware.front().spacing == 0.75,
+            "Modern Steel crosstie spacing default");
+    }
+
     void meshGenerationIsDeterministicAndIndexed()
     {
         const auto samples = straightSamples();
@@ -103,7 +124,8 @@ namespace
         }
 
         const std::size_t vertexCount = first.continuousMesh.vertices.size();
-        require(vertexCount == 2 * samples.size() * style.railRadialSegments,
+        require(vertexCount
+                == 2 * samples.size() * style.railRadialSegments * 2,
             "indexed tube vertex count");
         require(!first.continuousMesh.triangleIndices.empty()
                 && first.continuousMesh.triangleIndices.size() % 3 == 0,
@@ -134,7 +156,7 @@ namespace
     {
         const auto samples = straightSamples();
         auto style = createStandardDualRailPreset();
-        const std::size_t sides = style.railRadialSegments;
+        const std::size_t sides = style.railRadialSegments * 2;
         RenderableTrack track = generateRenderableTrack(samples, style);
         const std::size_t verticesPerRail = samples.size() * sides;
 
@@ -151,6 +173,15 @@ namespace
         requireNear(ringCenter(track.continuousMesh, verticesPerRail, sides),
             {0.0, 0.6, -0.15}, 1.0e-6, "right rail vertical offset");
 
+        style.railRadius = 0.12;
+        track = generateRenderableTrack(samples, style);
+        const glm::dvec3 configuredCenter = ringCenter(
+            track.continuousMesh, 0, sides);
+        require(std::abs(glm::length(
+                    glm::dvec3{track.continuousMesh.vertices.front().position}
+                    - configuredCenter) - style.railRadius) < 1.0e-6,
+            "rail profile radius controls the generated tube diameter");
+
         const quantum::geometry::CurveFrame banked{
             {1.0, 0.0, 0.0},
             {0.0, 0.0, 1.0},
@@ -164,6 +195,70 @@ namespace
             track.continuousMesh, verticesPerRail, sides);
         requireNear(glm::normalize(right - left), banked.lateral, 1.0e-6,
             "banking rotates the rail pair with the lateral frame");
+    }
+
+    void spineSweepCanBeConfiguredOrDisabled()
+    {
+        const auto samples = straightSamples();
+        auto style = createModernSteelPreset();
+        const std::size_t railVertices = style.railCount * samples.size()
+            * style.railRadialSegments * 2;
+        RenderableTrack track = generateRenderableTrack(samples, style);
+        require(track.materials.size() == 2
+                && track.continuousMesh.submeshes.size() == 3,
+            "enabled spine has a separate material and submesh");
+        require(track.continuousMesh.submeshes.back().materialIndex == 1,
+            "spine submesh selects the spine material");
+        requireNear(ringCenter(track.continuousMesh, railVertices, 8),
+            {0.0, 0.0, -0.46}, 1.0e-6,
+            "box spine follows its track-local offset");
+
+        style.spine.type = ContinuousSpineType::Tubular;
+        style.spine.dimensions = {0.40, 0.26};
+        style.spine.radialSegments = 10;
+        track = generateRenderableTrack(samples, style);
+        require(track.continuousMesh.vertices.size()
+                == railVertices + samples.size() * 20,
+            "tubular spine tessellation follows profile configuration");
+
+        style.spine.enabled = false;
+        track = generateRenderableTrack(samples, style);
+        require(track.materials.size() == 1
+                && track.continuousMesh.submeshes.size() == 2
+                && track.continuousMesh.vertices.size() == railVertices,
+            "disabled spine emits no geometry or unused material");
+    }
+
+    void sweptProfilesFollowCompoundFramesWithoutFlips()
+    {
+        const double inverseRootTwo = std::sqrt(0.5);
+        const std::vector<RiderLocalGeometryState> samples{
+            {0.0, {0.0, 0.0, 0.0},
+                {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}},
+            {1.0, {0.9, 0.3, 0.2},
+                {{inverseRootTwo, inverseRootTwo, 0.0},
+                 {-0.5, 0.5, inverseRootTwo},
+                 {0.5, -0.5, inverseRootTwo}}},
+            {2.0, {1.4, 1.0, 0.6},
+                {{0.0, inverseRootTwo, inverseRootTwo},
+                 {-inverseRootTwo, 0.5, -0.5},
+                 {-inverseRootTwo, -0.5, 0.5}}}
+        };
+        const TrackStylePreset style = createModernSteelPreset();
+        const RenderableTrack track = generateRenderableTrack(samples, style);
+        const std::size_t railRingVertices = style.railRadialSegments * 2;
+        for (std::size_t ring = 0; ring + 1 < samples.size(); ++ring)
+        {
+            for (std::size_t vertex = 0; vertex < railRingVertices; ++vertex)
+            {
+                const auto& before = track.continuousMesh.vertices[
+                    ring * railRingVertices + vertex];
+                const auto& after = track.continuousMesh.vertices[
+                    (ring + 1) * railRingVertices + vertex];
+                require(glm::dot(before.normal, after.normal) > -0.25F,
+                    "corresponding swept normals do not flip 180 degrees");
+            }
+        }
     }
 
     void generatedDataIsFiniteAndNormalsAreUseful()
@@ -219,6 +314,12 @@ namespace
         requireInvalid([](auto& style) { style.railRadialSegments = 129; },
             "excessive tessellation rejected");
         requireInvalid([](auto& style) {
+            style.spine.enabled = true;
+            style.spine.type = ContinuousSpineType::Tubular;
+            style.spine.dimensions = {0.2, 0.2};
+            style.spine.radialSegments = 2;
+        }, "low tubular spine tessellation rejected");
+        requireInvalid([](auto& style) {
             style.repeatingHardware[0].asset.path.clear();
         }, "missing required asset reference rejected");
         requireInvalid([](auto& style) {
@@ -254,8 +355,11 @@ int main()
     try
     {
         defaultPresetValidates();
+        modernSteelDefaultsValidate();
         meshGenerationIsDeterministicAndIndexed();
         railOffsetsFollowTheAuthoredFrame();
+        spineSweepCanBeConfiguredOrDisabled();
+        sweptProfilesFollowCompoundFramesWithoutFlips();
         generatedDataIsFiniteAndNormalsAreUseful();
         invalidStylesAreRejected();
     }

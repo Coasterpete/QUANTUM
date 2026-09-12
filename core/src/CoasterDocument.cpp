@@ -370,7 +370,10 @@ namespace quantum::coaster
                         {"vertical", style.spine.offset.vertical}}},
                     {"dimensions", {
                         {"x", style.spine.dimensions.x},
-                        {"y", style.spine.dimensions.y}}}}},
+                        {"y", style.spine.dimensions.y}}},
+                    {"radialSegments", style.spine.radialSegments},
+                    {"material", serializeTrackMaterial(
+                        style.spine.material)}}},
                 {"repeatingHardware", std::move(repeatingHardware)}};
         }
 
@@ -1257,7 +1260,8 @@ TrackStylePreset deserializeTrackStyle(
             const json& spine = object["spine"];
             const std::string spinePath = path + ".spine";
             requireNoUnknownFields(spine,
-                {"enabled", "type", "offset", "dimensions"}, spinePath);
+                {"enabled", "type", "offset", "dimensions",
+                    "radialSegments", "material"}, spinePath);
             requireBoolean(spine, "enabled", spinePath);
             requireString(spine, "type", spinePath);
             requireObject(spine, "offset", spinePath);
@@ -1282,6 +1286,25 @@ TrackStylePreset deserializeTrackStyle(
             requireNumber(dimensions, "y", spinePath + ".dimensions");
             style.spine.dimensions = {dimensions["x"].get<double>(),
                 dimensions["y"].get<double>()};
+            if (spine.contains("radialSegments"))
+            {
+                requireInteger(spine, "radialSegments", spinePath);
+                if (spine["radialSegments"] < 0
+                    || spine["radialSegments"]
+                        > std::numeric_limits<std::uint32_t>::max())
+                {
+                    throw std::runtime_error(
+                        spinePath + ".radialSegments: out of range");
+                }
+                style.spine.radialSegments =
+                    spine["radialSegments"].get<std::uint32_t>();
+            }
+            if (spine.contains("material"))
+            {
+                requireObject(spine, "material", spinePath);
+                style.spine.material = deserializeTrackMaterial(
+                    spine["material"], spinePath + ".material");
+            }
 
             for (std::size_t index = 0;
                 index < object["repeatingHardware"].size(); ++index)
@@ -1668,6 +1691,10 @@ TrackStylePreset deserializeTrackStyle(
 
             // 8. Build the AuthoredTrack.
             AuthoredTrack track;
+            // A missing trackStyle identifies a legacy document. Preserve its
+            // historical viewport appearance even though new documents now
+            // start with the Modern Steel preset.
+            track.setTrackStyle(createStandardDualRailPreset());
 
             for (std::size_t i = 0; i < sections.size(); ++i)
             {
