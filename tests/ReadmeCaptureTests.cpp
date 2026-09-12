@@ -76,6 +76,25 @@ namespace
             == directory / "preview images/editor-overview.png", "Incorrect output path.");
         validateReadmeCaptureDocument(manifest.scenarios.front(), track);
 
+        auto modernScenario = manifest.scenarios.front();
+        modernScenario.kind = ReadmeCaptureKind::ModernSteel;
+        validateReadmeCaptureDocument(modernScenario, track);
+        auto legacyStyle = quantum::coaster::createStandardDualRailPreset();
+        track.setTrackStyle(legacyStyle);
+        rejects([&] { validateReadmeCaptureDocument(modernScenario, track); },
+            "Modern Steel capture accepted a legacy track style.");
+        track.setTrackStyle(quantum::coaster::createModernSteelPreset());
+
+        auto modernManifestJson = base;
+        modernManifestJson["scenarios"][0]["name"] = "modern-steel";
+        const auto modernManifest = load(modernManifestJson);
+        require(modernManifest.scenarios.front().kind
+                == ReadmeCaptureKind::ModernSteel
+                && readmeCaptureOutputPath(modernManifest,
+                    modernManifest.scenarios.front()).filename()
+                    == "modern-steel.png",
+            "Modern Steel capture fixture name/output mapping changed.");
+
         const auto badField = [&](const char* field, const json& value)
         {
             auto invalid = base;

@@ -1,6 +1,8 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
+
+#include <nlohmann/json.hpp>
 #include <quantum/coaster/GeometricSection.hpp>
 #include <quantum/coaster/PlanarArcRegion.hpp>
 #include <quantum/math/TransitionFunctions.hpp>
@@ -837,6 +839,52 @@ namespace
             "hardware serialization must remain deterministic");
     }
 
+    void modernSteelStyleRoundTrip()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        require(track.trackStyle().name == "ModernSteel",
+            "new documents use the Modern Steel preset");
+        auto style = quantum::coaster::createModernSteelPreset();
+        style.railRadius = 0.081;
+        style.railOffsets = {{-0.58, 0.02}, {0.58, 0.02}};
+        style.spine.type = quantum::coaster::ContinuousSpineType::Tubular;
+        style.spine.dimensions = {0.36, 0.28};
+        style.spine.radialSegments = 18;
+        style.spine.material.baseColor = {0.12F, 0.24F, 0.36F, 1.0F};
+        track.setTrackStyle(style);
+
+        const std::string serialized = serializeCoasterDocument(track);
+        const auto restored = deserializeCoasterDocument(serialized);
+        requireValidDocument(restored, "Modern Steel style round-trip");
+        const auto& restoredStyle = restored->trackStyle();
+        require(restoredStyle.name == style.name
+                && restoredStyle.railRadius == style.railRadius
+                && restoredStyle.railOffsets.size() == 2
+                && restoredStyle.railOffsets[0].lateral == -0.58
+                && restoredStyle.railOffsets[0].vertical == 0.02
+                && restoredStyle.railOffsets[1].lateral == 0.58
+                && restoredStyle.railOffsets[1].vertical == 0.02,
+            "Modern Steel rail profile must survive Save/Open");
+        require(restoredStyle.spine.enabled
+                && restoredStyle.spine.type == style.spine.type
+                && restoredStyle.spine.dimensions == style.spine.dimensions
+                && restoredStyle.spine.radialSegments
+                    == style.spine.radialSegments
+                && restoredStyle.spine.material.baseColor
+                    == style.spine.material.baseColor,
+            "Modern Steel spine profile and material must survive Save/Open");
+        require(serializeCoasterDocument(*restored) == serialized,
+            "Modern Steel serialization must remain deterministic");
+
+        auto legacyJson = nlohmann::json::parse(serialized);
+        legacyJson.erase("trackStyle");
+        const auto legacy = deserializeCoasterDocument(legacyJson.dump());
+        requireValidDocument(legacy, "legacy style default");
+        require(legacy->trackStyle().name == "StandardDualRail"
+                && !legacy->trackStyle().spine.enabled,
+            "documents without trackStyle keep the historical standard preset");
+    }
+
     // ----------------------------------------------------------------
     // Test runner
     // ----------------------------------------------------------------
@@ -872,6 +920,7 @@ namespace
             {"InvalidPlanarArcDataRejection",   invalidPlanarArcDataRejection},
             {"EmptySectionsRejection",           emptySectionsRejection},
             {"TrackHardwareRoundTrip",           trackHardwareRoundTrip},
+            {"ModernSteelStyleRoundTrip",        modernSteelStyleRoundTrip},
         };
 
         std::size_t failures = 0;

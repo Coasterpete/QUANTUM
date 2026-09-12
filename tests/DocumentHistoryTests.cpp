@@ -255,10 +255,10 @@ namespace
             "hardware rotation Undo must restore the prior value");
         state = requireState(history.undo(), "position Undo missing");
         require(state.trackStyle().repeatingHardware.front().localPosition
-                == glm::dvec3{0.0, 0.0, -0.11},
+                == glm::dvec3{0.0, 0.0, -0.12},
             "hardware position Undo must restore the preset value");
         state = requireState(history.undo(), "spacing Undo missing");
-        require(state.trackStyle().repeatingHardware.front().spacing == 1.5,
+        require(state.trackStyle().repeatingHardware.front().spacing == 0.75,
             "hardware spacing Undo must restore the preset value");
         state = requireState(history.undo(), "asset Undo missing");
         require(state.trackStyle().repeatingHardware.front().asset.path

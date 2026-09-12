@@ -1,0 +1,15 @@
+{
+  "width": 1600,
+  "height": 900,
+  "settle_frames": 16,
+  "output_directory": "../build/modern-steel-capture",
+  "overwrite": true,
+  "scenarios": [
+    {
+      "name": "modern-steel",
+      "document": "../smoke-tests/modern-steel-validation.quantum",
+      "region": 3,
+      "framing": "all"
+    }
+  ]
+}

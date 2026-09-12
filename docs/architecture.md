@@ -75,7 +75,12 @@ AuthoredTrack
                             CenterlineVisualization + section slices
                                                       |
                                                       v
-                                      Vulkan track-curve vertex buffer
+                         renderer-neutral RenderableTrack
+                           |-- continuous profile-swept rails/spine
+                           +-- repeating static-mesh hardware instances
+                                                      |
+                                                      v
+                                      Vulkan mesh/instance buffers
 ```
 
 The diagram is a description of current dependency flow, not a commitment to
@@ -136,9 +141,11 @@ conventions implemented by `applyRoll`, `applyLocalPitch`, and `applyLocalYaw`.
 `quantum::coaster::AuthoredTrack` is the ordered authored coaster document used
 by the Editor. It owns the layout intent (`Circuit` or `Shuttle`), one global
 `AuthoredStartPose`, `TrackPhysicalSettings`, one `TrackStylePreset`, and an
-ordered sequence of `AuthoredTrackSection` values. The track style includes the
-logical repeating-hardware asset identity and its spacing, phase, and local
-transform; renderer cache entries and GPU handles are not document state.
+ordered sequence of `AuthoredTrackSection` values. The track style includes
+continuous rail/spine profile dimensions and materials plus the logical
+repeating-hardware asset identity and its spacing, phase, and local transform;
+generated vertices, renderer cache entries, and GPU handles are not document
+state.
 The start pose stores a world position and normalized quaternion that rotates
 the canonical local `(T, L, U)` axes into the initial rider frame. The UI calls
 the ordered section values regions; the Core type retains the established

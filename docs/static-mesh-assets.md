@@ -121,3 +121,38 @@ The included `test-crosstie-placeholder.glb` is a Blender-exported path fixture,
 not final production artwork. `tools/export_test_crosstie_glb.py` reproduces it;
 the portable package installs only the `.glb`, never `.blend` or `.blend1`
 files.
+
+## Modern Steel source-asset workflow
+
+The user's existing one-piece Blender track model remains the visual source of
+truth. It does not need to be discarded or rebuilt as short repeating track
+segments. Adapt it to the runtime style in three measurements/exports:
+
+1. Measure the running-rail outside diameter and center-to-center lateral
+   spacing. Enter those values as the preset's `railRadius` and paired
+   `railOffsets`; QUANTUM sweeps both circular profiles continuously.
+2. Measure the spine cross-section and its lateral/vertical relationship to
+   the track centerline. Enter those values in `spine.dimensions` and
+   `spine.offset`. The current runtime accepts a tubular/elliptical or box
+   profile; a distinct measured profile can be added without changing the
+   longitudinal sweep or Vulkan upload path.
+3. Separate one representative crosstie assembly and export it as one GLB using
+   the contract above. For a drop-in crosstie, use metres, local `+X` forward,
+   local `+Y` track-lateral, and local `+Z` track-up. Put the origin on the
+   track centerline at the intended longitudinal placement plane, normally
+   centered laterally. Use `localPosition` only for the measured offset from
+   that origin to the track centerline frame; do not bake a sample track's
+   world-space pitch, yaw, or bank into the asset.
+
+The focused GLB loader retains geometry and normals but does not import glTF
+PBR materials or textures. Modern Steel therefore keeps separate renderer
+colors for running rails, the continuous spine, and crosstie hardware in the
+track-style preset. The eventual crosstie may use `materialOverride` through
+the existing hardware draw batch; node-based material authoring remains a
+future milestone.
+
+The current preset values are validation proportions, not production art:
+0.15 m rail diameter, 1.10 m rail-center spacing, a 0.32 m by 0.42 m box spine
+centered 0.46 m below the track centerline, and 0.75 m crosstie spacing. Replace
+them with measurements from the master model before treating the style as
+artistically final.

@@ -16,7 +16,8 @@ namespace quantum::editor
         TransitionEditor,
         GeometryRegions,
         TrackStartGizmo,
-        ForceDiagnostics
+        ForceDiagnostics,
+        ModernSteel
     };
 
     // Presentation only. Documents are supplied by the developer and never edited.

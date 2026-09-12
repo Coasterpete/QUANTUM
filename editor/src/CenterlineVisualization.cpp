@@ -87,6 +87,12 @@ namespace quantum::editor
     }
 
     CenterlineVisualization createCenterlineVisualization(
+        const coaster::AuthoredTrack& track)
+    {
+        return createCenterlineVisualization(track, track.trackStyle());
+    }
+
+    CenterlineVisualization createCenterlineVisualization(
         const coaster::AuthoredTrack& track,
         const coaster::TrackStylePreset& style)
     {

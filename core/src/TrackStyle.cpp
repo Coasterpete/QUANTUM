@@ -12,6 +12,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace quantum::coaster
 {
@@ -19,7 +20,18 @@ namespace quantum::coaster
     {
         constexpr double pi = 3.14159265358979323846;
         constexpr std::uint32_t firstRailComponentId = 1;
+        constexpr std::uint32_t spineComponentId = 3;
         constexpr std::uint32_t firstHardwareComponentId = 1000;
+
+        // Temporary presentation dimensions live together here until the
+        // user's Blender master model supplies measured production values.
+        constexpr double modernSteelRailDiameter = 0.15;
+        constexpr double modernSteelRailSpacing = 1.10;
+        constexpr std::uint32_t modernSteelRailRadialSegments = 16;
+        constexpr glm::dvec2 modernSteelSpineDimensions{0.32, 0.42};
+        constexpr double modernSteelSpineVerticalOffset = -0.46;
+        constexpr double modernSteelCrosstieSpacing = 0.75;
+        constexpr double modernSteelCrosstieVerticalOffset = -0.12;
 
         [[nodiscard]] bool finite(const glm::dvec2& value) noexcept
         {
@@ -203,6 +215,142 @@ namespace quantum::coaster
             }
             return true;
         }
+
+        struct ProfileEdge
+        {
+            glm::dvec2 begin{0.0};
+            glm::dvec2 end{0.0};
+            glm::dvec2 beginNormal{0.0, 1.0};
+            glm::dvec2 endNormal{0.0, 1.0};
+        };
+
+        [[nodiscard]] std::vector<ProfileEdge> ellipticalProfile(
+            const glm::dvec2 diameters,
+            const std::uint32_t segmentCount)
+        {
+            const glm::dvec2 radii = diameters * 0.5;
+            std::vector<ProfileEdge> profile;
+            profile.reserve(segmentCount);
+            const auto point = [radii](const double angle)
+            {
+                return glm::dvec2{
+                    radii.x * std::cos(angle),
+                    radii.y * std::sin(angle)};
+            };
+            const auto normal = [radii](const double angle)
+            {
+                return glm::normalize(glm::dvec2{
+                    std::cos(angle) / radii.x,
+                    std::sin(angle) / radii.y});
+            };
+            for (std::uint32_t segment = 0; segment < segmentCount; ++segment)
+            {
+                const double beginAngle = 2.0 * pi
+                    * static_cast<double>(segment)
+                    / static_cast<double>(segmentCount);
+                const double endAngle = 2.0 * pi
+                    * static_cast<double>(segment + 1)
+                    / static_cast<double>(segmentCount);
+                profile.push_back({
+                    point(beginAngle), point(endAngle),
+                    normal(beginAngle), normal(endAngle)});
+            }
+            return profile;
+        }
+
+        [[nodiscard]] std::vector<ProfileEdge> boxProfile(
+            const glm::dvec2 dimensions)
+        {
+            const glm::dvec2 half = dimensions * 0.5;
+            return {
+                {{half.x, -half.y}, {half.x, half.y}, {1.0, 0.0}, {1.0, 0.0}},
+                {{half.x, half.y}, {-half.x, half.y}, {0.0, 1.0}, {0.0, 1.0}},
+                {{-half.x, half.y}, {-half.x, -half.y}, {-1.0, 0.0}, {-1.0, 0.0}},
+                {{-half.x, -half.y}, {half.x, -half.y}, {0.0, -1.0}, {0.0, -1.0}}
+            };
+        }
+
+        void appendProfileSweep(
+            ContinuousTrackMesh& mesh,
+            const std::span<const RiderLocalGeometryState> samples,
+            const std::span<const ProfileEdge> profile,
+            const RailOffset offset,
+            const std::uint32_t materialIndex,
+            const std::uint32_t componentId)
+        {
+            const std::size_t verticesPerRing = profile.size() * 2;
+            const std::size_t firstVertex = mesh.vertices.size();
+            const std::uint32_t firstIndex = checkedIndex(
+                mesh.triangleIndices.size(),
+                "A profile-sweep triangle-index stream exceeds 32 bits.");
+            static_cast<void>(checkedIndex(
+                firstVertex + samples.size() * verticesPerRing,
+                "A profile-sweep vertex stream exceeds 32 bits."));
+
+            for (const RiderLocalGeometryState& sample : samples)
+            {
+                const glm::dvec3 center = sample.position
+                    + sample.frame.lateral * offset.lateral
+                    + sample.frame.up * offset.vertical;
+                for (const ProfileEdge& edge : profile)
+                {
+                    for (const auto& [point, profileNormal] : {
+                        std::pair{edge.begin, edge.beginNormal},
+                        std::pair{edge.end, edge.endNormal}})
+                    {
+                        const glm::dvec3 position = center
+                            + sample.frame.lateral * point.x
+                            + sample.frame.up * point.y;
+                        const glm::dvec3 normal = glm::normalize(
+                            sample.frame.lateral * profileNormal.x
+                            + sample.frame.up * profileNormal.y);
+                        mesh.vertices.push_back({
+                            finiteFloatVector(position,
+                                "A generated profile-sweep position is outside the finite float range."),
+                            finiteFloatVector(normal,
+                                "A generated profile-sweep normal is outside the finite float range.")});
+                    }
+                }
+            }
+
+            for (std::size_t ring = 0; ring + 1 < samples.size(); ++ring)
+            {
+                for (std::size_t edge = 0; edge < profile.size(); ++edge)
+                {
+                    const std::uint32_t a = checkedIndex(
+                        firstVertex + ring * verticesPerRing + edge * 2,
+                        "A profile-sweep index exceeds 32 bits.");
+                    const std::uint32_t d = a + 1;
+                    const std::uint32_t b = checkedIndex(
+                        firstVertex + (ring + 1) * verticesPerRing + edge * 2,
+                        "A profile-sweep index exceeds 32 bits.");
+                    const std::uint32_t c = b + 1;
+                    mesh.triangleIndices.insert(
+                        mesh.triangleIndices.end(), {a, b, c, a, c, d});
+                    mesh.edgeIndices.insert(
+                        mesh.edgeIndices.end(), {a, b, d, c});
+                }
+            }
+
+            for (std::size_t ring = 0; ring < samples.size(); ++ring)
+            {
+                for (std::size_t edge = 0; edge < profile.size(); ++edge)
+                {
+                    const std::uint32_t begin = checkedIndex(
+                        firstVertex + ring * verticesPerRing + edge * 2,
+                        "A profile-sweep edge index exceeds 32 bits.");
+                    mesh.edgeIndices.insert(
+                        mesh.edgeIndices.end(), {begin, begin + 1});
+                }
+            }
+
+            mesh.submeshes.push_back({
+                firstIndex,
+                checkedIndex(mesh.triangleIndices.size() - firstIndex,
+                    "A profile-sweep submesh index count exceeds 32 bits."),
+                materialIndex,
+                componentId});
+        }
     }
 
     TrackStylePreset createStandardDualRailPreset()
@@ -232,6 +380,38 @@ namespace quantum::coaster
             glm::vec4{0.28F, 0.30F, 0.32F, 1.0F}
         };
         style.repeatingHardware.push_back(std::move(testCrosstie));
+        return style;
+    }
+
+    TrackStylePreset createModernSteelPreset()
+    {
+        TrackStylePreset style;
+        style.name = "ModernSteel";
+        style.geometryFamily = TrackGeometryFamily::DualRailTubular;
+        style.railCount = 2;
+        style.railOffsets = {
+            {-modernSteelRailSpacing * 0.5, 0.0},
+            {modernSteelRailSpacing * 0.5, 0.0}};
+        style.railRadius = modernSteelRailDiameter * 0.5;
+        style.railRadialSegments = modernSteelRailRadialSegments;
+        style.railMaterial.baseColor = {0.72F, 0.16F, 0.08F, 1.0F};
+
+        style.spine.enabled = true;
+        style.spine.type = ContinuousSpineType::Box;
+        style.spine.offset = {0.0, modernSteelSpineVerticalOffset};
+        style.spine.dimensions = modernSteelSpineDimensions;
+        style.spine.radialSegments = 12;
+        style.spine.material.baseColor = {0.20F, 0.23F, 0.27F, 1.0F};
+
+        RepeatingHardwareStyle crosstie;
+        crosstie.asset = {
+            "assets://track/test-crosstie-placeholder.glb", true};
+        crosstie.spacing = modernSteelCrosstieSpacing;
+        crosstie.localPosition = {0.0, 0.0,
+            modernSteelCrosstieVerticalOffset};
+        crosstie.materialOverride = TrackMaterial{
+            glm::vec4{0.36F, 0.39F, 0.43F, 1.0F}};
+        style.repeatingHardware.push_back(std::move(crosstie));
         return style;
     }
 
@@ -305,6 +485,15 @@ namespace quantum::coaster
         {
             throw std::invalid_argument("Continuous-spine parameters must be finite.");
         }
+        switch (style.spine.type)
+        {
+        case ContinuousSpineType::None:
+        case ContinuousSpineType::Tubular:
+        case ContinuousSpineType::Box:
+            break;
+        default:
+            throw std::invalid_argument("The continuous-spine type is invalid.");
+        }
         if (style.spine.enabled
             && (style.spine.type == ContinuousSpineType::None
                 || style.spine.dimensions.x <= 0.0
@@ -314,6 +503,15 @@ namespace quantum::coaster
                 "An enabled continuous spine requires a type and positive dimensions."
             );
         }
+        if (style.spine.enabled
+            && style.spine.type == ContinuousSpineType::Tubular
+            && (style.spine.radialSegments < 3
+                || style.spine.radialSegments > 128))
+        {
+            throw std::invalid_argument(
+                "Tubular spine radial tessellation must be in [3, 128].");
+        }
+        validateMaterial(style.spine.material, "Spine material");
 
         for (const RepeatingHardwareStyle& hardware : style.repeatingHardware)
         {
@@ -382,118 +580,33 @@ namespace quantum::coaster
         validateTrackStyle(style);
         validateSamples(samples);
 
-        if (style.spine.enabled)
-        {
-            throw std::invalid_argument(
-                "The DualRailTubular family does not generate a continuous spine yet."
-            );
-        }
-
         RenderableTrack result;
         result.materials.push_back(style.railMaterial);
+        result.continuousMesh.submeshes.reserve(
+            style.railCount + (style.spine.enabled ? 1 : 0));
 
-        const std::size_t railCount = style.railCount;
-        const std::size_t ringCount = samples.size();
-        const std::size_t sides = style.railRadialSegments;
-        const std::size_t totalVertices = railCount * ringCount * sides;
-        static_cast<void>(checkedIndex(
-            totalVertices,
-            "The rail mesh exceeds the 32-bit vertex-index range."
-        ));
-        result.continuousMesh.vertices.reserve(totalVertices);
-        result.continuousMesh.triangleIndices.reserve(
-            railCount * (ringCount - 1) * sides * 6);
-        result.continuousMesh.edgeIndices.reserve(
-            railCount * (ringCount * sides + (ringCount - 1) * sides) * 2);
-        result.continuousMesh.submeshes.reserve(railCount);
-
-        for (std::size_t rail = 0; rail < railCount; ++rail)
+        const std::vector<ProfileEdge> railProfile = ellipticalProfile(
+            glm::dvec2{style.railRadius * 2.0},
+            style.railRadialSegments);
+        for (std::size_t rail = 0; rail < style.railCount; ++rail)
         {
-            const std::uint32_t firstIndex = checkedIndex(
-                result.continuousMesh.triangleIndices.size(),
-                "The rail triangle-index stream exceeds the 32-bit draw range."
-            );
-            const RailOffset offset = style.railOffsets[rail];
-            const std::size_t railFirstVertex =
-                result.continuousMesh.vertices.size();
+            appendProfileSweep(
+                result.continuousMesh, samples, railProfile,
+                style.railOffsets[rail], 0,
+                firstRailComponentId + static_cast<std::uint32_t>(rail));
+        }
 
-            for (const RiderLocalGeometryState& sample : samples)
-            {
-                const glm::dvec3 railCenter = sample.position
-                    + sample.frame.lateral * offset.lateral
-                    + sample.frame.up * offset.vertical;
-
-                for (std::size_t side = 0; side < sides; ++side)
-                {
-                    const double angle = 2.0 * pi
-                        * static_cast<double>(side)
-                        / static_cast<double>(sides);
-                    const glm::dvec3 normal = glm::normalize(
-                        sample.frame.lateral * std::cos(angle)
-                        + sample.frame.up * std::sin(angle)
-                    );
-                    const glm::dvec3 position = railCenter
-                        + normal * style.railRadius;
-                    result.continuousMesh.vertices.push_back({
-                        finiteFloatVector(position,
-                            "A generated rail position is outside the finite float range."),
-                        finiteFloatVector(normal,
-                            "A generated rail normal is outside the finite float range.")
-                    });
-                }
-            }
-
-            for (std::size_t ring = 0; ring + 1 < ringCount; ++ring)
-            {
-                for (std::size_t side = 0; side < sides; ++side)
-                {
-                    const std::size_t nextSide = (side + 1) % sides;
-                    const std::uint32_t a = checkedIndex(
-                        railFirstVertex + ring * sides + side,
-                        "A generated rail index exceeds 32 bits.");
-                    const std::uint32_t b = checkedIndex(
-                        railFirstVertex + (ring + 1) * sides + side,
-                        "A generated rail index exceeds 32 bits.");
-                    const std::uint32_t c = checkedIndex(
-                        railFirstVertex + (ring + 1) * sides + nextSide,
-                        "A generated rail index exceeds 32 bits.");
-                    const std::uint32_t d = checkedIndex(
-                        railFirstVertex + ring * sides + nextSide,
-                        "A generated rail index exceeds 32 bits.");
-
-                    result.continuousMesh.triangleIndices.insert(
-                        result.continuousMesh.triangleIndices.end(),
-                        {a, b, c, a, c, d}
-                    );
-                    result.continuousMesh.edgeIndices.insert(
-                        result.continuousMesh.edgeIndices.end(),
-                        {a, b}
-                    );
-                }
-            }
-
-            for (std::size_t ring = 0; ring < ringCount; ++ring)
-            {
-                for (std::size_t side = 0; side < sides; ++side)
-                {
-                    const std::size_t nextSide = (side + 1) % sides;
-                    result.continuousMesh.edgeIndices.push_back(checkedIndex(
-                        railFirstVertex + ring * sides + side,
-                        "A generated rail edge index exceeds 32 bits."));
-                    result.continuousMesh.edgeIndices.push_back(checkedIndex(
-                        railFirstVertex + ring * sides + nextSide,
-                        "A generated rail edge index exceeds 32 bits."));
-                }
-            }
-
-            result.continuousMesh.submeshes.push_back({
-                firstIndex,
-                checkedIndex(
-                    result.continuousMesh.triangleIndices.size() - firstIndex,
-                    "A rail submesh index count exceeds 32 bits."),
-                0,
-                firstRailComponentId + static_cast<std::uint32_t>(rail)
-            });
+        if (style.spine.enabled)
+        {
+            result.materials.push_back(style.spine.material);
+            const std::vector<ProfileEdge> spineProfile =
+                style.spine.type == ContinuousSpineType::Tubular
+                ? ellipticalProfile(
+                    style.spine.dimensions, style.spine.radialSegments)
+                : boxProfile(style.spine.dimensions);
+            appendProfileSweep(
+                result.continuousMesh, samples, spineProfile,
+                style.spine.offset, 1, spineComponentId);
         }
 
         const double trackBegin = samples.front().distance;

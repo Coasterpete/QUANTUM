@@ -69,9 +69,12 @@ namespace quantum::editor
     // continuous whole-track solve and derives its viewport reference curves
     // from the per-sample solved frames.
     [[nodiscard]] CenterlineVisualization createCenterlineVisualization(
+        const coaster::AuthoredTrack& track
+    );
+
+    [[nodiscard]] CenterlineVisualization createCenterlineVisualization(
         const coaster::AuthoredTrack& track,
-        const coaster::TrackStylePreset& style =
-            coaster::createStandardDualRailPreset()
+        const coaster::TrackStylePreset& style
     );
 
     // Display-only bounds for Frame All/Focus. Keep the solved centerline
@@ -103,7 +106,7 @@ namespace quantum::editor
     private:
         CenterlineVisualization visualization_;
         coaster::TrackStylePreset trackStyle_ =
-            coaster::createStandardDualRailPreset();
+            coaster::createModernSteelPreset();
         std::uint64_t generation_ = 0;
         bool dirty_ = true;
     };
