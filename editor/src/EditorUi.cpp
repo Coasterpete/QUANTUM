@@ -200,6 +200,56 @@ namespace
         }
     }
 
+    [[nodiscard]] std::pair<bool, bool> inputDoubleWithUnits(
+        const char* const id,
+        double* const value,
+        const char* const units,
+        const int precision,
+        const double step,
+        const double fastStep,
+        const quantum::editor::EditorFonts& fonts)
+    {
+        char format[32];
+        std::snprintf(format, sizeof(format), "%%.%df %s", precision, units);
+
+        ImGui::SetNextItemWidth(-1.0F);
+        ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
+        const bool changed = ImGui::InputDouble(
+            id,
+            value,
+            step,
+            fastStep,
+            format);
+        const bool active = ImGui::IsItemActive();
+        ImGui::PopFont();
+        return {changed, active};
+    }
+
+    [[nodiscard]] std::pair<bool, bool> inputDouble2WithUnits(
+        const char* const id,
+        double values[2],
+        const char* const units,
+        const int precision,
+        const quantum::editor::EditorFonts& fonts)
+    {
+        char format[32];
+        std::snprintf(format, sizeof(format), "%%.%df %s", precision, units);
+
+        ImGui::SetNextItemWidth(-1.0F);
+        ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
+        const bool changed = ImGui::InputScalarN(
+            id,
+            ImGuiDataType_Double,
+            values,
+            2,
+            nullptr,
+            nullptr,
+            format);
+        const bool active = ImGui::IsItemActive();
+        ImGui::PopFont();
+        return {changed, active};
+    }
+
     struct AuthoredDomainView
     {
         double domainBegin;
@@ -2391,7 +2441,9 @@ namespace
     [[nodiscard]] std::optional<quantum::editor::RegionTrackStyleEdit>
     showRegionTrackStyleControls(
         const quantum::coaster::AuthoredTrack& track,
-        const std::size_t selectedIndex)
+        const std::size_t selectedIndex,
+        const quantum::editor::EditorFonts& fonts,
+        bool& numericEditActive)
     {
         using quantum::coaster::ContinuousSpineType;
         using quantum::coaster::RegionTrackStyleOverrides;
@@ -2473,7 +2525,7 @@ namespace
         };
         const auto doubleOverride = [&](const char* label, const char* id,
             std::optional<double>& local, const double inherited,
-            const double step)
+            const double step, const bool positive)
         {
             ImGui::PushID(id);
             bool authored = local.has_value();
@@ -2487,13 +2539,18 @@ namespace
             ImGui::TextUnformatted(label);
             double value = local.value_or(inherited);
             ImGui::BeginDisabled(!authored);
-            ImGui::SetNextItemWidth(-1.0F);
-            if (ImGui::InputDouble("##Value", &value, step, step * 10.0,
-                "%.3f"))
+            const double valueBefore = value;
+            const auto [valueChanged, valueActive] = inputDoubleWithUnits(
+                "##Value", &value, "m", 3, step, step * 10.0, fonts);
+            numericEditActive = numericEditActive || valueActive;
+            if (valueChanged && value != valueBefore
+                && std::isfinite(value) && (!positive || value > 0.0))
             {
                 local = value;
                 changed = true;
-                continuous = ImGui::IsItemActive();
+                // The active-field flag keeps the history span open across
+                // paused frames; the next inactive frame closes it.
+                continuous = true;
             }
             ImGui::EndDisabled();
             ImGui::PopID();
@@ -2586,7 +2643,8 @@ namespace
             if (supported(TrackStyleProperty::HardwareSpacing))
                 doubleOverride("Spacing", "HardwareSpacing",
                     candidate.hardwareSpacing,
-                    documentStyle.repeatingHardware.front().spacing, 0.05);
+                    documentStyle.repeatingHardware.front().spacing, 0.05,
+                    true);
             ImGui::TreePop();
         }
         if (ImGui::TreeNode("Appearance"))
@@ -2610,20 +2668,21 @@ namespace
         {
             if (supported(TrackStyleProperty::RailRadius))
                 doubleOverride("Rail radius", "RailRadius",
-                    candidate.railRadius, documentStyle.railRadius, 0.005);
+                    candidate.railRadius, documentStyle.railRadius, 0.005,
+                    true);
             if (supported(TrackStyleProperty::RailCenterSpacing))
                 doubleOverride("Rail center spacing", "RailSpacing",
                     candidate.railCenterSpacing,
                     std::abs(documentStyle.railOffsets[1].lateral
-                        - documentStyle.railOffsets[0].lateral), 0.01);
+                        - documentStyle.railOffsets[0].lateral), 0.01, true);
             if (supported(TrackStyleProperty::RailVerticalOffset))
                 doubleOverride("Rail vertical offset", "RailVertical",
                     candidate.railVerticalOffset,
-                    documentStyle.railOffsets.front().vertical, 0.01);
+                    documentStyle.railOffsets.front().vertical, 0.01, false);
             if (supported(TrackStyleProperty::SpineRadius))
                 doubleOverride("Spine radius", "SpineRadius",
                     candidate.spineRadius,
-                    documentStyle.spine.dimensions.x * 0.5, 0.01);
+                    documentStyle.spine.dimensions.x * 0.5, 0.01, true);
             if (supported(TrackStyleProperty::SpineDimensions))
             {
                 bool authored = candidate.spineDimensions.has_value();
@@ -2638,21 +2697,32 @@ namespace
                 ImGui::TextUnformatted("Spine width / height");
                 double values[2]{resolved.spine.dimensions.x,
                     resolved.spine.dimensions.y};
+                const double widthBefore = values[0];
+                const double heightBefore = values[1];
                 ImGui::BeginDisabled(!authored);
-                ImGui::SetNextItemWidth(-1.0F);
-                if (ImGui::InputScalarN("##SpineDimensions",
-                    ImGuiDataType_Double, values, 2))
+                const auto [valuesChanged, valuesActive] =
+                    inputDouble2WithUnits(
+                        "##SpineDimensions", values, "m", 3, fonts);
+                numericEditActive = numericEditActive || valuesActive;
+                if (valuesChanged
+                    && (values[0] != widthBefore
+                        || values[1] != heightBefore)
+                    && std::isfinite(values[0])
+                    && std::isfinite(values[1])
+                    && values[0] > 0.0 && values[1] > 0.0)
                 {
                     candidate.spineDimensions = {values[0], values[1]};
                     changed = true;
-                    continuous = ImGui::IsItemActive();
+                    // Include a last-character-plus-Enter frame in the
+                    // same continuous history span.
+                    continuous = true;
                 }
                 ImGui::EndDisabled();
             }
             if (supported(TrackStyleProperty::SpineVerticalOffset))
                 doubleOverride("Spine vertical offset", "SpineVertical",
                     candidate.spineVerticalOffset,
-                    documentStyle.spine.offset.vertical, 0.01);
+                    documentStyle.spine.offset.vertical, 0.01, false);
             ImGui::TreePop();
         }
 
@@ -2674,7 +2744,8 @@ namespace
         std::array<char, 512>& hardwareAssetIdBuffer,
         std::string& hardwareAssetIdBufferSource,
         std::string& hardwareEditError,
-        bool& hardwareDragActive)
+        bool& hardwareDragActive,
+        bool& regionStyleNumericEditActive)
     {
         TrackWorkspaceEdit edit;
         ImGui::Begin(trackWorkspaceWindowName);
@@ -2823,7 +2894,8 @@ namespace
                     "Track Style", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     edit.regionStyleEdit = showRegionTrackStyleControls(
-                        track, selectedIndex);
+                        track, selectedIndex, fonts,
+                        regionStyleNumericEditActive);
                     ImGui::TreePop();
                 }
             }
@@ -7419,6 +7491,7 @@ ImGui::MenuItem(
         }
         ImGui::NewFrame();
         hardwareDragActive_ = false;
+        regionStyleNumericEditActive_ = false;
 
         if (captureSetupPending_)
         {
@@ -8007,7 +8080,8 @@ ImGui::MenuItem(
             hardwareAssetIdBuffer_,
             hardwareAssetIdBufferSource_,
             hardwareAssetInputError_,
-            hardwareDragActive_
+            hardwareDragActive_,
+            regionStyleNumericEditActive_
         );
 
         if (workspaceEdit.hardwareEdit.has_value())
@@ -9472,6 +9546,7 @@ ImGui::MenuItem(
         hardwareAssetIdBufferSource_.clear();
         hardwareAssetInputError_.clear();
         hardwareDragActive_ = false;
+        regionStyleNumericEditActive_ = false;
         trackHardwareEdit_.reset();
         valueEndEditBuffers_.fill(0.0);
         endpointSelections_.fill(ScalarProfileEndpoint::None);
@@ -9911,6 +9986,7 @@ ImGui::MenuItem(
         return startPoseManipulation_.has_value()
             || supportNodeManipulation_.has_value()
             || hardwareDragActive_
+            || regionStyleNumericEditActive_
             || supportAnchorDragActive_
             || firstActiveEndpoint(endpointDrags_)
                 != ScalarProfileEndpoint::None;
@@ -9973,6 +10049,7 @@ std::optional<coaster::LayoutMode>
         hardwareAssetIdBufferSource_.clear();
         hardwareAssetInputError_.clear();
         hardwareDragActive_ = false;
+        regionStyleNumericEditActive_ = false;
         trackHardwareEdit_.reset();
         if (riderLoadDiagnostics_.sectionCount() > 0)
         {

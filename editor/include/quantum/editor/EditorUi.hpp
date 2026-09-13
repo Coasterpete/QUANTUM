@@ -785,6 +785,7 @@ void drawSimulationTelemetry();
         std::string hardwareAssetIdBufferSource_;
         std::string hardwareAssetInputError_;
         bool hardwareDragActive_ = false;
+        bool regionStyleNumericEditActive_ = false;
         std::vector<CenterlineSectionSlice> centerlineSlices_;
         const CenterlineVisualization* centerlineVisualization_ = nullptr;
         const SupportVisualization* supportVisualization_ = nullptr;
