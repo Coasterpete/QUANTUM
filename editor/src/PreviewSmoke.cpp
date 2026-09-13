@@ -237,6 +237,11 @@ namespace quantum::editor
                 options.repeat = true;
                 continue;
             }
+            if (argument == "--stopped-preview")
+            {
+                options.stoppedPreview = true;
+                continue;
+            }
             if (argument == "--dev-preview-smoke")
             {
                 if (++index >= arguments.size() || arguments[index].starts_with("--"))
@@ -255,11 +260,36 @@ namespace quantum::editor
             };
 
             if (argument == "--duration" || argument == "--spike-frame-ms"
-                || argument == "--spike-steps" || argument == "--output")
+                || argument == "--spike-steps" || argument == "--output"
+                || argument == "--region-style-edit")
             {
                 const auto value = requireValue(argument);
                 if (!value) return std::unexpected(value.error());
-                if (argument == "--output")
+                if (argument == "--region-style-edit")
+                {
+                    if (*value == "hardware-spacing")
+                    {
+                        options.regionStyleEdit =
+                            PreviewSmokeRegionStyleEdit::HardwareSpacing;
+                    }
+                    else if (*value == "rail-material")
+                    {
+                        options.regionStyleEdit =
+                            PreviewSmokeRegionStyleEdit::RailMaterial;
+                    }
+                    else if (*value == "rail-spacing")
+                    {
+                        options.regionStyleEdit =
+                            PreviewSmokeRegionStyleEdit::RailCenterSpacing;
+                    }
+                    else
+                    {
+                        return std::unexpected(
+                            "--region-style-edit requires hardware-spacing, "
+                            "rail-material, or rail-spacing.");
+                    }
+                }
+                else if (argument == "--output")
                 {
                     if (value->empty())
                         return std::unexpected("--output requires a non-empty path.");

@@ -80,6 +80,9 @@ namespace quantum::coaster
         TrackGeometryFamily geometryFamily =
             TrackGeometryFamily::DualRailTubular;
 
+        bool visible = true;
+        bool railsVisible = true;
+
         std::uint32_t railCount = 2;
         std::vector<RailOffset> railOffsets;
         double railRadius = 0.065;
@@ -90,8 +93,66 @@ namespace quantum::coaster
         std::vector<RepeatingHardwareStyle> repeatingHardware;
     };
 
+    // Semantic authoring properties that a concrete style configuration may
+    // expose to sparse region overrides. Support is derived from the
+    // configuration's structure, never from its preset name.
+    enum class TrackStyleProperty : std::uint8_t
+    {
+        Visibility,
+        RailsVisibility,
+        RailRadius,
+        RailCenterSpacing,
+        RailVerticalOffset,
+        SpineEnabled,
+        SpineType,
+        SpineRadius,
+        SpineDimensions,
+        SpineVerticalOffset,
+        HardwareEnabled,
+        HardwareSpacing,
+        RailMaterial,
+        SpineMaterial,
+        HardwareMaterial
+    };
+
+    // A region owns only explicitly authored differences. std::optional is
+    // the inheritance marker: disengaged means use the document value.
+    struct RegionTrackStyleOverrides
+    {
+        bool enabled = false;
+        std::optional<bool> visible;
+        std::optional<bool> railsVisible;
+        std::optional<double> railRadius;
+        std::optional<double> railCenterSpacing;
+        std::optional<double> railVerticalOffset;
+        std::optional<bool> spineEnabled;
+        std::optional<ContinuousSpineType> spineType;
+        std::optional<double> spineRadius;
+        std::optional<glm::dvec2> spineDimensions;
+        std::optional<double> spineVerticalOffset;
+        std::optional<bool> hardwareEnabled;
+        std::optional<double> hardwareSpacing;
+        std::optional<TrackMaterial> railMaterial;
+        std::optional<TrackMaterial> spineMaterial;
+        std::optional<TrackMaterial> hardwareMaterial;
+    };
+
     [[nodiscard]] TrackStylePreset createStandardDualRailPreset();
     [[nodiscard]] TrackStylePreset createModernSteelPreset();
+
+    [[nodiscard]] bool supportsTrackStyleProperty(
+        const TrackStylePreset& style,
+        TrackStyleProperty property) noexcept;
+
+    // The single canonical document-style + region-overrides resolution
+    // path. Throws std::invalid_argument for unsupported or invalid authored
+    // overrides and otherwise returns a fully validated concrete style.
+    [[nodiscard]] TrackStylePreset resolveTrackStyle(
+        const TrackStylePreset& documentStyle,
+        const RegionTrackStyleOverrides& overrides);
+
+    [[nodiscard]] bool hasTrackStylePropertyOverrides(
+        const RegionTrackStyleOverrides& overrides) noexcept;
 
     // Returns a canonical package-relative identifier for repeating track
     // hardware below assets://track/. The retained builtin diagnostic
@@ -155,11 +216,24 @@ namespace quantum::coaster
         std::vector<HardwareInstanceBatch> hardwareBatches;
     };
 
+    // Product-level builders used by presentation invalidation. Both consume
+    // already solved centerline/frame samples and never advance authored-track
+    // geometry or physics generation.
+    [[nodiscard]] RenderableTrack generateContinuousTrackPresentation(
+        std::span<const RiderLocalGeometryState> samples,
+        const TrackStylePreset& style);
+    [[nodiscard]] std::vector<HardwareInstanceBatch>
+    generateTrackHardwarePresentation(
+        std::span<const RiderLocalGeometryState> samples,
+        const TrackStylePreset& style,
+        bool includeHardwareAtEnd = true);
+
     // Builds renderer-neutral indexed rail geometry and reusable-hardware
     // placement from the canonical centerline/frame samples. The samples are
     // not regenerated or re-framed here.
     [[nodiscard]] RenderableTrack generateRenderableTrack(
         std::span<const RiderLocalGeometryState> samples,
-        const TrackStylePreset& style
+        const TrackStylePreset& style,
+        bool includeHardwareAtEnd = true
     );
 }

@@ -19,6 +19,7 @@ add_executable(
     src/RiderLoadDiagnostics.cpp
     src/SimulationPreview.cpp
     src/TransitionEditorModel.cpp
+    src/TrackStylePresentation.cpp
     src/ViewportCamera.cpp
     src/ViewportPicking.cpp
     src/ViewportTrackAnchors.cpp
@@ -42,6 +43,7 @@ add_executable(
     include/quantum/editor/RiderLoadDiagnostics.hpp
     include/quantum/editor/SimulationPreview.hpp
     include/quantum/editor/TransitionEditorModel.hpp
+    include/quantum/editor/TrackStylePresentation.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp
     include/quantum/editor/ViewportPicking.hpp

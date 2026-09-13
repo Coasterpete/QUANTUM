@@ -885,6 +885,52 @@ namespace
             "documents without trackStyle keep the historical standard preset");
     }
 
+    void regionTrackStyleOverridesRoundTripAndStaySparse()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        track.appendSection();
+        auto& overrides = track.section(1).trackStyleOverrides;
+        overrides.enabled = true;
+        overrides.hardwareSpacing = 1.4;
+        overrides.spineEnabled = false;
+        overrides.railMaterial = quantum::coaster::TrackMaterial{
+            glm::vec4{0.2F, 0.7F, 0.3F, 1.0F}};
+
+        const std::string serialized = serializeCoasterDocument(track);
+        const auto json = nlohmann::json::parse(serialized);
+        require(!json["sections"][0].contains("trackStyleOverrides"),
+            "fully inherited regions must not serialize override data");
+        const auto& local = json["sections"][1]["trackStyleOverrides"];
+        require(local.size() == 3
+                && local.contains("hardwareSpacing")
+                && local.contains("spineEnabled")
+                && local.contains("railMaterial")
+                && !local.contains("railRadius"),
+            "region serialization must contain only explicitly authored values");
+
+        const auto restored = deserializeCoasterDocument(serialized);
+        requireValidDocument(restored, "region style override round-trip");
+        const auto& restoredOverrides =
+            restored->section(1).trackStyleOverrides;
+        require(restoredOverrides.enabled
+                && restoredOverrides.hardwareSpacing == 1.4
+                && restoredOverrides.spineEnabled == false
+                && !restoredOverrides.railRadius.has_value(),
+            "sparse inherited/overridden state must survive Save/Open");
+        const auto resolved = quantum::coaster::resolveTrackStyle(
+            restored->trackStyle(), restoredOverrides);
+        require(resolved.repeatingHardware.front().spacing == 1.4
+                && !resolved.spine.enabled,
+            "round-tripped overrides must resolve to the same presentation");
+
+        auto legacy = json;
+        legacy["sections"][1].erase("trackStyleOverrides");
+        const auto legacyResult = deserializeCoasterDocument(legacy.dump());
+        requireValidDocument(legacyResult, "legacy region inheritance");
+        require(!legacyResult->section(1).trackStyleOverrides.enabled,
+            "documents without region override data must inherit unchanged");
+    }
+
     // ----------------------------------------------------------------
     // Test runner
     // ----------------------------------------------------------------
@@ -921,6 +967,8 @@ namespace
             {"EmptySectionsRejection",           emptySectionsRejection},
             {"TrackHardwareRoundTrip",           trackHardwareRoundTrip},
             {"ModernSteelStyleRoundTrip",        modernSteelStyleRoundTrip},
+            {"RegionTrackStyleOverridesRoundTrip",
+                regionTrackStyleOverridesRoundTripAndStaySparse},
         };
 
         std::size_t failures = 0;

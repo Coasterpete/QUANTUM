@@ -481,6 +481,90 @@ namespace
         require(snapshot(redone) == unconnected,
             "clearing a connection must redo to the unconnected document");
     }
+
+    void regionStyleOverridesUseWholeDocumentHistory()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        const std::string inherited = snapshot(track);
+
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            const auto before = transaction.candidate().section(0)
+                .trackStyleOverrides;
+            transaction.candidate().section(0)
+                .trackStyleOverrides.enabled = true;
+            const auto impact = quantum::editor::classifyRegionTrackStyleEdit(
+                transaction.candidate().trackStyle(), before,
+                transaction.candidate().section(0).trackStyleOverrides);
+            transaction.commit(track);
+            history.record(track, false, impact);
+        }
+        const std::string enabledOnly = snapshot(track);
+        track = requireState(history.undo(), "region-style enable Undo missing");
+        require(history.lastRestoreTrackStylePresentationImpact().has_value()
+                && history.lastRestoreTrackStylePresentationImpact()->empty(),
+            "style-only Undo retains its no-op presentation classification");
+        require(snapshot(track) == inherited,
+            "enabling local override behavior must be undoable");
+        track = requireState(history.redo(), "region-style enable Redo missing");
+        require(snapshot(track) == enabledOnly
+                && track.section(0).trackStyleOverrides.enabled,
+            "enabling local override behavior must be redoable");
+
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            const auto before = transaction.candidate().section(0)
+                .trackStyleOverrides;
+            auto& overrides = transaction.candidate().section(0)
+                .trackStyleOverrides;
+            overrides.hardwareSpacing = 1.6;
+            const auto impact = quantum::editor::classifyRegionTrackStyleEdit(
+                transaction.candidate().trackStyle(), before, overrides);
+            transaction.commit(track);
+            history.record(track, false, impact);
+        }
+        const std::string overridden = snapshot(track);
+        require(track.section(0).trackStyleOverrides.hardwareSpacing == 1.6,
+            "accepted region override must enter document state");
+
+        track = requireState(history.undo(), "region-style Undo missing");
+        require(history.lastRestoreTrackStylePresentationImpact().has_value()
+                && history.lastRestoreTrackStylePresentationImpact()->affects(
+                    quantum::editor::TrackStylePresentationProduct::
+                        HardwareInstances)
+                && !history.lastRestoreTrackStylePresentationImpact()->affects(
+                    quantum::editor::TrackStylePresentationProduct::
+                        RenderableMesh),
+            "hardware-spacing Undo restores the hardware-only invalidation");
+        require(snapshot(track) == enabledOnly
+                && track.section(0).trackStyleOverrides.enabled
+                && !track.section(0).trackStyleOverrides.hardwareSpacing,
+            "Undo must remove an individual property override exactly");
+        track = requireState(history.redo(), "region-style Redo missing");
+        require(history.lastRestoreTrackStylePresentationImpact().has_value()
+                && history.lastRestoreTrackStylePresentationImpact()->affects(
+                    quantum::editor::TrackStylePresentationProduct::
+                        HardwareInstances),
+            "hardware-spacing Redo reuses the hardware-only invalidation");
+        require(snapshot(track) == overridden
+                && quantum::coaster::resolveTrackStyle(
+                    track.trackStyle(),
+                    track.section(0).trackStyleOverrides)
+                    .repeatingHardware.front().spacing == 1.6,
+            "Redo must restore region data and resolved presentation");
+
+        {
+            AuthoredTrackEditTransaction transaction{track};
+            transaction.candidate().section(0).trackStyleOverrides = {};
+            transaction.commit(track);
+            history.record(track);
+        }
+        track = requireState(history.undo(), "region-style clear Undo missing");
+        require(snapshot(track) == overridden,
+            "clearing all overrides must be undoable");
+    }
 }
 
 int main()
@@ -498,6 +582,7 @@ int main()
         supportGraphAuthoringUndoRedoIsExact();
         supportAnchorMetadataUsesWholeDocumentHistory();
         supportMemberEndConnectionsUndoRedoIsExact();
+        regionStyleOverridesUseWholeDocumentHistory();
     }
     catch (const std::exception& exception)
     {

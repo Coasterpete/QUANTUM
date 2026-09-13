@@ -20,13 +20,15 @@ namespace quantum::editor
         entries_.clear();
         cursor_ = 0;
         continuousEditActive_ = false;
-        entries_.push_back(Entry{track, nextRevision_++});
+        lastRestoreImpact_.reset();
+        entries_.push_back(Entry{track, nextRevision_++, std::nullopt});
         savedRevision_ = entries_.front().revision;
     }
 
     void DocumentHistory::record(
         const coaster::AuthoredTrack& track,
-        const bool continuous)
+        const bool continuous,
+        std::optional<TrackStylePresentationImpact> impact)
     {
         if (entries_.empty())
         {
@@ -37,7 +39,20 @@ namespace quantum::editor
 
         if (continuous && continuousEditActive_)
         {
-            entries_[cursor_] = Entry{track, nextRevision_++};
+            if (entries_[cursor_].trackStylePresentationImpactFromPrevious
+                && impact)
+            {
+                impact = combineTrackStyleImpacts(
+                    *entries_[cursor_]
+                        .trackStylePresentationImpactFromPrevious,
+                    *impact);
+            }
+            else
+            {
+                impact.reset();
+            }
+            entries_[cursor_] = Entry{
+                track, nextRevision_++, std::move(impact)};
             return;
         }
 
@@ -46,7 +61,7 @@ namespace quantum::editor
             continuousEditActive_ = false;
         }
 
-        append(track);
+        append(track, std::move(impact));
         continuousEditActive_ = continuous;
     }
 
@@ -63,6 +78,8 @@ namespace quantum::editor
             return std::nullopt;
         }
 
+        lastRestoreImpact_ =
+            entries_[cursor_].trackStylePresentationImpactFromPrevious;
         --cursor_;
         return entries_[cursor_].track;
     }
@@ -76,7 +93,15 @@ namespace quantum::editor
         }
 
         ++cursor_;
+        lastRestoreImpact_ =
+            entries_[cursor_].trackStylePresentationImpactFromPrevious;
         return entries_[cursor_].track;
+    }
+
+    std::optional<TrackStylePresentationImpact>
+    DocumentHistory::lastRestoreTrackStylePresentationImpact() const noexcept
+    {
+        return lastRestoreImpact_;
     }
 
     void DocumentHistory::markSaved() noexcept
@@ -109,11 +134,14 @@ namespace quantum::editor
         return entries_.size();
     }
 
-    void DocumentHistory::append(const coaster::AuthoredTrack& track)
+    void DocumentHistory::append(
+        const coaster::AuthoredTrack& track,
+        std::optional<TrackStylePresentationImpact> impact)
     {
         entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(cursor_ + 1),
             entries_.end());
-        entries_.push_back(Entry{track, nextRevision_++});
+        entries_.push_back(Entry{
+            track, nextRevision_++, std::move(impact)});
         cursor_ = entries_.size() - 1;
 
         if (entries_.size() > capacity_)

@@ -65,6 +65,7 @@
     {
       "kind": "RateProfiles",
       "length": 10.0,
+      "trackStyleOverrides": {"hardwareSpacing": 1.5},
       "rateProfiles": {
         "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]},
         "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": -0.08, "type": "Smootherstep"}}]},
@@ -74,6 +75,7 @@
     {
       "kind": "RateProfiles",
       "length": 10.0,
+      "trackStyleOverrides": {"spineEnabled": false},
       "rateProfiles": {
         "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.0, "type": "Linear"}}]},
         "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": -0.08, "valueEnd": 0.08, "type": "CosineEaseInOut"}}]},
@@ -83,6 +85,11 @@
     {
       "kind": "RateProfiles",
       "length": 10.0,
+      "trackStyleOverrides": {
+        "railMaterial": {
+          "baseColor": {"r": 0.10, "g": 0.75, "b": 0.24, "a": 1.0}
+        }
+      },
       "rateProfiles": {
         "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.0, "valueEnd": 0.10, "type": "Smootherstep"}}]},
         "pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0.0, "domainEnd": 10.0, "valueBegin": 0.08, "valueEnd": 0.0, "type": "Smoothstep"}}]},

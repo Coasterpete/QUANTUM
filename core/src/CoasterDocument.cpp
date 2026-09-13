@@ -357,6 +357,8 @@ namespace quantum::coaster
             return {
                 {"name", style.name},
                 {"geometryFamily", "DualRailTubular"},
+                {"visible", style.visible},
+                {"railsVisible", style.railsVisible},
                 {"railCount", style.railCount},
                 {"railOffsets", std::move(railOffsets)},
                 {"railRadius", style.railRadius},
@@ -375,6 +377,63 @@ namespace quantum::coaster
                     {"material", serializeTrackMaterial(
                         style.spine.material)}}},
                 {"repeatingHardware", std::move(repeatingHardware)}};
+        }
+
+        json serializeRegionTrackStyleOverrides(
+            const RegionTrackStyleOverrides& overrides)
+        {
+            json result = json::object();
+            if (overrides.visible) result["visible"] = *overrides.visible;
+            if (overrides.railsVisible)
+                result["railsVisible"] = *overrides.railsVisible;
+            if (overrides.railRadius)
+                result["railRadius"] = *overrides.railRadius;
+            if (overrides.railCenterSpacing)
+                result["railCenterSpacing"] = *overrides.railCenterSpacing;
+            if (overrides.railVerticalOffset)
+                result["railVerticalOffset"] = *overrides.railVerticalOffset;
+            if (overrides.spineEnabled)
+                result["spineEnabled"] = *overrides.spineEnabled;
+            if (overrides.spineType)
+            {
+                switch (*overrides.spineType)
+                {
+                case ContinuousSpineType::None:
+                    result["spineType"] = "None";
+                    break;
+                case ContinuousSpineType::Tubular:
+                    result["spineType"] = "Tubular";
+                    break;
+                case ContinuousSpineType::Box:
+                    result["spineType"] = "Box";
+                    break;
+                }
+            }
+            if (overrides.spineRadius)
+                result["spineRadius"] = *overrides.spineRadius;
+            if (overrides.spineDimensions)
+            {
+                result["spineDimensions"] = {
+                    {"x", overrides.spineDimensions->x},
+                    {"y", overrides.spineDimensions->y}};
+            }
+            if (overrides.spineVerticalOffset)
+                result["spineVerticalOffset"] =
+                    *overrides.spineVerticalOffset;
+            if (overrides.hardwareEnabled)
+                result["hardwareEnabled"] = *overrides.hardwareEnabled;
+            if (overrides.hardwareSpacing)
+                result["hardwareSpacing"] = *overrides.hardwareSpacing;
+            if (overrides.railMaterial)
+                result["railMaterial"] =
+                    serializeTrackMaterial(*overrides.railMaterial);
+            if (overrides.spineMaterial)
+                result["spineMaterial"] =
+                    serializeTrackMaterial(*overrides.spineMaterial);
+            if (overrides.hardwareMaterial)
+                result["hardwareMaterial"] =
+                    serializeTrackMaterial(*overrides.hardwareMaterial);
+            return result;
         }
 
         json serializeCoasterSetup(const CoasterSetup& setup)
@@ -598,12 +657,23 @@ namespace quantum::coaster
                 }
             }
 
+            if (section.trackStyleOverrides.enabled)
+            {
+                result["trackStyleOverrides"] =
+                    serializeRegionTrackStyleOverrides(
+                        section.trackStyleOverrides);
+            }
+
             return result;
         }
 
         // ----------------------------------------------------------------
         // Deserialization
         // ----------------------------------------------------------------
+
+        TrackMaterial deserializeTrackMaterial(
+            const json& object,
+            const std::string& path);
 
         math::ScalarTransition deserializeScalarTransition(
             const json& object,
@@ -757,11 +827,13 @@ namespace quantum::coaster
 
             if (kindStr == "RateProfiles")
             {
-                allowed = {"kind", "length", "rateProfiles"};
+                allowed = {"kind", "length", "rateProfiles",
+                    "trackStyleOverrides"};
             }
             else if (kindStr == "Geometry")
             {
-                allowed = {"kind", "length", "planarArc", "forceDriven"};
+                allowed = {"kind", "length", "planarArc", "forceDriven",
+                    "trackStyleOverrides"};
             }
             else
             {
@@ -814,6 +886,113 @@ namespace quantum::coaster
                         deserializeChannelProfile(force["targetLateralG"], forcePath + ".targetLateralG"),
                         deserializeChannelProfile(force["rollRate"], forcePath + ".rollRate")}};
                 }
+            }
+
+            if (object.contains("trackStyleOverrides"))
+            {
+                requireObject(object, "trackStyleOverrides", path);
+                const json& local = object["trackStyleOverrides"];
+                const std::string localPath = path + ".trackStyleOverrides";
+                requireNoUnknownFields(local, {
+                    "visible", "railsVisible", "railRadius",
+                    "railCenterSpacing", "railVerticalOffset",
+                    "spineEnabled", "spineType", "spineRadius",
+                    "spineDimensions", "spineVerticalOffset",
+                    "hardwareEnabled", "hardwareSpacing", "railMaterial",
+                    "spineMaterial", "hardwareMaterial"}, localPath);
+
+                RegionTrackStyleOverrides& overrides =
+                    section.trackStyleOverrides;
+                overrides.enabled = true;
+                if (local.contains("visible"))
+                {
+                    requireBoolean(local, "visible", localPath);
+                    overrides.visible = local["visible"].get<bool>();
+                }
+                if (local.contains("railsVisible"))
+                {
+                    requireBoolean(local, "railsVisible", localPath);
+                    overrides.railsVisible =
+                        local["railsVisible"].get<bool>();
+                }
+                for (const char* key : {"railRadius", "railCenterSpacing",
+                    "railVerticalOffset", "spineRadius",
+                    "spineVerticalOffset", "hardwareSpacing"})
+                {
+                    if (local.contains(key)) requireNumber(local, key, localPath);
+                }
+                if (local.contains("railRadius"))
+                    overrides.railRadius = local["railRadius"].get<double>();
+                if (local.contains("railCenterSpacing"))
+                    overrides.railCenterSpacing =
+                        local["railCenterSpacing"].get<double>();
+                if (local.contains("railVerticalOffset"))
+                    overrides.railVerticalOffset =
+                        local["railVerticalOffset"].get<double>();
+                if (local.contains("spineEnabled"))
+                {
+                    requireBoolean(local, "spineEnabled", localPath);
+                    overrides.spineEnabled =
+                        local["spineEnabled"].get<bool>();
+                }
+                if (local.contains("spineType"))
+                {
+                    requireString(local, "spineType", localPath);
+                    const std::string value =
+                        local["spineType"].get<std::string>();
+                    if (value == "None")
+                        overrides.spineType = ContinuousSpineType::None;
+                    else if (value == "Tubular")
+                        overrides.spineType = ContinuousSpineType::Tubular;
+                    else if (value == "Box")
+                        overrides.spineType = ContinuousSpineType::Box;
+                    else throw std::runtime_error(
+                        localPath + ".spineType: unsupported spine type");
+                }
+                if (local.contains("spineRadius"))
+                    overrides.spineRadius =
+                        local["spineRadius"].get<double>();
+                if (local.contains("spineDimensions"))
+                {
+                    requireObject(local, "spineDimensions", localPath);
+                    const json& dimensions = local["spineDimensions"];
+                    const std::string dimensionsPath =
+                        localPath + ".spineDimensions";
+                    requireNoUnknownFields(dimensions, {"x", "y"},
+                        dimensionsPath);
+                    requireNumber(dimensions, "x", dimensionsPath);
+                    requireNumber(dimensions, "y", dimensionsPath);
+                    overrides.spineDimensions = glm::dvec2{
+                        dimensions["x"].get<double>(),
+                        dimensions["y"].get<double>()};
+                }
+                if (local.contains("spineVerticalOffset"))
+                    overrides.spineVerticalOffset =
+                        local["spineVerticalOffset"].get<double>();
+                if (local.contains("hardwareEnabled"))
+                {
+                    requireBoolean(local, "hardwareEnabled", localPath);
+                    overrides.hardwareEnabled =
+                        local["hardwareEnabled"].get<bool>();
+                }
+                if (local.contains("hardwareSpacing"))
+                    overrides.hardwareSpacing =
+                        local["hardwareSpacing"].get<double>();
+                for (const char* key : {"railMaterial", "spineMaterial",
+                    "hardwareMaterial"})
+                {
+                    if (local.contains(key)) requireObject(local, key, localPath);
+                }
+                if (local.contains("railMaterial"))
+                    overrides.railMaterial = deserializeTrackMaterial(
+                        local["railMaterial"], localPath + ".railMaterial");
+                if (local.contains("spineMaterial"))
+                    overrides.spineMaterial = deserializeTrackMaterial(
+                        local["spineMaterial"], localPath + ".spineMaterial");
+                if (local.contains("hardwareMaterial"))
+                    overrides.hardwareMaterial = deserializeTrackMaterial(
+                        local["hardwareMaterial"],
+                        localPath + ".hardwareMaterial");
             }
 
             return section;
@@ -1208,7 +1387,7 @@ TrackStylePreset deserializeTrackStyle(
             requireNoUnknownFields(object, {
                 "name", "geometryFamily", "railCount", "railOffsets",
                 "railRadius", "railRadialSegments", "railMaterial", "spine",
-                "repeatingHardware"}, path);
+                "repeatingHardware", "visible", "railsVisible"}, path);
             requireString(object, "name", path);
             requireString(object, "geometryFamily", path);
             requireInteger(object, "railCount", path);
@@ -1236,6 +1415,16 @@ TrackStylePreset deserializeTrackStyle(
             TrackStylePreset style;
             style.name = object["name"].get<std::string>();
             style.geometryFamily = TrackGeometryFamily::DualRailTubular;
+            if (object.contains("visible"))
+            {
+                requireBoolean(object, "visible", path);
+                style.visible = object["visible"].get<bool>();
+            }
+            if (object.contains("railsVisible"))
+            {
+                requireBoolean(object, "railsVisible", path);
+                style.railsVisible = object["railsVisible"].get<bool>();
+            }
             style.railCount = object["railCount"].get<std::uint32_t>();
             for (std::size_t index = 0; index < object["railOffsets"].size();
                 ++index)
@@ -1531,6 +1720,9 @@ TrackStylePreset deserializeTrackStyle(
 
         for (std::size_t i = 0; i < track.sectionCount(); ++i)
         {
+            static_cast<void>(resolveTrackStyle(
+                track.trackStyle(),
+                track.section(i).trackStyleOverrides));
             sectionsJson.push_back(serializeSection(track.section(i)));
         }
 
@@ -1730,6 +1922,13 @@ TrackStylePreset deserializeTrackStyle(
                 requireObject(root, "trackStyle", "root");
                 track.setTrackStyle(deserializeTrackStyle(
                     root["trackStyle"], "trackStyle"));
+            }
+
+            for (std::size_t index = 0; index < track.sectionCount(); ++index)
+            {
+                static_cast<void>(resolveTrackStyle(
+                    track.trackStyle(),
+                    track.section(index).trackStyleOverrides));
             }
 
             // Documents written before the Coaster Setup system keep the

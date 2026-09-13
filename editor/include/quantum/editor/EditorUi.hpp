@@ -326,6 +326,13 @@ namespace quantum::editor
         double value = 0.0;
     };
 
+    struct RegionTrackStyleEdit
+    {
+        std::size_t sectionIndex = 0;
+        coaster::RegionTrackStyleOverrides overrides;
+        bool continuous = false;
+    };
+
     // File workflow operations requested by the user through the menu
     // bar or command area. The Application layer processes these.
     enum class FileOperationType
@@ -433,6 +440,8 @@ namespace quantum::editor
         takeSectionLengthEdit() noexcept;
         [[nodiscard]] std::optional<RegionCommand>
         takeRegionCommand() noexcept;
+        [[nodiscard]] std::optional<RegionTrackStyleEdit>
+        takeRegionTrackStyleEdit() noexcept;
         [[nodiscard]] std::optional<StartPoseEdit>
         takeStartPoseEdit() noexcept;
         [[nodiscard]] std::optional<TrackHardwareEdit>
@@ -840,6 +849,7 @@ void drawSimulationTelemetry();
         std::optional<TrackCommand> trackCommand_;
         std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
+        std::optional<RegionTrackStyleEdit> regionTrackStyleEdit_;
         std::optional<StartPoseEdit> startPoseEdit_;
         std::optional<TrackHardwareEdit> trackHardwareEdit_;
         std::string iniPath_;
