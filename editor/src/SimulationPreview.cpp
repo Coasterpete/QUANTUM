@@ -1,5 +1,6 @@
 #include <quantum/editor/SimulationPreview.hpp>
 
+#include <quantum/coaster/TrainConfiguration.hpp>
 #include <quantum/coaster/TrackTopology.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/engine/Logging.hpp>
@@ -16,19 +17,11 @@ namespace quantum::editor
 {
     namespace
     {
-        inline constexpr std::size_t previewCarCount = 4;
         // This fixed train first fits a straight open path at about 14.65 m.
         // The small margin keeps its initial bogies away from the endpoint;
         // Core still validates the complete consist at every candidate.
         inline constexpr double preferredInitialStationMeters = 14.75;
         inline constexpr double initialPlacementSearchStepMeters = 0.5;
-
-        inline constexpr glm::dvec3 previewCarDimensionsMeters{
-            4.0, 1.35, 1.4};
-        inline constexpr double previewCarDryMassKilograms = 800.0;
-        inline constexpr double previewCarLoadMassKilograms = 200.0;
-        inline constexpr double previewBogieHalfSpacingMeters = 1.15;
-        inline constexpr double previewConnectorLengthMeters = 0.5;
 
         using Color = std::array<float, 4>;
         inline constexpr std::array<Color, 2> carColors{{
@@ -43,56 +36,6 @@ namespace quantum::editor
             physics::TrackLocation location;
             physics::TrainPose pose;
         };
-
-        [[nodiscard]] physics::TrainDefinition createPreviewTrainDefinition()
-        {
-            using namespace physics;
-
-            CarDefinition car;
-            car.dryMassKilograms = previewCarDryMassKilograms;
-            car.dryCenterOfGravityMeters = {0.0, 0.0, 0.55};
-            car.dryInertiaTensorBodyKgM2 =
-                makeUniformBoxInertiaTensorBodyKgM2(
-                    car.dryMassKilograms,
-                    previewCarDimensionsMeters);
-            car.bodyDimensionsMeters = previewCarDimensionsMeters;
-            car.frontHitchPositionMeters = {2.0, 0.0, 0.2};
-            car.rearHitchPositionMeters = {-2.0, 0.0, 0.2};
-            car.bogies = {
-                BogieDefinition{{previewBogieHalfSpacingMeters, 0.0, 0.0}},
-                BogieDefinition{{-previewBogieHalfSpacingMeters, 0.0, 0.0}}
-            };
-
-            const CarLoadout loadout{
-                previewCarLoadMassKilograms,
-                {0.0, 0.0, 0.9}
-            };
-
-            TrainDefinition train;
-            train.cars.reserve(previewCarCount);
-            train.connections.reserve(previewCarCount - 1);
-            for (std::size_t index = 0; index < previewCarCount; ++index)
-            {
-                train.cars.push_back({car, loadout});
-                if (index != 0)
-                {
-                    train.connections.push_back(
-                        {previewConnectorLengthMeters});
-                }
-            }
-
-            // This temporary consist uses the existing aggregate resistance
-            // law; no preview-specific motion or operations force is added.
-            train.resistance.constantMechanicalForceNewtons = 500.0;
-            train.resistance.linearResistanceCoefficientNewtonSecondsPerMeter =
-                50.0;
-            train.resistance.airDensityKilogramsPerCubicMeter = 1.225;
-            train.resistance.dragAreaSquareMeters = 2.5;
-            train.resistance.rollingResistanceCoefficient = 0.01;
-
-            validateTrainDefinition(train);
-            return train;
-        }
 
         [[nodiscard]] std::optional<InitialPlacement> tryPlacement(
             const physics::CompiledPhysicsTrack& track,
@@ -357,7 +300,8 @@ namespace quantum::editor
         setUnavailable({});
         try
         {
-            trainDefinition_ = createPreviewTrainDefinition();
+            trainDefinition_ = coaster::resolveTrainConfiguration(
+                coaster::createDefaultTrainConfiguration());
             const std::vector<coaster::TrackKinematicState> kinematics =
                 coaster::integrateAuthoredTrackKinematics(
                     authoredTrack,
