@@ -384,6 +384,7 @@ namespace
         // flow; the append/prepend direction lives in RegionCreateFlow.
         std::optional<quantum::coaster::RegionKind> createdRegionKind;
         std::optional<quantum::editor::TrackHardwareEdit> hardwareEdit;
+        std::optional<quantum::editor::RegionTrackStyleEdit> regionStyleEdit;
     };
 
     [[nodiscard]] float squaredDistance(
@@ -2387,6 +2388,279 @@ namespace
         return std::nullopt;
     }
 
+    [[nodiscard]] std::optional<quantum::editor::RegionTrackStyleEdit>
+    showRegionTrackStyleControls(
+        const quantum::coaster::AuthoredTrack& track,
+        const std::size_t selectedIndex)
+    {
+        using quantum::coaster::ContinuousSpineType;
+        using quantum::coaster::RegionTrackStyleOverrides;
+        using quantum::coaster::TrackStyleProperty;
+
+        const auto& documentStyle = track.trackStyle();
+        const auto& committed =
+            track.section(selectedIndex).trackStyleOverrides;
+        RegionTrackStyleOverrides candidate = committed;
+        bool changed = false;
+        bool continuous = false;
+
+        ImGui::TextDisabled("Configuration");
+        ImGui::SameLine();
+        ImGui::TextUnformatted(documentStyle.name.c_str());
+        ImGui::TextDisabled(candidate.enabled
+            ? "Region: local sparse overrides"
+            : "Region: inherits document style");
+
+        bool enabled = candidate.enabled;
+        if (ImGui::Checkbox("Override this region", &enabled))
+        {
+            candidate = {};
+            candidate.enabled = enabled;
+            changed = true;
+        }
+
+        if (!candidate.enabled)
+        {
+            if (changed)
+                return quantum::editor::RegionTrackStyleEdit{
+                    selectedIndex, std::move(candidate), false};
+            return std::nullopt;
+        }
+
+        if (quantum::coaster::hasTrackStylePropertyOverrides(candidate))
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear all"))
+            {
+                candidate = {};
+                changed = true;
+            }
+        }
+        if (!candidate.enabled)
+            return quantum::editor::RegionTrackStyleEdit{
+                selectedIndex, std::move(candidate), false};
+
+        const auto resolved = quantum::coaster::resolveTrackStyle(
+            documentStyle, candidate);
+        const auto supported = [&documentStyle](TrackStyleProperty property)
+        {
+            return quantum::coaster::supportsTrackStyleProperty(
+                documentStyle, property);
+        };
+        const auto boolOverride = [&](const char* label, const char* id,
+            std::optional<bool>& local, const bool inherited)
+        {
+            ImGui::PushID(id);
+            bool authored = local.has_value();
+            if (ImGui::Checkbox("##Local", &authored))
+            {
+                if (authored) local = inherited;
+                else local.reset();
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine();
+            bool value = local.value_or(inherited);
+            ImGui::BeginDisabled(!authored);
+            if (ImGui::Checkbox("##Value", &value))
+            {
+                local = value;
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        };
+        const auto doubleOverride = [&](const char* label, const char* id,
+            std::optional<double>& local, const double inherited,
+            const double step)
+        {
+            ImGui::PushID(id);
+            bool authored = local.has_value();
+            if (ImGui::Checkbox("##Local", &authored))
+            {
+                if (authored) local = inherited;
+                else local.reset();
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(label);
+            double value = local.value_or(inherited);
+            ImGui::BeginDisabled(!authored);
+            ImGui::SetNextItemWidth(-1.0F);
+            if (ImGui::InputDouble("##Value", &value, step, step * 10.0,
+                "%.3f"))
+            {
+                local = value;
+                changed = true;
+                continuous = ImGui::IsItemActive();
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        };
+        const auto colorOverride = [&](const char* label, const char* id,
+            std::optional<quantum::coaster::TrackMaterial>& local,
+            const quantum::coaster::TrackMaterial& inherited)
+        {
+            ImGui::PushID(id);
+            bool authored = local.has_value();
+            if (ImGui::Checkbox("##Local", &authored))
+            {
+                if (authored) local = inherited;
+                else local.reset();
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(label);
+            auto value = local.value_or(inherited);
+            ImGui::BeginDisabled(!authored);
+            if (ImGui::ColorEdit4("##Value", &value.baseColor.x,
+                ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar))
+            {
+                local = value;
+                changed = true;
+                continuous = ImGui::IsItemActive();
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        };
+
+        ImGui::Spacing();
+        if (ImGui::TreeNodeEx("Rails", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if (supported(TrackStyleProperty::RailsVisibility))
+                boolOverride("Visible", "RailsVisible",
+                    candidate.railsVisible, documentStyle.railsVisible);
+            ImGui::TreePop();
+        }
+        if (supported(TrackStyleProperty::SpineEnabled)
+            && ImGui::TreeNodeEx("Spine / Structure",
+                ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            boolOverride("Enabled", "SpineEnabled", candidate.spineEnabled,
+                documentStyle.spine.enabled);
+            if (supported(TrackStyleProperty::SpineType))
+            {
+                bool authored = candidate.spineType.has_value();
+                if (ImGui::Checkbox("##SpineTypeLocal", &authored))
+                {
+                    if (authored) candidate.spineType = documentStyle.spine.type;
+                    else candidate.spineType.reset();
+                    changed = true;
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted("Profile");
+                ImGui::BeginDisabled(!authored);
+                const ContinuousSpineType value = candidate.spineType.value_or(
+                    documentStyle.spine.type);
+                const char* preview = value == ContinuousSpineType::Tubular
+                    ? "Tubular" : value == ContinuousSpineType::Box
+                    ? "Box" : "None";
+                if (ImGui::BeginCombo("##SpineType", preview))
+                {
+                    for (const auto [type, name] : {
+                        std::pair{ContinuousSpineType::Tubular, "Tubular"},
+                        std::pair{ContinuousSpineType::Box, "Box"}})
+                    {
+                        if (ImGui::Selectable(name, value == type))
+                        {
+                            candidate.spineType = type;
+                            changed = true;
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::EndDisabled();
+            }
+            ImGui::TreePop();
+        }
+        if (supported(TrackStyleProperty::HardwareEnabled)
+            && ImGui::TreeNodeEx("Crossties / Track Hardware",
+                ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            bool inheritedEnabled = true;
+            for (const auto& hardware : documentStyle.repeatingHardware)
+                inheritedEnabled = inheritedEnabled && hardware.enabled;
+            boolOverride("Enabled", "HardwareEnabled",
+                candidate.hardwareEnabled, inheritedEnabled);
+            if (supported(TrackStyleProperty::HardwareSpacing))
+                doubleOverride("Spacing", "HardwareSpacing",
+                    candidate.hardwareSpacing,
+                    documentStyle.repeatingHardware.front().spacing, 0.05);
+            ImGui::TreePop();
+        }
+        if (ImGui::TreeNode("Appearance"))
+        {
+            if (supported(TrackStyleProperty::Visibility))
+                boolOverride("Overall track visible", "TrackVisible",
+                    candidate.visible, documentStyle.visible);
+            if (supported(TrackStyleProperty::RailMaterial))
+                colorOverride("Rails", "RailColor", candidate.railMaterial,
+                    documentStyle.railMaterial);
+            if (supported(TrackStyleProperty::SpineMaterial))
+                colorOverride("Spine", "SpineColor",
+                    candidate.spineMaterial, documentStyle.spine.material);
+            if (supported(TrackStyleProperty::HardwareMaterial))
+                colorOverride("Hardware", "HardwareColor",
+                    candidate.hardwareMaterial,
+                    *documentStyle.repeatingHardware.front().materialOverride);
+            ImGui::TreePop();
+        }
+        if (ImGui::TreeNode("Advanced"))
+        {
+            if (supported(TrackStyleProperty::RailRadius))
+                doubleOverride("Rail radius", "RailRadius",
+                    candidate.railRadius, documentStyle.railRadius, 0.005);
+            if (supported(TrackStyleProperty::RailCenterSpacing))
+                doubleOverride("Rail center spacing", "RailSpacing",
+                    candidate.railCenterSpacing,
+                    std::abs(documentStyle.railOffsets[1].lateral
+                        - documentStyle.railOffsets[0].lateral), 0.01);
+            if (supported(TrackStyleProperty::RailVerticalOffset))
+                doubleOverride("Rail vertical offset", "RailVertical",
+                    candidate.railVerticalOffset,
+                    documentStyle.railOffsets.front().vertical, 0.01);
+            if (supported(TrackStyleProperty::SpineRadius))
+                doubleOverride("Spine radius", "SpineRadius",
+                    candidate.spineRadius,
+                    documentStyle.spine.dimensions.x * 0.5, 0.01);
+            if (supported(TrackStyleProperty::SpineDimensions))
+            {
+                bool authored = candidate.spineDimensions.has_value();
+                if (ImGui::Checkbox("##SpineDimensionsLocal", &authored))
+                {
+                    if (authored)
+                        candidate.spineDimensions = documentStyle.spine.dimensions;
+                    else candidate.spineDimensions.reset();
+                    changed = true;
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted("Spine width / height");
+                double values[2]{resolved.spine.dimensions.x,
+                    resolved.spine.dimensions.y};
+                ImGui::BeginDisabled(!authored);
+                ImGui::SetNextItemWidth(-1.0F);
+                if (ImGui::InputScalarN("##SpineDimensions",
+                    ImGuiDataType_Double, values, 2))
+                {
+                    candidate.spineDimensions = {values[0], values[1]};
+                    changed = true;
+                    continuous = ImGui::IsItemActive();
+                }
+                ImGui::EndDisabled();
+            }
+            if (supported(TrackStyleProperty::SpineVerticalOffset))
+                doubleOverride("Spine vertical offset", "SpineVertical",
+                    candidate.spineVerticalOffset,
+                    documentStyle.spine.offset.vertical, 0.01);
+            ImGui::TreePop();
+        }
+
+        if (!changed) return std::nullopt;
+        return quantum::editor::RegionTrackStyleEdit{
+            selectedIndex, std::move(candidate), continuous};
+    }
+
     [[nodiscard]] TrackWorkspaceEdit showTrackWorkspace(
         const quantum::coaster::AuthoredTrack& track,
         const quantum::renderer::VulkanContext& vulkan,
@@ -2542,6 +2816,14 @@ namespace
                     }
                     ImGui::PopTextWrapPos();
                     ImGui::PopStyleColor();
+                    ImGui::TreePop();
+                }
+
+                if (ImGui::TreeNodeEx(
+                    "Track Style", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    edit.regionStyleEdit = showRegionTrackStyleControls(
+                        track, selectedIndex);
                     ImGui::TreePop();
                 }
             }
@@ -7224,6 +7506,9 @@ ImGui::MenuItem(
                     bottomFraction = 0.52F;
                 else if (captureScenario_->kind == ReadmeCaptureKind::ModernSteel)
                     bottomFraction = 0.12F;
+                else if (captureScenario_->kind
+                    == ReadmeCaptureKind::TrackStyleRegions)
+                    bottomFraction = 0.12F;
             }
             buildDefaultDockLayout(dockspaceId, defaultDockspaceSize, bottomFraction,
                 captureScenario_ != nullptr);
@@ -7728,6 +8013,11 @@ ImGui::MenuItem(
         if (workspaceEdit.hardwareEdit.has_value())
         {
             trackHardwareEdit_ = workspaceEdit.hardwareEdit;
+        }
+
+        if (workspaceEdit.regionStyleEdit.has_value())
+        {
+            regionTrackStyleEdit_ = workspaceEdit.regionStyleEdit;
         }
 
         if (workspaceEdit.selectRequest.has_value())
@@ -8432,6 +8722,15 @@ ImGui::MenuItem(
         const std::optional<RegionCommand> command = regionCommand_;
         regionCommand_.reset();
         return command;
+    }
+
+    std::optional<RegionTrackStyleEdit>
+    EditorUi::takeRegionTrackStyleEdit() noexcept
+    {
+        const std::optional<RegionTrackStyleEdit> edit =
+            regionTrackStyleEdit_;
+        regionTrackStyleEdit_.reset();
+        return edit;
     }
 
     std::optional<StartPoseEdit> EditorUi::takeStartPoseEdit() noexcept

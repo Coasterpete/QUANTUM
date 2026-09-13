@@ -95,6 +95,29 @@ namespace
                     == "modern-steel.png",
             "Modern Steel capture fixture name/output mapping changed.");
 
+        track.appendSection();
+        track.section(1).trackStyleOverrides.enabled = true;
+        track.section(1).trackStyleOverrides.spineEnabled = false;
+        auto regionStyleScenario = manifest.scenarios.front();
+        regionStyleScenario.kind = ReadmeCaptureKind::TrackStyleRegions;
+        regionStyleScenario.region = 1;
+        validateReadmeCaptureDocument(regionStyleScenario, track);
+        track.section(1).trackStyleOverrides = {};
+        rejects([&] {
+            validateReadmeCaptureDocument(regionStyleScenario, track);
+        }, "Track-style capture accepted a document without local overrides.");
+
+        auto regionStyleManifestJson = base;
+        regionStyleManifestJson["scenarios"][0]["name"] =
+            "track-style-regions";
+        const auto regionStyleManifest = load(regionStyleManifestJson);
+        require(regionStyleManifest.scenarios.front().kind
+                == ReadmeCaptureKind::TrackStyleRegions
+                && readmeCaptureOutputPath(regionStyleManifest,
+                    regionStyleManifest.scenarios.front()).filename()
+                    == "track-style-regions.png",
+            "region-style capture name/output mapping changed.");
+
         const auto badField = [&](const char* field, const json& value)
         {
             auto invalid = base;

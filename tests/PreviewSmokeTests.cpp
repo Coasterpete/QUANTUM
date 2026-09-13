@@ -60,6 +60,15 @@ namespace
             "--dev-preview-smoke", fixtureString, "--repeat"});
         require(repeated && repeated->has_value() && (**repeated).repeat,
             "developer repeat flag parses without a value");
+        const auto stoppedEdit = parse({
+            "--dev-preview-smoke", fixtureString, "--stopped-preview",
+            "--region-style-edit", "hardware-spacing"});
+        require(stoppedEdit && stoppedEdit->has_value()
+                && (**stoppedEdit).stoppedPreview
+                && (**stoppedEdit).regionStyleEdit
+                    == quantum::editor::PreviewSmokeRegionStyleEdit::
+                        HardwareSpacing,
+            "stopped region-style edit diagnostic parses");
 
         const auto custom = parse({
             "--log-level", "debug", "--dev-preview-smoke", fixtureString,
@@ -98,7 +107,10 @@ namespace
                 std::vector<std::string_view>{
                     "--dev-preview-smoke", fixtureString, "--spike-frame-ms", "-1"},
                 std::vector<std::string_view>{
-                    "--dev-preview-smoke", fixtureString, "--spike-steps", "0"}})
+                    "--dev-preview-smoke", fixtureString, "--spike-steps", "0"},
+                std::vector<std::string_view>{
+                    "--dev-preview-smoke", fixtureString,
+                    "--region-style-edit", "unknown"}})
             require(!parse(arguments), "invalid numeric option rejected");
         std::filesystem::remove(fixture);
     }

@@ -39,6 +39,9 @@ namespace
     using quantum::editor::CenterlineVisualizationCache;
     using quantum::editor::centerlineVisualizationSampleSpacing;
     using quantum::editor::createCenterlineVisualization;
+    using quantum::editor::createTrackStylePresentationCandidate;
+    using quantum::editor::classifyRegionTrackStyleEdit;
+    using quantum::editor::TrackStylePresentationProduct;
     using quantum::math::TransitionType;
 
     constexpr double pi = 3.14159265358979323846;
@@ -744,6 +747,238 @@ namespace
         require(cache.generation() == beforeStyleChange + 1,
             "track-style rebuild advances visualization generation");
     }
+
+    void regionStylesDriveViewportAndHardwareGeneration()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        track.appendSection();
+        track.appendSection();
+        track.appendSection();
+
+        auto& spacing = track.section(1).trackStyleOverrides;
+        spacing.enabled = true;
+        spacing.hardwareSpacing = 2.0;
+        spacing.railCenterSpacing = 1.8;
+        auto& noSpine = track.section(2).trackStyleOverrides;
+        noSpine.enabled = true;
+        noSpine.spineEnabled = false;
+        auto& appearance = track.section(3).trackStyleOverrides;
+        appearance.enabled = true;
+        appearance.railMaterial = quantum::coaster::TrackMaterial{
+            glm::vec4{0.1F, 0.8F, 0.2F, 1.0F}};
+
+        const CenterlineVisualization visualization =
+            createCenterlineVisualization(track);
+        require(visualization.resolvedRegionStyles.size() == 4,
+            "viewport retains one canonical resolved style per region");
+        require(visualization.resolvedRegionStyles[0].spine.enabled
+                && visualization.resolvedRegionStyles[0]
+                    .repeatingHardware.front().spacing == 0.75,
+            "first region fully inherits the document style");
+        require(visualization.resolvedRegionStyles[1]
+                    .repeatingHardware.front().spacing == 2.0
+                && visualization.resolvedRegionStyles[1].railOffsets[0].lateral
+                    == -0.9
+                && visualization.resolvedRegionStyles[1].railOffsets[1].lateral
+                    == 0.9
+                && visualization.resolvedRegionStyles[1].spine.enabled,
+            "spacing override affects only its intended region");
+        require(!visualization.resolvedRegionStyles[2].spine.enabled
+                && visualization.resolvedRegionStyles[2]
+                    .repeatingHardware.front().spacing == 0.75,
+            "spine override does not leak into inherited hardware");
+        require(visualization.resolvedRegionStyles[3].spine.enabled
+                && visualization.resolvedRegionStyles[3]
+                    .railMaterial.baseColor
+                    == glm::vec4{0.1F, 0.8F, 0.2F, 1.0F},
+            "appearance override is scoped and later structure inherits");
+
+        const std::size_t secondRegionSample =
+            visualization.sectionSlices[1].firstVertex / 2 + 1;
+        requireNear(glm::length(
+                curvePoint(visualization,
+                    quantum::renderer::viewportRightRailCurve,
+                    secondRegionSample)
+                - curvePoint(visualization,
+                    quantum::renderer::viewportLeftRailCurve,
+                    secondRegionSample)),
+            1.8, positionTolerance,
+            "engineering rail curves use the same resolved regional spacing");
+
+        require(visualization.renderableTrack.hardwareBatches.size() == 4,
+            "each region's resolved repeating hardware reaches the renderer");
+        require(visualization.renderableTrack.hardwareBatches[0]
+                    .instances.size() == 80
+                && visualization.renderableTrack.hardwareBatches[1]
+                    .instances.size() == 30
+                && visualization.renderableTrack.hardwareBatches[2]
+                    .instances.size() == 80
+                && visualization.renderableTrack.hardwareBatches[3]
+                    .instances.size() == 81,
+            "region hardware spacing is deterministic and boundaries are not duplicated");
+        require(visualization.renderableTrack.continuousMesh.submeshes.size()
+                == 11,
+            "spine-disabled region removes exactly one regional submesh");
+    }
+
+    void regionStylePresentationInvalidationIsProductSpecific()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        track.appendSection();
+        track.appendSection();
+        track.appendSection();
+
+        CenterlineVisualizationCache cache;
+        cache.setTrackStyle(track.trackStyle());
+        require(cache.rebuildIfDirty(track), "fixture cache builds");
+        const std::uint64_t canonicalGeneration = cache.generation();
+        const auto* const solvedSamples =
+            cache.visualization().samples.data();
+
+        quantum::coaster::RegionTrackStyleOverrides inherited;
+        auto hardwareColor = inherited;
+        hardwareColor.enabled = true;
+        hardwareColor.hardwareMaterial = quantum::coaster::TrackMaterial{
+            glm::vec4{0.2F, 0.3F, 0.4F, 1.0F}};
+        const auto hardwareMaterialImpact = classifyRegionTrackStyleEdit(
+            track.trackStyle(), inherited, hardwareColor);
+        require(hardwareMaterialImpact.affects(
+                    TrackStylePresentationProduct::HardwareMaterials)
+                && !hardwareMaterialImpact.affects(
+                    TrackStylePresentationProduct::HardwareInstances)
+                && !hardwareMaterialImpact.affects(
+                    TrackStylePresentationProduct::RenderableMesh),
+            "hardware color classifies as hardware material-only");
+
+        auto before = track.section(1).trackStyleOverrides;
+        auto after = before;
+        after.enabled = true;
+        after.hardwareSpacing = 2.0;
+        auto impact = classifyRegionTrackStyleEdit(
+            track.trackStyle(), before, after);
+        require(impact.affects(TrackStylePresentationProduct::HardwareInstances)
+                && !impact.affects(TrackStylePresentationProduct::RenderableMesh)
+                && !impact.affects(TrackStylePresentationProduct::EngineeringRails)
+                && !impact.affects(TrackStylePresentationProduct::TrackMaterials),
+            "hardware spacing classifies as hardware instances only");
+        require(!impact.invalidatesCanonicalTrack()
+                && !impact.invalidatesRiderLoads()
+                && !impact.invalidatesSupports()
+                && !impact.invalidatesSimulationPreview(),
+            "hardware spacing invalidates no physics or engineering products");
+        track.section(1).trackStyleOverrides = after;
+        auto candidate = createTrackStylePresentationCandidate(
+            track, cache.visualization(), impact);
+        require(candidate.hardwareBatches.has_value()
+                && !candidate.continuousMesh.has_value()
+                && !candidate.trackMaterials.has_value()
+                && !candidate.referenceCurveVertices.has_value(),
+            "hardware-only rebuild stages only hardware placement");
+        const std::size_t inheritedHardwareCount = cache.visualization()
+            .renderableTrack.hardwareBatches[0].instances.size();
+        cache.applyTrackStylePresentation(std::move(candidate));
+        require(cache.generation() == canonicalGeneration
+                && cache.visualization().samples.data() == solvedSamples,
+            "hardware-only edit reuses solved samples without canonical generation");
+        require(cache.visualization().renderableTrack.hardwareBatches[1]
+                    .instances.size() < inheritedHardwareCount
+                && cache.visualization().resolvedRegionStyles[0]
+                    .repeatingHardware.front().spacing == 0.75
+                && cache.visualization().resolvedRegionStyles[2]
+                    .repeatingHardware.front().spacing == 0.75,
+            "hardware spacing remains region-scoped");
+
+        before = track.section(2).trackStyleOverrides;
+        after = before;
+        after.enabled = true;
+        after.railMaterial = quantum::coaster::TrackMaterial{
+            glm::vec4{0.05F, 0.65F, 0.25F, 1.0F}};
+        impact = classifyRegionTrackStyleEdit(
+            track.trackStyle(), before, after);
+        require(impact.affects(TrackStylePresentationProduct::TrackMaterials)
+                && !impact.affects(TrackStylePresentationProduct::RenderableMesh)
+                && !impact.affects(TrackStylePresentationProduct::HardwareInstances)
+                && !impact.affects(TrackStylePresentationProduct::EngineeringRails),
+            "rail color classifies as material-only");
+        track.section(2).trackStyleOverrides = after;
+        const auto* const meshVertices = cache.visualization()
+            .renderableTrack.continuousMesh.vertices.data();
+        candidate = createTrackStylePresentationCandidate(
+            track, cache.visualization(), impact);
+        require(candidate.trackMaterials.has_value()
+                && !candidate.continuousMesh.has_value()
+                && !candidate.hardwareBatches.has_value()
+                && !candidate.referenceCurveVertices.has_value(),
+            "material-only rebuild stages no geometry or placement");
+        cache.applyTrackStylePresentation(std::move(candidate));
+        require(cache.generation() == canonicalGeneration
+                && cache.visualization().samples.data() == solvedSamples
+                && cache.visualization().renderableTrack.continuousMesh
+                    .vertices.data() == meshVertices,
+            "material-only edit preserves canonical and mesh storage");
+
+        before = track.section(3).trackStyleOverrides;
+        after = before;
+        after.enabled = true;
+        after.railRadius = 0.11;
+        impact = classifyRegionTrackStyleEdit(
+            track.trackStyle(), before, after);
+        require(impact.affects(TrackStylePresentationProduct::RenderableMesh)
+                && !impact.affects(TrackStylePresentationProduct::EngineeringRails)
+                && !impact.affects(TrackStylePresentationProduct::HardwareInstances),
+            "visual rail radius classifies as renderable mesh only");
+        track.section(3).trackStyleOverrides = after;
+        candidate = createTrackStylePresentationCandidate(
+            track, cache.visualization(), impact);
+        require(candidate.continuousMesh.has_value()
+                && candidate.trackMaterials.has_value()
+                && !candidate.hardwareBatches.has_value()
+                && !candidate.referenceCurveVertices.has_value(),
+            "rail-radius rebuild stages mesh without curves or hardware");
+        cache.applyTrackStylePresentation(std::move(candidate));
+        require(cache.generation() == canonicalGeneration
+                && cache.visualization().samples.data() == solvedSamples,
+            "renderable mesh edit does not advance canonical generation");
+
+        before = track.section(1).trackStyleOverrides;
+        after = before;
+        after.railCenterSpacing = 1.8;
+        impact = classifyRegionTrackStyleEdit(
+            track.trackStyle(), before, after);
+        require(impact.affects(TrackStylePresentationProduct::RenderableMesh)
+                && impact.affects(TrackStylePresentationProduct::EngineeringRails)
+                && !impact.affects(TrackStylePresentationProduct::HardwareInstances),
+            "rail spacing classifies as mesh plus engineering rails");
+        track.section(1).trackStyleOverrides = after;
+        const std::size_t centerlineVertex =
+            2 * cache.visualization().verticesPerCurve;
+        const auto unchangedCenterline =
+            cache.visualization().vertices[centerlineVertex];
+        candidate = createTrackStylePresentationCandidate(
+            track, cache.visualization(), impact);
+        require(candidate.continuousMesh.has_value()
+                && candidate.referenceCurveVertices.has_value()
+                && !candidate.hardwareBatches.has_value(),
+            "engineering edit stages only mesh and reference curves");
+        cache.applyTrackStylePresentation(std::move(candidate));
+        const auto& retainedCenterline =
+            cache.visualization().vertices[centerlineVertex];
+        require(retainedCenterline.x == unchangedCenterline.x
+                && retainedCenterline.y == unchangedCenterline.y
+                && retainedCenterline.z == unchangedCenterline.z
+                && cache.generation() == canonicalGeneration
+                && cache.visualization().samples.data() == solvedSamples,
+            "engineering rail update leaves centerline and canonical solve unchanged");
+
+        auto structurallyDifferent = track.trackStyle();
+        structurallyDifferent.railCount = 3;
+        structurallyDifferent.railOffsets.push_back({0.0, 0.0});
+        const auto fallback = quantum::editor::
+            classifyResolvedTrackStylePresentationChange(
+                track.trackStyle(), structurallyDifferent);
+        require(fallback.requiresFullRegeneration(),
+            "unknown style structure conservatively requires full regeneration");
+    }
 }
 
 int main()
@@ -779,6 +1014,10 @@ int main()
         heartlineSetupControlsOnlyReferenceCurve);
     run("visualizationCacheInvalidatesOnlyForGeometry",
         visualizationCacheInvalidatesOnlyForGeometry);
+    run("regionStylesDriveViewportAndHardwareGeneration",
+        regionStylesDriveViewportAndHardwareGeneration);
+    run("regionStylePresentationInvalidationIsProductSpecific",
+        regionStylePresentationInvalidationIsProductSpecific);
 
     std::cout << "\n  " << passed << " passed, "
         << failed << " failed\n";

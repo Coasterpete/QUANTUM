@@ -17,7 +17,8 @@ namespace quantum::editor
         GeometryRegions,
         TrackStartGizmo,
         ForceDiagnostics,
-        ModernSteel
+        ModernSteel,
+        TrackStyleRegions
     };
 
     // Presentation only. Documents are supplied by the developer and never edited.

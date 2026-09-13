@@ -278,6 +278,102 @@ namespace
         }
     }
 
+    void regionOverridesResolveSparselyAndRevert()
+    {
+        const TrackStylePreset documentStyle = createModernSteelPreset();
+        RegionTrackStyleOverrides overrides;
+
+        const TrackStylePreset inherited = resolveTrackStyle(
+            documentStyle, overrides);
+        require(inherited.railRadius == documentStyle.railRadius
+                && inherited.spine.enabled
+                && inherited.repeatingHardware.front().spacing
+                    == documentStyle.repeatingHardware.front().spacing,
+            "disabled region overrides inherit the complete document style");
+
+        overrides.enabled = true;
+        overrides.railRadius = 0.11;
+        overrides.railCenterSpacing = 1.4;
+        overrides.spineEnabled = false;
+        overrides.hardwareSpacing = 1.25;
+        overrides.railMaterial = TrackMaterial{
+            glm::vec4{0.1F, 0.2F, 0.3F, 1.0F}};
+        const TrackStylePreset resolved = resolveTrackStyle(
+            documentStyle, overrides);
+        require(resolved.railRadius == 0.11
+                && resolved.railOffsets[0].lateral == -0.7
+                && resolved.railOffsets[1].lateral == 0.7
+                && !resolved.spine.enabled
+                && resolved.repeatingHardware.front().spacing == 1.25
+                && resolved.railMaterial.baseColor
+                    == glm::vec4{0.1F, 0.2F, 0.3F, 1.0F},
+            "explicit sparse properties override only their semantic values");
+        require(resolved.repeatingHardware.front().asset.path
+                == documentStyle.repeatingHardware.front().asset.path,
+            "unoverridden configuration remains inherited");
+
+        overrides.railRadius.reset();
+        require(resolveTrackStyle(documentStyle, overrides).railRadius
+                == documentStyle.railRadius,
+            "removing one override restores its inherited value");
+        overrides = {};
+        require(!hasTrackStylePropertyOverrides(overrides)
+                && resolveTrackStyle(documentStyle, overrides).spine.enabled,
+            "returning a region to full inheritance restores the document");
+    }
+
+    void capabilitiesAreConfigurationDrivenRatherThanNamed()
+    {
+        TrackStylePreset synthetic = createStandardDualRailPreset();
+        synthetic.name = "SyntheticNoStructure";
+        synthetic.spine = {};
+        synthetic.repeatingHardware.clear();
+        validateTrackStyle(synthetic);
+
+        require(supportsTrackStyleProperty(synthetic,
+                    TrackStyleProperty::RailRadius)
+                && !supportsTrackStyleProperty(synthetic,
+                    TrackStyleProperty::SpineEnabled)
+                && !supportsTrackStyleProperty(synthetic,
+                    TrackStyleProperty::HardwareSpacing),
+            "capabilities follow configuration structure, not preset name");
+
+        RegionTrackStyleOverrides valid;
+        valid.enabled = true;
+        valid.railRadius = 0.09;
+        require(resolveTrackStyle(synthetic, valid).railRadius == 0.09,
+            "non-Modern-Steel configurations resolve supported overrides");
+
+        valid.spineEnabled = true;
+        bool rejected = false;
+        try
+        {
+            static_cast<void>(resolveTrackStyle(synthetic, valid));
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejected = true;
+        }
+        require(rejected,
+            "unsupported authored capabilities are rejected deterministically");
+    }
+
+    void visibilityOverridesDriveGeneratedPresentation()
+    {
+        auto style = createModernSteelPreset();
+        style.railsVisible = false;
+        const auto withoutRails = generateRenderableTrack(
+            straightSamples(), style);
+        require(withoutRails.continuousMesh.submeshes.size() == 1,
+            "rail visibility removes only rail submeshes");
+
+        style.visible = false;
+        const auto hidden = generateRenderableTrack(straightSamples(), style);
+        require(hidden.continuousMesh.vertices.empty()
+                && hidden.hardwareBatches.empty(),
+            "overall visibility removes continuous and repeated presentation");
+    }
+
     template<typename Edit>
     void requireInvalid(Edit&& edit, const char* const message)
     {
@@ -361,6 +457,9 @@ int main()
         spineSweepCanBeConfiguredOrDisabled();
         sweptProfilesFollowCompoundFramesWithoutFlips();
         generatedDataIsFiniteAndNormalsAreUseful();
+        regionOverridesResolveSparselyAndRevert();
+        capabilitiesAreConfigurationDrivenRatherThanNamed();
+        visibilityOverridesDriveGeneratedPresentation();
         invalidStylesAreRejected();
     }
     catch (const std::exception& error)

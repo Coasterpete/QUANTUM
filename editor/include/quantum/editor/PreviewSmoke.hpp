@@ -15,6 +15,13 @@
 
 namespace quantum::editor
 {
+    enum class PreviewSmokeRegionStyleEdit : std::uint8_t
+    {
+        HardwareSpacing,
+        RailMaterial,
+        RailCenterSpacing
+    };
+
     struct PreviewSmokeOptions
     {
         std::filesystem::path documentPath;
@@ -23,6 +30,8 @@ namespace quantum::editor
         double spikeFrameMilliseconds = 33.3;
         std::size_t spikeStepThreshold = 8;
         bool repeat = false;
+        bool stoppedPreview = false;
+        std::optional<PreviewSmokeRegionStyleEdit> regionStyleEdit;
     };
 
     [[nodiscard]] std::expected<std::optional<PreviewSmokeOptions>, std::string>

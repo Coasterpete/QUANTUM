@@ -174,6 +174,7 @@ if(QUANTUM_ENABLE_EDITOR)
     add_executable(QuantumEditorViewportPresentationTests
         ViewportPresentationTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/EditorStyle.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
@@ -212,6 +213,7 @@ if(QUANTUM_ENABLE_EDITOR)
     add_executable(QuantumEditorForceDrivenAcceptanceTests
         ForceDrivenAcceptanceTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
@@ -1013,6 +1015,7 @@ add_executable(
     QuantumEditorAuthoredStartPoseTests
     AuthoredStartPoseTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
@@ -1455,6 +1458,7 @@ add_executable(
     QuantumEditorCenterlineVisualizationTests
     CenterlineVisualizationTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
 )
@@ -1721,6 +1725,7 @@ add_executable(
     QuantumEditorSupportNodeManipulationTests
     SupportNodeManipulationTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/SupportNodeManipulation.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/SupportVisualization.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
@@ -1767,6 +1772,7 @@ add_executable(
     QuantumEditorSupportAuthoringTests
     SupportAuthoringTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/SupportVisualization.cpp
 )
 
@@ -1841,6 +1847,7 @@ add_executable(
     QuantumEditorCoasterSetupTests
     CoasterSetupTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
 )
 
 target_include_directories(
@@ -1923,6 +1930,7 @@ add_executable(
     QuantumEditorDocumentHistoryTests
     DocumentHistoryTests.cpp
     ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
 )
 
 target_include_directories(

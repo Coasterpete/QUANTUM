@@ -498,8 +498,9 @@ namespace quantum::engine
                     }
                     else
                     {
-                        simulationPreview.play();
                         previewSmokeStart = PerformanceClock::now();
+                        if (!previewSmokeOptions->stoppedPreview)
+                            simulationPreview.play();
                     }
                 }
 
@@ -516,9 +517,146 @@ namespace quantum::engine
                     editorUi.updateWindowTitle(documentState.windowTitle());
                 };
 
-                const auto publishHistoryState =
-                    [&](const quantum::coaster::AuthoredTrack& restoredTrack)
+                struct RegionStyleEditTelemetry
                 {
+                    double presentationMilliseconds = 0.0;
+                    double rebuildMilliseconds = 0.0;
+                    double curveUploadMilliseconds = 0.0;
+                    double frameFenceWaitMilliseconds = 0.0;
+                    double meshUploadMilliseconds = 0.0;
+                    double hardwareUploadMilliseconds = 0.0;
+                    double materialPublicationMilliseconds = 0.0;
+                    unsigned curveUploadCount = 0;
+                    unsigned meshUploadCount = 0;
+                    unsigned hardwareUploadCount = 0;
+                    unsigned materialPublicationCount = 0;
+                };
+                std::optional<RegionStyleEditTelemetry>
+                    regionStyleEditTelemetry;
+
+                const auto publishTrackStylePresentation =
+                    [&](const quantum::coaster::AuthoredTrack& candidateTrack,
+                        const quantum::editor::TrackStylePresentationImpact
+                            impact)
+                {
+                    const auto totalBegin = PerformanceClock::now();
+                    const auto rebuildBegin = PerformanceClock::now();
+                    quantum::editor::TrackStylePresentationCandidate candidate =
+                        quantum::editor::createTrackStylePresentationCandidate(
+                            candidateTrack,
+                            centerlineCache.visualization(), impact);
+                    const double rebuildMilliseconds =
+                        std::chrono::duration<double, std::milli>(
+                            PerformanceClock::now() - rebuildBegin).count();
+
+                    double curveUploadMilliseconds = 0.0;
+                    double meshUploadMilliseconds = 0.0;
+                    double hardwareUploadMilliseconds = 0.0;
+                    double materialPublicationMilliseconds = 0.0;
+                    double frameFenceWaitMilliseconds = 0.0;
+                    if (candidate.referenceCurveVertices.has_value())
+                    {
+                        const auto begin = PerformanceClock::now();
+                        vulkan.updateTrackCurveVertices(
+                            *candidate.referenceCurveVertices,
+                            centerlineCache.visualization().verticesPerCurve);
+                        curveUploadMilliseconds =
+                            std::chrono::duration<double, std::milli>(
+                                PerformanceClock::now() - begin).count();
+                        frameFenceWaitMilliseconds +=
+                            vulkan.lastFrameCompletionWaitMilliseconds();
+                    }
+                    if (candidate.continuousMesh.has_value())
+                    {
+                        const auto begin = PerformanceClock::now();
+                        vulkan.updateRenderableTrackMesh(
+                            *candidate.continuousMesh,
+                            *candidate.trackMaterials);
+                        meshUploadMilliseconds =
+                            std::chrono::duration<double, std::milli>(
+                                PerformanceClock::now() - begin).count();
+                        frameFenceWaitMilliseconds +=
+                            vulkan.lastFrameCompletionWaitMilliseconds();
+                    }
+                    else if (candidate.trackMaterials.has_value())
+                    {
+                        const auto begin = PerformanceClock::now();
+                        vulkan.updateTrackMaterials(
+                            centerline.renderableTrack.continuousMesh.submeshes,
+                            *candidate.trackMaterials);
+                        materialPublicationMilliseconds +=
+                            std::chrono::duration<double, std::milli>(
+                                PerformanceClock::now() - begin).count();
+                    }
+                    if (candidate.hardwareBatches.has_value())
+                    {
+                        const auto begin = PerformanceClock::now();
+                        vulkan.updateTrackHardware(*candidate.hardwareBatches);
+                        hardwareUploadMilliseconds =
+                            std::chrono::duration<double, std::milli>(
+                                PerformanceClock::now() - begin).count();
+                        frameFenceWaitMilliseconds +=
+                            vulkan.lastFrameCompletionWaitMilliseconds();
+                    }
+                    else if (candidate.hardwareMaterials.has_value())
+                    {
+                        const auto begin = PerformanceClock::now();
+                        vulkan.updateTrackHardwareMaterials(
+                            *candidate.hardwareMaterials);
+                        materialPublicationMilliseconds +=
+                            std::chrono::duration<double, std::milli>(
+                                PerformanceClock::now() - begin).count();
+                    }
+
+                    const unsigned curveUploadCount =
+                        candidate.referenceCurveVertices.has_value() ? 1u : 0u;
+                    const unsigned meshUploadCount =
+                        candidate.continuousMesh.has_value() ? 1u : 0u;
+                    const unsigned hardwareUploadCount =
+                        candidate.hardwareBatches.has_value() ? 1u : 0u;
+                    const unsigned materialPublicationCount =
+                        (candidate.trackMaterials.has_value()
+                            && !candidate.continuousMesh.has_value() ? 1u : 0u)
+                        + (candidate.hardwareMaterials.has_value() ? 1u : 0u);
+                    centerlineCache.applyTrackStylePresentation(
+                        std::move(candidate));
+                    const double totalMilliseconds =
+                        std::chrono::duration<double, std::milli>(
+                            PerformanceClock::now() - totalBegin).count();
+                    regionStyleEditTelemetry = RegionStyleEditTelemetry{
+                        .presentationMilliseconds = totalMilliseconds,
+                        .rebuildMilliseconds = rebuildMilliseconds,
+                        .curveUploadMilliseconds = curveUploadMilliseconds,
+                        .frameFenceWaitMilliseconds =
+                            frameFenceWaitMilliseconds,
+                        .meshUploadMilliseconds = meshUploadMilliseconds,
+                        .hardwareUploadMilliseconds =
+                            hardwareUploadMilliseconds,
+                        .materialPublicationMilliseconds =
+                            materialPublicationMilliseconds,
+                        .curveUploadCount = curveUploadCount,
+                        .meshUploadCount = meshUploadCount,
+                        .hardwareUploadCount = hardwareUploadCount,
+                        .materialPublicationCount = materialPublicationCount};
+                };
+
+                const auto publishHistoryState =
+                    [&](const quantum::coaster::AuthoredTrack& restoredTrack,
+                        const std::optional<quantum::editor::
+                            TrackStylePresentationImpact>& presentationImpact)
+                {
+                    if (presentationImpact.has_value()
+                        && !presentationImpact->requiresFullRegeneration())
+                    {
+                        publishTrackStylePresentation(
+                            restoredTrack, *presentationImpact);
+                        const std::size_t restoredSelection = std::min(
+                            editorUi.selectedSection(),
+                            restoredTrack.sectionCount() - 1);
+                        authoredTrack = restoredTrack;
+                        editorUi.selectSection(restoredSelection, true);
+                        return;
+                    }
                     quantum::editor::CenterlineVisualization
                         restoredCenterline = quantum::editor::
                             createCenterlineVisualization(
@@ -640,9 +778,11 @@ editorUi.selectSection(restoredSelection, true);
                 std::optional<PerformanceClock::time_point>
                     previousRenderedFrameStart;
                 std::uint64_t renderedFrameId = 0;
+                bool previewRegionStyleEditApplied = false;
 
                 while (running)
                 {
+                    regionStyleEditTelemetry.reset();
                     const auto frameLoopStart = PerformanceClock::now();
                     const auto eventPumpBegin = frameLoopStart;
                     SDL_Event event{};
@@ -753,9 +893,26 @@ editorUi.selectSection(restoredSelection, true);
                             {
                                 try
                                 {
-                                    publishHistoryState(*restoredTrack);
+                                    publishHistoryState(*restoredTrack,
+                                        documentHistory.
+                                            lastRestoreTrackStylePresentationImpact());
+                                    const auto restoredImpact = documentHistory.
+                                        lastRestoreTrackStylePresentationImpact();
                                     applicationBlockingEvents
-                                        .trackBufferMutation = true;
+                                        .trackBufferMutation =
+                                            !restoredImpact.has_value()
+                                            || restoredImpact->affects(
+                                                quantum::editor::
+                                                    TrackStylePresentationProduct::
+                                                        EngineeringRails)
+                                            || restoredImpact->affects(
+                                                quantum::editor::
+                                                    TrackStylePresentationProduct::
+                                                        RenderableMesh)
+                                            || restoredImpact->affects(
+                                                quantum::editor::
+                                                    TrackStylePresentationProduct::
+                                                        HardwareInstances);
                                     synchronizeDirtyState();
                                     quantum::logging::logMessage(
                                         quantum::logging::LogLevel::Info,
@@ -1061,6 +1218,52 @@ editorUi.selectSection(restoredSelection, true);
                             editorUi.takeSectionLengthEdit();
                         const auto requestedRegionCommand =
                             editorUi.takeRegionCommand();
+                        auto requestedRegionStyleEdit =
+                            editorUi.takeRegionTrackStyleEdit();
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->regionStyleEdit.has_value()
+                            && !previewRegionStyleEditApplied
+                            && renderedFrameId >= 60)
+                        {
+                            using quantum::editor::PreviewSmokeRegionStyleEdit;
+                            std::size_t sectionIndex = 1;
+                            if (*previewSmokeOptions->regionStyleEdit
+                                == PreviewSmokeRegionStyleEdit::RailMaterial)
+                            {
+                                sectionIndex = 3;
+                            }
+                            else if (*previewSmokeOptions->regionStyleEdit
+                                == PreviewSmokeRegionStyleEdit::RailCenterSpacing)
+                            {
+                                sectionIndex = 4;
+                            }
+                            if (sectionIndex >= authoredTrack.sectionCount())
+                            {
+                                throw std::runtime_error(
+                                    "Region-style edit smoke fixture has too few sections.");
+                            }
+                            auto overrides = authoredTrack.section(sectionIndex)
+                                .trackStyleOverrides;
+                            overrides.enabled = true;
+                            switch (*previewSmokeOptions->regionStyleEdit)
+                            {
+                            case PreviewSmokeRegionStyleEdit::HardwareSpacing:
+                                overrides.hardwareSpacing = 2.0;
+                                break;
+                            case PreviewSmokeRegionStyleEdit::RailMaterial:
+                                overrides.railMaterial =
+                                    quantum::coaster::TrackMaterial{
+                                        glm::vec4{0.12F, 0.42F, 0.86F, 1.0F}};
+                                break;
+                            case PreviewSmokeRegionStyleEdit::RailCenterSpacing:
+                                overrides.railCenterSpacing = 1.4;
+                                break;
+                            }
+                            requestedRegionStyleEdit =
+                                quantum::editor::RegionTrackStyleEdit{
+                                    sectionIndex, std::move(overrides), false};
+                            previewRegionStyleEditApplied = true;
+                        }
                         const auto requestedValueEdit =
                             editorUi.takeProfileEndpointValueEdit();
                         const auto requestedTransitionType =
@@ -1095,6 +1298,8 @@ editorUi.selectSection(restoredSelection, true);
                                 && requestedStartPoseEdit->continuous)
                             || (requestedHardwareEdit.has_value()
                                 && requestedHardwareEdit->continuous)
+                            || (requestedRegionStyleEdit.has_value()
+                                && requestedRegionStyleEdit->continuous)
                             || (requestedSupportEdit.has_value()
                                 && requestedSupportEdit->continuous)
                             || (requestedSupportAnchorCommand.has_value()
@@ -1737,6 +1942,9 @@ editorUi.selectSection(restoredSelection, true);
                             quantum::coaster::invalidSegmentId;
                         bool regionCommandApplied = false;
                         bool hardwareEditApplied = false;
+                        std::optional<quantum::editor::
+                            TrackStylePresentationImpact>
+                            regionStylePresentationImpact;
                         try
                         {
                             if (requestedHardwareEdit.has_value())
@@ -2018,6 +2226,22 @@ editorUi.selectSection(restoredSelection, true);
 
                             if (!trackStructureChanged)
                             {
+                                if (requestedRegionStyleEdit.has_value())
+                                {
+                                    auto& section = candidateTrack.section(
+                                        requestedRegionStyleEdit->sectionIndex);
+                                    regionStylePresentationImpact =
+                                        quantum::editor::
+                                            classifyRegionTrackStyleEdit(
+                                                candidateTrack.trackStyle(),
+                                                section.trackStyleOverrides,
+                                                requestedRegionStyleEdit
+                                                    ->overrides);
+                                    section.trackStyleOverrides =
+                                        requestedRegionStyleEdit->overrides;
+                                    candidateChanged = true;
+                                }
+
                                 if (requestedLengthEdit.has_value())
                                 {
                                     quantum::coaster::setSectionLength(
@@ -2218,9 +2442,51 @@ editorUi.selectSection(restoredSelection, true);
 
                             if (candidateChanged)
                             {
-                                applicationBlockingEvents
-                                    .trackBufferMutation = true;
-                                quantum::editor::CenterlineVisualization
+                                const bool regionStyleOnly =
+                                    requestedRegionStyleEdit.has_value()
+                                    && !requestedHardwareEdit.has_value()
+                                    && !requestedStartPoseEdit.has_value()
+                                    && !requestedCommand.has_value()
+                                    && !requestedRegionCommand.has_value()
+                                    && !requestedLengthEdit.has_value()
+                                    && !requestedValueEdit.has_value()
+                                    && !requestedTransitionType.has_value()
+                                    && !requestedDistanceEdit.has_value()
+                                    && !requestedSegmentCommand.has_value()
+                                    && regionStylePresentationImpact.has_value()
+                                    && !regionStylePresentationImpact
+                                        ->requiresFullRegeneration();
+                                if (regionStyleOnly)
+                                {
+                                    publishTrackStylePresentation(
+                                        candidateTrack,
+                                        *regionStylePresentationImpact);
+                                    applicationBlockingEvents
+                                        .trackBufferMutation =
+                                            regionStylePresentationImpact
+                                                ->affects(quantum::editor::
+                                                    TrackStylePresentationProduct::
+                                                        EngineeringRails)
+                                            || regionStylePresentationImpact
+                                                ->affects(quantum::editor::
+                                                    TrackStylePresentationProduct::
+                                                        RenderableMesh)
+                                            || regionStylePresentationImpact
+                                                ->affects(quantum::editor::
+                                                    TrackStylePresentationProduct::
+                                                        HardwareInstances);
+                                    editTransaction.commit(authoredTrack);
+                                    documentHistory.record(
+                                        authoredTrack,
+                                        continuousDrag,
+                                        regionStylePresentationImpact);
+                                    synchronizeDirtyState();
+                                }
+                                else
+                                {
+                                    applicationBlockingEvents
+                                        .trackBufferMutation = true;
+                                    quantum::editor::CenterlineVisualization
                                     candidateCenterline =
                                         quantum::editor::
                                             createCenterlineVisualization(
@@ -2274,6 +2540,7 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateRiderLoads)
                                 );
                                 synchronizeDirtyState();
+                                }
 
                                 if (hardwareEditApplied && !continuousDrag)
                                 {
@@ -2906,6 +3173,36 @@ editorUi.selectSection(restoredSelection, true);
                         const double frameStartToSimulationMilliseconds =
                             std::chrono::duration<double, std::milli>(
                                 simulationUpdateBegin - frameLoopStart).count();
+                        if (regionStyleEditTelemetry.has_value())
+                        {
+                            const auto& edit = *regionStyleEditTelemetry;
+                            quantum::logging::logMessagef(
+                                quantum::logging::LogLevel::Info,
+                                "PERF",
+                                "Region style edit: pre-simulation %.3f ms, "
+                                "presentation %.3f (rebuild %.3f), rider "
+                                "loads 0.000, supports 0.000, curves %.3f "
+                                "(%u), fence %.3f, mesh %.3f (%u), hardware "
+                                "%.3f (%u), materials %.3f (%u), simulation "
+                                "rebuild 0; canonical generation %llu, "
+                                "presentation generation %llu.",
+                                preSimulationCpuMilliseconds,
+                                edit.presentationMilliseconds,
+                                edit.rebuildMilliseconds,
+                                edit.curveUploadMilliseconds,
+                                edit.curveUploadCount,
+                                edit.frameFenceWaitMilliseconds,
+                                edit.meshUploadMilliseconds,
+                                edit.meshUploadCount,
+                                edit.hardwareUploadMilliseconds,
+                                edit.hardwareUploadCount,
+                                edit.materialPublicationMilliseconds,
+                                edit.materialPublicationCount,
+                                static_cast<unsigned long long>(
+                                    centerlineCache.generation()),
+                                static_cast<unsigned long long>(
+                                    centerlineCache.presentationGeneration()));
+                        }
                         // Minimized iterations skip ImGui NewFrame, so its
                         // first restored delta includes the entire suspension.
                         // The event flags survive those skipped iterations.
@@ -3032,7 +3329,8 @@ editorUi.selectSection(restoredSelection, true);
                                 simulationPreview.pause();
                                 running = false;
                             }
-                            else if (simulationPreview.playbackState()
+                            else if (!previewSmokeOptions->stoppedPreview
+                                && simulationPreview.playbackState()
                                 != quantum::editor::SimulationPreview::
                                     PlaybackState::Playing
                                 && !(previewSmokeOptions->repeat

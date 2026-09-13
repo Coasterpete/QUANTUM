@@ -13,9 +13,10 @@ namespace quantum::editor
 {
     namespace
     {
-        constexpr std::array<std::string_view, 6> names{
+        constexpr std::array<std::string_view, 7> names{
             "editor-overview", "transition-editor", "geometry-regions",
-            "track-start-gizmo", "force-diagnostics", "modern-steel"
+            "track-start-gizmo", "force-diagnostics", "modern-steel",
+            "track-style-regions"
         };
 
         void requireKeys(const nlohmann::json& object,
@@ -91,7 +92,7 @@ namespace quantum::editor
     std::filesystem::path readmeCaptureOutputPath(
         const ReadmeCaptureManifest& manifest, const ReadmeCaptureScenario& scenario)
     {
-        // Filenames come exclusively from the five presets; no traversal or source-file writes.
+        // Filenames come exclusively from the named presets; no traversal or source-file writes.
         return manifest.outputDirectory / (std::string(readmeCaptureName(scenario.kind)) + ".png");
     }
 
@@ -114,7 +115,8 @@ namespace quantum::editor
             throw std::invalid_argument("Capture output_directory is not a directory.");
         const auto& scenarios = json.at("scenarios");
         if (!scenarios.is_array() || scenarios.empty() || scenarios.size() > names.size())
-            throw std::invalid_argument("Capture scenarios must contain 1 to 5 entries.");
+            throw std::invalid_argument("Capture scenarios must contain 1 to "
+                + std::to_string(names.size()) + " entries.");
         std::set<ReadmeCaptureKind> used;
         for (const auto& entry : scenarios)
         {
@@ -202,6 +204,24 @@ namespace quantum::editor
                 throw std::invalid_argument(
                     name + ": supply a ModernSteel document with an enabled spine and crossties.");
             }
+        }
+        if (scenario.kind == ReadmeCaptureKind::TrackStyleRegions)
+        {
+            bool hasInherited = false;
+            bool hasLocal = false;
+            for (std::size_t index = 0; index < track.sectionCount(); ++index)
+            {
+                const auto& overrides =
+                    track.section(index).trackStyleOverrides;
+                hasInherited = hasInherited || !overrides.enabled;
+                hasLocal = hasLocal || (overrides.enabled
+                    && coaster::hasTrackStylePropertyOverrides(overrides));
+                static_cast<void>(coaster::resolveTrackStyle(
+                    track.trackStyle(), overrides));
+            }
+            if (!hasInherited || !hasLocal)
+                throw std::invalid_argument(name
+                    + ": supply both inherited and locally overridden regions.");
         }
     }
 }

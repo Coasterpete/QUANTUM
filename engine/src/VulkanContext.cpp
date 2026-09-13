@@ -195,12 +195,12 @@ namespace
             && std::isfinite(value.z);
     }
 
-    void requireValidRenderableTrack(
-        const quantum::coaster::RenderableTrack& track)
+    void requireValidTrackMesh(
+        const quantum::coaster::ContinuousTrackMesh& mesh,
+        const std::span<const quantum::coaster::TrackMaterial> materials)
     {
-        const auto& mesh = track.continuousMesh;
         if (mesh.vertices.empty() || mesh.triangleIndices.empty()
-            || mesh.edgeIndices.empty() || track.materials.empty())
+            || mesh.edgeIndices.empty() || materials.empty())
         {
             throw std::invalid_argument(
                 "VulkanContext requires nonempty indexed track mesh data."
@@ -245,13 +245,18 @@ namespace
                 || submesh.firstIndex > mesh.triangleIndices.size()
                 || submesh.indexCount
                     > mesh.triangleIndices.size() - submesh.firstIndex
-                || submesh.materialIndex >= track.materials.size())
+                || submesh.materialIndex >= materials.size())
             {
                 throw std::invalid_argument(
                     "A track submesh has an invalid draw or material range.");
             }
         }
-        for (const auto& batch : track.hardwareBatches)
+    }
+
+    void requireValidTrackHardware(
+        const std::span<const quantum::coaster::HardwareInstanceBatch> batches)
+    {
+        for (const auto& batch : batches)
         {
             if (batch.asset.path.empty())
             {
@@ -273,6 +278,13 @@ namespace
                 }
             }
         }
+    }
+
+    void requireValidRenderableTrack(
+        const quantum::coaster::RenderableTrack& track)
+    {
+        requireValidTrackMesh(track.continuousMesh, track.materials);
+        requireValidTrackHardware(track.hardwareBatches);
     }
 
     // The track-curve stream carries complete line segments: each consecutive
@@ -2497,6 +2509,8 @@ namespace quantum::renderer
 
     void VulkanContext::waitForFrameCompletion()
     {
+        const auto begin = std::chrono::steady_clock::now();
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
         if (frameFences_[0] == VK_NULL_HANDLE)
         {
             return;
@@ -2514,6 +2528,9 @@ namespace quantum::renderer
         {
             throwVulkanError("vkWaitForFences", result);
         }
+        lastFrameCompletionWaitMilliseconds_ =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - begin).count();
     }
 
     void VulkanContext::waitForFrameSlot(const std::uint32_t frameSlot)
@@ -2979,21 +2996,10 @@ namespace quantum::renderer
             });
     }
 
-    void VulkanContext::updateRenderableTrack(
-        const coaster::RenderableTrack& renderableTrack)
+    void VulkanContext::uploadRenderableTrackMesh(
+        const coaster::ContinuousTrackMesh& mesh,
+        const std::span<const coaster::TrackMaterial> materials)
     {
-        if (allocator_ == VK_NULL_HANDLE)
-        {
-            throw std::logic_error(
-                "VulkanContext cannot update renderable track data before initialization."
-            );
-        }
-
-        requireValidRenderableTrack(renderableTrack);
-        waitForFrameCompletion();
-
-        const coaster::ContinuousTrackMesh& mesh =
-            renderableTrack.continuousMesh;
         updateHostVisibleBuffer(
             allocator_,
             std::span<const coaster::TrackMeshVertex>{mesh.vertices},
@@ -3032,16 +3038,20 @@ namespace quantum::renderer
         for (const coaster::TrackSubmesh& submesh : mesh.submeshes)
         {
             const glm::vec4 color =
-                renderableTrack.materials[submesh.materialIndex].baseColor;
+                materials[submesh.materialIndex].baseColor;
             trackDrawBatches_.push_back({
                 submesh.firstIndex,
                 submesh.indexCount,
                 {color.r, color.g, color.b, color.a}});
         }
+    }
 
+    void VulkanContext::uploadTrackHardware(
+        const std::span<const coaster::HardwareInstanceBatch> batches)
+    {
         std::vector<coaster::HardwareInstance> instances;
         std::size_t totalInstanceCount = 0;
-        for (const auto& batch : renderableTrack.hardwareBatches)
+        for (const auto& batch : batches)
         {
             totalInstanceCount += batch.instances.size();
         }
@@ -3053,11 +3063,10 @@ namespace quantum::renderer
         }
         instances.reserve(totalInstanceCount);
         hardwareDrawBatches_.clear();
-        hardwareDrawBatches_.reserve(renderableTrack.hardwareBatches.size());
+        hardwareDrawBatches_.reserve(batches.size());
         hardwareAssetLoadStatuses_.clear();
-        hardwareAssetLoadStatuses_.reserve(
-            renderableTrack.hardwareBatches.size());
-        for (const auto& batch : renderableTrack.hardwareBatches)
+        hardwareAssetLoadStatuses_.reserve(batches.size());
+        for (const auto& batch : batches)
         {
             HardwareDrawBatch drawBatch;
             drawBatch.firstInstance = static_cast<std::uint32_t>(
@@ -3122,6 +3131,108 @@ namespace quantum::renderer
                 "track hardware instance upload"
             );
         }
+    }
+
+    void VulkanContext::updateRenderableTrack(
+        const coaster::RenderableTrack& renderableTrack)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update renderable track data before initialization."
+            );
+        }
+
+        requireValidRenderableTrack(renderableTrack);
+        waitForFrameCompletion();
+        uploadRenderableTrackMesh(
+            renderableTrack.continuousMesh, renderableTrack.materials);
+        uploadTrackHardware(renderableTrack.hardwareBatches);
+    }
+
+    void VulkanContext::updateRenderableTrackMesh(
+        const coaster::ContinuousTrackMesh& mesh,
+        const std::span<const coaster::TrackMaterial> materials)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update track mesh data before initialization.");
+        }
+        requireValidTrackMesh(mesh, materials);
+        waitForFrameCompletion();
+        uploadRenderableTrackMesh(mesh, materials);
+    }
+
+    void VulkanContext::updateTrackMaterials(
+        const std::span<const coaster::TrackSubmesh> submeshes,
+        const std::span<const coaster::TrackMaterial> materials)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update track materials before initialization.");
+        }
+        if (submeshes.size() != trackDrawBatches_.size())
+        {
+            throw std::invalid_argument(
+                "Track material update must preserve the current submesh layout.");
+        }
+        for (std::size_t index = 0; index < submeshes.size(); ++index)
+        {
+            const coaster::TrackSubmesh& submesh = submeshes[index];
+            if (submesh.materialIndex >= materials.size()
+                || submesh.firstIndex != trackDrawBatches_[index].firstIndex
+                || submesh.indexCount != trackDrawBatches_[index].indexCount)
+            {
+                throw std::invalid_argument(
+                    "Track material update changed the current submesh layout.");
+            }
+            const glm::vec4 color = materials[submesh.materialIndex].baseColor;
+            trackDrawBatches_[index].baseColor =
+                {color.r, color.g, color.b, color.a};
+        }
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
+    }
+
+    void VulkanContext::updateTrackHardware(
+        const std::span<const coaster::HardwareInstanceBatch> batches)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update track hardware before initialization.");
+        }
+        requireValidTrackHardware(batches);
+        waitForFrameCompletion();
+        uploadTrackHardware(batches);
+    }
+
+    void VulkanContext::updateTrackHardwareMaterials(
+        const std::span<const std::optional<coaster::TrackMaterial>> materials)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update track hardware materials before initialization.");
+        }
+        if (materials.size() != hardwareDrawBatches_.size())
+        {
+            throw std::invalid_argument(
+                "Hardware material update must preserve the current batch layout.");
+        }
+        for (std::size_t index = 0; index < materials.size(); ++index)
+        {
+            hardwareDrawBatches_[index].baseColor =
+                {0.28F, 0.30F, 0.32F, 1.0F};
+            if (materials[index].has_value())
+            {
+                const glm::vec4 color = materials[index]->baseColor;
+                hardwareDrawBatches_[index].baseColor =
+                    {color.r, color.g, color.b, color.a};
+            }
+        }
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
     void VulkanContext::reloadTrackHardwareAsset(
@@ -4518,6 +4629,11 @@ namespace quantum::renderer
     VulkanContext::lastDrawFrameCpuTelemetry() const noexcept
     {
         return lastDrawFrameCpuTelemetry_;
+    }
+
+    double VulkanContext::lastFrameCompletionWaitMilliseconds() const noexcept
+    {
+        return lastFrameCompletionWaitMilliseconds_;
     }
 
     const std::filesystem::path& VulkanContext::runtimeAssetRoot() const noexcept

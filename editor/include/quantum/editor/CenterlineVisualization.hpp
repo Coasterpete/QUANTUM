@@ -2,12 +2,14 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/TrackStyle.hpp>
+#include <quantum/editor/TrackStylePresentation.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <glm/vec3.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -45,6 +47,11 @@ namespace quantum::editor
         // hardware instance batches generated from the same solved samples.
         coaster::RenderableTrack renderableTrack;
 
+        // Canonical per-region results consumed to build renderableTrack.
+        // Retained for editor inspection/tests; regions never own these full
+        // copies in the authored document.
+        std::vector<coaster::TrackStylePreset> resolvedRegionStyles;
+
         // Vertex count of each of the four equal-length reference-curve
         // runs concatenated inside `vertices`, in the order above.
         std::uint32_t verticesPerCurve = 0;
@@ -62,6 +69,21 @@ namespace quantum::editor
         glm::dvec3 maximumPosition{0.0};
     };
 
+    // Staged presentation products built from CenterlineVisualization::samples.
+    // The cache applies these only after the required renderer uploads succeed.
+    struct TrackStylePresentationCandidate
+    {
+        TrackStylePresentationImpact impact;
+        std::vector<coaster::TrackStylePreset> resolvedRegionStyles;
+        std::optional<coaster::ContinuousTrackMesh> continuousMesh;
+        std::optional<std::vector<coaster::TrackMaterial>> trackMaterials;
+        std::optional<std::vector<coaster::HardwareInstanceBatch>>
+            hardwareBatches;
+        std::optional<std::vector<std::optional<coaster::TrackMaterial>>>
+            hardwareMaterials;
+        std::optional<std::vector<renderer::LineVertex>> referenceCurveVertices;
+    };
+
     // Distance-domain spacing used for viewport visualization samples.
     inline constexpr double centerlineVisualizationSampleSpacing = 0.75;
 
@@ -76,6 +98,12 @@ namespace quantum::editor
         const coaster::AuthoredTrack& track,
         const coaster::TrackStylePreset& style
     );
+
+    [[nodiscard]] TrackStylePresentationCandidate
+    createTrackStylePresentationCandidate(
+        const coaster::AuthoredTrack& track,
+        const CenterlineVisualization& cachedVisualization,
+        TrackStylePresentationImpact impact);
 
     // Display-only bounds for Frame All/Focus. Keep the solved centerline
     // bounds above unchanged; rails/heartline matter when framing short tracks.
@@ -95,9 +123,12 @@ namespace quantum::editor
         void setTrackStyle(coaster::TrackStylePreset style);
         [[nodiscard]] bool rebuildIfDirty(const coaster::AuthoredTrack& track);
         void replace(CenterlineVisualization visualization);
+        void applyTrackStylePresentation(
+            TrackStylePresentationCandidate candidate);
 
         [[nodiscard]] bool isDirty() const noexcept;
         [[nodiscard]] std::uint64_t generation() const noexcept;
+        [[nodiscard]] std::uint64_t presentationGeneration() const noexcept;
         [[nodiscard]] const CenterlineVisualization& visualization()
             const noexcept;
         [[nodiscard]] const coaster::TrackStylePreset& trackStyle()
@@ -108,6 +139,7 @@ namespace quantum::editor
         coaster::TrackStylePreset trackStyle_ =
             coaster::createModernSteelPreset();
         std::uint64_t generation_ = 0;
+        std::uint64_t presentationGeneration_ = 0;
         bool dirty_ = true;
     };
 }

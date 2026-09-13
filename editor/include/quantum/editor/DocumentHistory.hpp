@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/editor/TrackStylePresentation.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,12 +30,16 @@ namespace quantum::editor
         // Undo state.
         void record(
             const coaster::AuthoredTrack& track,
-            bool continuous = false
+            bool continuous = false,
+            std::optional<TrackStylePresentationImpact>
+                trackStylePresentationImpact = std::nullopt
         );
         void endContinuousEdit() noexcept;
 
         [[nodiscard]] std::optional<coaster::AuthoredTrack> undo();
         [[nodiscard]] std::optional<coaster::AuthoredTrack> redo();
+        [[nodiscard]] std::optional<TrackStylePresentationImpact>
+        lastRestoreTrackStylePresentationImpact() const noexcept;
 
         // Save/Save As identify the exact current revision as clean.
         void markSaved() noexcept;
@@ -49,9 +54,12 @@ namespace quantum::editor
         {
             coaster::AuthoredTrack track;
             std::uint64_t revision = 0;
+            std::optional<TrackStylePresentationImpact>
+                trackStylePresentationImpactFromPrevious;
         };
 
-        void append(const coaster::AuthoredTrack& track);
+        void append(const coaster::AuthoredTrack& track,
+            std::optional<TrackStylePresentationImpact> impact);
 
         std::vector<Entry> entries_;
         std::size_t cursor_ = 0;
@@ -59,5 +67,6 @@ namespace quantum::editor
         std::uint64_t nextRevision_ = 1;
         std::optional<std::uint64_t> savedRevision_;
         bool continuousEditActive_ = false;
+        std::optional<TrackStylePresentationImpact> lastRestoreImpact_;
     };
 }

@@ -110,6 +110,19 @@ namespace quantum::renderer
         void updateRenderableTrack(
             const coaster::RenderableTrack& renderableTrack
         );
+        void updateRenderableTrackMesh(
+            const coaster::ContinuousTrackMesh& mesh,
+            std::span<const coaster::TrackMaterial> materials);
+        // Material colors are copied into future command-buffer push
+        // constants; already recorded/in-flight command buffers own their
+        // values, so these two updates require no fence drain.
+        void updateTrackMaterials(
+            std::span<const coaster::TrackSubmesh> submeshes,
+            std::span<const coaster::TrackMaterial> materials);
+        void updateTrackHardware(
+            std::span<const coaster::HardwareInstanceBatch> batches);
+        void updateTrackHardwareMaterials(
+            std::span<const std::optional<coaster::TrackMaterial>> materials);
         // Invalidates and reloads one package-relative hardware mesh, then
         // refreshes every draw batch in the supplied current track.
         void reloadTrackHardwareAsset(
@@ -165,6 +178,8 @@ namespace quantum::renderer
         [[nodiscard]] bool fillModeNonSolidSupported() const noexcept;
         [[nodiscard]] const DrawFrameCpuTelemetry& lastDrawFrameCpuTelemetry()
             const noexcept;
+        [[nodiscard]] double lastFrameCompletionWaitMilliseconds()
+            const noexcept;
         [[nodiscard]] const std::filesystem::path& runtimeAssetRoot() const noexcept;
         [[nodiscard]] std::optional<HardwareAssetLoadStatus>
         hardwareAssetLoadStatus(std::string_view identifier) const;
@@ -188,6 +203,11 @@ namespace quantum::renderer
         void createSynchronizationResources();
         [[nodiscard]] std::uint32_t currentFrameSlot() const noexcept;
         void waitForFrameCompletion();
+        void uploadRenderableTrackMesh(
+            const coaster::ContinuousTrackMesh& mesh,
+            std::span<const coaster::TrackMaterial> materials);
+        void uploadTrackHardware(
+            std::span<const coaster::HardwareInstanceBatch> batches);
         void waitForFrameSlot(std::uint32_t frameSlot);
         void updateTrainPreviewFrameBuffer(std::uint32_t frameSlot);
         void recreateSwapchain();
@@ -375,6 +395,7 @@ namespace quantum::renderer
         std::array<VkFence, maxFramesInFlight> frameFences_{};
         std::uint32_t frameIndex_ = 0;
         DrawFrameCpuTelemetry lastDrawFrameCpuTelemetry_;
+        double lastFrameCompletionWaitMilliseconds_ = 0.0;
         std::array<FrameSubmissionTelemetry, maxFramesInFlight> frameSubmissions_{};
         std::uint64_t drawAttemptId_ = 0;
 

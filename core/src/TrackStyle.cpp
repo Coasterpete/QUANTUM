@@ -415,6 +415,194 @@ namespace quantum::coaster
         return style;
     }
 
+    bool hasTrackStylePropertyOverrides(
+        const RegionTrackStyleOverrides& overrides) noexcept
+    {
+        return overrides.visible.has_value()
+            || overrides.railsVisible.has_value()
+            || overrides.railRadius.has_value()
+            || overrides.railCenterSpacing.has_value()
+            || overrides.railVerticalOffset.has_value()
+            || overrides.spineEnabled.has_value()
+            || overrides.spineType.has_value()
+            || overrides.spineRadius.has_value()
+            || overrides.spineDimensions.has_value()
+            || overrides.spineVerticalOffset.has_value()
+            || overrides.hardwareEnabled.has_value()
+            || overrides.hardwareSpacing.has_value()
+            || overrides.railMaterial.has_value()
+            || overrides.spineMaterial.has_value()
+            || overrides.hardwareMaterial.has_value();
+    }
+
+    bool supportsTrackStyleProperty(
+        const TrackStylePreset& style,
+        const TrackStyleProperty property) noexcept
+    {
+        const bool hasRails = style.railCount > 0
+            && style.railOffsets.size() == style.railCount;
+        const bool hasConfiguredSpine = style.spine.type
+                != ContinuousSpineType::None
+            && style.spine.dimensions.x > 0.0
+            && style.spine.dimensions.y > 0.0;
+        bool commonRailVerticalOffset = hasRails;
+        if (hasRails)
+        {
+            const double vertical = style.railOffsets.front().vertical;
+            for (const RailOffset& offset : style.railOffsets)
+            {
+                commonRailVerticalOffset = commonRailVerticalOffset
+                    && offset.vertical == vertical;
+            }
+        }
+
+        switch (property)
+        {
+        case TrackStyleProperty::Visibility:
+            return true;
+        case TrackStyleProperty::RailsVisibility:
+        case TrackStyleProperty::RailMaterial:
+            return hasRails;
+        case TrackStyleProperty::RailRadius:
+            return hasRails
+                && style.geometryFamily == TrackGeometryFamily::DualRailTubular;
+        case TrackStyleProperty::RailCenterSpacing:
+            return style.railCount == 2 && style.railOffsets.size() == 2;
+        case TrackStyleProperty::RailVerticalOffset:
+            return commonRailVerticalOffset;
+        case TrackStyleProperty::SpineEnabled:
+        case TrackStyleProperty::SpineType:
+        case TrackStyleProperty::SpineVerticalOffset:
+        case TrackStyleProperty::SpineMaterial:
+            return hasConfiguredSpine;
+        case TrackStyleProperty::SpineRadius:
+            return hasConfiguredSpine
+                && style.spine.type == ContinuousSpineType::Tubular;
+        case TrackStyleProperty::SpineDimensions:
+            return hasConfiguredSpine
+                && style.spine.type == ContinuousSpineType::Box;
+        case TrackStyleProperty::HardwareEnabled:
+        case TrackStyleProperty::HardwareSpacing:
+            return !style.repeatingHardware.empty();
+        case TrackStyleProperty::HardwareMaterial:
+            return !style.repeatingHardware.empty()
+                && std::ranges::all_of(style.repeatingHardware,
+                    [](const RepeatingHardwareStyle& hardware)
+                    {
+                        return hardware.materialOverride.has_value();
+                    });
+        }
+        return false;
+    }
+
+    TrackStylePreset resolveTrackStyle(
+        const TrackStylePreset& documentStyle,
+        const RegionTrackStyleOverrides& overrides)
+    {
+        validateTrackStyle(documentStyle);
+        if (!overrides.enabled)
+        {
+            return documentStyle;
+        }
+
+        const auto requireSupported = [&documentStyle](
+            const bool authored,
+            const TrackStyleProperty property,
+            const char* const name)
+        {
+            if (authored
+                && !supportsTrackStyleProperty(documentStyle, property))
+            {
+                throw std::invalid_argument(
+                    std::string("The current track style does not support a region ")
+                    + name + " override.");
+            }
+        };
+
+        requireSupported(overrides.visible.has_value(),
+            TrackStyleProperty::Visibility, "visibility");
+        requireSupported(overrides.railsVisible.has_value(),
+            TrackStyleProperty::RailsVisibility, "rail-visibility");
+        requireSupported(overrides.railRadius.has_value(),
+            TrackStyleProperty::RailRadius, "rail-radius");
+        requireSupported(overrides.railCenterSpacing.has_value(),
+            TrackStyleProperty::RailCenterSpacing, "rail-spacing");
+        requireSupported(overrides.railVerticalOffset.has_value(),
+            TrackStyleProperty::RailVerticalOffset, "rail-offset");
+        requireSupported(overrides.spineEnabled.has_value(),
+            TrackStyleProperty::SpineEnabled, "spine-enabled");
+        requireSupported(overrides.spineType.has_value(),
+            TrackStyleProperty::SpineType, "spine-type");
+        requireSupported(overrides.spineRadius.has_value(),
+            TrackStyleProperty::SpineRadius, "spine-radius");
+        requireSupported(overrides.spineDimensions.has_value(),
+            TrackStyleProperty::SpineDimensions, "spine-dimensions");
+        requireSupported(overrides.spineVerticalOffset.has_value(),
+            TrackStyleProperty::SpineVerticalOffset, "spine-offset");
+        requireSupported(overrides.hardwareEnabled.has_value(),
+            TrackStyleProperty::HardwareEnabled, "hardware-enabled");
+        requireSupported(overrides.hardwareSpacing.has_value(),
+            TrackStyleProperty::HardwareSpacing, "hardware-spacing");
+        requireSupported(overrides.railMaterial.has_value(),
+            TrackStyleProperty::RailMaterial, "rail-material");
+        requireSupported(overrides.spineMaterial.has_value(),
+            TrackStyleProperty::SpineMaterial, "spine-material");
+        requireSupported(overrides.hardwareMaterial.has_value(),
+            TrackStyleProperty::HardwareMaterial, "hardware-material");
+
+        TrackStylePreset resolved = documentStyle;
+        if (overrides.visible) resolved.visible = *overrides.visible;
+        if (overrides.railsVisible)
+            resolved.railsVisible = *overrides.railsVisible;
+        if (overrides.railRadius)
+            resolved.railRadius = *overrides.railRadius;
+        if (overrides.railCenterSpacing)
+        {
+            const double midpoint = (resolved.railOffsets[0].lateral
+                + resolved.railOffsets[1].lateral) * 0.5;
+            const double halfSpacing = *overrides.railCenterSpacing * 0.5;
+            resolved.railOffsets[0].lateral = midpoint - halfSpacing;
+            resolved.railOffsets[1].lateral = midpoint + halfSpacing;
+        }
+        if (overrides.railVerticalOffset)
+        {
+            for (RailOffset& offset : resolved.railOffsets)
+                offset.vertical = *overrides.railVerticalOffset;
+        }
+        if (overrides.spineEnabled)
+            resolved.spine.enabled = *overrides.spineEnabled;
+        if (overrides.spineType)
+            resolved.spine.type = *overrides.spineType;
+        if (overrides.spineRadius)
+            resolved.spine.dimensions = glm::dvec2{*overrides.spineRadius * 2.0};
+        if (overrides.spineDimensions)
+            resolved.spine.dimensions = *overrides.spineDimensions;
+        if (overrides.spineVerticalOffset)
+            resolved.spine.offset.vertical = *overrides.spineVerticalOffset;
+        if (overrides.hardwareEnabled)
+        {
+            for (RepeatingHardwareStyle& hardware : resolved.repeatingHardware)
+                hardware.enabled = *overrides.hardwareEnabled;
+        }
+        if (overrides.hardwareSpacing)
+        {
+            for (RepeatingHardwareStyle& hardware : resolved.repeatingHardware)
+                hardware.spacing = *overrides.hardwareSpacing;
+        }
+        if (overrides.railMaterial)
+            resolved.railMaterial = *overrides.railMaterial;
+        if (overrides.spineMaterial)
+            resolved.spine.material = *overrides.spineMaterial;
+        if (overrides.hardwareMaterial)
+        {
+            for (RepeatingHardwareStyle& hardware : resolved.repeatingHardware)
+                hardware.materialOverride = *overrides.hardwareMaterial;
+        }
+
+        validateTrackStyle(resolved);
+        return resolved;
+    }
+
     std::string normalizeTrackHardwareAssetIdentifier(
         const std::string_view identifier)
     {
@@ -573,7 +761,7 @@ namespace quantum::coaster
         }
     }
 
-    RenderableTrack generateRenderableTrack(
+    RenderableTrack generateContinuousTrackPresentation(
         const std::span<const RiderLocalGeometryState> samples,
         const TrackStylePreset& style)
     {
@@ -581,19 +769,27 @@ namespace quantum::coaster
         validateSamples(samples);
 
         RenderableTrack result;
+        if (!style.visible)
+        {
+            return result;
+        }
         result.materials.push_back(style.railMaterial);
         result.continuousMesh.submeshes.reserve(
-            style.railCount + (style.spine.enabled ? 1 : 0));
+            (style.railsVisible ? style.railCount : 0)
+                + (style.spine.enabled ? 1 : 0));
 
-        const std::vector<ProfileEdge> railProfile = ellipticalProfile(
-            glm::dvec2{style.railRadius * 2.0},
-            style.railRadialSegments);
-        for (std::size_t rail = 0; rail < style.railCount; ++rail)
+        if (style.railsVisible)
         {
-            appendProfileSweep(
-                result.continuousMesh, samples, railProfile,
-                style.railOffsets[rail], 0,
-                firstRailComponentId + static_cast<std::uint32_t>(rail));
+            const std::vector<ProfileEdge> railProfile = ellipticalProfile(
+                glm::dvec2{style.railRadius * 2.0},
+                style.railRadialSegments);
+            for (std::size_t rail = 0; rail < style.railCount; ++rail)
+            {
+                appendProfileSweep(
+                    result.continuousMesh, samples, railProfile,
+                    style.railOffsets[rail], 0,
+                    firstRailComponentId + static_cast<std::uint32_t>(rail));
+            }
         }
 
         if (style.spine.enabled)
@@ -607,6 +803,23 @@ namespace quantum::coaster
             appendProfileSweep(
                 result.continuousMesh, samples, spineProfile,
                 style.spine.offset, 1, spineComponentId);
+        }
+
+        return result;
+    }
+
+    std::vector<HardwareInstanceBatch> generateTrackHardwarePresentation(
+        const std::span<const RiderLocalGeometryState> samples,
+        const TrackStylePreset& style,
+        const bool includeHardwareAtEnd)
+    {
+        validateTrackStyle(style);
+        validateSamples(samples);
+
+        std::vector<HardwareInstanceBatch> result;
+        if (!style.visible)
+        {
+            return result;
         }
 
         const double trackBegin = samples.front().distance;
@@ -649,6 +862,12 @@ namespace quantum::coaster
                         + hardware.startOffset
                         + static_cast<double>(instanceIndex)
                             * hardware.spacing;
+                    if (!includeHardwareAtEnd
+                        && distance >= trackEnd
+                            - 1.0e-9 * std::max(1.0, std::abs(trackEnd)))
+                    {
+                        continue;
+                    }
                     const InterpolatedTrackFrame frame =
                         interpolateTrackFrame(samples, distance);
                     const glm::dquat orientation =
@@ -680,9 +899,21 @@ namespace quantum::coaster
                     });
                 }
             }
-            result.hardwareBatches.push_back(std::move(batch));
+            result.push_back(std::move(batch));
         }
 
+        return result;
+    }
+
+    RenderableTrack generateRenderableTrack(
+        const std::span<const RiderLocalGeometryState> samples,
+        const TrackStylePreset& style,
+        const bool includeHardwareAtEnd)
+    {
+        RenderableTrack result =
+            generateContinuousTrackPresentation(samples, style);
+        result.hardwareBatches = generateTrackHardwarePresentation(
+            samples, style, includeHardwareAtEnd);
         return result;
     }
 }

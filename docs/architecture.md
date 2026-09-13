@@ -153,7 +153,42 @@ section name. A region's place in the track is its vector position, and its
 length contributes to cumulative whole-track stationing.
 
 Each `AuthoredTrackSection` owns one positive finite length and one authored
-region payload. That stored length defines the canonical section-local distance
+region payload plus optional sparse `RegionTrackStyleOverrides`. A disengaged
+property inherits the document `TrackStylePreset`; an engaged property is a
+local authored value. `resolveTrackStyle` is the single validation and merge
+path used before regional mesh and repeating-hardware generation. Capability
+queries derive supported semantic properties from the concrete configuration's
+structure rather than its name, keeping Modern Steel a validation family
+instead of a renderer special case. Explicit family/variant library objects,
+per-component overrides for configurations with heterogeneous repeated
+hardware, and smooth boundary blending remain later milestones.
+
+`classifyRegionTrackStyleEdit` is the centralized edit-impact boundary for
+these sparse overrides. Valid M0 properties are presentation-only and map as
+follows:
+
+| Changed effective property | Invalidated presentation product |
+|---|---|
+| rail, spine, or hardware color | track-material or hardware-material draw data only |
+| crosstie/hardware enabled state or spacing | hardware instance placement and its instance-buffer upload |
+| overall visibility | procedural rail/spine mesh plus hardware instances |
+| rail visibility or radius | procedural rail mesh |
+| spine enabled state, profile/type, dimensions/radius, or vertical offset | procedural spine mesh |
+| rail center spacing or common vertical placement | procedural rail mesh plus the two engineering rail curves |
+
+The presentation candidate resolves every region against the document preset
+and consumes the existing `CenterlineVisualizationCache::samples` and section
+slices. It does not integrate the authored track again. Material-only changes
+update CPU draw colors without waiting for in-flight frames; hardware placement,
+mesh, and engineering-curve changes retain their existing synchronized Vulkan
+buffer lifetime rules. Applying a candidate advances only the cache's
+presentation generation. The canonical centerline generation, rider-load
+history, support visualization, and Simulation Preview track generation remain
+unchanged. Undo and redo retain this impact with their history revision. Any
+unrecognized structural style difference is classified as full regeneration
+and uses the existing generic document path.
+
+That stored length defines the canonical section-local distance
 domain `[0, length]`; the selected region's editor and the Core solver use the
 same domain. Structural operations append, prepend, insert, duplicate, remove,
 and reorder regions by value. Duplicated rate profiles share no mutable state,
@@ -165,6 +200,8 @@ generation rejects an empty track.
 The current JSON document format serializes the layout mode, authored start
 pose, physical settings, track style, and every authored region. Track-hardware
 assets remain package-relative logical IDs such as `assets://track/...`.
+Only regions with local style behavior serialize a `trackStyleOverrides`
+object, and that object contains only explicitly overridden properties.
 Documents that predate the `startPose` field load with the original
 origin/identity pose, and documents that predate `trackStyle` load the standard
 dual-rail preset. Deserialization constructs a new document and accepts it only

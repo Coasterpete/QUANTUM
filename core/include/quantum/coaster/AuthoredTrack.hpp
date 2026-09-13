@@ -74,6 +74,7 @@ namespace quantum::coaster
         RegionKind kind = RegionKind::RateProfiles;
         double length = defaultNewSectionLength;
         std::variant<RateProfileRegion, GeometryRegion> region;
+        RegionTrackStyleOverrides trackStyleOverrides;
 
         // Rate-profile access to the authored region. Throws
         // std::logic_error when the section authors a different region kind;
