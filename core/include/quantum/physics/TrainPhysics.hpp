@@ -863,6 +863,8 @@ namespace quantum::physics
         double generalizedExternalForceNewtons = 0.0;
         std::size_t externalForceApplicationCount = 0;
         double resistanceForceNewtons = 0.0;
+        BasicResistanceForceBreakdown basicResistance;
+        double resistancePowerWatts = 0.0;
         double kinematicMassGradientForceNewtons = 0.0;
         double constraintForceNewtons = 0.0;
         double totalGeneralizedForceNewtons = 0.0;

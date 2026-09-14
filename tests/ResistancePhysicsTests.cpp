@@ -257,6 +257,245 @@ namespace
         return *analysis.connectorLoads()[index].axialForceNewtons();
     }
 
+    [[nodiscard]] BasicResistance representativeAggregateResistance()
+    {
+        BasicResistance resistance;
+        resistance.constantMechanicalForceNewtons = 500.0;
+        resistance.linearResistanceCoefficientNewtonSecondsPerMeter = 50.0;
+        resistance.airDensityKilogramsPerCubicMeter = 1.225;
+        resistance.dragAreaSquareMeters = 2.5;
+        resistance.rollingResistanceCoefficient = 0.01;
+        return resistance;
+    }
+
+    void aggregateBreakdownMovingComponentsAndSymmetry()
+    {
+        const BasicResistance resistance = representativeAggregateResistance();
+        constexpr double mass = 4'000.0;
+        constexpr double gravity = 9.80665;
+        constexpr double speed = 10.0;
+        const auto forward = evaluateBasicResistanceForces(
+            resistance, mass, gravity, 0.0, speed);
+        const auto reverse = evaluateBasicResistanceForces(
+            resistance, mass, gravity, 0.0, -speed);
+
+        const double rolling = 0.01 * mass * gravity;
+        const double dryCapacity = 500.0 + rolling;
+        const double linear = -50.0 * speed;
+        const double aerodynamic = -0.5 * 1.225 * 2.5 * speed * speed;
+        const double total = -dryCapacity + linear + aerodynamic;
+
+        requireNear(forward.constantMechanicalForceMagnitudeNewtons,
+            500.0, 0.0, "constant mechanical magnitude");
+        requireNear(forward.rollingResistanceForceMagnitudeNewtons,
+            rolling, 1.0e-12, "Crr mass gravity rolling magnitude");
+        requireNear(forward.dryResistanceForceCapacityNewtons,
+            dryCapacity, 1.0e-12, "combined dry capacity");
+        requireNear(forward.appliedDryResistanceForceNewtons,
+            -dryCapacity, 1.0e-12, "forward applied dry resistance");
+        requireNear(forward.linearResistanceForceNewtons,
+            linear, 0.0, "forward linear resistance");
+        requireNear(forward.aggregateAerodynamicResistanceForceNewtons,
+            aerodynamic, 1.0e-12, "forward aggregate aerodynamic resistance");
+        requireNear(forward.totalResistanceForceNewtons,
+            total, 1.0e-12, "forward aggregate total");
+        requireNear(evaluateBasicResistanceForceNewtons(
+                resistance, mass, gravity, 0.0, speed),
+            forward.totalResistanceForceNewtons, 0.0,
+            "scalar evaluator delegates to breakdown total");
+
+        requireNear(reverse.constantMechanicalForceMagnitudeNewtons,
+            forward.constantMechanicalForceMagnitudeNewtons, 0.0,
+            "constant magnitude is direction independent");
+        requireNear(reverse.rollingResistanceForceMagnitudeNewtons,
+            forward.rollingResistanceForceMagnitudeNewtons, 0.0,
+            "rolling magnitude is direction independent");
+        requireNear(reverse.dryResistanceForceCapacityNewtons,
+            forward.dryResistanceForceCapacityNewtons, 0.0,
+            "dry capacity is direction independent");
+        requireNear(reverse.appliedDryResistanceForceNewtons,
+            -forward.appliedDryResistanceForceNewtons, 0.0,
+            "applied dry force reverses with motion");
+        requireNear(reverse.linearResistanceForceNewtons,
+            -forward.linearResistanceForceNewtons, 0.0,
+            "linear force reverses with motion");
+        requireNear(reverse.aggregateAerodynamicResistanceForceNewtons,
+            -forward.aggregateAerodynamicResistanceForceNewtons, 0.0,
+            "aggregate aerodynamic force reverses with motion");
+        requireNear(reverse.totalResistanceForceNewtons,
+            -forward.totalResistanceForceNewtons, 0.0,
+            "aggregate total reverses with motion");
+    }
+
+    void aggregateBreakdownStaticCapacityAndTolerance()
+    {
+        BasicResistance resistance = representativeAggregateResistance();
+        resistance.constantMechanicalForceNewtons = 100.0;
+        resistance.rollingResistanceCoefficient = 0.01;
+        constexpr double mass = 100.0;
+        constexpr double gravity = 10.0;
+        constexpr double capacity = 110.0;
+
+        const auto held = evaluateBasicResistanceForces(
+            resistance, mass, gravity, 80.0, 0.0);
+        requireNear(held.dryResistanceForceCapacityNewtons,
+            capacity, 0.0, "static dry capacity");
+        requireNear(held.appliedDryResistanceForceNewtons,
+            -80.0, 0.0, "static force exactly balances within capacity");
+        requireNear(held.linearResistanceForceNewtons,
+            0.0, 0.0, "linear resistance is zero at rest");
+        requireNear(held.aggregateAerodynamicResistanceForceNewtons,
+            0.0, 0.0, "aggregate aerodynamic resistance is zero at rest");
+        requireNear(held.totalResistanceForceNewtons,
+            -80.0, 0.0, "static total is applied combined dry force");
+
+        const auto saturated = evaluateBasicResistanceForces(
+            resistance, mass, gravity, 180.0, 0.0);
+        const auto reverseSaturated = evaluateBasicResistanceForces(
+            resistance, mass, gravity, -180.0, 0.0);
+        requireNear(saturated.appliedDryResistanceForceNewtons,
+            -capacity, 0.0, "static dry resistance saturates at capacity");
+        requireNear(reverseSaturated.appliedDryResistanceForceNewtons,
+            capacity, 0.0, "static saturation opposes reverse impending force");
+
+        const auto withinTolerance = evaluateBasicResistanceForces(
+            resistance,
+            mass,
+            gravity,
+            50.0,
+            0.5 * followerRestSpeedToleranceMetersPerSecond);
+        requireNear(withinTolerance.appliedDryResistanceForceNewtons,
+            -50.0, 0.0, "near-rest speed retains static holding semantics");
+        requireNear(withinTolerance.linearResistanceForceNewtons,
+            0.0, 0.0, "near-rest linear term remains zero");
+        requireNear(withinTolerance.aggregateAerodynamicResistanceForceNewtons,
+            0.0, 0.0, "near-rest aggregate aero term remains zero");
+
+        const auto moving = evaluateBasicResistanceForces(
+            resistance,
+            mass,
+            gravity,
+            50.0,
+            2.0 * followerRestSpeedToleranceMetersPerSecond);
+        requireNear(moving.appliedDryResistanceForceNewtons,
+            -capacity, 0.0, "speed above rest tolerance uses moving dry law");
+    }
+
+    void aggregateBreakdownZeroCoefficientsAndDissipation()
+    {
+        const BasicResistance zero;
+        for (const double speed : {0.0, 5.0, -5.0})
+        {
+            const auto breakdown = evaluateBasicResistanceForces(
+                zero, 750.0, 9.80665, 0.0, speed);
+            requireNear(breakdown.constantMechanicalForceMagnitudeNewtons,
+                0.0, 0.0, "zero constant magnitude");
+            requireNear(breakdown.rollingResistanceForceMagnitudeNewtons,
+                0.0, 0.0, "zero rolling magnitude");
+            requireNear(breakdown.dryResistanceForceCapacityNewtons,
+                0.0, 0.0, "zero dry capacity");
+            requireNear(breakdown.totalResistanceForceNewtons,
+                0.0, 0.0, "zero coefficients produce zero total");
+        }
+
+        const BasicResistance resistance = representativeAggregateResistance();
+        for (const double speed : {12.0, -12.0, 0.25, -0.25})
+        {
+            const auto breakdown = evaluateBasicResistanceForces(
+                resistance, 4'000.0, 9.80665, 0.0, speed);
+            require(breakdown.totalResistanceForceNewtons * speed <= 0.0,
+                "moving aggregate resistance cannot add energy");
+        }
+    }
+
+    void aggregateTelemetryAndStraightTrainRegression()
+    {
+        const auto track = straightTrack();
+        TrainDefinition train = trainWithCdas({0.0});
+        train.resistance = representativeAggregateResistance();
+        const PhysicsEnvironment physicsEnvironment{};
+        const TrainDynamicsState state = stateAt(50.0, 10.0);
+        const auto breakdown = evaluateBasicResistanceForces(
+            train.resistance,
+            1'000.0,
+            physicsEnvironment.gravityAccelerationMetersPerSecondSquared,
+            0.0,
+            10.0);
+        const double expectedResistance =
+            -(500.0
+                + 0.01 * 1'000.0
+                    * physicsEnvironment
+                        .gravityAccelerationMetersPerSecondSquared)
+            - 50.0 * 10.0
+            - 0.5 * 1.225 * 2.5 * 10.0 * 10.0;
+        requireNear(breakdown.totalResistanceForceNewtons,
+            expectedResistance, 1.0e-12,
+            "aggregate breakdown preserves previous scalar equation");
+        const auto step = stepTrain(
+            track,
+            train,
+            physicsEnvironment,
+            state,
+            FixedStepSettings{0.01});
+
+        requireNear(step.telemetry.resistanceForceNewtons,
+            expectedResistance, 1.0e-12,
+            "train scalar resistance telemetry");
+        requireNear(step.telemetry.basicResistance.appliedDryResistanceForceNewtons,
+            breakdown.appliedDryResistanceForceNewtons, 1.0e-12,
+            "train applied dry telemetry");
+        requireNear(step.telemetry.basicResistance.linearResistanceForceNewtons,
+            breakdown.linearResistanceForceNewtons, 0.0,
+            "train linear telemetry");
+        requireNear(step.telemetry.basicResistance
+                .aggregateAerodynamicResistanceForceNewtons,
+            breakdown.aggregateAerodynamicResistanceForceNewtons, 1.0e-12,
+            "train aggregate aerodynamic telemetry");
+        requireNear(step.telemetry.resistancePowerWatts,
+            expectedResistance * 10.0, 1.0e-11,
+            "train aggregate resistance power telemetry");
+
+        const auto kinematics = evaluateTrainKinematics(
+            track, train, physicsEnvironment, state.generalizedReferenceLocation);
+        const double massGradientForce = -0.5
+            * kinematics.effectiveGeneralizedMassDerivativeKilogramsPerMeter
+            * 10.0 * 10.0;
+        const double expectedAcceleration =
+            (expectedResistance + massGradientForce)
+            / kinematics.effectiveGeneralizedMassKilograms;
+        const double expectedVelocity = 10.0 + expectedAcceleration * 0.01;
+        requireNear(step.state.generalizedAccelerationMetersPerSecondSquared,
+            expectedAcceleration, 1.0e-12,
+            "straight train aggregate acceleration regression");
+        requireNear(step.state.signedVelocityMetersPerSecond,
+            expectedVelocity, 1.0e-12,
+            "straight train aggregate velocity regression");
+        requireNear(step.state.generalizedReferenceLocation.stationMeters,
+            50.0 + expectedVelocity * 0.01, 1.0e-12,
+            "straight train aggregate state regression");
+
+        SingleFollowerDefinition follower;
+        follower.massKilograms = 1'000.0;
+        follower.resistance = train.resistance;
+        TrackFollowerState followerState;
+        followerState.location = locationAt(50.0);
+        followerState.signedVelocityMetersPerSecond = 10.0;
+        followerState.runState = FollowerRunState::Running;
+        const auto followerStep = stepTrackFollower(
+            track,
+            follower,
+            physicsEnvironment,
+            followerState,
+            FixedStepSettings{0.01});
+        requireNear(followerStep.telemetry.basicResistance
+                .totalResistanceForceNewtons,
+            expectedResistance, 1.0e-12,
+            "follower breakdown telemetry total");
+        requireNear(followerStep.telemetry.resistancePowerWatts,
+            expectedResistance * 10.0, 1.0e-11,
+            "follower aggregate resistance power telemetry");
+    }
+
     void noExplicitResistanceAndZeroCda()
     {
         const auto track = straightTrack();
@@ -649,6 +888,19 @@ namespace
         requireNear(step.telemetry.resistanceForceNewtons,
             -1'500.0, 2.0e-6,
             "aggregate static hold opposes the total impending force");
+        requireNear(step.telemetry.basicResistance
+                .dryResistanceForceCapacityNewtons,
+            2'000.0, 0.0, "aggregate static dry capacity telemetry");
+        requireNear(step.telemetry.basicResistance
+                .appliedDryResistanceForceNewtons,
+            -1'500.0, 2.0e-6, "aggregate applied static dry telemetry");
+        requireNear(step.telemetry.basicResistance.linearResistanceForceNewtons,
+            0.0, 0.0, "aggregate static linear telemetry");
+        requireNear(step.telemetry.basicResistance
+                .aggregateAerodynamicResistanceForceNewtons,
+            0.0, 0.0, "aggregate static aerodynamic telemetry");
+        requireNear(step.telemetry.resistancePowerWatts,
+            0.0, 0.0, "aggregate static resistance power");
     }
 
     void finiteGeneratedOutput()
@@ -697,6 +949,14 @@ int main()
 
     std::fprintf(stdout, "Resistance Physics Tests\n");
     run("no explicit resistance and zero CdA", noExplicitResistanceAndZeroCda);
+    run("aggregate moving component breakdown",
+        aggregateBreakdownMovingComponentsAndSymmetry);
+    run("aggregate static capacity and tolerance",
+        aggregateBreakdownStaticCapacityAndTolerance);
+    run("aggregate zero coefficients and dissipation",
+        aggregateBreakdownZeroCoefficientsAndDissipation);
+    run("aggregate telemetry and straight train regression",
+        aggregateTelemetryAndStraightTrainRegression);
     run("analytic straight drag and integration", analyticStraightDragAndIntegration);
     run("zero reverse and speed squared", zeroReverseAndSpeedSquared);
     run("relative wind physics", relativeWindPhysics);

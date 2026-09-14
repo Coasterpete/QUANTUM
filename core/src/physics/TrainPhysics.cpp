@@ -4766,13 +4766,16 @@ if (std::abs(solved.residualMeters)
             workingVelocity = 0.0;
         }
 
-        const double resistanceForce = evaluateBasicResistanceForceNewtons(
+        const BasicResistanceForceBreakdown basicResistance =
+            evaluateBasicResistanceForces(
             definition.resistance,
             current.pose.totalLoadedMassKilograms(),
             environment.gravityAccelerationMetersPerSecondSquared,
             current.generalizedGravityForceNewtons
                 + current.generalizedExternalForceNewtons,
             workingVelocity);
+        const double resistanceForce =
+            basicResistance.totalResistanceForceNewtons;
         const double massGradientForce = -0.5
             * current.effectiveGeneralizedMassDerivativeKilogramsPerMeter
             * workingVelocity * workingVelocity;
@@ -4933,6 +4936,8 @@ if (!committedPose)
             current.generalizedExternalForceNewtons,
             externalForces.size(),
             resistanceForce,
+            basicResistance,
+            resistanceForce * workingVelocity,
             massGradientForce,
             constraintForce,
             totalForce,

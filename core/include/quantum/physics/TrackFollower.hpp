@@ -179,10 +179,32 @@ namespace quantum::physics
         double rollingResistanceCoefficient = 0.0;
     };
 
+    struct BasicResistanceForceBreakdown
+    {
+        double constantMechanicalForceMagnitudeNewtons = 0.0;
+        double rollingResistanceForceMagnitudeNewtons = 0.0;
+        double dryResistanceForceCapacityNewtons = 0.0;
+
+        // The combined applied dry force is not allocated between its
+        // mechanical and rolling capacity, especially during static holding.
+        double appliedDryResistanceForceNewtons = 0.0;
+        double linearResistanceForceNewtons = 0.0;
+        double aggregateAerodynamicResistanceForceNewtons = 0.0;
+        double totalResistanceForceNewtons = 0.0;
+    };
+
     void validateBasicResistance(const BasicResistance& resistance);
 
     // Shared Phase 1/3 aggregate resistance law. impendingForceNewtons is the
     // non-resistance generalized force that dry resistance opposes at rest.
+    [[nodiscard]] BasicResistanceForceBreakdown evaluateBasicResistanceForces(
+        const BasicResistance& resistance,
+        double supportedMassKilograms,
+        double gravityAccelerationMetersPerSecondSquared,
+        double impendingForceNewtons,
+        double velocityMetersPerSecond);
+
+    // Compatibility scalar view of evaluateBasicResistanceForces().
     [[nodiscard]] double evaluateBasicResistanceForceNewtons(
         const BasicResistance& resistance,
         double supportedMassKilograms,
@@ -249,6 +271,8 @@ namespace quantum::physics
         double massKilograms = 0.0;
         double gravityForceNewtons = 0.0;
         double resistanceForceNewtons = 0.0;
+        BasicResistanceForceBreakdown basicResistance;
+        double resistancePowerWatts = 0.0;
         double constraintForceNewtons = 0.0;
         double totalLongitudinalForceNewtons = 0.0;
         double gravityAccelerationMetersPerSecondSquared = 0.0;
