@@ -192,7 +192,7 @@ namespace quantum::coaster
     class AuthoredTrack
     {
     public:
-        AuthoredTrack() = default;
+        AuthoredTrack();
 
         [[nodiscard]] LayoutMode layoutMode() const noexcept;
         void setLayoutMode(LayoutMode mode);
@@ -321,7 +321,7 @@ namespace quantum::coaster
         LayoutMode layoutMode_ = LayoutMode::Circuit;
         AuthoredStartPose startPose_;
         TrackPhysicalSettings physicalSettings_;
-        TrackStylePreset trackStyle_ = createModernSteelPreset();
+        TrackStylePreset trackStyle_;
         CoasterSetup coasterSetup_ =
             createCoasterSetupForStyle(defaultCoasterStyleId);
         SupportCollection supports_;

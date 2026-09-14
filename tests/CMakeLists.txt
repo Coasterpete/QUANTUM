@@ -152,6 +152,24 @@ if(QUANTUM_ENABLE_EDITOR)
     )
 endif()
 
+add_executable(
+    QuantumCoreTrackConfigurationTests
+    TrackConfigurationTests.cpp
+)
+target_link_libraries(QuantumCoreTrackConfigurationTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreTrackConfigurationTests PRIVATE cxx_std_23)
+set_target_properties(
+    QuantumCoreTrackConfigurationTests PROPERTIES CXX_EXTENSIONS OFF
+)
+add_test(
+    NAME QuantumCore.TrackConfiguration
+    COMMAND QuantumCoreTrackConfigurationTests
+)
+set_tests_properties(
+    QuantumCore.TrackConfiguration
+    PROPERTIES LABELS "core;coaster;track-configuration;track-style"
+)
+
 add_executable(QuantumCoreTrackStyleTests TrackStyleTests.cpp)
 target_link_libraries(QuantumCoreTrackStyleTests PRIVATE Quantum::Core)
 target_compile_features(QuantumCoreTrackStyleTests PRIVATE cxx_std_23)
