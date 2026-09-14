@@ -1,4 +1,5 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/TrackConfiguration.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -304,6 +305,18 @@ namespace quantum::coaster
             });
             ++channel.nextSegmentId;
             return channel;
+        }
+
+        [[nodiscard]] TrackStylePreset createDefaultDocumentTrackStyle()
+        {
+            const TrackConfigurationDefinition* configuration =
+                findTrackConfiguration(modernSteelTrackConfigurationId);
+            if (configuration == nullptr)
+            {
+                throw std::logic_error(
+                    "The default track configuration is not registered.");
+            }
+            return resolveTrackConfiguration(*configuration);
         }
     }
 
@@ -640,6 +653,11 @@ namespace quantum::coaster
     LayoutMode AuthoredTrack::layoutMode() const noexcept
     {
         return layoutMode_;
+    }
+
+    AuthoredTrack::AuthoredTrack()
+        : trackStyle_(createDefaultDocumentTrackStyle())
+    {
     }
 
     void AuthoredTrack::setLayoutMode(const LayoutMode mode)

@@ -146,6 +146,13 @@ continuous rail/spine profile dimensions and materials plus the logical
 repeating-hardware asset identity and its spacing, phase, and local transform;
 generated vertices, renderer cache entries, and GPU handles are not document
 state.
+Core's built-in Track Configuration seam gives the current Modern Steel
+configuration the stable ID `modern-steel` and the display name `Modern Steel`.
+`findTrackConfiguration` resolves that identity to a
+`TrackConfigurationDefinition`, and `resolveTrackConfiguration` produces the
+validated base `TrackStylePreset` through the existing Modern Steel factory.
+Documents continue to own and serialize that complete concrete preset; Track
+Configuration identity is not document state in this milestone.
 The start pose stores a world position and normalized quaternion that rotates
 the canonical local `(T, L, U)` axes into the initial rider frame. The UI calls
 the ordered section values regions; the Core type retains the established
@@ -159,7 +166,7 @@ local authored value. `resolveTrackStyle` is the single validation and merge
 path used before regional mesh and repeating-hardware generation. Capability
 queries derive supported semantic properties from the concrete configuration's
 structure rather than its name, keeping Modern Steel a validation family
-instead of a renderer special case. Explicit family/variant library objects,
+instead of a renderer special case. Additional configuration definitions,
 per-component overrides for configurations with heterogeneous repeated
 hardware, and smooth boundary blending remain later milestones.
 
