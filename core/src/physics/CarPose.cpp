@@ -935,6 +935,12 @@ namespace quantum::physics
                 throw std::invalid_argument(
                     "Frictionless bogie contact normals cannot contain a rolling-tangent component.");
             }
+            if (!std::isfinite(contact.clearanceMeters)
+                || contact.clearanceMeters < 0.0)
+            {
+                throw std::invalid_argument(
+                    "Bogie contact clearance must be finite, non-negative, and expressed in metres.");
+            }
         }
     }
 

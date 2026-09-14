@@ -84,6 +84,18 @@ namespace quantum::physics
         BogieContactRole role = BogieContactRole::Running;
         glm::dvec3 localPositionMeters{0.0};
         glm::dvec3 contactNormalLocal{0.0};
+        // Nominal separation along the authored contact normal. Zero retains
+        // the original rigid-contact geometry.
+        double clearanceMeters = 0.0;
+    };
+
+    // Prescribed displacement of the rigid bogie/contact assembly relative
+    // to its nominal Phase 2 travel-oriented frame. M0 exposes this only as a
+    // contact query; these transverse coordinates are not dynamically solved.
+    struct BogieContactClearanceState
+    {
+        double lateralDisplacementMeters = 0.0;
+        double verticalDisplacementMeters = 0.0;
     };
 
     // Car-local physical coordinates use +X forward, +Y lateral, and +Z up.

@@ -109,9 +109,10 @@ namespace
     [[nodiscard]] BogieContactDefinition contact(
         const BogieContactRole role,
         const glm::dvec3& position,
-        const glm::dvec3& normal)
+        const glm::dvec3& normal,
+        const double clearanceMeters = 0.0)
     {
-        return {role, position, normal};
+        return {role, position, normal, clearanceMeters};
     }
 
     [[nodiscard]] std::vector<BogieContactDefinition> runningPair()
@@ -165,10 +166,12 @@ namespace
 
     [[nodiscard]] BogieContactFeasibilityResult analyzeSynthetic(
         const std::vector<BogieContactDefinition>& contacts,
-        const glm::dvec3& reactionNewtons)
+        const glm::dvec3& reactionNewtons,
+        const BogieContactClearanceState& clearanceState = {})
     {
         return analyzeBogieContactFeasibility(
-            bogieWith(contacts), syntheticReaction(reactionNewtons));
+            bogieWith(contacts), syntheticReaction(reactionNewtons),
+            clearanceState);
     }
 
     void requireAvailable(
@@ -524,6 +527,23 @@ namespace
                 {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}));
         requireThrows([&] { validateBogieDefinition(invalid); },
             "unreasonable contact count rejected");
+
+        invalid.contacts.assign(1, contact(BogieContactRole::Running,
+            {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}, -0.001));
+        requireThrows([&] { validateBogieDefinition(invalid); },
+            "negative authored clearance rejected");
+        invalid.contacts[0].clearanceMeters =
+            std::numeric_limits<double>::infinity();
+        requireThrows([&] { validateBogieDefinition(invalid); },
+            "non-finite authored clearance rejected");
+
+        const BogieDefinition valid = bogieWith(runningPair());
+        requireThrows([&] {
+            (void)analyzeBogieContactFeasibility(
+                valid,
+                syntheticReaction({0.0, 0.0, 1'000.0}),
+                {std::numeric_limits<double>::quiet_NaN(), 0.0});
+        }, "non-finite prescribed displacement rejected");
     }
 
     void forceRoleCoverage()
@@ -1033,6 +1053,202 @@ namespace
             "finite conventional mixed allocation");
     }
 
+    void clearanceZeroStateCompatibility()
+    {
+        const BogieDefinition definition = bogieWith(
+            conventionalContacts());
+        const BogieReaction reaction = syntheticReaction(
+            {0.0, 345.0, 987.0});
+        const BogieContactFeasibilityResult previous =
+            analyzeBogieContactFeasibility(definition, reaction);
+        const BogieContactFeasibilityResult clearanceAware =
+            analyzeBogieContactFeasibility(definition, reaction, {});
+
+        require(previous.status == clearanceAware.status
+                && previous.forceRank == clearanceAware.forceRank
+                && previous.wrenchRank == clearanceAware.wrenchRank
+                && previous.allocation.status
+                    == clearanceAware.allocation.status
+                && previous.allocation.uniqueness
+                    == clearanceAware.allocation.uniqueness,
+            "zero clearance state preserves Phase 10/11 statuses");
+        requireAllocationAvailable(previous, "legacy zero-clearance query");
+        requireAllocationAvailable(
+            clearanceAware, "explicit zero-clearance query");
+        require(previous.allocation.representativeContacts.size()
+                == clearanceAware.allocation.representativeContacts.size(),
+            "zero clearance state preserves representative dimensions");
+        for (std::size_t index = 0;
+            index < clearanceAware.contacts.size(); ++index)
+        {
+            requireNear(previous.allocation.representativeContacts[index]
+                    .normalForceNewtons,
+                clearanceAware.allocation.representativeContacts[index]
+                    .normalForceNewtons,
+                0.0,
+                "zero clearance state preserves representative lambda");
+            require(clearanceAware.contacts[index].geometricState
+                        == BogieContactGeometricState::Touching
+                    && clearanceAware.contacts[index]
+                        .eligibleForAllocation
+                    && clearanceAware.contacts[index].signedGapMeters == 0.0,
+                "zero clearance and displacement are touching and eligible");
+        }
+    }
+
+    void clearanceVerticalGeometryAndFiltering()
+    {
+        const std::vector<BogieContactDefinition> contacts{
+            contact(BogieContactRole::Running,
+                {0.0, 0.0, -0.4}, {0.0, 0.0, 1.0}, 0.01),
+            contact(BogieContactRole::Upstop,
+                {0.0, 0.0, 0.4}, {0.0, 0.0, -1.0}, 0.01)
+        };
+
+        const auto nominal = analyzeSynthetic(
+            contacts, {0.0, 0.0, 1'000.0});
+        require(nominal.status
+                    == BogieContactFeasibilityStatus::NoEligibleContacts
+                && nominal.allocationEligibleContactCount == 0
+                && nominal.contacts[0].geometricState
+                    == BogieContactGeometricState::Separated
+                && nominal.contacts[1].geometricState
+                    == BogieContactGeometricState::Separated,
+            "positive nominal gaps leave both vertical contacts separated");
+
+        const auto downward = analyzeSynthetic(
+            contacts, {0.0, 0.0, 1'000.0}, {0.0, -0.01});
+        requireAllocationAvailable(downward,
+            "downward displacement closes running clearance");
+        requireNear(downward.contacts[0].signedGapMeters, 0.0, 1.0e-15,
+            "downward displacement closes running gap");
+        requireNear(downward.contacts[1].signedGapMeters, 0.02, 1.0e-15,
+            "downward displacement opens upstop gap");
+        require(downward.contacts[0].eligibleForAllocation
+                && downward.contacts[0].forceCarrying
+                && downward.contacts[0].reportingActive
+                && !downward.contacts[1].eligibleForAllocation
+                && downward.contacts[1].representativeNormalForceNewtons
+                && *downward.contacts[1]
+                        .representativeNormalForceNewtons == 0.0
+                && !downward.contacts[1].forceCarrying
+                && !downward.contacts[1].reportingActive,
+            "only touching running geometry can carry the required force");
+
+        const auto upward = analyzeSynthetic(
+            contacts, {0.0, 0.0, -500.0}, {0.0, 0.01});
+        requireAllocationAvailable(upward,
+            "upward displacement closes upstop clearance");
+        requireNear(upward.contacts[0].signedGapMeters, 0.02, 1.0e-15,
+            "upward displacement opens running gap");
+        requireNear(upward.contacts[1].signedGapMeters, 0.0, 1.0e-15,
+            "upward displacement closes upstop gap");
+        require(!upward.contacts[0].eligibleForAllocation
+                && upward.contacts[1].eligibleForAllocation
+                && upward.contacts[1].forceCarrying,
+            "upstop engagement follows geometry rather than required G");
+
+        const auto penetrating = analyzeSynthetic(
+            contacts, {0.0, 0.0, 1'000.0}, {0.0, -0.02});
+        require(penetrating.status
+                    == BogieContactFeasibilityStatus::PenetratingClearanceState
+                && penetrating.contacts[0].geometricState
+                    == BogieContactGeometricState::Penetrating
+                && penetrating.contacts[0].signedGapMeters
+                    < -bogieContactGapToleranceMeters
+                && penetrating.allocation.status
+                    == BogieContactAllocationStatus::Unavailable,
+            "material penetration is reported without allocation or clamping");
+    }
+
+    void clearanceTouchingAndLateralSemantics()
+    {
+        const std::vector<BogieContactDefinition> touchingContacts{
+            contact(BogieContactRole::Running,
+                {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}),
+            contact(BogieContactRole::Guide,
+                {0.0, 0.0, 0.0}, {0.0, 1.0, 0.0})
+        };
+        const auto unloadedTouching = analyzeSynthetic(
+            touchingContacts, {0.0, 0.0, 600.0});
+        requireAllocationAvailable(unloadedTouching,
+            "touching contact may remain unloaded");
+        require(unloadedTouching.contacts[1].geometricState
+                    == BogieContactGeometricState::Touching
+                && unloadedTouching.contacts[1].eligibleForAllocation
+                && unloadedTouching.contacts[1]
+                    .representativeNormalForceNewtons
+                && *unloadedTouching.contacts[1]
+                        .representativeNormalForceNewtons == 0.0
+                && !unloadedTouching.contacts[1].forceCarrying
+                && !unloadedTouching.contacts[1].reportingActive,
+            "touching, force-carrying, and reporting-active remain distinct");
+
+        const CurveFrame rotated{
+            {0.0, 1.0, 0.0},
+            {-1.0, 0.0, 0.0},
+            {0.0, 0.0, 1.0}
+        };
+        const BogieDefinition guideDefinition = bogieWith({
+            contact(BogieContactRole::Guide,
+                {0.0, 0.2, 0.0}, {0.0, 1.0, 0.0}, 0.005)
+        });
+        const auto guide = analyzeBogieContactFeasibility(
+            guideDefinition,
+            syntheticReaction({-250.0, 0.0, 0.0}, rotated),
+            {-0.005, 0.0});
+        requireAllocationAvailable(guide,
+            "lateral guide clearance in travel-oriented frame");
+        require(guide.contacts[0].role == BogieContactRole::Guide
+                && guide.contacts[0].geometricState
+                    == BogieContactGeometricState::Touching
+                && guide.contacts[0].forceCarrying,
+            "guide role identity survives generic lateral gap evaluation");
+        requireNear(guide.contacts[0].worldNormal,
+            {-1.0, 0.0, 0.0}, 1.0e-12,
+            "touching guide normal uses travel-oriented world transform");
+
+        const auto roleIndependent = analyzeSynthetic({
+                contact(BogieContactRole::Upstop,
+                    {0.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, 0.004)
+            },
+            {0.0, 125.0, 0.0},
+            {-0.004, 0.0});
+        requireAllocationAvailable(roleIndependent,
+            "authored normal rather than role controls lateral clearance");
+        require(roleIndependent.contacts[0].role
+                    == BogieContactRole::Upstop
+                && roleIndependent.contacts[0].geometricState
+                    == BogieContactGeometricState::Touching
+                && roleIndependent.contacts[0].forceCarrying,
+            "noncanonical role/normal pairing uses the generic gap equation");
+    }
+
+    void clearanceFilteringPreservesNonuniqueSemantics()
+    {
+        const std::vector<BogieContactDefinition> contacts{
+            contact(BogieContactRole::Running,
+                {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}),
+            contact(BogieContactRole::Running,
+                {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}),
+            contact(BogieContactRole::Upstop,
+                {0.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, 0.01)
+        };
+        const auto result = analyzeSynthetic(
+            contacts, {0.0, 0.0, 900.0});
+        requireAllocationAvailable(result,
+            "clearance-filtered redundant allocation");
+        require(result.allocationEligibleContactCount == 2
+                && result.allocation.uniqueness
+                    == BogieContactAllocationUniqueness::NonUnique
+                && result.contacts[2].geometricState
+                    == BogieContactGeometricState::Separated
+                && result.contacts[2].representativeNormalForceNewtons
+                && *result.contacts[2]
+                        .representativeNormalForceNewtons == 0.0,
+            "filtering impossible contacts does not overclaim wheel-load uniqueness");
+    }
+
     void unilateralAllocationBasic()
     {
         const auto result = analyzeSynthetic(runningPair(), {0.0, 0.0, 1'000.0});
@@ -1514,6 +1730,16 @@ int main()
         heterogeneousAndGenericGeometryIntegration);
     run("finite diagnostics and allocation state",
         finiteDiagnosticsAndAllocationState);
+
+    // Wheel/rail contact clearance geometry M0 tests
+    run("clearance zero-state compatibility",
+        clearanceZeroStateCompatibility);
+    run("clearance vertical geometry and filtering",
+        clearanceVerticalGeometryAndFiltering);
+    run("clearance touching and lateral semantics",
+        clearanceTouchingAndLateralSemantics);
+    run("clearance filtering preserves nonunique semantics",
+        clearanceFilteringPreservesNonuniqueSemantics);
 
     // Phase 11 tests
     run("unilateral allocation basic", unilateralAllocationBasic);
