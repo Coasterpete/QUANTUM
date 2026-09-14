@@ -691,12 +691,23 @@ namespace quantum::physics
     {
         Available,
         NoContacts,
+        NoEligibleContacts,
+        PenetratingClearanceState,
         InvalidContactGeometry,
         Phase9ReactionUnavailable,
         ForceNotRepresentable,
         WrenchNotRepresentable,
         IllConditioned,
         NonFiniteSystem
+    };
+
+    inline constexpr double bogieContactGapToleranceMeters = 1.0e-9;
+
+    enum class BogieContactGeometricState : std::uint8_t
+    {
+        Separated,
+        Touching,
+        Penetrating
     };
 
     struct WorldBogieContact
@@ -706,6 +717,19 @@ namespace quantum::physics
         glm::dvec3 worldPositionMeters{0.0};
         // Unit direction of positive rail-on-bogie force in world space.
         glm::dvec3 worldNormal{0.0};
+        double authoredClearanceMeters = 0.0;
+        // g = clearance + dot((0, lateral, vertical), normalLocal).
+        // Positive is separated, approximately zero is touching, and a value
+        // below -bogieContactGapToleranceMeters is penetrating.
+        double signedGapMeters = 0.0;
+        BogieContactGeometricState geometricState =
+            BogieContactGeometricState::Touching;
+        bool eligibleForAllocation = true;
+        // Published only when Phase 11 publishes a complete representative.
+        // A separated contact then has the exact constrained value zero.
+        std::optional<double> representativeNormalForceNewtons;
+        bool forceCarrying = false;
+        bool reportingActive = false;
     };
 
     struct ContactAllocation
@@ -783,7 +807,10 @@ namespace quantum::physics
         // Phase 9 supplies a point resultant, so the required moment about
         // bogieReferenceWorldPositionMeters is exactly zero.
         glm::dvec3 requiredMomentNewtonMeters{0.0};
+        BogieContactClearanceState prescribedClearanceState;
+        double gapToleranceMeters = bogieContactGapToleranceMeters;
         std::vector<WorldBogieContact> contacts;
+        std::size_t allocationEligibleContactCount = 0;
 
         bool forceSpanFeasible = false;
         bool wrenchSpanFeasible = false;
@@ -831,6 +858,15 @@ namespace quantum::physics
         analyzeBogieContactFeasibility(
             const BogieDefinition& definition,
             const BogieReaction& phase9Reaction);
+
+    // Clearance-aware M0 query. Only geometrically touching contacts enter
+    // the existing Phase 10/11 matrices. A materially penetrating prescribed
+    // state is reported and is never solved or silently clamped.
+    [[nodiscard]] BogieContactFeasibilityResult
+        analyzeBogieContactFeasibility(
+            const BogieDefinition& definition,
+            const BogieReaction& phase9Reaction,
+            const BogieContactClearanceState& clearanceState);
 
     // Runs Phase 9 and then analyzes every front/rear bogie without adding
     // engagement state or publishing contact loads.

@@ -4238,7 +4238,22 @@ if (std::abs(solved.residualMeters)
         const BogieDefinition& definition,
         const BogieReaction& phase9Reaction)
     {
+        return analyzeBogieContactFeasibility(
+            definition, phase9Reaction, {});
+    }
+
+    BogieContactFeasibilityResult analyzeBogieContactFeasibility(
+        const BogieDefinition& definition,
+        const BogieReaction& phase9Reaction,
+        const BogieContactClearanceState& clearanceState)
+    {
         validateBogieDefinition(definition);
+        if (!std::isfinite(clearanceState.lateralDisplacementMeters)
+            || !std::isfinite(clearanceState.verticalDisplacementMeters))
+        {
+            throw std::invalid_argument(
+                "Prescribed bogie contact displacement must contain finite lateral and vertical metre values.");
+        }
 
         BogieContactFeasibilityResult result;
         result.carIndex = phase9Reaction.carIndex;
@@ -4249,6 +4264,7 @@ if (std::abs(solved.residualMeters)
             phase9Reaction.worldPositionMeters;
         result.requiredWorldReactionNewtons =
             phase9Reaction.worldReactionNewtons;
+        result.prescribedClearanceState = clearanceState;
         result.contacts.reserve(definition.contacts.size());
 
         const geometry::CurveFrame& frame = phase9Reaction.bogieFrame;
@@ -4278,6 +4294,9 @@ if (std::abs(solved.residualMeters)
         };
         std::array<glm::dvec3, maximumBogieContactCount>
             contactArmsWorld{};
+        std::array<std::size_t, maximumBogieContactCount>
+            eligibleContactIndices{};
+        bool penetratingClearanceState = false;
         for (std::size_t contactIndex = 0;
             contactIndex < definition.contacts.size();
             ++contactIndex)
@@ -4291,9 +4310,15 @@ if (std::abs(solved.residualMeters)
                 phase9Reaction.worldPositionMeters + worldOffset;
             const glm::dvec3 worldNormal = transformDirection(
                 contact.contactNormalLocal);
+            const double signedGapMeters = contact.clearanceMeters
+                + clearanceState.lateralDisplacementMeters
+                    * contact.contactNormalLocal.y
+                + clearanceState.verticalDisplacementMeters
+                    * contact.contactNormalLocal.z;
             if (!finite(worldOffset)
                 || !finite(worldPosition)
                 || !finite(worldNormal)
+                || !std::isfinite(signedGapMeters)
                 || std::abs(glm::length(worldNormal) - 1.0) > 1.0e-9
                 || std::abs(glm::dot(worldNormal, frame.tangent))
                     > 1.0e-9)
@@ -4303,17 +4328,52 @@ if (std::abs(solved.residualMeters)
                 result.contacts.clear();
                 return result;
             }
+            BogieContactGeometricState geometricState =
+                BogieContactGeometricState::Touching;
+            bool eligibleForAllocation = true;
+            if (signedGapMeters > bogieContactGapToleranceMeters)
+            {
+                geometricState = BogieContactGeometricState::Separated;
+                eligibleForAllocation = false;
+            }
+            else if (signedGapMeters < -bogieContactGapToleranceMeters)
+            {
+                geometricState = BogieContactGeometricState::Penetrating;
+                eligibleForAllocation = false;
+                penetratingClearanceState = true;
+            }
+            else
+            {
+                eligibleContactIndices[result.allocationEligibleContactCount] =
+                    contactIndex;
+                ++result.allocationEligibleContactCount;
+            }
             result.contacts.push_back({
                 contactIndex,
                 contact.role,
                 worldPosition,
-                worldNormal
+                worldNormal,
+                contact.clearanceMeters,
+                signedGapMeters,
+                geometricState,
+                eligibleForAllocation
             });
         }
 
         if (result.contacts.empty())
         {
             result.status = BogieContactFeasibilityStatus::NoContacts;
+            return result;
+        }
+        if (penetratingClearanceState)
+        {
+            result.status =
+                BogieContactFeasibilityStatus::PenetratingClearanceState;
+            return result;
+        }
+        if (result.allocationEligibleContactCount == 0)
+        {
+            result.status = BogieContactFeasibilityStatus::NoEligibleContacts;
             return result;
         }
         if (phase9Reaction.status != BogieReactionRecoveryStatus::Available
@@ -4332,7 +4392,8 @@ if (std::abs(solved.residualMeters)
             return result;
         }
 
-        const std::size_t contactCount = result.contacts.size();
+        const std::size_t contactCount =
+            result.allocationEligibleContactCount;
         std::array<SmallSystemColumn, maximumBogieContactCount>
             forceColumns{};
         std::array<SmallSystemColumn, maximumBogieContactCount>
@@ -4342,10 +4403,13 @@ if (std::abs(solved.residualMeters)
             contactIndex < contactCount;
             ++contactIndex)
         {
-            const WorldBogieContact& contact = result.contacts[contactIndex];
+            const std::size_t sourceContactIndex =
+                eligibleContactIndices[contactIndex];
+            const WorldBogieContact& contact =
+                result.contacts[sourceContactIndex];
             characteristicLengthMeters = std::max(
                 characteristicLengthMeters,
-                glm::length(contactArmsWorld[contactIndex]));
+                glm::length(contactArmsWorld[sourceContactIndex]));
             forceColumns[contactIndex][0] = contact.worldNormal.x;
             forceColumns[contactIndex][1] = contact.worldNormal.y;
             forceColumns[contactIndex][2] = contact.worldNormal.z;
@@ -4363,9 +4427,12 @@ if (std::abs(solved.residualMeters)
             contactIndex < contactCount;
             ++contactIndex)
         {
-            const WorldBogieContact& contact = result.contacts[contactIndex];
+            const std::size_t sourceContactIndex =
+                eligibleContactIndices[contactIndex];
+            const WorldBogieContact& contact =
+                result.contacts[sourceContactIndex];
             const glm::dvec3 moment = glm::cross(
-                contactArmsWorld[contactIndex], contact.worldNormal);
+                contactArmsWorld[sourceContactIndex], contact.worldNormal);
             if (!finite(moment))
             {
                 result.status =
@@ -4424,8 +4491,10 @@ if (std::abs(solved.residualMeters)
         glm::dvec3 wrenchRecoveredForce{0.0};
         glm::dvec3 wrenchRecoveredMoment{0.0};
         double maximumMomentContribution = 0.0;
-        std::vector<double> forceCoefficients(contactCount, 0.0);
-        std::vector<double> wrenchCoefficients(contactCount, 0.0);
+        std::vector<double> forceCoefficients(
+            result.contacts.size(), 0.0);
+        std::vector<double> wrenchCoefficients(
+            result.contacts.size(), 0.0);
         for (std::size_t contactIndex = 0;
             contactIndex < contactCount;
             ++contactIndex)
@@ -4434,15 +4503,17 @@ if (std::abs(solved.residualMeters)
                 forceSolve.solution[contactIndex];
             const double wrenchCoefficient =
                 wrenchSolve.solution[contactIndex];
-            forceCoefficients[contactIndex] = forceCoefficient;
-            wrenchCoefficients[contactIndex] = wrenchCoefficient;
+            const std::size_t sourceContactIndex =
+                eligibleContactIndices[contactIndex];
+            forceCoefficients[sourceContactIndex] = forceCoefficient;
+            wrenchCoefficients[sourceContactIndex] = wrenchCoefficient;
             forceOnlyRecovered += forceCoefficient
-                * result.contacts[contactIndex].worldNormal;
+                * result.contacts[sourceContactIndex].worldNormal;
             const glm::dvec3 wrenchForce = wrenchCoefficient
-                * result.contacts[contactIndex].worldNormal;
+                * result.contacts[sourceContactIndex].worldNormal;
             wrenchRecoveredForce += wrenchForce;
             const glm::dvec3 moment = glm::cross(
-                contactArmsWorld[contactIndex],
+                contactArmsWorld[sourceContactIndex],
                 wrenchForce);
             wrenchRecoveredMoment += moment;
             maximumMomentContribution = std::max(
@@ -4592,6 +4663,8 @@ if (std::abs(solved.residualMeters)
 
         glm::dvec3 reconstructedForce{0.0};
         glm::dvec3 reconstructedMoment{0.0};
+        std::array<double, maximumBogieContactCount>
+            representativeCoefficients{};
         for (std::size_t contactIndex = 0;
             contactIndex < contactCount;
             ++contactIndex)
@@ -4603,11 +4676,14 @@ if (std::abs(solved.residualMeters)
                     BogieContactAllocationStatus::NonConverged;
                 return result;
             }
+            const std::size_t sourceContactIndex =
+                eligibleContactIndices[contactIndex];
+            representativeCoefficients[sourceContactIndex] = coefficient;
             const glm::dvec3 worldForce = coefficient
-                * result.contacts[contactIndex].worldNormal;
+                * result.contacts[sourceContactIndex].worldNormal;
             reconstructedForce += worldForce;
             reconstructedMoment += glm::cross(
-                contactArmsWorld[contactIndex], worldForce);
+                contactArmsWorld[sourceContactIndex], worldForce);
         }
 
         const glm::dvec3 forceResidual = reconstructedForce
@@ -4647,15 +4723,17 @@ if (std::abs(solved.residualMeters)
             reconstructedMoment;
         result.allocation.forceResidualNewtons = forceResidual;
         result.allocation.momentResidualNewtonMeters = momentResidual;
-        result.allocation.representativeContacts.reserve(contactCount);
+        result.allocation.representativeContacts.reserve(
+            result.contacts.size());
 
-        for (std::size_t contactIndex = 0;
-            contactIndex < contactCount;
-            ++contactIndex)
+        for (std::size_t sourceContactIndex = 0;
+            sourceContactIndex < result.contacts.size();
+            ++sourceContactIndex)
         {
-            const double coefficient = nnls.coefficients[contactIndex];
-            const WorldBogieContact& worldContact =
-                result.contacts[contactIndex];
+            const double coefficient =
+                representativeCoefficients[sourceContactIndex];
+            WorldBogieContact& worldContact =
+                result.contacts[sourceContactIndex];
             ContactAllocation contactAllocation;
             contactAllocation.sourceContactIndex =
                 worldContact.sourceContactIndex;
@@ -4665,6 +4743,11 @@ if (std::abs(solved.residualMeters)
                 * worldContact.worldNormal;
             contactAllocation.reportingActive = coefficient
                 > result.allocation.reportingActiveToleranceNewtons;
+            worldContact.representativeNormalForceNewtons = coefficient;
+            worldContact.forceCarrying = worldContact.eligibleForAllocation
+                && coefficient > nnls.nonnegativeTolerance;
+            worldContact.reportingActive =
+                contactAllocation.reportingActive;
             if (contactAllocation.reportingActive)
             {
                 ++result.allocation.reportingActiveContactCount;

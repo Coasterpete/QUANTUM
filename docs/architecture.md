@@ -1434,11 +1434,12 @@ planar, formed-steel, wood, and hybrid layouts without a family-specific solver
 or geometric closest-point search against rendered rails.
 
 Each `BogieContactDefinition` contains a descriptive `BogieContactRole`
-(`Running`, `Guide`, or `Upstop`), a contact point in metres, and a unit contact
-normal. Both vectors use the existing travel-oriented Phase 2 bogie frame whose
-origin is the sampled bogie reference point and whose axes are +X forward and
-along the admissible rolling tangent, +Y lateral, and +Z up. A positive scalar
-`lambda_i` means the rail applies
+(`Running`, `Guide`, or `Upstop`), a contact point in metres, a unit contact
+normal, and a nonnegative `clearanceMeters` whose zero default preserves the
+original rigid-contact behavior. The point and normal use the existing
+travel-oriented Phase 2 bogie frame whose origin is the sampled bogie reference
+point and whose axes are +X forward and along the admissible rolling tangent,
++Y lateral, and +Z up. A positive scalar `lambda_i` means the rail applies
 
 ```text
 F_i = lambda_i n_i
@@ -1554,9 +1555,81 @@ Front and rear bogies are allocated independently and retain their Phase 9
 identity and load split.
 
 Phase 11 remains a frictionless rigid-contact feasibility/allocation model. It
-does not add gaps, preload, hysteresis, suspension or wheel/rail deformation,
-friction/slip, wheel rotational dynamics, steering, derailment, connector
-compliance, operational devices, rendering, or track-family dependencies.
+does not itself determine gaps, preload, hysteresis, suspension or wheel/rail
+deformation, friction/slip, wheel rotational dynamics, steering, derailment,
+connector compliance, operational devices, rendering, or track-family
+dependencies.
+
+### Wheel/rail contact clearance geometry M0
+
+M0 adds a prescribed transverse clearance query in front of the existing Phase
+10/11 machinery:
+
+```text
+authored rigid contacts + clearance
+        +
+prescribed bogie transverse displacement
+        ↓
+signed contact gaps
+        ↓
+geometric contact eligibility
+        ↓
+existing Phase 10 wrench feasibility
+        ↓
+existing Phase 11 lambda >= 0 allocation
+```
+
+`BogieContactDefinition::clearanceMeters` is finite, nonnegative authored SI
+geometry. It is independent of rendered rail geometry, `TrackStylePreset`, and
+wheel meshes, and every Running, Guide, or Upstop contact may author its own
+value. The role remains descriptive and never changes the gap equation or force
+direction.
+
+`BogieContactClearanceState` prescribes the rigid assembly's lateral (+Y) and
+vertical (+Z) displacement in metres relative to its nominal travel-oriented
+Phase 2 bogie frame. There is deliberately no longitudinal coordinate. For
+local displacement `d_i = (0, d_y, d_z)` and the authored local unit normal
+`n_i`, the signed gap is
+
+```text
+g_i = clearance_i + dot(d_i, n_i)
+```
+
+`g_i > 1e-9 m` is `Separated`, `|g_i| <= 1e-9 m` is `Touching`, and
+`g_i < -1e-9 m` is `Penetrating`. A materially penetrating prescribed state is
+reported as `PenetratingClearanceState`; it is not clamped or passed to either
+solver. A separated contact is unavailable and has `lambda_i = 0`. A touching
+contact is eligible but may still receive zero lambda. Therefore geometric
+touching, representative force carrying, and the existing higher-threshold
+`reportingActive` telemetry are separate facts.
+
+For an accepted prescribed state, only touching source-contact indices are
+used to assemble the same force and wrench columns described by Phase 10. The
+same rank-revealing QR and the same Phase 11 NNLS implementation then operate on
+that filtered candidate matrix; neither solver is duplicated. Available
+results still expose all authored contacts in source order. Separated contacts
+have a representative coefficient of exactly zero, while uniqueness is
+classified only for the eligible system. Clearance filtering cannot promote a
+rank-deficient representative into an authoritative individual wheel load.
+
+The intended later rigid unilateral relationship is
+
+```text
+g_i >= 0
+lambda_i >= 0
+g_i * lambda_i = 0
+```
+
+M0 supplies `d_y` and `d_z` as prescribed query input; it does not solve them
+from forces and does not couple them to the longitudinal train generalized
+coordinate. Dynamic running-to-upstop or guide-gap traversal will require at
+minimum lateral and vertical bogie-relative generalized coordinates, their
+velocities and inertial properties, force-balance equations, and a unilateral
+contact event/constraint solve that determines displacement and lambda
+together. Spring/damper suspension, impact impulses, preload, hysteresis,
+deformation, friction/slip, wheel rotation, steering, derailment, resistance
+redistribution, rendering, persistence, and Editor UI remain deferred. No
+G-value threshold selects contact availability.
 
 ## Planned systems
 
