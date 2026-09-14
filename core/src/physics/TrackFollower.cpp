@@ -89,13 +89,13 @@ namespace quantum::physics
             return {rotation[0], rotation[1], rotation[2]};
         }
 
-        struct ForceBreakdown
+        struct FollowerForceBreakdown
         {
             double gravityForceNewtons = 0.0;
-            double resistanceForceNewtons = 0.0;
+            BasicResistanceForceBreakdown basicResistance;
         };
 
-        [[nodiscard]] ForceBreakdown evaluateForces(
+        [[nodiscard]] FollowerForceBreakdown evaluateForces(
             const SingleFollowerDefinition& definition,
             const PhysicsEnvironment& environment,
             const geometry::CurveFrame& frame,
@@ -116,15 +116,15 @@ namespace quantum::physics
                 throw std::invalid_argument(
                     "Follower force inputs produce a non-finite force.");
             }
-            const double resistanceForce =
-                evaluateBasicResistanceForceNewtons(
+            const BasicResistanceForceBreakdown basicResistance =
+                evaluateBasicResistanceForces(
                     definition.resistance,
                     definition.massKilograms,
                     environment.gravityAccelerationMetersPerSecondSquared,
                     gravityForce,
                     velocityMetersPerSecond);
 
-            return {gravityForce, resistanceForce};
+            return {gravityForce, basicResistance};
         }
 
         [[nodiscard]] TrackBoundary boundaryForState(
@@ -534,7 +534,7 @@ namespace quantum::physics
         }
     }
 
-    double evaluateBasicResistanceForceNewtons(
+    BasicResistanceForceBreakdown evaluateBasicResistanceForces(
         const BasicResistance& resistance,
         const double supportedMassKilograms,
         const double gravityAccelerationMetersPerSecondSquared,
@@ -553,55 +553,77 @@ namespace quantum::physics
                 "Basic resistance evaluation inputs must be finite and physically valid.");
         }
 
-        const double rollingForceMagnitude =
+        BasicResistanceForceBreakdown result;
+        result.constantMechanicalForceMagnitudeNewtons =
+            resistance.constantMechanicalForceNewtons;
+        result.rollingResistanceForceMagnitudeNewtons =
             resistance.rollingResistanceCoefficient
             * supportedMassKilograms
             * gravityAccelerationMetersPerSecondSquared;
-        const double dryForceMagnitude =
-            resistance.constantMechanicalForceNewtons
-            + rollingForceMagnitude;
-        if (!std::isfinite(rollingForceMagnitude)
-            || !std::isfinite(dryForceMagnitude))
+        result.dryResistanceForceCapacityNewtons =
+            result.constantMechanicalForceMagnitudeNewtons
+            + result.rollingResistanceForceMagnitudeNewtons;
+        if (!std::isfinite(result.rollingResistanceForceMagnitudeNewtons)
+            || !std::isfinite(result.dryResistanceForceCapacityNewtons))
         {
             throw std::invalid_argument(
                 "Basic resistance inputs produce a non-finite force.");
         }
 
-        double resistanceForce = 0.0;
         if (std::abs(velocityMetersPerSecond)
             <= followerRestSpeedToleranceMetersPerSecond)
         {
             // Dry resistance opposes impending non-resistance motion and
             // statically balances it when the available capacity permits.
-            resistanceForce = std::abs(impendingForceNewtons)
-                    <= dryForceMagnitude
+            result.appliedDryResistanceForceNewtons =
+                std::abs(impendingForceNewtons)
+                    <= result.dryResistanceForceCapacityNewtons
                 ? -impendingForceNewtons
-                : -std::copysign(dryForceMagnitude, impendingForceNewtons);
+                : -std::copysign(
+                    result.dryResistanceForceCapacityNewtons,
+                    impendingForceNewtons);
         }
         else
         {
             const double motionSign =
                 std::copysign(1.0, velocityMetersPerSecond);
-            const double linearForce =
+            result.appliedDryResistanceForceNewtons =
+                -motionSign * result.dryResistanceForceCapacityNewtons;
+            result.linearResistanceForceNewtons =
                 -resistance.linearResistanceCoefficientNewtonSecondsPerMeter
                 * velocityMetersPerSecond;
-            const double aerodynamicForce =
+            result.aggregateAerodynamicResistanceForceNewtons =
                 -0.5
                 * resistance.airDensityKilogramsPerCubicMeter
                 * resistance.dragAreaSquareMeters
                 * velocityMetersPerSecond
                 * std::abs(velocityMetersPerSecond);
-            resistanceForce =
-                -motionSign * dryForceMagnitude
-                + linearForce
-                + aerodynamicForce;
         }
-        if (!std::isfinite(resistanceForce))
+        result.totalResistanceForceNewtons =
+            result.appliedDryResistanceForceNewtons
+            + result.linearResistanceForceNewtons
+            + result.aggregateAerodynamicResistanceForceNewtons;
+        if (!std::isfinite(result.totalResistanceForceNewtons))
         {
             throw std::invalid_argument(
                 "Basic resistance inputs produce a non-finite force.");
         }
-        return resistanceForce;
+        return result;
+    }
+
+    double evaluateBasicResistanceForceNewtons(
+        const BasicResistance& resistance,
+        const double supportedMassKilograms,
+        const double gravityAccelerationMetersPerSecondSquared,
+        const double impendingForceNewtons,
+        const double velocityMetersPerSecond)
+    {
+        return evaluateBasicResistanceForces(
+            resistance,
+            supportedMassKilograms,
+            gravityAccelerationMetersPerSecondSquared,
+            impendingForceNewtons,
+            velocityMetersPerSecond).totalResistanceForceNewtons;
     }
 
     void validatePhysicsEnvironment(const PhysicsEnvironment& environment)
@@ -674,10 +696,11 @@ namespace quantum::physics
             }
         }
 
-        const ForceBreakdown forces = evaluateForces(
+        const FollowerForceBreakdown forces = evaluateForces(
             definition, environment, currentSample.frame, workingVelocity);
         const double unconstrainedForce =
-            forces.gravityForceNewtons + forces.resistanceForceNewtons;
+            forces.gravityForceNewtons
+            + forces.basicResistance.totalResistanceForceNewtons;
         const double unconstrainedAcceleration =
             unconstrainedForce / definition.massKilograms;
         double nextVelocity = workingVelocity
@@ -779,13 +802,19 @@ namespace quantum::physics
             nextState.longitudinalAccelerationMetersPerSecondSquared;
         telemetry.massKilograms = definition.massKilograms;
         telemetry.gravityForceNewtons = forces.gravityForceNewtons;
-        telemetry.resistanceForceNewtons = forces.resistanceForceNewtons;
+        telemetry.resistanceForceNewtons =
+            forces.basicResistance.totalResistanceForceNewtons;
+        telemetry.basicResistance = forces.basicResistance;
+        telemetry.resistancePowerWatts =
+            forces.basicResistance.totalResistanceForceNewtons
+            * workingVelocity;
         telemetry.constraintForceNewtons = constraintForce;
         telemetry.totalLongitudinalForceNewtons = totalForce;
         telemetry.gravityAccelerationMetersPerSecondSquared =
             forces.gravityForceNewtons / definition.massKilograms;
         telemetry.resistanceAccelerationMetersPerSecondSquared =
-            forces.resistanceForceNewtons / definition.massKilograms;
+            forces.basicResistance.totalResistanceForceNewtons
+            / definition.massKilograms;
         telemetry.totalLongitudinalAccelerationMetersPerSecondSquared =
             nextState.longitudinalAccelerationMetersPerSecondSquared;
         telemetry.curvaturePerMeter = committedSample.curvaturePerMeter;

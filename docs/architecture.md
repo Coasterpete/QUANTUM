@@ -921,6 +921,53 @@ at their endpoints and report the intervention. Each step returns the committed
 state and physics telemetry for motion, force contributions, curvature, run
 state, and boundary behavior.
 
+#### Aggregate resistance audit boundary
+
+`BasicResistance` remains the compatibility aggregate law used by both
+`stepTrackFollower` and `stepTrain`. `evaluateBasicResistanceForces` is its one
+authoritative component evaluation; the older scalar
+`evaluateBasicResistanceForceNewtons` delegates to the breakdown total. For
+supplied supported mass `m`, positive gravity magnitude `g`, generalized speed
+`v`, and impending non-resistance force `F_impending`, the moving law is
+
+```text
+F_roll_magnitude = Crr m g
+F_dry_capacity = F_constant_mechanical + F_roll_magnitude
+F_dry = -sign(v) F_dry_capacity
+F_linear = -k_linear v
+F_aero_aggregate = -0.5 rho_aggregate CdA_aggregate v |v|
+F_resistance = F_dry + F_linear + F_aero_aggregate
+```
+
+At or within the existing rest-speed tolerance, the linear and aggregate
+aerodynamic terms are zero. The combined dry term balances
+`-F_impending` when its magnitude is within `F_dry_capacity`, and otherwise
+saturates opposite the impending force at that capacity. The result exposes
+the constant mechanical magnitude, rolling magnitude, combined dry capacity,
+applied combined dry force, linear force, legacy aggregate aerodynamic force,
+and total. It intentionally does not fabricate separate applied static
+mechanical and rolling forces. Follower and train telemetry retain their scalar
+resistance force and also publish this breakdown plus the instantaneous
+aggregate power `F_resistance v` evaluated at the speed used for the step.
+
+The rolling input remains explicitly provisional: the supplied mass is used as
+the supported mass, so the magnitude is `Crr * supplied mass * g`. It is not
+derived from bogie reactions or active wheel contacts. A future
+contact-dependent rolling model may instead derive supported rolling load from
+physically active running, guide, and upstop contacts, after clearance gaps and
+contact-state transitions exist. Phase 11 coefficients in nonunique rigid
+contact systems are representative allocations and are not authoritative
+individual wheel loads. Wheel bearing allocation and wheel/rail friction or
+slip likewise remain unimplemented.
+
+This legacy zero-wind scalar aerodynamic term is distinct from the Phase 6
+per-car path. Per-car `CarDefinition` CdA acts at the authored physical
+aerodynamic center, uses `PhysicsEnvironment` density and world wind, and is
+generated as ordinary `ExternalForceApplication` values. Aggregate and per-car
+aerodynamic authoring remain mutually exclusive. No aggregate component gains
+a per-car or per-bogie distribution through this audit, so connector and bogie
+reaction recovery continue to report aggregate resistance as underdetermined.
+
 ### Phase 2: authored car and bogie geometry
 
 `CarDefinition` separates reusable dry mass and dry center of gravity from the
