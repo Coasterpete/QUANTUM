@@ -103,6 +103,12 @@ namespace quantum::physics
         [[nodiscard]] double lengthMeters() const noexcept;
         [[nodiscard]] coaster::TopologyKind topology() const noexcept;
 
+        // M1A accepts only an unbanked vertical plane. This query inspects
+        // every compiled canonical sample (rather than trusting caller
+        // metadata): positions, tangent/up/curvature must remain in one plane
+        // and the lateral axis must remain constant and horizontal.
+        [[nodiscard]] bool supportsPlanarVerticalMotion() const noexcept;
+
         [[nodiscard]] PhysicsTrackSample sample(
             const TrackLocation& location) const;
 
