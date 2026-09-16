@@ -1622,14 +1622,144 @@ g_i * lambda_i = 0
 
 M0 supplies `d_y` and `d_z` as prescribed query input; it does not solve them
 from forces and does not couple them to the longitudinal train generalized
-coordinate. Dynamic running-to-upstop or guide-gap traversal will require at
-minimum lateral and vertical bogie-relative generalized coordinates, their
-velocities and inertial properties, force-balance equations, and a unilateral
-contact event/constraint solve that determines displacement and lambda
-together. Spring/damper suspension, impact impulses, preload, hysteresis,
-deformation, friction/slip, wheel rotation, steering, derailment, resistance
-redistribution, rendering, persistence, and Editor UI remain deferred. No
-G-value threshold selects contact availability.
+coordinate. Spring/damper suspension, preload, hysteresis, deformation,
+friction/slip, wheel rotation, steering, derailment, resistance redistribution,
+rendering, persistence, and Editor UI remain deferred. No G-value threshold
+selects contact availability.
+
+### Dynamic wheel/rail contact motion M1A
+
+M1A is a separate opt-in CPU path exposed by `stepDynamicContact`. It does not
+replace, call, or alter `stepTrain`, `TrainDynamicsState`, the Phase 2 rigid
+pose solver, Phase 9 reaction recovery, Phase 10 wrench feasibility, Phase 11
+NNLS allocation, resistance, explicit aerodynamic generation, or Simulation
+Preview. Its authoritative integrated state is
+
+```text
+x = [q, z_front, z_rear]
+v = [q_dot, z_front_dot, z_rear_dot]
+```
+
+plus tick and run state. `q` remains a canonical `TrackLocation`; circuit
+wrapping and reverse travel use `CompiledPhysicsTrack::advance` and the existing
+travel-oriented frame convention. The two vertical coordinates are offsets of
+the front and rear bogie reference points from their nominal sampled locations.
+They are not separate masses. The sole inertial body is the complete loaded car,
+using `totalCarMassKilograms`, `loadedCarCenterOfGravityMeters`, and
+`loadedCarInertiaTensorBodyKgM2`.
+
+For every candidate configuration, M1A samples the authored front and rear
+stations in named front/rear order, displaces each pivot along its actual
+travel-oriented track-up axis, and adjusts the two stations symmetrically until
+the world pivot separation equals the authored car-local pivot separation. A
+single planar rotation maps the authored pivot axis and car lateral axis to the
+displaced world chord and track lateral axis. The body origin, loaded COG,
+hitches, body orientation, bogie reference poses, and source-contact world
+points/normals are all derived from that one transform and its two sampled
+bogie frames. Material closure failure is reported; no visual-only offset or
+second body pose is maintained.
+
+The scope check inspects every compiled canonical track sample. A supported
+track has one constant horizontal lateral axis; all sample positions, tangents,
+up axes, and curvature remain in the corresponding vertical plane. Banked,
+laterally curving, or otherwise nonplanar compiled geometry is rejected. M1A
+also requires exactly one car, exactly two bogies, no connector, equal authored
+bogie lateral reference coordinates, no guide contact, no nonvertical authored
+contact normal, no force-producing aggregate `BasicResistance`, and zero
+per-car aerodynamic CdA. The timestep is exactly the existing `1/240 s`.
+Unsupported inputs return a distinct `DynamicContactStepStatus` and never fall
+back to rigid mode. Unlike the legacy environment validator, M1A accepts zero
+gravity for its free-flight oracle while retaining finite nonnegative gravity.
+
+COG and world angular-velocity Jacobian columns are deterministic pose finite
+differences. The q column reuses the existing `0.01 m` train derivative scale,
+canonical topology advancement, central differences where legal, and
+second-order one-sided stencils at open boundaries. The transverse columns use
+a documented `1e-5 m` central step: it is large compared with rigid closure
+tolerance and small compared with metre-scale vehicle coordinates and authored
+clearance. With world angular columns expressed in the current body frame, the
+whole-car generalized mass matrix is
+
+```text
+M_ab = m dot(Jr_a, Jr_b) + Jomega_body,a^T I_body Jomega_body,b
+```
+
+The symmetric 3-by-3 matrix is checked by a deterministic symmetric eigensolve;
+nonfinite, non-positive-definite, or condition estimates above `1e8` fail
+explicitly. Configuration/velocity bias is not omitted. M1A finite-differences
+the complete mass matrix with the same coordinate stencils and evaluates
+
+```text
+c_i = 1/2 sum_j sum_k
+      (dM_ij/dx_k + dM_ik/dx_j - dM_jk/dx_i) v_j v_k
+```
+
+This is the multi-coordinate Christoffel form corresponding to the existing
+one-coordinate `0.5 M' q_dot^2` term. Gravity is projected through the complete
+loaded COG Jacobian. Every supplied `ExternalForceApplication` is transformed
+from its authored car-local point by the dynamic body pose, differentiated in
+all three coordinates, and contributes `Q_i = F_world dot dr_app/dx_i`.
+
+The free semi-implicit velocity solves the dense system without forming an
+inverse:
+
+```text
+M (v_free - v_n) = h (Q_applied - c)
+```
+
+M1A then evaluates actual dynamic source-contact geometry. Authored normals,
+not roles, define signed-gap direction. Because there is no roll coordinate,
+left/right contacts may enter one bogie constraint only when they have equal
+normal and clearance and every local point has an exact mirrored partner with
+the same local X/Z. These dynamically equivalent source contacts are reduced to
+one aggregate constraint per bogie/normal/clearance group. At most one group in
+each vertical normal direction is accepted per bogie; multiple unequal-clearance
+surfaces in one direction are not equivalent and are rejected. Consequently the
+contact LCP is bounded at four aggregate rows. Asymmetric geometry is rejected
+rather than hiding a roll requirement. M1A publishes only aggregate
+front/rear impulses; it never fabricates individual left/right dynamic wheel
+loads. Phase 10/11 may still be run afterward as diagnostic analysis, and its
+representative/nonunique source allocation retains its existing semantics, but
+neither Phase 9 reactions nor Phase 10/11 coefficients drive M1A motion.
+
+A constraint is a candidate when its current gap is within `1e-9 m` of contact
+or its free end-of-step prediction crosses below `-1e-9 m`. Material initial
+penetration is rejected. For candidate gap rows `J = dg/dx`, M1A forms
+
+```text
+W = h J M^-1 J^T
+b = g_n + h J v_free
+0 <= p perpendicular to W p + b >= 0
+v_next = v_free + M^-1 J^T p
+```
+
+The tiny LCP is solved by deterministic enumeration of independent active sets
+in aggregate source order. Feasible solutions are selected by minimum impulse
+norm, then minimum active count, which prevents arbitrary equal/opposite
+self-stress for coincident running/upstop constraints. Singular or condition
+estimates above `1e8`, nonconvergence, negative impulses, negative predicted
+gaps, and complementarity residuals are explicit failures. Newly closing
+contact is plastic (zero-restitution) normal impact: no restitution, damping,
+spring, penalty, preload, or post-solve penetration clamp is present.
+
+After `x_next = x_n + h v_next`, the full nonlinear pose and signed gaps are
+reconstructed. A gap below tolerance rejects that trial. The step retries from
+the original state with deterministic 2, 4, then 8 equal substeps; failure after
+that bounded refinement is explicit. Telemetry records q and all velocities and
+offsets, free and committed generalized velocity, minimum/maximum gap,
+candidate and impulse-carrying aggregate counts, front/rear aggregate impulses,
+their step-average equivalent forces, complementarity and nonlinear-gap
+residuals, mass/contact condition status and estimate, solver iterations,
+retry/substep counts, pre/post-contact kinetic energy, dynamic pose evaluations,
+and the fixed mass/contact matrix sizes. `p/h` is a step-average equivalent
+force, never an instantaneous wheel load.
+
+Deferred beyond M1A are multi-car/contact/connector dynamics, lateral
+coordinates, guide closure, independent roll, general banked/3D motion, bogie
+or wheel mass, suspension, springs/damping/preload/hysteresis, restitution,
+deformation, friction/slip, wheel rotation, steering, derailment,
+contact-resolved resistance, transverse aerodynamic regeneration, GPU physics,
+Editor UI, persistence, and visual wheel-gap animation.
 
 ## Planned systems
 

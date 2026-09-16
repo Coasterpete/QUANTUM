@@ -275,6 +275,44 @@ namespace quantum::physics
         return topology_;
     }
 
+    bool CompiledPhysicsTrack::supportsPlanarVerticalMotion() const noexcept
+    {
+        if (samples_.empty())
+        {
+            return false;
+        }
+
+        constexpr double directionTolerance = 1.0e-9;
+        const glm::dvec3 lateral = samples_.front().frame.lateral;
+        const glm::dvec3 origin = samples_.front().positionMeters;
+        if (std::abs(glm::dot(lateral, glm::dvec3{0.0, 0.0, 1.0}))
+                > directionTolerance)
+        {
+            return false;
+        }
+
+        const double positionScale = std::max(1.0, lengthMeters_);
+        const double positionTolerance = directionTolerance * positionScale;
+        for (const Sample& sample : samples_)
+        {
+            if (glm::length(sample.frame.lateral - lateral)
+                    > directionTolerance
+                || std::abs(glm::dot(
+                    sample.positionMeters - origin, lateral))
+                    > positionTolerance
+                || std::abs(glm::dot(sample.frame.tangent, lateral))
+                    > directionTolerance
+                || std::abs(glm::dot(sample.frame.up, lateral))
+                    > directionTolerance
+                || std::abs(glm::dot(sample.curvaturePerMeter, lateral))
+                    > directionTolerance)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     void CompiledPhysicsTrack::validateLocation(
         const TrackLocation& location) const
     {
