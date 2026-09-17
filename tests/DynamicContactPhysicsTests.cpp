@@ -345,18 +345,470 @@ namespace
             "banked track is rejected from compiled geometry");
     }
 
+    //=========================================================================
+    // M1B Tests: Coupled Multi-Car Planar Vertical Dynamic Contact
+    //=========================================================================
+
+    [[nodiscard]] DynamicContactMultiCarState multiCarStateAt(
+        const std::size_t carCount,
+        const double station = 100.0,
+        const TravelDirection direction = TravelDirection::IncreasingStation)
+    {
+        DynamicContactMultiCarState state;
+        state.leadCarReferenceLocation = {
+            primaryTrackPathId, station, direction};
+        state.cars.resize(carCount);
+        return state;
+    }
+
+    [[nodiscard]] TrainDefinition twoCarTrain(
+        const bool running, const bool upstop = false)
+    {
+        TrainDefinition def;
+        for (std::size_t i = 0; i < 2; ++i)
+        {
+            CarDefinition car;
+            car.dryMassKilograms = 1000.0 + i * 500.0;
+            car.bodyDimensionsMeters = {4.0, 2.0, 1.5};
+            car.dryCenterOfGravityMeters = {0.0, 0.0, 0.5};
+            car.dryInertiaTensorBodyKgM2 = makeUniformBoxInertiaTensorBodyKgM2(
+                car.dryMassKilograms, car.bodyDimensionsMeters);
+            car.frontHitchPositionMeters = {2.2, 0.0, 0.0};
+            car.rearHitchPositionMeters = {-2.2, 0.0, 0.0};
+            for (const double x : {1.5, -1.5})
+            {
+                BogieDefinition bogie;
+                bogie.referencePositionMeters = {x, 0.0, 0.0};
+                if (running)
+                {
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Running, -0.6, 1.0));
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Running, 0.6, 1.0));
+                }
+                if (upstop)
+                {
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Upstop, -0.6, -1.0, 0.1));
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Upstop, 0.6, -1.0, 0.1));
+                }
+                car.bogies.push_back(std::move(bogie));
+            }
+            TrainCarDefinition tcd;
+            tcd.car = std::move(car);
+            def.cars.push_back(std::move(tcd));
+        }
+        InterCarConnectionDefinition conn;
+        conn.rigidLengthMeters = 5.0;
+        def.connections.push_back(conn);
+        return def;
+    }
+
+    [[nodiscard]] TrainDefinition fourCarTrain(
+        const bool running, const bool upstop = false)
+    {
+        TrainDefinition def;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            CarDefinition car;
+            car.dryMassKilograms = 1000.0 + i * 250.0;
+            car.bodyDimensionsMeters = {4.0, 2.0, 1.5};
+            car.dryCenterOfGravityMeters = {0.0, 0.0, 0.5};
+            car.dryInertiaTensorBodyKgM2 = makeUniformBoxInertiaTensorBodyKgM2(
+                car.dryMassKilograms, car.bodyDimensionsMeters);
+            car.frontHitchPositionMeters = {2.2, 0.0, 0.0};
+            car.rearHitchPositionMeters = {-2.2, 0.0, 0.0};
+            for (const double x : {1.5, -1.5})
+            {
+                BogieDefinition bogie;
+                bogie.referencePositionMeters = {x, 0.0, 0.0};
+                if (running)
+                {
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Running, -0.6, 1.0));
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Running, 0.6, 1.0));
+                }
+                if (upstop)
+                {
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Upstop, -0.6, -1.0, 0.1));
+                    bogie.contacts.push_back(contact(
+                        BogieContactRole::Upstop, 0.6, -1.0, 0.1));
+                }
+                car.bogies.push_back(std::move(bogie));
+            }
+            TrainCarDefinition tcd;
+            tcd.car = std::move(car);
+            def.cars.push_back(std::move(tcd));
+            if (i + 1 < 4)
+            {
+                InterCarConnectionDefinition conn;
+                conn.rigidLengthMeters = 5.0;
+                def.connections.push_back(conn);
+            }
+        }
+        return def;
+    }
+
+    void testMultiCarN1Regression()
+    {
+        // M1B with N=1 must produce identical results to M1A.
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = singleCar(true, true);
+        const DynamicContactMultiCarState mcState = multiCarStateAt(1);
+
+        const DynamicContactMultiCarStepResult mcResult =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+
+        DynamicContactState m1aState = stateAt();
+        const DynamicContactStepResult m1aResult = stepDynamicContact(
+            straightTrack(), train, environment, m1aState);
+
+        require(mcResult.available() && m1aResult.available(),
+            "N=1 regression both available");
+        require(mcResult.status == m1aResult.status,
+            "N=1 regression status match");
+        require(mcResult.generalizedVelocity.size() == 3,
+            "N=1 regression velocity size");
+        require(mcResult.generalizedCoordinates.size() == 3,
+            "N=1 regression coordinates size");
+        requireNear(mcResult.generalizedVelocity[0],
+            m1aResult.state.signedLongitudinalVelocityMetersPerSecond,
+            1.0e-10, "N=1 longitudinal velocity match");
+        requireNear(mcResult.generalizedVelocity[1],
+            m1aResult.state.frontVerticalVelocityMetersPerSecond,
+            1.0e-10, "N=1 front vertical velocity match");
+        requireNear(mcResult.generalizedVelocity[2],
+            m1aResult.state.rearVerticalVelocityMetersPerSecond,
+            1.0e-10, "N=1 rear vertical velocity match");
+    }
+
+    void testTwoCarConnectorClosure()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(false);
+        const DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(result.available(), "two-car closure available");
+        require(result.carResults.size() == 2, "two cars in result");
+        require(result.telemetry.maximumConnectorResidualMeters
+                <= connectorLengthToleranceMeters,
+            "two-car connector closure within tolerance");
+    }
+
+    void testFourCarConnectorClosure()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = fourCarTrain(false);
+        const DynamicContactMultiCarState mcState = multiCarStateAt(4);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(result.available(), "four-car closure available");
+        require(result.carResults.size() == 4, "four cars in result");
+        require(result.telemetry.maximumConnectorResidualMeters
+                <= connectorLengthToleranceMeters,
+            "four-car connector closure within tolerance");
+    }
+
+    void testMultiCarFlatTrackGravity()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(false);
+        DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(result.available(), "multi-car gravity available");
+        const double expected = -environment.gravityAccelerationMetersPerSecondSquared
+            * defaultFixedTimeStepSeconds;
+        requireNear(result.generalizedVelocity[1], expected, 2.0e-6,
+            "car 0 front gravity");
+        requireNear(result.generalizedVelocity[2], expected, 2.0e-6,
+            "car 0 rear gravity");
+        requireNear(result.generalizedVelocity[3], expected, 2.0e-6,
+            "car 1 front gravity");
+        requireNear(result.generalizedVelocity[4], expected, 2.0e-6,
+            "car 1 rear gravity");
+    }
+
+    void testMultiCarSupportAndRelease()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(true, true);
+        const DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        if (!result.available())
+        {
+            std::fprintf(stderr,
+                "M1B support FAIL: status=%d minGap=%e\n",
+                static_cast<int>(result.status),
+                result.telemetry.minimumSignedGapMeters);
+        }
+        require(result.available(), "multi-car support available");
+        require(result.telemetry.minimumSignedGapMeters
+                >= -dynamicContactGapToleranceMeters,
+            "multi-car supported nonpenetrating");
+    }
+
+    void testMultiCarDeterministic()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(true);
+        const DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const DynamicContactMultiCarStepResult first =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        const DynamicContactMultiCarStepResult second =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(first.available() && second.available(),
+            "deterministic both available");
+        require(first.telemetry.solverIterationCount
+                == second.telemetry.solverIterationCount,
+            "deterministic solver iterations match");
+        for (std::size_t i = 0; i < first.generalizedVelocity.size(); ++i)
+        {
+            requireNear(first.generalizedVelocity[i],
+                second.generalizedVelocity[i], 1.0e-15,
+                "deterministic velocity match");
+        }
+    }
+
+    void testMultiCarDofLayout()
+    {
+        const DynamicContactDofLayout layout =
+            DynamicContactDofLayout::create(4);
+        require(layout.carCount == 4, "layout car count");
+        require(layout.dofCount == 9, "layout dof count");
+        require(layout.longitudinalDof() == 0, "longitudinal dof");
+        require(layout.frontVerticalDof(0) == 1, "car 0 front dof");
+        require(layout.rearVerticalDof(0) == 2, "car 0 rear dof");
+        require(layout.frontVerticalDof(1) == 3, "car 1 front dof");
+        require(layout.rearVerticalDof(1) == 4, "car 1 rear dof");
+        require(layout.frontVerticalDof(3) == 7, "car 3 front dof");
+        require(layout.rearVerticalDof(3) == 8, "car 3 rear dof");
+        require(layout.carIndexForVerticalDof(0)
+                == std::numeric_limits<std::size_t>::max(),
+            "longitudinal not vertical");
+        require(layout.carIndexForVerticalDof(1) == 0, "dof 1 -> car 0");
+        require(layout.carIndexForVerticalDof(3) == 1, "dof 3 -> car 1");
+        require(layout.carIndexForVerticalDof(7) == 3, "dof 7 -> car 3");
+        require(layout.isLongitudinalDof(0), "dof 0 is longitudinal");
+        require(!layout.isLongitudinalDof(1), "dof 1 not longitudinal");
+    }
+
+    void testMultiCarConnectorTelemetry()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(false);
+        const DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(result.available(), "connector telemetry available");
+        require(result.telemetry.connectorClosures.size() == 1,
+            "one connector closure reported");
+        require(std::abs(result.telemetry.connectorClosures[0].signedResidualMeters)
+                <= connectorLengthToleranceMeters,
+            "connector residual within tolerance");
+    }
+
+    void testMultiCarReverseTravel()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(false);
+        DynamicContactMultiCarState mcState = multiCarStateAt(
+            2, 100.0, TravelDirection::DecreasingStation);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(result.available(), "reverse travel available");
+        require(result.telemetry.maximumConnectorResidualMeters
+                <= connectorLengthToleranceMeters,
+            "reverse connector closure");
+    }
+
+    void testMultiCarExternalForce()
+    {
+        PhysicsEnvironment environment;
+        environment.gravityAccelerationMetersPerSecondSquared = 0.0;
+        const TrainDefinition train = twoCarTrain(false);
+        DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const ExternalForceApplication upward{
+            0, {0.0, 0.0, 0.5},
+            {0.0, 0.0, 2000.0}};
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState, {},
+                std::span<const ExternalForceApplication>{&upward, 1});
+        require(result.available(), "external force available");
+        require(result.generalizedVelocity[1] > 0.0,
+            "car 0 front velocity upward from external force");
+    }
+
+    void testMultiCarHeterogeneousMass()
+    {
+        const PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(false);
+        DynamicContactMultiCarState mcState = multiCarStateAt(2);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), train, environment, mcState);
+        require(result.available(), "heterogeneous mass available");
+        // With different masses, the gravitational accelerations should
+        // still be the same (g) but inertias differ.
+        const double expected = -environment.gravityAccelerationMetersPerSecondSquared
+            * defaultFixedTimeStepSeconds;
+        requireNear(result.generalizedVelocity[1], expected, 2.0e-6,
+            "car 0 front gravity heterogeneous");
+        requireNear(result.generalizedVelocity[3], expected, 2.0e-6,
+            "car 1 front gravity heterogeneous");
+    }
+
+    void testMultiCarHeavyLightRatio()
+    {
+        // Deliberately awkward heavy/light mass ratio.
+        PhysicsEnvironment environment;
+        TrainDefinition def;
+        for (std::size_t i = 0; i < 2; ++i)
+        {
+            CarDefinition car;
+            car.dryMassKilograms = (i == 0) ? 10000.0 : 10.0;
+            car.bodyDimensionsMeters = {4.0, 2.0, 1.5};
+            car.dryCenterOfGravityMeters = {0.0, 0.0, 0.5};
+            car.dryInertiaTensorBodyKgM2 = makeUniformBoxInertiaTensorBodyKgM2(
+                car.dryMassKilograms, car.bodyDimensionsMeters);
+            car.frontHitchPositionMeters = {2.2, 0.0, 0.0};
+            car.rearHitchPositionMeters = {-2.2, 0.0, 0.0};
+            for (const double x : {1.5, -1.5})
+            {
+                BogieDefinition bogie;
+                bogie.referencePositionMeters = {x, 0.0, 0.0};
+                bogie.contacts.push_back(contact(
+                    BogieContactRole::Running, -0.6, 1.0));
+                bogie.contacts.push_back(contact(
+                    BogieContactRole::Running, 0.6, 1.0));
+                car.bogies.push_back(std::move(bogie));
+            }
+            TrainCarDefinition tcd;
+            tcd.car = std::move(car);
+            def.cars.push_back(std::move(tcd));
+            if (i + 1 < 2)
+            {
+                InterCarConnectionDefinition conn;
+                conn.rigidLengthMeters = 5.0;
+                def.connections.push_back(conn);
+            }
+        }
+        DynamicContactMultiCarState mcState = multiCarStateAt(2);
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                straightTrack(), def, environment, mcState);
+        require(result.available(), "heavy/light ratio available");
+        require(result.telemetry.maximumConnectorResidualMeters
+                <= connectorLengthToleranceMeters,
+            "heavy/light connector closure");
+    }
+
+    void testMultiCar1000StepStability()
+    {
+        PhysicsEnvironment environment;
+        const TrainDefinition train = twoCarTrain(true, true);
+        DynamicContactMultiCarState state = multiCarStateAt(2);
+
+        for (std::size_t step = 0; step < 1000; ++step)
+        {
+            const DynamicContactMultiCarStepResult result =
+                stepDynamicContactMultiCar(
+                    straightTrack(), train, environment, state);
+            require(result.available(), "stability step available");
+            require(result.telemetry.maximumConnectorResidualMeters
+                    <= connectorLengthToleranceMeters,
+                "stability connector closure");
+            state.leadCarReferenceLocation = result.leadCarReferenceLocation;
+            state.signedLongitudinalVelocityMetersPerSecond =
+                result.generalizedVelocity[0];
+            state.tick = result.tick;
+            state.runState = result.runState;
+            for (std::size_t i = 0; i < 2; ++i)
+            {
+                state.cars[i].frontVerticalOffsetMeters =
+                    result.generalizedCoordinates[1 + 2 * i];
+                state.cars[i].frontVerticalVelocityMetersPerSecond =
+                    result.generalizedVelocity[1 + 2 * i];
+                state.cars[i].rearVerticalOffsetMeters =
+                    result.generalizedCoordinates[1 + 2 * i + 1];
+                state.cars[i].rearVerticalVelocityMetersPerSecond =
+                    result.generalizedVelocity[1 + 2 * i + 1];
+            }
+        }
+    }
+
+    void testMultiCarCircuitSeam()
+    {
+        PhysicsEnvironment noGravity;
+        noGravity.gravityAccelerationMetersPerSecondSquared = 0.0;
+        const CompiledPhysicsTrack circuit = verticalCircuit();
+        const TrainDefinition train = twoCarTrain(false);
+        DynamicContactMultiCarState mcState = multiCarStateAt(
+            2, circuit.lengthMeters() - 0.001);
+
+        const DynamicContactMultiCarStepResult result =
+            stepDynamicContactMultiCar(
+                circuit, train, noGravity, mcState);
+        require(result.available(), "circuit seam available");
+        require(result.leadCarReferenceLocation.stationMeters < 0.01
+                || result.leadCarReferenceLocation.stationMeters
+                    > circuit.lengthMeters() - 0.1,
+            "circuit seam wrapping");
+    }
+
 }
 
 int main()
 {
     try
     {
+        // M1A tests (existing).
         testFreeFlight();
         testSymmetricGravity();
         testSupportAndRelease();
         testPlasticUpstopImpact();
         testPitchAndReverseDeterminism();
         testSeamAndRejections();
+
+        // M1B tests.
+        testMultiCarN1Regression();
+        testMultiCarDofLayout();
+        testTwoCarConnectorClosure();
+        testFourCarConnectorClosure();
+        testMultiCarFlatTrackGravity();
+        testMultiCarSupportAndRelease();
+        testMultiCarDeterministic();
+        testMultiCarConnectorTelemetry();
+        testMultiCarReverseTravel();
+        testMultiCarExternalForce();
+        testMultiCarHeterogeneousMass();
+        testMultiCarHeavyLightRatio();
+        testMultiCar1000StepStability();
+        testMultiCarCircuitSeam();
     }
     catch (const std::exception& error)
     {

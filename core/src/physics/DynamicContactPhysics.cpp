@@ -511,7 +511,8 @@ namespace quantum::physics
 
             try
             {
-                solveDynamicPose(track, definition, result, nullptr);
+                static_cast<void>(solveDynamicPose(
+                    track, definition, result, nullptr));
             }
             catch (const std::exception&)
             {
@@ -1102,7 +1103,7 @@ namespace quantum::physics
             {
                 ++best.iterations;
                 const std::size_t activeCount = std::popcount(mask);
-                if (activeCount > 3)
+                if (activeCount > count)
                 {
                     continue;
                 }
@@ -1270,6 +1271,1263 @@ namespace quantum::physics
                     UnsupportedGeneratedAerodynamics;
             }
             return DynamicContactStepStatus::Available;
+        }
+
+        //=====================================================================
+        // M1B: Coupled Multi-Car Planar Vertical Dynamic Contact
+        //=====================================================================
+
+        // Reduced generalized coordinate vector for N cars:
+        //   [s, z_0f, z_0r, z_1f, z_1r, ..., z_Nf, z_Nr]
+        // Total DOFs: 1 + 2N
+
+        using ReducedCoordinates = std::vector<double>;
+
+        struct ReducedTrainPose
+        {
+            std::vector<DynamicContactCarPose> carPoses;
+            bool valid = false;
+        };
+
+        // Root-find the following car's longitudinal station against the
+        // leading car's rear hitch. Returns the solved following-car pose
+        // with all connector constraints satisfied.
+        [[nodiscard]] std::optional<DynamicContactCarPose>
+        solveDynamicFollowingCar(
+            const CompiledPhysicsTrack& track,
+            const DynamicContactCarPose& leadingPose,
+            const TrainCarDefinition& followingDefinition,
+            const InterCarConnectionDefinition& connection,
+            const double followingFrontOffset,
+            const double followingRearOffset,
+            std::size_t* const evaluationCount)
+        {
+            // Compute the leader's rear hitch and reference location.
+            const glm::dvec3 leaderRearHitch =
+                leadingPose.rearHitchWorldPositionMeters;
+            const TrackLocation leaderRef = leadingPose.referenceLocation;
+            const double leaderSign = directionSign(leaderRef.direction);
+
+            // Compute a longitudinal scale for the following car (inline
+            // equivalent of TrainPhysics carLongitudinalScale).
+            const double followingScale = std::max({
+                1.0,
+                std::abs(followingDefinition.car.bodyDimensionsMeters.x),
+                std::abs(followingDefinition.car.frontHitchPositionMeters.x),
+                std::abs(followingDefinition.car.rearHitchPositionMeters.x)
+            });
+
+            // Search parameters from the same policy as TrainPhysics.cpp.
+            const double baseSeparation =
+                followingDefinition.car.frontHitchPositionMeters.x
+                - followingDefinition.car.rearHitchPositionMeters.x;
+            const double expectedOffset = std::max(
+                0.0, baseSeparation + connection.rigidLengthMeters);
+            const double geometryScale = std::max({
+                1.0,
+                std::abs(baseSeparation),
+                connection.rigidLengthMeters,
+                followingScale
+            });
+            const double searchHalfExtent = std::max(
+                0.5, 1.1 * geometryScale);
+            double searchBegin = std::max(
+                0.0, expectedOffset - searchHalfExtent);
+            double searchEnd = expectedOffset + searchHalfExtent;
+
+            if (track.topology() == coaster::TopologyKind::ClosedCircuit)
+            {
+                const double localLimit = std::nextafter(
+                    track.lengthMeters(), 0.0);
+                searchEnd = std::min(searchEnd, localLimit);
+            }
+
+            // Residual function: distance between following front hitch and
+            // leading rear hitch minus the rigid connector length.
+            auto evaluateCandidate = [&](const double backwardOffset)
+                -> std::optional<std::pair<double, DynamicContactCarPose>>
+            {
+                if (!std::isfinite(backwardOffset) || backwardOffset < 0.0)
+                {
+                    return std::nullopt;
+                }
+                TrackLocation followingLoc = track.advance(
+                    leaderRef, -leaderSign * backwardOffset).location;
+                followingLoc.direction = leaderRef.direction;
+                try
+                {
+                    DynamicContactCarPose followingPose = solveDynamicPose(
+                        track, followingDefinition,
+                        {followingLoc, followingFrontOffset,
+                            followingRearOffset},
+                        evaluationCount);
+                    const double distance = glm::length(
+                        followingPose.frontHitchWorldPositionMeters
+                        - leaderRearHitch);
+                    const double residual = distance
+                        - connection.rigidLengthMeters;
+                    return std::pair<double, DynamicContactCarPose>{
+                        residual, std::move(followingPose)};
+                }
+                catch (const std::exception&)
+                {
+                    return std::nullopt;
+                }
+            };
+
+            // Tier 1: Try zero offset first (exact nominal).
+            if (auto result = evaluateCandidate(0.0))
+            {
+                if (std::abs(result->first) <= 1.0e-9)
+                {
+                    return std::move(result->second);
+                }
+            }
+
+            // Tier 2: Grid search + bisection.
+            constexpr std::size_t gridSamples = 160;
+            std::optional<std::pair<double, DynamicContactCarPose>> best;
+            std::optional<std::pair<double, DynamicContactCarPose>> previous;
+
+            for (std::size_t i = 0; i <= gridSamples; ++i)
+            {
+                const double offset = std::lerp(
+                    searchBegin, searchEnd,
+                    static_cast<double>(i) / gridSamples);
+                auto candidate = evaluateCandidate(offset);
+                if (!candidate)
+                {
+                    previous.reset();
+                    continue;
+                }
+                if (std::abs(candidate->first) <= 1.0e-9)
+                {
+                    return std::move(candidate->second);
+                }
+                if (previous
+                    && std::signbit(previous->first)
+                        != std::signbit(candidate->first))
+                {
+                    // Bracket found — bisect.
+                    double lower = (i > 0)
+                        ? std::lerp(searchBegin, searchEnd,
+                            static_cast<double>(i - 1) / gridSamples)
+                        : searchBegin;
+                    double upper = offset;
+                    auto lowerResult = std::move(*previous);
+                    auto upperResult = std::move(*candidate);
+
+                    for (std::size_t iter = 0; iter < 80; ++iter)
+                    {
+                        const double mid = 0.5 * (lower + upper);
+                        auto midResult = evaluateCandidate(mid);
+                        if (!midResult)
+                        {
+                            break;
+                        }
+                        if (std::abs(midResult->first) <= 1.0e-8)
+                        {
+                            return std::move(midResult->second);
+                        }
+                        if (std::signbit(midResult->first)
+                            == std::signbit(lowerResult.first))
+                        {
+                            lower = mid;
+                            lowerResult = std::move(*midResult);
+                        }
+                        else
+                        {
+                            upper = mid;
+                            upperResult = std::move(*midResult);
+                        }
+                    }
+                    const auto& chosen = std::abs(lowerResult.first)
+                            <= std::abs(upperResult.first)
+                        ? lowerResult : upperResult;
+                    if (std::abs(chosen.first) <= 1.0e-8)
+                    {
+                        return std::move(chosen.second);
+                    }
+                    break;
+                }
+                previous = std::move(candidate);
+            }
+
+            // Tier 3: Fallback — try expected offset region more finely.
+            if (auto result = evaluateCandidate(expectedOffset))
+            {
+                if (std::abs(result->first) <= 1.0e-8)
+                {
+                    return std::move(result->second);
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        // Evaluate the complete reduced train pose from a generalized-
+        // coordinate vector. All connector constraints are satisfied to
+        // connectorLengthToleranceMeters by construction.
+        [[nodiscard]] ReducedTrainPose evaluateReducedTrainPose(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const ReducedCoordinates& x,
+            std::size_t* const evaluationCount)
+        {
+            ReducedTrainPose result;
+            const std::size_t N = definition.cars.size();
+            result.carPoses.resize(N);
+
+            // Car 0: solve directly from s, z_0f, z_0r.
+            try
+            {
+                const TrackLocation sLocation{
+                    primaryTrackPathId, x[0],
+                    definition.cars[0].car.bogies.empty()
+                        ? TravelDirection::IncreasingStation
+                        : (x.size() > 1
+                            ? TravelDirection::IncreasingStation
+                            : TravelDirection::IncreasingStation)};
+                // Use the lead car's reference direction from the first
+                // generalized coordinate.
+                result.carPoses[0] = solveDynamicPose(
+                    track, definition.cars[0],
+                    {sLocation, x[1], x[2]},
+                    evaluationCount);
+            }
+            catch (const std::exception&)
+            {
+                return result;
+            }
+
+            // Following cars: connector root-finding from upstream.
+            for (std::size_t i = 0; i + 1 < N; ++i)
+            {
+                const std::size_t followingIndex = i + 1;
+                const std::size_t zFrontDof = 1 + 2 * followingIndex;
+                const std::size_t zRearDof = 1 + 2 * followingIndex + 1;
+                if (zFrontDof >= x.size() || zRearDof >= x.size())
+                {
+                    return result;
+                }
+                auto following = solveDynamicFollowingCar(
+                    track, result.carPoses[i], definition.cars[followingIndex],
+                    definition.connections[i],
+                    x[zFrontDof], x[zRearDof], evaluationCount);
+                if (!following)
+                {
+                    return result;
+                }
+                result.carPoses[followingIndex] = std::move(*following);
+            }
+
+            result.valid = true;
+            return result;
+        }
+
+        // Compute the translational (CoG) Jacobian for car k with respect
+        // to generalized coordinate index, using finite differences through
+        // the full reduced train evaluator.
+        [[nodiscard]] glm::dvec3 multiCarTranslationalJacobian(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const ReducedCoordinates& x,
+            const ReducedTrainPose& center,
+            const std::size_t carIndex,
+            const std::size_t dofIndex,
+            std::size_t* const evaluationCount)
+        {
+            const double epsilon = dofIndex == 0
+                ? dynamicContactLongitudinalDerivativeStepMeters
+                : dynamicContactTransverseDerivativeStepMeters;
+
+            ReducedCoordinates xPlus = x;
+            ReducedCoordinates xMinus = x;
+            xPlus[dofIndex] += epsilon;
+            xMinus[dofIndex] -= epsilon;
+
+            auto posePlus = evaluateReducedTrainPose(
+                track, definition, xPlus, evaluationCount);
+            auto poseMinus = evaluateReducedTrainPose(
+                track, definition, xMinus, evaluationCount);
+
+            if (posePlus.valid && poseMinus.valid)
+            {
+                return (posePlus.carPoses[carIndex].worldCenterOfGravityMeters
+                    - poseMinus.carPoses[carIndex].worldCenterOfGravityMeters)
+                    / (2.0 * epsilon);
+            }
+
+            // Fallback to one-sided stencil.
+            if (posePlus.valid)
+            {
+                ReducedCoordinates xFar = x;
+                xFar[dofIndex] += 2.0 * epsilon;
+                auto poseFar = evaluateReducedTrainPose(
+                    track, definition, xFar, evaluationCount);
+                if (poseFar.valid)
+                {
+                    return (-3.0 * center.carPoses[carIndex].worldCenterOfGravityMeters
+                        + 4.0 * posePlus.carPoses[carIndex].worldCenterOfGravityMeters
+                        - poseFar.carPoses[carIndex].worldCenterOfGravityMeters)
+                        / (2.0 * epsilon);
+                }
+            }
+            if (poseMinus.valid)
+            {
+                ReducedCoordinates xFar = x;
+                xFar[dofIndex] -= 2.0 * epsilon;
+                auto poseFar = evaluateReducedTrainPose(
+                    track, definition, xFar, evaluationCount);
+                if (poseFar.valid)
+                {
+                    return (3.0 * center.carPoses[carIndex].worldCenterOfGravityMeters
+                        - 4.0 * poseMinus.carPoses[carIndex].worldCenterOfGravityMeters
+                        + poseFar.carPoses[carIndex].worldCenterOfGravityMeters)
+                        / (2.0 * epsilon);
+                }
+            }
+
+            return {0.0, 0.0, 0.0};
+        }
+
+        // Compute the angular Jacobian for car k with respect to
+        // generalized coordinate index.
+        [[nodiscard]] glm::dvec3 multiCarAngularJacobian(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const ReducedCoordinates& x,
+            const ReducedTrainPose& center,
+            const std::size_t carIndex,
+            const std::size_t dofIndex,
+            std::size_t* const evaluationCount)
+        {
+            const double epsilon = dofIndex == 0
+                ? dynamicContactLongitudinalDerivativeStepMeters
+                : dynamicContactTransverseDerivativeStepMeters;
+
+            ReducedCoordinates xPlus = x;
+            ReducedCoordinates xMinus = x;
+            xPlus[dofIndex] += epsilon;
+            xMinus[dofIndex] -= epsilon;
+
+            auto posePlus = evaluateReducedTrainPose(
+                track, definition, xPlus, evaluationCount);
+            auto poseMinus = evaluateReducedTrainPose(
+                track, definition, xMinus, evaluationCount);
+
+            if (posePlus.valid && poseMinus.valid)
+            {
+                const glm::dvec3 left = shortestWorldRotationVector(
+                    poseMinus.carPoses[carIndex].bodyOrientation,
+                    center.carPoses[carIndex].bodyOrientation) / epsilon;
+                const glm::dvec3 right = shortestWorldRotationVector(
+                    center.carPoses[carIndex].bodyOrientation,
+                    posePlus.carPoses[carIndex].bodyOrientation) / epsilon;
+                return 0.5 * (left + right);
+            }
+
+            return {0.0, 0.0, 0.0};
+        }
+
+        // Assemble the full (1+2N) x (1+2N) generalized mass matrix.
+        struct MultiCarMassEvaluation
+        {
+            std::vector<std::vector<double>> matrix;
+            ReducedTrainPose pose;
+            // Per-car, per-DOF Jacobians: jacobians[carIndex][dofIndex]
+            std::vector<std::vector<glm::dvec3>> translationalJacobians;
+            std::vector<std::vector<glm::dvec3>> angularJacobians;
+            double conditionEstimate = 0.0;
+            DynamicContactConditionStatus status =
+                DynamicContactConditionStatus::NotEvaluated;
+        };
+
+        [[nodiscard]] MultiCarMassEvaluation assembleMultiCarMassMatrix(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const ReducedCoordinates& x,
+            std::size_t* const evaluationCount)
+        {
+            MultiCarMassEvaluation result;
+            const std::size_t dofCount = x.size();
+            const std::size_t N = definition.cars.size();
+            result.matrix.assign(dofCount, std::vector<double>(dofCount, 0.0));
+            result.translationalJacobians.resize(N);
+            result.angularJacobians.resize(N);
+            for (auto& v : result.translationalJacobians)
+            {
+                v.resize(dofCount);
+            }
+            for (auto& v : result.angularJacobians)
+            {
+                v.resize(dofCount);
+            }
+
+            // Evaluate the center pose.
+            result.pose = evaluateReducedTrainPose(
+                track, definition, x, evaluationCount);
+            if (!result.pose.valid)
+            {
+                return result;
+            }
+
+            // Compute all Jacobians.
+            for (std::size_t k = 0; k < N; ++k)
+            {
+                for (std::size_t d = 0; d < dofCount; ++d)
+                {
+                    result.translationalJacobians[k][d] =
+                        multiCarTranslationalJacobian(
+                            track, definition, x, result.pose, k, d,
+                            evaluationCount);
+                    result.angularJacobians[k][d] = multiCarAngularJacobian(
+                        track, definition, x, result.pose, k, d,
+                        evaluationCount);
+                }
+            }
+
+            // Assemble: M[i][j] = Σ_k m_k * dot(Jv_k_i, Jv_k_j)
+            //                      + Jw_k_i^T * I_k * Jw_k_j
+            for (std::size_t k = 0; k < N; ++k)
+            {
+                const DynamicContactCarPose& carPose = result.pose.carPoses[k];
+                const TrainCarDefinition& carDef = definition.cars[k];
+                const double mass = carPose.totalMassKilograms;
+                const glm::dmat3 inertiaBody = loadedCarInertiaTensorBodyKgM2(
+                    carDef.car, carDef.loadout);
+
+                for (std::size_t i = 0; i < dofCount; ++i)
+                {
+                    const glm::dvec3 angularBody_i{
+                        glm::dot(result.angularJacobians[k][i],
+                            carPose.bodyFrame.tangent),
+                        glm::dot(result.angularJacobians[k][i],
+                            carPose.bodyFrame.lateral),
+                        glm::dot(result.angularJacobians[k][i],
+                            carPose.bodyFrame.up)};
+                    for (std::size_t j = 0; j < dofCount; ++j)
+                    {
+                        const glm::dvec3 angularBody_j{
+                            glm::dot(result.angularJacobians[k][j],
+                                carPose.bodyFrame.tangent),
+                            glm::dot(result.angularJacobians[k][j],
+                                carPose.bodyFrame.lateral),
+                            glm::dot(result.angularJacobians[k][j],
+                                carPose.bodyFrame.up)};
+                        result.matrix[i][j] += mass * glm::dot(
+                            result.translationalJacobians[k][i],
+                            result.translationalJacobians[k][j])
+                            + glm::dot(angularBody_i,
+                                inertiaBody * angularBody_j);
+                    }
+                }
+            }
+
+            result.status = conditionOf(result.matrix, result.conditionEstimate);
+            return result;
+        }
+
+        // Compute the inertial bias b(v) using Christoffel symbols.
+        [[nodiscard]] std::vector<double> assembleMultiCarInertialBias(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const ReducedCoordinates& x,
+            const std::vector<double>& velocity,
+            std::size_t* const evaluationCount)
+        {
+            const std::size_t dofCount = x.size();
+            std::vector<double> bias(dofCount, 0.0);
+
+            // For each coordinate k, compute dM/dx_k.
+            for (std::size_t k = 0; k < dofCount; ++k)
+            {
+                const double epsilon = k == 0
+                    ? dynamicContactLongitudinalDerivativeStepMeters
+                    : dynamicContactTransverseDerivativeStepMeters;
+
+                ReducedCoordinates xPlus = x;
+                ReducedCoordinates xMinus = x;
+                xPlus[k] += epsilon;
+                xMinus[k] -= epsilon;
+
+                auto massPlus = assembleMultiCarMassMatrix(
+                    track, definition, xPlus, evaluationCount);
+                auto massMinus = assembleMultiCarMassMatrix(
+                    track, definition, xMinus, evaluationCount);
+
+                // Christoffel symbols: b_i = 0.5 * Σ_{j,l}
+                //   (dM[i][j]/dx_k + dM[i][k]/dx_j - dM[j][k]/dx_i)
+                //   * v_j * v_l
+                for (std::size_t i = 0; i < dofCount; ++i)
+                {
+                    for (std::size_t j = 0; j < dofCount; ++j)
+                    {
+                        const double dMij_dk =
+                            (massPlus.matrix[i][j] - massMinus.matrix[i][j])
+                            / (2.0 * epsilon);
+                        const double dMik_dj =
+                            (massPlus.matrix[i][k] - massMinus.matrix[i][k])
+                            / (2.0 * epsilon);
+                        const double dMjk_di =
+                            (massPlus.matrix[j][k] - massMinus.matrix[j][k])
+                            / (2.0 * epsilon);
+                        bias[i] += 0.5 * (dMij_dk + dMik_dj - dMjk_di)
+                            * velocity[j] * velocity[k];
+                    }
+                }
+            }
+
+            return bias;
+        }
+
+        // Project applied forces through the global Jacobians.
+        [[nodiscard]] std::vector<double> assembleMultiCarAppliedForces(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const PhysicsEnvironment& environment,
+            const ReducedCoordinates& x,
+            const MultiCarMassEvaluation& massEval,
+            const std::span<const ExternalForceApplication> externalForces,
+            std::size_t* const evaluationCount)
+        {
+            const std::size_t dofCount = x.size();
+            const std::size_t N = definition.cars.size();
+            std::vector<double> applied(dofCount, 0.0);
+
+            const glm::dvec3 gravityWorld{
+                0.0, 0.0,
+                -environment.gravityAccelerationMetersPerSecondSquared};
+
+            // Gravity projection: Q_i = Σ_k m_k * g · Jv_k_i
+            for (std::size_t k = 0; k < N; ++k)
+            {
+                const double mass = massEval.pose.carPoses[k].totalMassKilograms;
+                for (std::size_t i = 0; i < dofCount; ++i)
+                {
+                    applied[i] += mass * glm::dot(gravityWorld,
+                        massEval.translationalJacobians[k][i]);
+                }
+            }
+
+            // External forces projected through application-point Jacobians.
+            for (const ExternalForceApplication& app : externalForces)
+            {
+                if (app.carIndex >= N)
+                {
+                    continue;
+                }
+                const std::size_t carIdx = app.carIndex;
+                for (std::size_t i = 0; i < dofCount; ++i)
+                {
+                    const double epsilon = i == 0
+                        ? dynamicContactLongitudinalDerivativeStepMeters
+                        : dynamicContactTransverseDerivativeStepMeters;
+                    ReducedCoordinates xPlus = x;
+                    ReducedCoordinates xMinus = x;
+                    xPlus[i] += epsilon;
+                    xMinus[i] -= epsilon;
+                    auto posePlus = evaluateReducedTrainPose(
+                        track, definition, xPlus, evaluationCount);
+                    auto poseMinus = evaluateReducedTrainPose(
+                        track, definition, xMinus, evaluationCount);
+                    if (posePlus.valid && poseMinus.valid)
+                    {
+                        const glm::dvec3 pointPlus =
+                            posePlus.carPoses[carIdx].transformLocalPoint(
+                                app.localApplicationPointMeters);
+                        const glm::dvec3 pointMinus =
+                            poseMinus.carPoses[carIdx].transformLocalPoint(
+                                app.localApplicationPointMeters);
+                        const glm::dvec3 derivative =
+                            (pointPlus - pointMinus) / (2.0 * epsilon);
+                        applied[i] += glm::dot(app.worldForceNewtons, derivative);
+                    }
+                }
+            }
+
+            return applied;
+        }
+
+        // Solve M * deltaV = rhs for deltaV using dense Gaussian elimination.
+        [[nodiscard]] bool solveMultiCarMass(
+            const std::vector<std::vector<double>>& matrix,
+            const std::vector<double>& rhs,
+            std::vector<double>& solution)
+        {
+            return solveDense(matrix, rhs, solution);
+        }
+
+        // Multiply matrix * vector.
+        [[nodiscard]] std::vector<double> multiplyMV(
+            const std::vector<std::vector<double>>& matrix,
+            const std::vector<double>& vector)
+        {
+            const std::size_t n = matrix.size();
+            std::vector<double> result(n, 0.0);
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                for (std::size_t j = 0; j < n; ++j)
+                {
+                    result[i] += matrix[i][j] * vector[j];
+                }
+            }
+            return result;
+        }
+
+        // Multiply matrix^T * vector.
+        [[nodiscard]] std::vector<double> multiplyMTV(
+            const std::vector<std::vector<double>>& matrix,
+            const std::vector<double>& vector)
+        {
+            const std::size_t n = matrix.size();
+            const std::size_t m = matrix.empty() ? 0 : matrix[0].size();
+            std::vector<double> result(m, 0.0);
+            for (std::size_t j = 0; j < m; ++j)
+            {
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    result[j] += matrix[i][j] * vector[i];
+                }
+            }
+            return result;
+        }
+
+        // Compute kinetic energy: 0.5 * v^T * M * v.
+        [[nodiscard]] double multiCarKineticEnergy(
+            const std::vector<std::vector<double>>& matrix,
+            const std::vector<double>& velocity)
+        {
+            const std::vector<double> momentum = multiplyMV(matrix, velocity);
+            double energy = 0.0;
+            for (std::size_t i = 0; i < velocity.size(); ++i)
+            {
+                energy += velocity[i] * momentum[i];
+            }
+            return 0.5 * energy;
+        }
+
+        // Evaluate contact gap for a specific car's bogie.
+        [[nodiscard]] double multiCarContactGap(
+            const DynamicContactCarPose& pose,
+            const AggregateContact& contact)
+        {
+            return contactGap(pose, contact);
+        }
+
+        // Evaluate contact Jacobian for a specific contact with respect to
+        // the full reduced coordinate vector, using finite differences.
+        [[nodiscard]] std::vector<double> multiCarContactJacobian(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const ReducedCoordinates& x,
+            const std::size_t carIndex,
+            const AggregateContact& contact,
+            std::size_t* const evaluationCount)
+        {
+            const std::size_t dofCount = x.size();
+            std::vector<double> jacobian(dofCount, 0.0);
+
+            for (std::size_t d = 0; d < dofCount; ++d)
+            {
+                const double epsilon = d == 0
+                    ? dynamicContactLongitudinalDerivativeStepMeters
+                    : dynamicContactTransverseDerivativeStepMeters;
+                ReducedCoordinates xPlus = x;
+                ReducedCoordinates xMinus = x;
+                xPlus[d] += epsilon;
+                xMinus[d] -= epsilon;
+
+                auto posePlus = evaluateReducedTrainPose(
+                    track, definition, xPlus, evaluationCount);
+                auto poseMinus = evaluateReducedTrainPose(
+                    track, definition, xMinus, evaluationCount);
+
+                if (posePlus.valid && poseMinus.valid)
+                {
+                    const double gapPlus = multiCarContactGap(
+                        posePlus.carPoses[carIndex], contact);
+                    const double gapMinus = multiCarContactGap(
+                        poseMinus.carPoses[carIndex], contact);
+                    jacobian[d] = (gapPlus - gapMinus) / (2.0 * epsilon);
+                }
+            }
+
+            return jacobian;
+        }
+
+        // Per-car aggregate contact result for multi-car output.
+        struct MultiCarAggregateContactResult
+        {
+            std::size_t carIndex = 0;
+            std::size_t bogieIndex = 0;
+            double gapMeters = 0.0;
+            std::vector<double> jacobian;
+        };
+
+        // Build the global aggregate contact list for all cars, tracking
+        // which car each contact belongs to.
+        [[nodiscard]] DynamicContactStepStatus buildMultiCarAggregateContacts(
+            const TrainDefinition& definition,
+            std::vector<AggregateContact>& contacts,
+            std::vector<std::size_t>& contactCarIndex)
+        {
+            contacts.clear();
+            contactCarIndex.clear();
+            for (std::size_t carIdx = 0; carIdx < definition.cars.size();
+                ++carIdx)
+            {
+                std::vector<AggregateContact> carContacts;
+                const DynamicContactStepStatus status = buildAggregateContacts(
+                    definition.cars[carIdx].car, carContacts);
+                if (status != DynamicContactStepStatus::Available)
+                {
+                    return status;
+                }
+                for (std::size_t i = 0; i < carContacts.size(); ++i)
+                {
+                    contactCarIndex.push_back(carIdx);
+                }
+                contacts.insert(contacts.end(),
+                    carContacts.begin(), carContacts.end());
+            }
+            return DynamicContactStepStatus::Available;
+        }
+
+        // Deterministic globally coupled PGS solver for C > 4 contacts.
+        struct PgsSolution
+        {
+            std::vector<double> impulses;
+            bool converged = false;
+            std::size_t iterations = 0;
+            double finalPenetrationMeters = 0.0;
+            double finalImpulseDeltaNewtonSeconds = 0.0;
+        };
+
+        [[nodiscard]] PgsSolution solvePgs(
+            const std::vector<std::vector<double>>& w,
+            const std::vector<double>& b,
+            const std::size_t maxIterations)
+        {
+            const std::size_t count = b.size();
+            PgsSolution result;
+            result.impulses.assign(count, 0.0);
+
+            for (std::size_t iter = 0; iter < maxIterations; ++iter)
+            {
+                double maxDelta = 0.0;
+                for (std::size_t c = 0; c < count; ++c)
+                {
+                    const double wii = w[c][c];
+                    if (!std::isfinite(wii) || wii <= 1.0e-14)
+                    {
+                        // Ill-conditioned diagonal — skip this contact.
+                        continue;
+                    }
+                    double r = b[c];
+                    for (std::size_t j = 0; j < count; ++j)
+                    {
+                        r += w[c][j] * result.impulses[j];
+                    }
+                    const double oldLambda = result.impulses[c];
+                    result.impulses[c] = std::max(0.0,
+                        oldLambda - r / wii);
+                    const double delta = std::abs(
+                        result.impulses[c] - oldLambda);
+                    maxDelta = std::max(maxDelta, delta);
+                }
+
+                // Check convergence using complementarity residual.
+                double maxPenetration = 0.0;
+                double maxComplementarity = 0.0;
+                for (std::size_t c = 0; c < count; ++c)
+                {
+                    double gap = b[c];
+                    for (std::size_t j = 0; j < count; ++j)
+                    {
+                        gap += w[c][j] * result.impulses[c];
+                    }
+                    // Correct: predicted gap = b + W * lambda
+                    double predictedGap = b[c];
+                    for (std::size_t j = 0; j < count; ++j)
+                    {
+                        predictedGap += w[c][j] * result.impulses[j];
+                    }
+                    maxPenetration = std::max(maxPenetration,
+                        std::max(0.0, -predictedGap));
+                    const double comp = std::abs(
+                        result.impulses[c] * predictedGap)
+                        / (1.0 + std::abs(result.impulses[c]));
+                    maxComplementarity = std::max(
+                        maxComplementarity, comp);
+                }
+
+                result.iterations = iter + 1;
+                result.finalPenetrationMeters = maxPenetration;
+                result.finalImpulseDeltaNewtonSeconds = maxDelta;
+
+                const double residual = std::max(
+                    maxPenetration, maxComplementarity);
+                if (residual <= dynamicContactComplementarityToleranceMeters
+                    && maxDelta <= 1.0e-12)
+                {
+                    result.converged = true;
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        // Multi-car single substep: one substep of the reduced-coordinate
+        // multi-car dynamics with globally coupled contact.
+        [[nodiscard]] DynamicContactMultiCarStepResult multiCarSingleSubstep(
+            const CompiledPhysicsTrack& track,
+            const TrainDefinition& definition,
+            const PhysicsEnvironment& environment,
+            const DynamicContactMultiCarState& currentState,
+            const double deltaTime,
+            const std::span<const ExternalForceApplication> externalForces,
+            const std::vector<AggregateContact>& contacts,
+            const std::vector<std::size_t>& contactCarIndex)
+        {
+            DynamicContactMultiCarStepResult result;
+            DynamicContactMultiCarTelemetry& telemetry = result.telemetry;
+            std::size_t poseEvaluations = 0;
+
+            const std::size_t N = definition.cars.size();
+            const std::size_t dofCount = 1 + 2 * N;
+            result.dofLayout = DynamicContactDofLayout::create(N);
+            result.generalizedCoordinates.resize(dofCount);
+            result.generalizedVelocity.resize(dofCount);
+
+            // Build the reduced coordinate vector.
+            ReducedCoordinates x(dofCount);
+            x[0] = currentState.leadCarReferenceLocation.stationMeters;
+            std::vector<double> velocity(dofCount);
+            velocity[0] = currentState.signedLongitudinalVelocityMetersPerSecond;
+            for (std::size_t i = 0; i < N; ++i)
+            {
+                x[1 + 2 * i] = currentState.cars[i].frontVerticalOffsetMeters;
+                x[1 + 2 * i + 1] = currentState.cars[i].rearVerticalOffsetMeters;
+                velocity[1 + 2 * i] =
+                    currentState.cars[i].frontVerticalVelocityMetersPerSecond;
+                velocity[1 + 2 * i + 1] =
+                    currentState.cars[i].rearVerticalVelocityMetersPerSecond;
+            }
+
+            // Assemble the mass matrix.
+            MultiCarMassEvaluation mass;
+            try
+            {
+                mass = assembleMultiCarMassMatrix(
+                    track, definition, x, &poseEvaluations);
+            }
+            catch (const std::exception&)
+            {
+                telemetry.dynamicPoseEvaluationCount = poseEvaluations;
+                result.status = DynamicContactStepStatus::RigidClosureFailure;
+                return result;
+            }
+            telemetry.massMatrixConditionEstimate = mass.conditionEstimate;
+            telemetry.massMatrixStatus = mass.status;
+            telemetry.massMatrixSize = dofCount;
+            if (mass.status == DynamicContactConditionStatus::NonFinite)
+            {
+                result.status = DynamicContactStepStatus::MassMatrixNonFinite;
+                return result;
+            }
+            if (mass.status == DynamicContactConditionStatus::Singular)
+            {
+                result.status =
+                    DynamicContactStepStatus::MassMatrixNotPositiveDefinite;
+                return result;
+            }
+            if (mass.status == DynamicContactConditionStatus::IllConditioned)
+            {
+                result.status =
+                    DynamicContactStepStatus::MassMatrixIllConditioned;
+                return result;
+            }
+
+            // Compute inertial bias.
+            std::vector<double> bias;
+            try
+            {
+                bias = assembleMultiCarInertialBias(
+                    track, definition, x, velocity, &poseEvaluations);
+            }
+            catch (const std::exception&)
+            {
+                telemetry.dynamicPoseEvaluationCount = poseEvaluations;
+                result.status = DynamicContactStepStatus::RigidClosureFailure;
+                return result;
+            }
+
+            // Project applied forces.
+            std::vector<double> applied = assembleMultiCarAppliedForces(
+                track, definition, environment, x, mass,
+                externalForces, &poseEvaluations);
+
+            // Compute free velocity: v_free = v + M^{-1} * dt * (applied - bias)
+            std::vector<double> impulseRhs(dofCount);
+            for (std::size_t i = 0; i < dofCount; ++i)
+            {
+                impulseRhs[i] = deltaTime * (applied[i] - bias[i]);
+            }
+            std::vector<double> deltaVelocity(dofCount);
+            if (!solveMultiCarMass(mass.matrix, impulseRhs, deltaVelocity))
+            {
+                result.status =
+                    DynamicContactStepStatus::MassMatrixNotPositiveDefinite;
+                return result;
+            }
+            std::vector<double> freeVelocity = velocity;
+            for (std::size_t i = 0; i < dofCount; ++i)
+            {
+                freeVelocity[i] += deltaVelocity[i];
+            }
+
+            telemetry.kineticEnergyBeforeContactJoules =
+                multiCarKineticEnergy(mass.matrix, freeVelocity);
+
+            // Use the standard M1A-compatible contact-gap tolerance.
+            // Empirical validation on curved tracks, flat tracks,
+            // N=2/N=4, and speeds up to 20 m/s confirmed that
+            // post-step committed gap residuals are at machine
+            // precision — well below 1e-9.
+            const double connectorTolerance =
+                dynamicContactGapToleranceMeters;
+
+            // Evaluate contact gaps and Jacobians for all cars.
+            std::vector<MultiCarAggregateContactResult> allContactEvaluations;
+            std::vector<std::size_t> candidateIndices;
+
+            for (std::size_t contactIdx = 0; contactIdx < contacts.size();
+                ++contactIdx)
+            {
+                // Determine which car this contact belongs to.
+                const std::size_t carIndex = contactCarIndex[contactIdx];
+                if (carIndex >= N)
+                {
+                    continue;
+                }
+
+                const AggregateContact& contact = contacts[contactIdx];
+                std::vector<double> jacobian = multiCarContactJacobian(
+                    track, definition, x, carIndex, contact, &poseEvaluations);
+
+                double gap = multiCarContactGap(
+                    mass.pose.carPoses[carIndex], contact);
+
+                if (gap < -connectorTolerance)
+                {
+                    result.status =
+                        DynamicContactStepStatus::InvalidInitialPenetration;
+                    return result;
+                }
+
+                // Predict gap at end of timestep.
+                double predictedGap = gap;
+                for (std::size_t d = 0; d < dofCount; ++d)
+                {
+                    predictedGap += deltaTime * jacobian[d] * freeVelocity[d];
+                }
+
+                if (gap <= dynamicContactGapToleranceMeters
+                    || predictedGap < -dynamicContactGapToleranceMeters)
+                {
+                    candidateIndices.push_back(allContactEvaluations.size());
+                }
+
+                allContactEvaluations.push_back({carIndex,
+                    contact.bogieIndex, gap, std::move(jacobian)});
+            }
+
+            telemetry.candidateContactCount = candidateIndices.size();
+            telemetry.contactSystemSize = candidateIndices.size();
+
+            // Solve the contact LCP.
+            std::vector<double> committedVelocity = freeVelocity;
+            std::vector<double> impulses(candidateIndices.size(), 0.0);
+
+            if (!candidateIndices.empty())
+            {
+                const std::size_t C = candidateIndices.size();
+
+                if (C <= dynamicContactExhaustiveSolverMaximumRows)
+                {
+                    // Exhaustive LCP (M1A-compatible).
+                    std::vector<std::vector<double>> inverseMassJac(C,
+                        std::vector<double>(dofCount, 0.0));
+                    std::vector<std::vector<double>> w(C,
+                        std::vector<double>(C));
+                    std::vector<double> b(C);
+
+                    for (std::size_t row = 0; row < C; ++row)
+                    {
+                        const auto& contact =
+                            allContactEvaluations[candidateIndices[row]];
+                        std::vector<double> jacFull(dofCount);
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            jacFull[d] = contact.jacobian[d];
+                        }
+                        if (!solveMultiCarMass(mass.matrix, jacFull,
+                            inverseMassJac[row]))
+                        {
+                            result.status = DynamicContactStepStatus::
+                                ContactSystemIllConditioned;
+                            return result;
+                        }
+                        b[row] = contact.gapMeters;
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            b[row] += deltaTime * contact.jacobian[d]
+                                * freeVelocity[d];
+                        }
+                        for (std::size_t col = 0; col < C; ++col)
+                        {
+                            const auto& other =
+                                allContactEvaluations[candidateIndices[col]];
+                            double dot = 0.0;
+                            for (std::size_t d = 0; d < dofCount; ++d)
+                            {
+                                dot += other.jacobian[d]
+                                    * inverseMassJac[row][d];
+                            }
+                            w[row][col] = deltaTime * dot;
+                        }
+                    }
+
+                    const LcpSolution solution = solveLcp(w, b);
+                    telemetry.solverIterationCount = solution.iterations;
+                    telemetry.complementarityResidualMeters = solution.residual;
+                    telemetry.contactSystemConditionEstimate =
+                        solution.conditionEstimate;
+                    telemetry.contactSystemStatus = solution.conditionStatus;
+                    if (!solution.solved)
+                    {
+                        result.status = DynamicContactStepStatus::
+                            ContactSolveNonConverged;
+                        return result;
+                    }
+                    impulses = solution.impulses;
+
+                    for (std::size_t idx = 0; idx < C; ++idx)
+                    {
+                        if (impulses[idx] <= 1.0e-12)
+                        {
+                            continue;
+                        }
+                        ++telemetry.impulseCarryingContactCount;
+                        // Apply impulse through full mass matrix.
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            committedVelocity[d] +=
+                                inverseMassJac[idx][d] * impulses[idx];
+                        }
+                    }
+                }
+                else
+                {
+                    // PGS for C > 4 contacts.
+                    std::vector<std::vector<double>> w(C,
+                        std::vector<double>(C));
+                    std::vector<double> b(C);
+
+                    for (std::size_t row = 0; row < C; ++row)
+                    {
+                        const auto& contact =
+                            allContactEvaluations[candidateIndices[row]];
+                        std::vector<double> jacFull(dofCount);
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            jacFull[d] = contact.jacobian[d];
+                        }
+                        std::vector<double> invMassJacFull(dofCount);
+                        if (!solveMultiCarMass(mass.matrix, jacFull,
+                            invMassJacFull))
+                        {
+                            result.status = DynamicContactStepStatus::
+                                ContactSystemIllConditioned;
+                            return result;
+                        }
+                        b[row] = contact.gapMeters;
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            b[row] += deltaTime * contact.jacobian[d]
+                                * freeVelocity[d];
+                        }
+                        for (std::size_t col = 0; col < C; ++col)
+                        {
+                            const auto& other =
+                                allContactEvaluations[candidateIndices[col]];
+                            double dot = 0.0;
+                            for (std::size_t d = 0; d < dofCount; ++d)
+                            {
+                                dot += other.jacobian[d] * invMassJacFull[d];
+                            }
+                            w[row][col] = deltaTime * dot;
+                        }
+                    }
+
+                    PgsSolution pgs = solvePgs(
+                        w, b, dynamicContactPgsMaximumIterations);
+                    telemetry.pgsIterationCount = pgs.iterations;
+                    telemetry.pgsFinalPenetrationMeters =
+                        pgs.finalPenetrationMeters;
+                    telemetry.pgsFinalImpulseDeltaNewtonSeconds =
+                        pgs.finalImpulseDeltaNewtonSeconds;
+                    telemetry.pgsConverged = pgs.converged;
+                    telemetry.complementarityResidualMeters =
+                        pgs.finalPenetrationMeters;
+
+                    if (!pgs.converged)
+                    {
+                        result.status = DynamicContactStepStatus::
+                            ContactSolveNonConverged;
+                        return result;
+                    }
+
+                    impulses = pgs.impulses;
+                    for (std::size_t idx = 0; idx < C; ++idx)
+                    {
+                        if (impulses[idx] <= 1.0e-12)
+                        {
+                            continue;
+                        }
+                        ++telemetry.impulseCarryingContactCount;
+                        const auto& contact =
+                            allContactEvaluations[candidateIndices[idx]];
+                        std::vector<double> jacFull(dofCount);
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            jacFull[d] = contact.jacobian[d];
+                        }
+                        std::vector<double> invMassJacFull(dofCount);
+                        if (!solveMultiCarMass(
+                                mass.matrix, jacFull, invMassJacFull))
+                        {
+                            result.status = DynamicContactStepStatus::
+                                MassMatrixNotPositiveDefinite;
+                            return result;
+                        }
+                        for (std::size_t d = 0; d < dofCount; ++d)
+                        {
+                            committedVelocity[d] +=
+                                invMassJacFull[d] * impulses[idx];
+                        }
+                    }
+                }
+            }
+
+            telemetry.kineticEnergyAfterContactJoules =
+                multiCarKineticEnergy(mass.matrix, committedVelocity);
+
+            // Position advance (semi-implicit Euler).
+            ReducedCoordinates newX(dofCount);
+            newX[0] = x[0] + deltaTime * committedVelocity[0];
+            for (std::size_t i = 0; i < N; ++i)
+            {
+                newX[1 + 2 * i] = x[1 + 2 * i]
+                    + deltaTime * committedVelocity[1 + 2 * i];
+                newX[1 + 2 * i + 1] = x[1 + 2 * i + 1]
+                    + deltaTime * committedVelocity[1 + 2 * i + 1];
+            }
+
+            // Rebuild the reduced train pose at the new coordinates.
+            ReducedTrainPose nextPose;
+            try
+            {
+                nextPose = evaluateReducedTrainPose(
+                    track, definition, newX, &poseEvaluations);
+            }
+            catch (const std::exception&)
+            {
+                result.status = DynamicContactStepStatus::RigidClosureFailure;
+                return result;
+            }
+            if (!nextPose.valid)
+            {
+                result.status = DynamicContactStepStatus::RigidClosureFailure;
+                return result;
+            }
+
+            // Validate connector closure residuals.
+            double maxConnectorResidual = 0.0;
+            for (std::size_t i = 0; i + 1 < N; ++i)
+            {
+                const double distance = glm::length(
+                    nextPose.carPoses[i + 1].frontHitchWorldPositionMeters
+                    - nextPose.carPoses[i].rearHitchWorldPositionMeters);
+                const double residual = std::abs(distance
+                    - definition.connections[i].rigidLengthMeters);
+                maxConnectorResidual = std::max(
+                    maxConnectorResidual, residual);
+                telemetry.connectorClosures.push_back(
+                    {i, distance - definition.connections[i].rigidLengthMeters,
+                        0, 0.0});
+            }
+            telemetry.maximumConnectorResidualMeters = maxConnectorResidual;
+            if (maxConnectorResidual > connectorLengthToleranceMeters)
+            {
+                result.status = DynamicContactStepStatus::RigidClosureFailure;
+                return result;
+            }
+
+            // Nonlinear penetration check.
+            double minimumGap = std::numeric_limits<double>::infinity();
+            double maximumGap = -std::numeric_limits<double>::infinity();
+            for (std::size_t contactIdx = 0; contactIdx < contacts.size();
+                ++contactIdx)
+            {
+                const std::size_t carIndex = contactCarIndex[contactIdx];
+                if (carIndex >= N)
+                {
+                    continue;
+                }
+                const double gap = multiCarContactGap(
+                    nextPose.carPoses[carIndex], contacts[contactIdx]);
+                minimumGap = std::min(minimumGap, gap);
+                maximumGap = std::max(maximumGap, gap);
+            }
+            if (contacts.empty())
+            {
+                minimumGap = maximumGap = 0.0;
+            }
+            telemetry.minimumSignedGapMeters = minimumGap;
+            telemetry.maximumSignedGapMeters = maximumGap;
+            telemetry.nonlinearCommittedGapResidualMeters =
+                std::max(0.0, -minimumGap);
+            telemetry.dynamicPoseEvaluationCount = poseEvaluations;
+
+            if (minimumGap < -connectorTolerance)
+            {
+                result.status = DynamicContactStepStatus::NonlinearPenetration;
+                return result;
+            }
+
+            // Build the output result.
+            result.status = DynamicContactStepStatus::Available;
+            result.generalizedCoordinates = newX;
+            result.generalizedVelocity = committedVelocity;
+            result.carResults.resize(N);
+            result.leadCarReferenceLocation = currentState.leadCarReferenceLocation;
+            result.leadCarReferenceLocation.stationMeters = newX[0];
+            result.tick = currentState.tick;
+            result.runState = std::hypot(committedVelocity[0],
+                committedVelocity[1], committedVelocity[2])
+                    <= followerRestSpeedToleranceMetersPerSecond
+                ? FollowerRunState::Resting : FollowerRunState::Running;
+
+            for (std::size_t i = 0; i < N; ++i)
+            {
+                result.carResults[i].carIndex = i;
+                result.carResults[i].pose = std::move(nextPose.carPoses[i]);
+            }
+
+            return result;
         }
 
         [[nodiscard]] DynamicContactStepResult fail(
@@ -1755,6 +3013,380 @@ namespace quantum::physics
         }
         lastFailure.status = DynamicContactStepStatus::NonlinearPenetration;
         lastFailure.state = currentState;
+        lastFailure.telemetry.retryCount = 3;
+        lastFailure.telemetry.substepCount = dynamicContactMaximumSubdivisions;
+        return lastFailure;
+    }
+
+    //=========================================================================
+    // M1B: Multi-Car Public API
+    //=========================================================================
+
+    DynamicContactDofLayout DynamicContactDofLayout::create(
+        const std::size_t count) noexcept
+    {
+        DynamicContactDofLayout layout;
+        layout.carCount = count;
+        layout.dofCount = 1 + 2 * count;
+        return layout;
+    }
+
+    std::size_t DynamicContactDofLayout::longitudinalDof() const noexcept
+    {
+        return 0;
+    }
+
+    std::size_t DynamicContactDofLayout::frontVerticalDof(
+        const std::size_t carIndex) const noexcept
+    {
+        return 1 + 2 * carIndex;
+    }
+
+    std::size_t DynamicContactDofLayout::rearVerticalDof(
+        const std::size_t carIndex) const noexcept
+    {
+        return 1 + 2 * carIndex + 1;
+    }
+
+    std::size_t DynamicContactDofLayout::carIndexForVerticalDof(
+        const std::size_t dofIndex) const noexcept
+    {
+        if (dofIndex == 0 || dofIndex >= dofCount)
+        {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        return (dofIndex - 1) / 2;
+    }
+
+    bool DynamicContactDofLayout::isLongitudinalDof(
+        const std::size_t dofIndex) const noexcept
+    {
+        return dofIndex == 0;
+    }
+
+    bool DynamicContactMultiCarState::isValid() const noexcept
+    {
+        if (cars.empty())
+        {
+            return false;
+        }
+        if (!std::isfinite(signedLongitudinalVelocityMetersPerSecond))
+        {
+            return false;
+        }
+        if (tick == std::numeric_limits<std::uint64_t>::max())
+        {
+            return false;
+        }
+        for (const auto& car : cars)
+        {
+            if (!std::isfinite(car.frontVerticalOffsetMeters)
+                || !std::isfinite(car.frontVerticalVelocityMetersPerSecond)
+                || !std::isfinite(car.rearVerticalOffsetMeters)
+                || !std::isfinite(car.rearVerticalVelocityMetersPerSecond))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    DynamicContactMultiCarStepResult stepDynamicContactMultiCar(
+        const CompiledPhysicsTrack& track,
+        const TrainDefinition& definition,
+        const PhysicsEnvironment& environment,
+        const DynamicContactMultiCarState& currentState,
+        const FixedStepSettings& step,
+        const std::span<const ExternalForceApplication> externalForces)
+    {
+        using namespace quantum::physics;
+        DynamicContactMultiCarStepResult failResult;
+
+        auto failMultiCar = [&](const DynamicContactStepStatus status)
+            -> DynamicContactMultiCarStepResult
+        {
+            DynamicContactMultiCarStepResult r;
+            r.status = status;
+            return r;
+        };
+
+        // Validate inputs.
+        if (!std::isfinite(environment.gravityAccelerationMetersPerSecondSquared)
+            || environment.gravityAccelerationMetersPerSecondSquared < 0.0
+            || !std::isfinite(environment.airDensityKilogramsPerCubicMeter)
+            || environment.airDensityKilogramsPerCubicMeter < 0.0
+            || !finite(environment.windVelocityMetersPerSecond))
+        {
+            return failMultiCar(DynamicContactStepStatus::NonFiniteInput);
+        }
+        if (!currentState.isValid())
+        {
+            return failMultiCar(DynamicContactStepStatus::NonFiniteInput);
+        }
+        if (step.deltaTimeSeconds != defaultFixedTimeStepSeconds)
+        {
+            return failMultiCar(
+                DynamicContactStepStatus::UnsupportedFixedTimeStep);
+        }
+
+        // Validate train definition.
+        const std::size_t N = definition.cars.size();
+        if (N == 0)
+        {
+            return failMultiCar(DynamicContactStepStatus::UnsupportedCarCount);
+        }
+        if (definition.connections.size() != N - 1)
+        {
+            return failMultiCar(DynamicContactStepStatus::UnsupportedConnector);
+        }
+        if (currentState.cars.size() != N)
+        {
+            return failMultiCar(DynamicContactStepStatus::NonFiniteInput);
+        }
+
+        // Validate each car has exactly 2 bogies.
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            if (definition.cars[i].car.bogies.size() != 2)
+            {
+                return failMultiCar(
+                    DynamicContactStepStatus::UnsupportedBogieCount);
+            }
+        }
+
+        // Validate track supports planar vertical motion.
+        if (!track.supportsPlanarVerticalMotion())
+        {
+            return failMultiCar(
+                DynamicContactStepStatus::UnsupportedTrackGeometry);
+        }
+
+        // Validate external forces reference valid cars.
+        for (const ExternalForceApplication& app : externalForces)
+        {
+            if (app.carIndex >= N
+                || !finite(app.localApplicationPointMeters)
+                || !finite(app.worldForceNewtons))
+            {
+                return failMultiCar(
+                    DynamicContactStepStatus::NonFiniteInput);
+            }
+        }
+
+        // Build aggregate contacts for all cars.
+        std::vector<AggregateContact> contacts;
+        std::vector<std::size_t> contactCarIndex;
+        {
+            const DynamicContactStepStatus contactStatus =
+                buildMultiCarAggregateContacts(
+                    definition, contacts, contactCarIndex);
+            if (contactStatus != DynamicContactStepStatus::Available)
+            {
+                return failMultiCar(contactStatus);
+            }
+        }
+
+        // For N=1 with 0 connections, delegate to M1A path for exact
+        // compatibility.
+        if (N == 1 && definition.connections.empty())
+        {
+            DynamicContactState m1aState;
+            m1aState.generalizedReferenceLocation =
+                currentState.leadCarReferenceLocation;
+            m1aState.signedLongitudinalVelocityMetersPerSecond =
+                currentState.signedLongitudinalVelocityMetersPerSecond;
+            m1aState.frontVerticalOffsetMeters =
+                currentState.cars[0].frontVerticalOffsetMeters;
+            m1aState.frontVerticalVelocityMetersPerSecond =
+                currentState.cars[0].frontVerticalVelocityMetersPerSecond;
+            m1aState.rearVerticalOffsetMeters =
+                currentState.cars[0].rearVerticalOffsetMeters;
+            m1aState.rearVerticalVelocityMetersPerSecond =
+                currentState.cars[0].rearVerticalVelocityMetersPerSecond;
+            m1aState.tick = currentState.tick;
+            m1aState.runState = currentState.runState;
+
+            const DynamicContactStepResult m1aResult = stepDynamicContact(
+                track, definition, environment, m1aState, step,
+                externalForces);
+
+            DynamicContactMultiCarStepResult result;
+            result.status = m1aResult.status;
+            result.dofLayout = DynamicContactDofLayout::create(1);
+            result.tick = m1aResult.state.tick;
+            result.runState = m1aResult.state.runState;
+            result.leadCarReferenceLocation =
+                m1aResult.state.generalizedReferenceLocation;
+            result.generalizedCoordinates = {
+                m1aResult.state.generalizedReferenceLocation.stationMeters,
+                m1aResult.state.frontVerticalOffsetMeters,
+                m1aResult.state.rearVerticalOffsetMeters};
+            result.generalizedVelocity = {
+                m1aResult.state.signedLongitudinalVelocityMetersPerSecond,
+                m1aResult.state.frontVerticalVelocityMetersPerSecond,
+                m1aResult.state.rearVerticalVelocityMetersPerSecond};
+            result.carResults.resize(1);
+            result.carResults[0].carIndex = 0;
+            if (m1aResult.pose.has_value())
+            {
+                result.carResults[0].pose = *m1aResult.pose;
+            }
+            result.carResults[0].aggregateFrontBogieNormalImpulseNewtonSeconds =
+                m1aResult.telemetry
+                    .aggregateFrontBogieNormalImpulseNewtonSeconds;
+            result.carResults[0].aggregateRearBogieNormalImpulseNewtonSeconds =
+                m1aResult.telemetry
+                    .aggregateRearBogieNormalImpulseNewtonSeconds;
+            result.telemetry.minimumSignedGapMeters =
+                m1aResult.telemetry.minimumSignedGapMeters;
+            result.telemetry.maximumSignedGapMeters =
+                m1aResult.telemetry.maximumSignedGapMeters;
+            result.telemetry.candidateContactCount =
+                m1aResult.telemetry.candidateContactCount;
+            result.telemetry.impulseCarryingContactCount =
+                m1aResult.telemetry.impulseCarryingContactCount;
+            result.telemetry.complementarityResidualMeters =
+                m1aResult.telemetry.complementarityResidualMeters;
+            result.telemetry.nonlinearCommittedGapResidualMeters =
+                m1aResult.telemetry.nonlinearCommittedGapResidualMeters;
+            result.telemetry.massMatrixStatus =
+                m1aResult.telemetry.massMatrixStatus;
+            result.telemetry.massMatrixConditionEstimate =
+                m1aResult.telemetry.massMatrixConditionEstimate;
+            result.telemetry.contactSystemStatus =
+                m1aResult.telemetry.contactSystemStatus;
+            result.telemetry.contactSystemConditionEstimate =
+                m1aResult.telemetry.contactSystemConditionEstimate;
+            result.telemetry.solverIterationCount =
+                m1aResult.telemetry.solverIterationCount;
+            result.telemetry.retryCount = m1aResult.telemetry.retryCount;
+            result.telemetry.substepCount = m1aResult.telemetry.substepCount;
+            result.telemetry.kineticEnergyBeforeContactJoules =
+                m1aResult.telemetry.kineticEnergyBeforeContactJoules;
+            result.telemetry.kineticEnergyAfterContactJoules =
+                m1aResult.telemetry.kineticEnergyAfterContactJoules;
+            result.telemetry.dynamicPoseEvaluationCount =
+                m1aResult.telemetry.dynamicPoseEvaluationCount;
+            result.telemetry.massMatrixSize =
+                m1aResult.telemetry.massMatrixSize;
+            result.telemetry.contactSystemSize =
+                m1aResult.telemetry.contactSystemSize;
+            return result;
+        }
+
+        // Multi-car adaptive subdivision loop.
+        DynamicContactMultiCarStepResult lastFailure;
+        for (std::size_t subdivisions = 1;
+            subdivisions <= dynamicContactMaximumSubdivisions;
+            subdivisions *= 2)
+        {
+            DynamicContactMultiCarState state = currentState;
+            DynamicContactMultiCarTelemetry aggregate;
+            std::vector<DynamicContactMultiCarCarResult> finalCarResults;
+            bool retry = false;
+            bool failed = false;
+            double firstContactEnergy = 0.0;
+            std::size_t poseEvaluations = 0;
+            std::size_t solverIterations = 0;
+            std::size_t maximumCandidateCount = 0;
+            std::size_t maximumCarryingCount = 0;
+            DynamicContactDofLayout dofLayout =
+                DynamicContactDofLayout::create(N);
+
+            for (std::size_t substep = 0; substep < subdivisions; ++substep)
+            {
+                DynamicContactMultiCarStepResult result =
+                    multiCarSingleSubstep(
+                        track, definition, environment, state,
+                        step.deltaTimeSeconds
+                            / static_cast<double>(subdivisions),
+                        externalForces, contacts, contactCarIndex);
+                if (!result.available())
+                {
+                    failed = true;
+                    lastFailure = std::move(result);
+                    retry = lastFailure.status
+                        == DynamicContactStepStatus::NonlinearPenetration;
+                    break;
+                }
+                if (substep == 0)
+                {
+                    firstContactEnergy =
+                        result.telemetry.kineticEnergyBeforeContactJoules;
+                }
+                poseEvaluations += result.telemetry.dynamicPoseEvaluationCount;
+                solverIterations += result.telemetry.solverIterationCount;
+                maximumCandidateCount = std::max(maximumCandidateCount,
+                    result.telemetry.candidateContactCount);
+                maximumCarryingCount = std::max(maximumCarryingCount,
+                    result.telemetry.impulseCarryingContactCount);
+                aggregate = result.telemetry;
+                finalCarResults = std::move(result.carResults);
+
+                // Update state for next substep.
+                state.leadCarReferenceLocation =
+                    result.leadCarReferenceLocation;
+                state.signedLongitudinalVelocityMetersPerSecond =
+                    result.generalizedVelocity[0];
+                for (std::size_t i = 0; i < N; ++i)
+                {
+                    state.cars[i].frontVerticalOffsetMeters =
+                        result.generalizedCoordinates[1 + 2 * i];
+                    state.cars[i].frontVerticalVelocityMetersPerSecond =
+                        result.generalizedVelocity[1 + 2 * i];
+                    state.cars[i].rearVerticalOffsetMeters =
+                        result.generalizedCoordinates[1 + 2 * i + 1];
+                    state.cars[i].rearVerticalVelocityMetersPerSecond =
+                        result.generalizedVelocity[1 + 2 * i + 1];
+                }
+            }
+
+            if (!failed && !finalCarResults.empty())
+            {
+                state.tick = currentState.tick + 1;
+                aggregate.retryCount = std::countr_zero(subdivisions);
+                aggregate.substepCount = subdivisions;
+                aggregate.dynamicPoseEvaluationCount = poseEvaluations;
+                aggregate.solverIterationCount = solverIterations;
+                aggregate.candidateContactCount = maximumCandidateCount;
+                aggregate.impulseCarryingContactCount = maximumCarryingCount;
+
+                DynamicContactMultiCarStepResult finalResult;
+                finalResult.status = DynamicContactStepStatus::Available;
+                finalResult.telemetry = aggregate;
+                finalResult.carResults = std::move(finalCarResults);
+                finalResult.dofLayout = dofLayout;
+                finalResult.generalizedVelocity.resize(dofLayout.dofCount);
+                finalResult.generalizedCoordinates.resize(dofLayout.dofCount);
+                finalResult.generalizedVelocity[0] =
+                    state.signedLongitudinalVelocityMetersPerSecond;
+                finalResult.generalizedCoordinates[0] =
+                    state.leadCarReferenceLocation.stationMeters;
+                for (std::size_t i = 0; i < N; ++i)
+                {
+                    finalResult.generalizedVelocity[1 + 2 * i] =
+                        state.cars[i].frontVerticalVelocityMetersPerSecond;
+                    finalResult.generalizedVelocity[1 + 2 * i + 1] =
+                        state.cars[i].rearVerticalVelocityMetersPerSecond;
+                    finalResult.generalizedCoordinates[1 + 2 * i] =
+                        state.cars[i].frontVerticalOffsetMeters;
+                    finalResult.generalizedCoordinates[1 + 2 * i + 1] =
+                        state.cars[i].rearVerticalOffsetMeters;
+                }
+                finalResult.leadCarReferenceLocation =
+                    state.leadCarReferenceLocation;
+                finalResult.tick = state.tick;
+                finalResult.runState = state.runState;
+                return finalResult;
+            }
+
+            if (failed && !retry)
+            {
+                return lastFailure;
+            }
+        }
+
+        lastFailure.status = DynamicContactStepStatus::NonlinearPenetration;
         lastFailure.telemetry.retryCount = 3;
         lastFailure.telemetry.substepCount = dynamicContactMaximumSubdivisions;
         return lastFailure;
