@@ -31,9 +31,10 @@ namespace quantum::renderer
 
     struct FrameSynchronizationTelemetry
     {
+        std::uint32_t framesInFlight = 0;
         FrameSubmissionTelemetry current;
-        // With two frames in flight this normally belongs to draw N-2,
-        // not the immediately preceding draw N-1.
+        // Identifies the last submission that owned current.frameSlot. With
+        // the production one-frame policy this normally belongs to draw N-1.
         FrameSubmissionTelemetry waitedSubmission;
         std::int32_t fenceStatusBeforeWait = 0;
         double fenceStatusCallMilliseconds = 0.0;

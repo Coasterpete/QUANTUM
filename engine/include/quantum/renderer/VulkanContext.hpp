@@ -39,10 +39,12 @@ namespace quantum::renderer
     inline constexpr std::uint32_t viewportCurveCount = 4;
     inline constexpr std::uint32_t viewportAllCurvesVisibleMask = 0xFu;
 
-    // Number of frames the CPU may run ahead of the GPU before drawFrame
-    // blocks on the oldest in-flight submission. Must never exceed the
-    // swapchain image count.
-    inline constexpr std::uint32_t maxFramesInFlight = 2;
+    // QUANTUM intentionally permits one submitted frame at a time under FIFO
+    // presentation. Every slot-owned command, synchronization, timestamp, and
+    // dynamic-preview resource below is sized from this policy. Render-finished
+    // semaphores remain separately owned per swapchain image.
+    inline constexpr std::uint32_t maxFramesInFlight = 1;
+    static_assert(maxFramesInFlight > 0);
 
     // Tightly packed, top-to-bottom RGBA8 pixels of the complete client area.
     struct FrameImage
@@ -60,6 +62,10 @@ namespace quantum::renderer
         double acquireCallMilliseconds = 0.0;
         double presentCallMilliseconds = 0.0;
         double totalMilliseconds = 0.0;
+        // Elapsed GPU time between top-of-pipe and bottom-of-pipe timestamps
+        // for the previous submission that owned the current frame slot.
+        double gpuExecutionMilliseconds = 0.0;
+        bool gpuTimingAvailable = false;
         bool previewStreamUpdated = false;
         bool swapchainRecreated = false;
         bool synchronousReadback = false;
@@ -389,6 +395,10 @@ namespace quantum::renderer
 
         VkCommandPool commandPool_ = VK_NULL_HANDLE;
         std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers_{};
+        VkQueryPool frameTimestampQueryPool_ = VK_NULL_HANDLE;
+        float timestampPeriodNanoseconds_ = 0.0F;
+        std::uint32_t timestampValidBits_ = 0;
+        std::array<bool, maxFramesInFlight> frameTimestampSubmitted_{};
 
         std::array<VkSemaphore, maxFramesInFlight> imageAvailableSemaphores_{};
         std::vector<VkSemaphore> renderFinishedSemaphores_;

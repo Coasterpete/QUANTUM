@@ -622,6 +622,10 @@ namespace quantum::editor
         // Uses the same ImGui/SDL frame timing already used by camera movement.
         [[nodiscard]] double frameDeltaSeconds() const noexcept;
 
+        // Developer smoke workload: applies one deterministic camera step
+        // before the normal viewport update publishes its matrix.
+        void applyPreviewSmokeCameraOrbit() noexcept;
+
     private:
         enum class CameraGesture
         {

@@ -412,7 +412,12 @@ namespace quantum::engine
                     documentHistory.canRedo());
 
                 quantum::editor::SimulationPreview simulationPreview;
-                simulationPreview.setGpuContext(gpuContext ? &*gpuContext : nullptr);
+                simulationPreview.setGpuContext(
+                    gpuContext.has_value()
+                            && (previewSmokeOptions == nullptr
+                                || !previewSmokeOptions
+                                    ->disableGpuPreviewSampling)
+                        ? &*gpuContext : nullptr);
                 std::uint64_t simulationTrackGeneration =
                     centerlineCache.generation();
                 quantum::coaster::LayoutMode simulationLayoutMode =
@@ -533,6 +538,18 @@ namespace quantum::engine
                 };
                 std::optional<RegionStyleEditTelemetry>
                     regionStyleEditTelemetry;
+                struct FullEditTelemetry
+                {
+                    double centerlineMilliseconds = 0.0;
+                    double riderLoadsMilliseconds = 0.0;
+                    double supportsMilliseconds = 0.0;
+                    double curveUploadMilliseconds = 0.0;
+                    double renderableUploadMilliseconds = 0.0;
+                    double supportUploadMilliseconds = 0.0;
+                    double frameFenceWaitMilliseconds = 0.0;
+                    double simulationRebuildMilliseconds = 0.0;
+                };
+                std::optional<FullEditTelemetry> fullEditTelemetry;
 
                 const auto publishTrackStylePresentation =
                     [&](const quantum::coaster::AuthoredTrack& candidateTrack,
@@ -783,6 +800,7 @@ editorUi.selectSection(restoredSelection, true);
                 while (running)
                 {
                     regionStyleEditTelemetry.reset();
+                    fullEditTelemetry.reset();
                     const auto frameLoopStart = PerformanceClock::now();
                     const auto eventPumpBegin = frameLoopStart;
                     SDL_Event event{};
@@ -873,6 +891,24 @@ editorUi.selectSection(restoredSelection, true);
                             : 0.0;
                         previousRenderedFrameStart = renderedFrameStart;
                         ++renderedFrameId;
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->resizeWindow
+                            && renderedFrameId >= 60
+                            && renderedFrameId <= 420
+                            && (renderedFrameId - 60) % 120 == 0)
+                        {
+                            const bool expanded =
+                                ((renderedFrameId - 60) / 120) % 2 != 0;
+                            if (!SDL_SetWindowSize(
+                                    window,
+                                    expanded ? 1760 : 1320,
+                                    expanded ? 980 : 760))
+                            {
+                                throw std::runtime_error(
+                                    std::string("SDL_SetWindowSize failed: ")
+                                    + SDL_GetError());
+                            }
+                        }
                         simulationPreview.beginFrameTelemetry();
                         quantum::editor::FrameBlockingEvents
                             applicationBlockingEvents;
@@ -1264,8 +1300,27 @@ editorUi.selectSection(restoredSelection, true);
                                     sectionIndex, std::move(overrides), false};
                             previewRegionStyleEditApplied = true;
                         }
-                        const auto requestedValueEdit =
+                        auto requestedValueEdit =
                             editorUi.takeProfileEndpointValueEdit();
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->transitionDrag
+                            && renderedFrameId >= 60
+                            && renderedFrameId < 90)
+                        {
+                            const double progress = static_cast<double>(
+                                renderedFrameId - 60);
+                            requestedValueEdit = quantum::editor::
+                                ScalarProfileEndpointValueEdit{
+                                    .endpoint = quantum::editor::
+                                        ScalarProfileEndpoint::End,
+                                    .value = -0.04 + 0.0005 * progress,
+                                    .continuous = renderedFrameId < 89,
+                                    .sectionIndex = 4,
+                                    .channel = quantum::editor::
+                                        RateChannel::Pitch,
+                                    .segmentId = 1
+                            };
+                        }
                         const auto requestedTransitionType =
                             editorUi.takeProfileTransitionTypeEdit();
                         const auto requestedSegmentCommand =
@@ -2484,8 +2539,10 @@ editorUi.selectSection(restoredSelection, true);
                                 }
                                 else
                                 {
+                                    FullEditTelemetry telemetry;
                                     applicationBlockingEvents
                                         .trackBufferMutation = true;
+                                    auto phaseBegin = PerformanceClock::now();
                                     quantum::editor::CenterlineVisualization
                                     candidateCenterline =
                                         quantum::editor::
@@ -2493,17 +2550,31 @@ editorUi.selectSection(restoredSelection, true);
                                                 candidateTrack,
                                                 candidateTrack.trackStyle()
                                             );
+                                telemetry.centerlineMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - phaseBegin).count();
+                                phaseBegin = PerformanceClock::now();
                                 quantum::coaster::RiderLoadHistory
                                     candidateRiderLoads =
                                         quantum::editor::
                                             evaluateRiderLoadDiagnostics(
                                                 candidateTrack
                                             );
+                                telemetry.riderLoadsMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - phaseBegin).count();
+                                phaseBegin = PerformanceClock::now();
                                 quantum::editor::SupportVisualization
                                     candidateSupports = quantum::editor::
                                         createSupportVisualization(
                                             candidateTrack,
                                             candidateCenterline.samples);
+                                telemetry.supportsMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - phaseBegin).count();
 
                                 editTransaction.requireAcceptableRiderLoads(candidateRiderLoads);
 
@@ -2515,14 +2586,35 @@ editorUi.selectSection(restoredSelection, true);
                                     candidateCenterline.sectionSlices
                                 );
                                 boundsApplied = true;
+                                phaseBegin = PerformanceClock::now();
                                 vulkan.updateTrackCurveVertices(
                                     candidateCenterline.vertices,
                                     candidateCenterline.verticesPerCurve
                                 );
+                                telemetry.curveUploadMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - phaseBegin).count();
+                                telemetry.frameFenceWaitMilliseconds +=
+                                    vulkan.lastFrameCompletionWaitMilliseconds();
+                                phaseBegin = PerformanceClock::now();
                                 vulkan.updateRenderableTrack(
                                     candidateCenterline.renderableTrack);
+                                telemetry.renderableUploadMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - phaseBegin).count();
+                                telemetry.frameFenceWaitMilliseconds +=
+                                    vulkan.lastFrameCompletionWaitMilliseconds();
+                                phaseBegin = PerformanceClock::now();
                                 vulkan.updateSupportVertices(
                                     candidateSupports.memberVertices);
+                                telemetry.supportUploadMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - phaseBegin).count();
+                                telemetry.frameFenceWaitMilliseconds +=
+                                    vulkan.lastFrameCompletionWaitMilliseconds();
 
                                 centerlineCache.setTrackStyle(
                                     candidateTrack.trackStyle());
@@ -2540,6 +2632,7 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateRiderLoads)
                                 );
                                 synchronizeDirtyState();
+                                fullEditTelemetry = telemetry;
                                 }
 
                                 if (hardwareEditApplied && !continuousDrag)
@@ -3129,13 +3222,28 @@ editorUi.selectSection(restoredSelection, true);
                                 centerlineCache.generation();
                             simulationLayoutMode =
                                 authoredTrack.layoutMode();
+                            const auto rebuildBegin = PerformanceClock::now();
                             rebuildSimulationPreview();
+                            if (fullEditTelemetry.has_value())
+                            {
+                                fullEditTelemetry
+                                    ->simulationRebuildMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - rebuildBegin).count();
+                            }
                         }
 
                         publishSimulationStatus();
                         editorUi.setHistoryAvailability(
                             documentHistory.canUndo(),
                             documentHistory.canRedo());
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->cameraOrbit
+                            && renderedFrameId >= 60)
+                        {
+                            editorUi.applyPreviewSmokeCameraOrbit();
+                        }
                         editorUi.beginFrame(vulkan);
                         quantum::editor::FrameBlockingEvents
                             frameBlockingEvents =
@@ -3202,6 +3310,47 @@ editorUi.selectSection(restoredSelection, true);
                                     centerlineCache.generation()),
                                 static_cast<unsigned long long>(
                                     centerlineCache.presentationGeneration()));
+                        }
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->transitionDrag
+                            && renderedFrameId >= 60
+                            && renderedFrameId < 90)
+                        {
+                            quantum::logging::logMessagef(
+                                quantum::logging::LogLevel::Info,
+                                "PERF",
+                                "Transition drag frame %llu: "
+                                "pre-simulation %.3f ms, centerline %.3f, "
+                                "rider loads %.3f, supports %.3f, curves "
+                                "%.3f, mesh %.3f, support upload %.3f, "
+                                "fence %.3f, simulation rebuild %.3f.",
+                                static_cast<unsigned long long>(
+                                    renderedFrameId),
+                                preSimulationCpuMilliseconds,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->centerlineMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->riderLoadsMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->supportsMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->curveUploadMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->renderableUploadMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->supportUploadMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->frameFenceWaitMilliseconds : 0.0,
+                                fullEditTelemetry.has_value()
+                                    ? fullEditTelemetry
+                                        ->simulationRebuildMilliseconds : 0.0);
                         }
                         // Minimized iterations skip ImGui NewFrame, so its
                         // first restored delta includes the entire suspension.
@@ -3279,6 +3428,10 @@ editorUi.selectSection(restoredSelection, true);
                                     preSimulationCpuMilliseconds,
                                 .frameStartToSimulationMilliseconds =
                                     frameStartToSimulationMilliseconds,
+                                .mainThreadFrameMilliseconds =
+                                    std::chrono::duration<double, std::milli>(
+                                        PerformanceClock::now()
+                                            - frameLoopStart).count(),
                                 .interpolationMilliseconds =
                                     preview.interpolationMilliseconds,
                                 .renderPoseSolveMilliseconds =
@@ -3299,6 +3452,10 @@ editorUi.selectSection(restoredSelection, true);
                                     draw.acquireCallMilliseconds,
                                 .presentCallMilliseconds =
                                     draw.presentCallMilliseconds,
+                                .gpuExecutionMilliseconds =
+                                    draw.gpuExecutionMilliseconds,
+                                .gpuTimingAvailable =
+                                    draw.gpuTimingAvailable,
                                 .previewStreamUpdated =
                                     draw.previewStreamUpdated,
                                 .swapchainRecreated =

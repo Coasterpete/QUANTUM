@@ -62,9 +62,16 @@ namespace
             "developer repeat flag parses without a value");
         const auto stoppedEdit = parse({
             "--dev-preview-smoke", fixtureString, "--stopped-preview",
+            "--camera-orbit", "--transition-drag",
+            "--resize-window",
+            "--disable-gpu-preview-sampling",
             "--region-style-edit", "hardware-spacing"});
         require(stoppedEdit && stoppedEdit->has_value()
                 && (**stoppedEdit).stoppedPreview
+                && (**stoppedEdit).cameraOrbit
+                && (**stoppedEdit).transitionDrag
+                && (**stoppedEdit).resizeWindow
+                && (**stoppedEdit).disableGpuPreviewSampling
                 && (**stoppedEdit).regionStyleEdit
                     == quantum::editor::PreviewSmokeRegionStyleEdit::
                         HardwareSpacing,
@@ -140,6 +147,8 @@ namespace
         first.drawFrameCpuMilliseconds = 1.5;
         first.acquireCallMilliseconds = 0.5;
         first.presentCallMilliseconds = 0.6;
+        first.blockingEvents.viewportResized = true;
+        first.swapchainRecreated = true;
         first.solverCounters.rigidBogieBracketExpansions = 2;
         first.solverCounters.connectorRefinementIterations = 3;
         first.solverCounters.intervalHintMisses = 4;
@@ -157,6 +166,8 @@ namespace
         second.interpolationMilliseconds = 0.4;
         second.discardedWallTimeMilliseconds = 2.0;
         second.maximumPhysicsStepsHit = true;
+        second.blockingEvents.viewportResized = false;
+        second.swapchainRecreated = false;
         second.renderPoseFailureCount = 1;
         second.solverCounters.rigidBogieBracketExpansions = 5;
         second.solverCounters.connectorRefinementIterations = 6;
@@ -180,6 +191,9 @@ namespace
             1.0e-12, "weighted fixed-step average");
         require(report.maximumStepsHitFrameCount == 1,
             "maximum-steps hit count");
+        require(report.viewportResizeCount == 1
+                && report.swapchainRecreationCount == 1,
+            "resize and swapchain recreation counts");
         require(report.interpolationSolveFailureCount == 1,
             "interpolation failure count");
         requireNear(report.totalDiscardedWallTimeMilliseconds, 2.0,
@@ -233,6 +247,7 @@ namespace
         sample.frameId = 1;
         sample.frameTimeMilliseconds = 16.0;
         sample.previewFrameSlotWaitMilliseconds = 479.0;
+        sample.synchronization.framesInFlight = 1;
         sample.synchronization.current.drawId = 3;
         sample.synchronization.current.frameSlot = 0;
         sample.synchronization.waitedSubmission.drawId = 1;
@@ -258,8 +273,9 @@ namespace
                 && json.find("\"spikes\"") != std::string::npos,
             "JSON contains structured summary and spikes");
         require(json.find("\"waited_submission\"") != std::string::npos
-                && json.find("\"render_finished_semaphore_image_index\"") != std::string::npos,
-            "JSON includes causal fence and semaphore identity");
+                && json.find("\"render_finished_semaphore_image_index\"") != std::string::npos
+                && json.find("\"frames_in_flight\": 1") != std::string::npos,
+            "JSON includes frame policy, causal fence, and semaphore identity");
         jsonInput.close();
         std::filesystem::remove(paths.json);
         std::filesystem::remove(paths.text);
