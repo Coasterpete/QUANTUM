@@ -753,13 +753,14 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const TrainCarDefinition& definition,
             const TrackLocation& referenceLocation,
-            TrainSolveCounters* const counters = nullptr)
+            TrainSolveCounters* const counters = nullptr,
+            detail::RigidBogieContinuationHint* const bogieHint = nullptr)
         {
             requireLegalOpenCarPlacement(
                 track, definition.car, referenceLocation);
             return detail::solveCarPoseForValidatedDefinition(
                 track, definition.car, referenceLocation,
-                definition.loadout, counters);
+                definition.loadout, counters, bogieHint);
         }
 
         struct ConnectionCandidate
@@ -789,7 +790,8 @@ namespace quantum::physics
             const CarPose& leadingPose,
             const double connectorLengthMeters,
             const double backwardOffsetMeters,
-            TrainSolveCounters* const counters = nullptr)
+            TrainSolveCounters* const counters = nullptr,
+            detail::RigidBogieContinuationHint* const bogieHint = nullptr)
         {
             detail::ScopedCounterTimer timer{
                 counters,
@@ -812,7 +814,7 @@ namespace quantum::physics
             const glm::dvec3 frontHitch = detail::
                 solveFrontHitchPositionForValidatedDefinition(
                     track, followingDefinition.car, followingLocation,
-                    counters);
+                    counters, bogieHint);
             const double distance = glm::length(
                 frontHitch
                 - leadingPose.rearHitchWorldPositionMeters());
@@ -862,6 +864,9 @@ namespace quantum::physics
             TrainSolveCounters* const counters = nullptr)
         {
             ConnectorWorkObservation workObservation{counters};
+            // Candidate locations within one connector solve are adjacent and
+            // share immutable car geometry. The hint never survives this call.
+            detail::RigidBogieContinuationHint bogieHint;
             const double baseSeparation =
                 followingDefinition.car.frontHitchPositionMeters.x
                 - leadingDefinition.car.rearHitchPositionMeters.x;
@@ -963,7 +968,8 @@ namespace quantum::physics
                         leadingPose,
                         connection.rigidLengthMeters,
                         candidateOffset,
-                        counters);
+                        counters,
+                        &bogieHint);
                     if (std::signbit(lower.residualMeters)
                         == std::signbit(candidate.residualMeters))
                     {
@@ -995,7 +1001,8 @@ return SolvedFollowingCar{
                             track,
                             leadingPose,
                             solved.backwardOffsetMeters),
-                        counters),
+                        counters,
+                        &bogieHint),
                     iterations,
                     finalBracketSize
                 };
@@ -1037,14 +1044,16 @@ ConnectionCandidate lower = connectionCandidate(
                         leadingPose,
                         connection.rigidLengthMeters,
                         offsetAt(lowerIndex),
-                        counters);
+                        counters,
+                        &bogieHint);
                     ConnectionCandidate upper = connectionCandidate(
                         track,
                         followingDefinition,
                         leadingPose,
                         connection.rigidLengthMeters,
                         offsetAt(upperIndex),
-                        counters);
+                        counters,
+                        &bogieHint);
                     if (std::signbit(lower.residualMeters)
                         != std::signbit(upper.residualMeters))
                     {
@@ -1085,7 +1094,7 @@ ConnectionCandidate lower = connectionCandidate(
 ConnectionCandidate next = connectionCandidate(
                             track, followingDefinition, leadingPose,
                             connection.rigidLengthMeters,
-                            offsetAt(--lowerIndex), counters);
+                            offsetAt(--lowerIndex), counters, &bogieHint);
                             adjacent = {next, lower};
                             lower = next;
                         }
@@ -1094,7 +1103,7 @@ ConnectionCandidate next = connectionCandidate(
 ConnectionCandidate next = connectionCandidate(
                             track, followingDefinition, leadingPose,
                             connection.rigidLengthMeters,
-                            offsetAt(++upperIndex), counters);
+                            offsetAt(++upperIndex), counters, &bogieHint);
                             adjacent = {upper, next};
                             upper = next;
                         }
@@ -1132,7 +1141,8 @@ ConnectionCandidate next = connectionCandidate(
                         leadingPose,
                         connection.rigidLengthMeters,
                         offset,
-                        counters);
+                        counters,
+                        &bogieHint);
                     if (!bestCandidate
                         || std::abs(candidate.residualMeters)
                             < std::abs(bestCandidate->residualMeters)
@@ -1209,7 +1219,8 @@ if (std::abs(bestCandidate->residualMeters)
                             track,
                             leadingPose,
                             bestCandidate->backwardOffsetMeters),
-                        counters),
+                        counters,
+                        &bogieHint),
                     0,
                     sampleSpacing,
                     true
@@ -1234,7 +1245,8 @@ if (std::abs(bestCandidate->residualMeters)
                 connection.rigidLengthMeters,
                 upperOffset - goldenRatioConjugate
                     * (upperOffset - lowerOffset),
-                counters);
+                counters,
+                &bogieHint);
             ConnectionCandidate right = connectionCandidate(
                 track,
                 followingDefinition,
@@ -1242,7 +1254,8 @@ if (std::abs(bestCandidate->residualMeters)
                 connection.rigidLengthMeters,
                 lowerOffset + goldenRatioConjugate
                     * (upperOffset - lowerOffset),
-                counters);
+                counters,
+                &bogieHint);
             std::size_t iterations = 0;
             for (; iterations < connectorRefinementIterationCount;
                 ++iterations)
@@ -1263,7 +1276,8 @@ if (std::abs(bestCandidate->residualMeters)
                         connection.rigidLengthMeters,
                         upperOffset - goldenRatioConjugate
                             * (upperOffset - lowerOffset),
-                        counters);
+                        counters,
+                        &bogieHint);
                 }
                 else
                 {
@@ -1276,7 +1290,8 @@ if (std::abs(bestCandidate->residualMeters)
                         connection.rigidLengthMeters,
                         lowerOffset + goldenRatioConjugate
                             * (upperOffset - lowerOffset),
-                        counters);
+                        counters,
+                        &bogieHint);
                 }
             }
             ConnectionCandidate solved =
@@ -1299,7 +1314,8 @@ if (std::abs(solved.residualMeters)
                             track,
                             leadingPose,
                             solved.backwardOffsetMeters),
-                        counters),
+                        counters,
+                        &bogieHint),
                     iterations,
                     upperOffset - lowerOffset,
                     true
