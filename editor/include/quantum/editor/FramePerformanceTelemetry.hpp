@@ -43,6 +43,7 @@ namespace quantum::editor
         double eventPumpMilliseconds = 0.0;
         double preSimulationCpuMilliseconds = 0.0;
         double frameStartToSimulationMilliseconds = 0.0;
+        double mainThreadFrameMilliseconds = 0.0;
         double interpolationMilliseconds = 0.0;
         double renderPoseSolveMilliseconds = 0.0;
         std::size_t renderPoseSolveCount = 0;
@@ -54,6 +55,8 @@ namespace quantum::editor
         double drawFrameCpuMilliseconds = 0.0;
         double acquireCallMilliseconds = 0.0;
         double presentCallMilliseconds = 0.0;
+        double gpuExecutionMilliseconds = 0.0;
+        bool gpuTimingAvailable = false;
         bool previewStreamUpdated = false;
         bool swapchainRecreated = false;
         bool synchronousReadback = false;

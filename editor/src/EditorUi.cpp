@@ -4178,6 +4178,12 @@ namespace
 
 namespace quantum::editor
 {
+    void EditorUi::applyPreviewSmokeCameraOrbit() noexcept
+    {
+        viewportCamera_.orbit(0.003, 0.001);
+        initialViewportFramePending_ = false;
+    }
+
     void EditorUi::drawSupportWorkspace()
     {
         ImGui::Begin(supportWorkspaceWindowName);

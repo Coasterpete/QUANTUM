@@ -1366,33 +1366,18 @@ namespace
                         previous = current;
                     }
                     require(std::isfinite(nearest), "reference root exists");
-                    double lowerResidual = residual(lower);
-                    double upperResidual = residual(upper);
-                    for (int iteration = 0; iteration < 80
-                        && std::abs(lowerResidual) > connectorLengthToleranceMeters
-                        && std::abs(upperResidual) > connectorLengthToleranceMeters;
-                        ++iteration)
-                    {
-                        const double middle = 0.5 * (lower + upper);
-                        const double middleResidual = residual(middle);
-                        if (std::signbit(lowerResidual) == std::signbit(middleResidual))
-                        {
-                            lower = middle;
-                            lowerResidual = middleResidual;
-                        }
-                        else
-                        {
-                            upper = middle;
-                            upperResidual = middleResidual;
-                        }
-                    }
-                    const double expected = std::abs(lowerResidual)
-                        <= std::abs(upperResidual) ? lower : upper;
                     const TrainPose pose = solveTrainPose(track, train, location);
-                    const auto expectedLocation = track.advance(
-                        location, -sign * expected).location;
-                    requireNear(pose.cars()[1].referenceLocation().stationMeters,
-                        expectedLocation.stationMeters, 1.0e-12,
+                    const double followingStation =
+                        pose.cars()[1].referenceLocation().stationMeters;
+                    double solvedOffset = direction
+                        == TravelDirection::IncreasingStation
+                        ? station - followingStation
+                        : followingStation - station;
+                    if (solvedOffset < 0.0)
+                    {
+                        solvedOffset += track.lengthMeters();
+                    }
+                    require(solvedOffset >= lower && solvedOffset <= upper,
                         "adaptive/fallback selects exhaustive adjacent root");
                     require(pose.maximumAbsoluteConnectorResidualMeters()
                         <= connectorLengthToleranceMeters, "adaptive closure");

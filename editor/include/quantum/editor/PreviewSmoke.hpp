@@ -31,6 +31,10 @@ namespace quantum::editor
         std::size_t spikeStepThreshold = 8;
         bool repeat = false;
         bool stoppedPreview = false;
+        bool cameraOrbit = false;
+        bool transitionDrag = false;
+        bool resizeWindow = false;
+        bool disableGpuPreviewSampling = false;
         std::optional<PreviewSmokeRegionStyleEdit> regionStyleEdit;
     };
 
@@ -47,6 +51,24 @@ namespace quantum::editor
         bool hasPrevious = false;
         FramePerformanceSample next;
         bool hasNext = false;
+    };
+
+    // Diagnostic-only wall-time bucket for identifying within-run trends.
+    // Values remain raw totals so the report writer can derive rates without
+    // changing frame or physics behavior.
+    struct PreviewSmokeTimeSlice
+    {
+        double beginSeconds = 0.0;
+        double endSeconds = 0.0;
+        std::uint64_t renderedFrameCount = 0;
+        std::uint64_t fixedStepCount = 0;
+        double frameMilliseconds = 0.0;
+        double physicsMilliseconds = 0.0;
+        double fixedStepMilliseconds = 0.0;
+        double maximumFixedStepMilliseconds = 0.0;
+        double gpuExecutionMilliseconds = 0.0;
+        std::uint64_t gpuTimingSampleCount = 0;
+        physics::TrainSolveCounters solverCounters;
     };
 
     struct PreviewSmokeReport
@@ -67,6 +89,18 @@ namespace quantum::editor
         double p95FrameMilliseconds = 0.0;
         double p99FrameMilliseconds = 0.0;
         double minimumFramesPerSecond = 0.0;
+        double onePercentLowFramesPerSecond = 0.0;
+        std::uint64_t framesOver16Milliseconds = 0;
+        std::uint64_t framesOver33Milliseconds = 0;
+        std::uint64_t viewportResizeCount = 0;
+        std::uint64_t swapchainRecreationCount = 0;
+
+        double averageMainThreadFrameMilliseconds = 0.0;
+        double maximumMainThreadFrameMilliseconds = 0.0;
+        double averageEventPumpMilliseconds = 0.0;
+        double maximumEventPumpMilliseconds = 0.0;
+        double averagePreSimulationMilliseconds = 0.0;
+        double maximumPreSimulationMilliseconds = 0.0;
 
         double averageStepsPerRenderedFrame = 0.0;
         std::size_t maximumStepsInRenderedFrame = 0;
@@ -92,6 +126,9 @@ namespace quantum::editor
         double maximumAcquireMilliseconds = 0.0;
         double averagePresentMilliseconds = 0.0;
         double maximumPresentMilliseconds = 0.0;
+        double averageGpuExecutionMilliseconds = 0.0;
+        double maximumGpuExecutionMilliseconds = 0.0;
+        std::uint64_t gpuTimingSampleCount = 0;
 
         double largestRawDeltaMilliseconds = 0.0;
         double averageRawDeltaMilliseconds = 0.0;
@@ -103,6 +140,7 @@ namespace quantum::editor
 
         physics::TrainSolveCounters solverCounters;
         std::uint64_t percentileSamplesDropped = 0;
+        std::vector<PreviewSmokeTimeSlice> timeSlices;
         std::vector<PreviewSmokeSpikeRecord> spikes;
     };
 
@@ -131,6 +169,8 @@ namespace quantum::editor
         std::array<PreviewSmokeSpikeRecord, maximumRetainedSpikes> spikes_{};
         std::size_t spikeCount_ = 0;
         std::optional<FramePerformanceSample> previousSample_;
+        std::vector<PreviewSmokeTimeSlice> timeSlices_;
+        PreviewSmokeTimeSlice currentTimeSlice_;
         PreviewSmokeReport totals_;
     };
 

@@ -8,8 +8,10 @@
 #include <cmath>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
@@ -18,6 +20,118 @@ namespace
 {
     using quantum::editor::FramePerformanceSample;
     using quantum::editor::PreviewSmokeSpikeRecord;
+    using quantum::editor::PreviewSmokeTimeSlice;
+
+    constexpr double previewSmokeTimeSliceMilliseconds = 5'000.0;
+
+    void addSolveCounters(
+        quantum::physics::TrainSolveCounters& destination,
+        const quantum::physics::TrainSolveCounters& source) noexcept
+    {
+        destination.solveTrainPoseCalls += source.solveTrainPoseCalls;
+        destination.solveCarGeometryCalls += source.solveCarGeometryCalls;
+        destination.rigidBogieSolveCalls += source.rigidBogieSolveCalls;
+        destination.rigidBogieRefinementIterations +=
+            source.rigidBogieRefinementIterations;
+        destination.rigidBogieBracketExpansions +=
+            source.rigidBogieBracketExpansions;
+        destination.connectionCandidateEvaluations +=
+            source.connectionCandidateEvaluations;
+        destination.connectorSolveCalls += source.connectorSolveCalls;
+        destination.connectorRefinementIterations +=
+            source.connectorRefinementIterations;
+        destination.connectorFallbackUses += source.connectorFallbackUses;
+        destination.trackSampleCalls += source.trackSampleCalls;
+        destination.intervalHintMisses += source.intervalHintMisses;
+        destination.solveTrainPoseNanoseconds +=
+            source.solveTrainPoseNanoseconds;
+        destination.solveCarGeometryNanoseconds +=
+            source.solveCarGeometryNanoseconds;
+        destination.rigidBogieSolveNanoseconds +=
+            source.rigidBogieSolveNanoseconds;
+        destination.connectionCandidateNanoseconds +=
+            source.connectionCandidateNanoseconds;
+        destination.trackSampleNanoseconds += source.trackSampleNanoseconds;
+    }
+
+    [[nodiscard]] double ratio(
+        const double numerator, const std::uint64_t denominator) noexcept
+    {
+        return denominator > 0
+            ? numerator / static_cast<double>(denominator)
+            : 0.0;
+    }
+
+    [[nodiscard]] nlohmann::json timeSliceJson(
+        const PreviewSmokeTimeSlice& slice)
+    {
+        const double elapsedSeconds = slice.frameMilliseconds / 1'000.0;
+        return {
+            {"begin_seconds", slice.beginSeconds},
+            {"end_seconds", slice.endSeconds},
+            {"rendered_frames", slice.renderedFrameCount},
+            {"fixed_steps", slice.fixedStepCount},
+            {"average_fps", elapsedSeconds > 0.0
+                ? static_cast<double>(slice.renderedFrameCount) / elapsedSeconds
+                : 0.0},
+            {"average_steps_per_frame", ratio(
+                static_cast<double>(slice.fixedStepCount),
+                slice.renderedFrameCount)},
+            {"average_fixed_step_cpu_ms", ratio(
+                slice.fixedStepMilliseconds, slice.fixedStepCount)},
+            {"maximum_fixed_step_cpu_ms", slice.maximumFixedStepMilliseconds},
+            {"average_physics_cpu_ms_per_frame", ratio(
+                slice.physicsMilliseconds, slice.renderedFrameCount)},
+            {"average_gpu_execution_ms", ratio(
+                slice.gpuExecutionMilliseconds, slice.gpuTimingSampleCount)},
+            {"solver_per_fixed_step", {
+                {"solve_train_pose_calls", ratio(
+                    static_cast<double>(slice.solverCounters.solveTrainPoseCalls),
+                    slice.fixedStepCount)},
+                {"rigid_bogie_solve_calls", ratio(
+                    static_cast<double>(slice.solverCounters.rigidBogieSolveCalls),
+                    slice.fixedStepCount)},
+                {"rigid_bogie_refinement_iterations", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .rigidBogieRefinementIterations),
+                    slice.fixedStepCount)},
+                {"connection_candidate_evaluations", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .connectionCandidateEvaluations),
+                    slice.fixedStepCount)},
+                {"connector_refinement_iterations", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .connectorRefinementIterations),
+                    slice.fixedStepCount)},
+                {"track_sample_calls", ratio(
+                    static_cast<double>(slice.solverCounters.trackSampleCalls),
+                    slice.fixedStepCount)},
+                {"interval_hint_misses", ratio(
+                    static_cast<double>(slice.solverCounters.intervalHintMisses),
+                    slice.fixedStepCount)}}},
+            {"solver_average_cpu_ms_per_call", {
+                {"solve_train_pose", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .solveTrainPoseNanoseconds) / 1'000'000.0,
+                    slice.solverCounters.solveTrainPoseCalls)},
+                {"solve_car_geometry", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .solveCarGeometryNanoseconds) / 1'000'000.0,
+                    slice.solverCounters.solveCarGeometryCalls)},
+                {"rigid_bogie_solve", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .rigidBogieSolveNanoseconds) / 1'000'000.0,
+                    slice.solverCounters.rigidBogieSolveCalls)},
+                {"connection_candidate", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .connectionCandidateNanoseconds) / 1'000'000.0,
+                    slice.solverCounters.connectionCandidateEvaluations)},
+                {"track_sample", ratio(
+                    static_cast<double>(slice.solverCounters
+                        .trackSampleNanoseconds) / 1'000'000.0,
+                    slice.solverCounters.trackSampleCalls)}}}
+        };
+    }
 
     [[nodiscard]] std::expected<double, std::string> parsePositiveDouble(
         const std::string_view value,
@@ -121,6 +235,7 @@ namespace
         const quantum::renderer::FrameSynchronizationTelemetry& synchronization)
     {
         return {
+            {"frames_in_flight", synchronization.framesInFlight},
             {"current_submission", submissionJson(synchronization.current)},
             {"waited_submission", submissionJson(synchronization.waitedSubmission)},
             {"fence_status_before_wait", synchronization.fenceStatusBeforeWait},
@@ -140,6 +255,10 @@ namespace
             {"synchronization", synchronizationJson(current.synchronization)},
             {"raw_incoming_delta_ms", current.rawSimulationDeltaMilliseconds},
             {"frame_interval_ms", current.frameTimeMilliseconds},
+            {"main_thread_frame_ms", current.mainThreadFrameMilliseconds},
+            {"gpu_execution_ms", current.gpuTimingAvailable
+                ? nlohmann::json(current.gpuExecutionMilliseconds)
+                : nlohmann::json(nullptr)},
             {"accumulator_before_input_ms", current.accumulatorBeforeMilliseconds},
             {"accumulator_after_clamp_ms", current.accumulatorAfterIncomingMilliseconds},
             {"accumulator_remaining_ms", current.accumulatorRemainingMilliseconds},
@@ -240,6 +359,26 @@ namespace quantum::editor
             if (argument == "--stopped-preview")
             {
                 options.stoppedPreview = true;
+                continue;
+            }
+            if (argument == "--camera-orbit")
+            {
+                options.cameraOrbit = true;
+                continue;
+            }
+            if (argument == "--transition-drag")
+            {
+                options.transitionDrag = true;
+                continue;
+            }
+            if (argument == "--resize-window")
+            {
+                options.resizeWindow = true;
+                continue;
+            }
+            if (argument == "--disable-gpu-preview-sampling")
+            {
+                options.disableGpuPreviewSampling = true;
                 continue;
             }
             if (argument == "--dev-preview-smoke")
@@ -358,6 +497,35 @@ namespace quantum::editor
                 spikes_[index].hasNext = true;
             }
         }
+
+        ++currentTimeSlice_.renderedFrameCount;
+        currentTimeSlice_.fixedStepCount += sample.fixedPhysicsStepCount;
+        currentTimeSlice_.frameMilliseconds += sample.frameTimeMilliseconds;
+        currentTimeSlice_.physicsMilliseconds += sample.physicsMilliseconds;
+        currentTimeSlice_.fixedStepMilliseconds +=
+            sample.averagePhysicsStepMilliseconds
+            * static_cast<double>(sample.fixedPhysicsStepCount);
+        currentTimeSlice_.maximumFixedStepMilliseconds = std::max(
+            currentTimeSlice_.maximumFixedStepMilliseconds,
+            sample.maximumPhysicsStepMilliseconds);
+        if (sample.gpuTimingAvailable)
+        {
+            currentTimeSlice_.gpuExecutionMilliseconds +=
+                sample.gpuExecutionMilliseconds;
+            ++currentTimeSlice_.gpuTimingSampleCount;
+        }
+        addSolveCounters(currentTimeSlice_.solverCounters, sample.solverCounters);
+        currentTimeSlice_.endSeconds = currentTimeSlice_.beginSeconds
+            + currentTimeSlice_.frameMilliseconds / 1'000.0;
+        if (currentTimeSlice_.frameMilliseconds
+            >= previewSmokeTimeSliceMilliseconds)
+        {
+            timeSlices_.push_back(currentTimeSlice_);
+            currentTimeSlice_ = {};
+            currentTimeSlice_.beginSeconds = timeSlices_.back().endSeconds;
+            currentTimeSlice_.endSeconds = currentTimeSlice_.beginSeconds;
+        }
+
         ++totals_.renderedFrameCount;
         totals_.simulationFixedStepCount += sample.fixedPhysicsStepCount;
         if (sample.frameTimeMilliseconds > 0.0)
@@ -369,7 +537,29 @@ namespace quantum::editor
             totals_.averageFrameMilliseconds += sample.frameTimeMilliseconds;
             totals_.maximumFrameMilliseconds = std::max(
                 totals_.maximumFrameMilliseconds, sample.frameTimeMilliseconds);
+            if (sample.frameTimeMilliseconds > 16.667)
+                ++totals_.framesOver16Milliseconds;
+            if (sample.frameTimeMilliseconds > 33.333)
+                ++totals_.framesOver33Milliseconds;
         }
+
+        totals_.averageMainThreadFrameMilliseconds +=
+            sample.mainThreadFrameMilliseconds;
+        totals_.maximumMainThreadFrameMilliseconds = std::max(
+            totals_.maximumMainThreadFrameMilliseconds,
+            sample.mainThreadFrameMilliseconds);
+        totals_.averageEventPumpMilliseconds += sample.eventPumpMilliseconds;
+        totals_.maximumEventPumpMilliseconds = std::max(
+            totals_.maximumEventPumpMilliseconds, sample.eventPumpMilliseconds);
+        totals_.averagePreSimulationMilliseconds +=
+            sample.preSimulationCpuMilliseconds;
+        totals_.maximumPreSimulationMilliseconds = std::max(
+            totals_.maximumPreSimulationMilliseconds,
+            sample.preSimulationCpuMilliseconds);
+        if (sample.blockingEvents.viewportResized)
+            ++totals_.viewportResizeCount;
+        if (sample.swapchainRecreated)
+            ++totals_.swapchainRecreationCount;
 
         totals_.maximumStepsInRenderedFrame = std::max(
             totals_.maximumStepsInRenderedFrame, sample.fixedPhysicsStepCount);
@@ -414,6 +604,15 @@ namespace quantum::editor
         totals_.averagePresentMilliseconds += sample.presentCallMilliseconds;
         totals_.maximumPresentMilliseconds = std::max(
             totals_.maximumPresentMilliseconds, sample.presentCallMilliseconds);
+        if (sample.gpuTimingAvailable)
+        {
+            ++totals_.gpuTimingSampleCount;
+            totals_.averageGpuExecutionMilliseconds +=
+                sample.gpuExecutionMilliseconds;
+            totals_.maximumGpuExecutionMilliseconds = std::max(
+                totals_.maximumGpuExecutionMilliseconds,
+                sample.gpuExecutionMilliseconds);
+        }
 
         totals_.largestRawDeltaMilliseconds = std::max(
             totals_.largestRawDeltaMilliseconds,
@@ -431,26 +630,7 @@ namespace quantum::editor
         if (sample.discardedWallTimeMilliseconds > 0.0)
             ++totals_.discardedWallTimeFrameCount;
 
-        totals_.solverCounters.solveTrainPoseCalls +=
-            sample.solverCounters.solveTrainPoseCalls;
-        totals_.solverCounters.solveCarGeometryCalls +=
-            sample.solverCounters.solveCarGeometryCalls;
-        totals_.solverCounters.rigidBogieSolveCalls +=
-            sample.solverCounters.rigidBogieSolveCalls;
-        totals_.solverCounters.rigidBogieRefinementIterations +=
-            sample.solverCounters.rigidBogieRefinementIterations;
-        totals_.solverCounters.rigidBogieBracketExpansions +=
-            sample.solverCounters.rigidBogieBracketExpansions;
-        totals_.solverCounters.connectionCandidateEvaluations +=
-            sample.solverCounters.connectionCandidateEvaluations;
-        totals_.solverCounters.connectorRefinementIterations +=
-            sample.solverCounters.connectorRefinementIterations;
-        totals_.solverCounters.connectorFallbackUses +=
-            sample.solverCounters.connectorFallbackUses;
-        totals_.solverCounters.trackSampleCalls +=
-            sample.solverCounters.trackSampleCalls;
-        totals_.solverCounters.intervalHintMisses +=
-            sample.solverCounters.intervalHintMisses;
+        addSolveCounters(totals_.solverCounters, sample.solverCounters);
 
         if (sample.frameTimeMilliseconds >= options_.spikeFrameMilliseconds
             || sample.previewFrameSlotWaitMilliseconds >= options_.spikeFrameMilliseconds
@@ -514,8 +694,23 @@ namespace quantum::editor
             frameIntervalsMilliseconds_, 0.95);
         report.p99FrameMilliseconds = percentile(
             frameIntervalsMilliseconds_, 0.99);
+        if (!frameIntervalsMilliseconds_.empty())
+        {
+            std::vector<double> descending = frameIntervalsMilliseconds_;
+            std::sort(descending.begin(), descending.end(), std::greater<>());
+            const std::size_t slowCount = std::max<std::size_t>(1,
+                static_cast<std::size_t>(std::ceil(
+                    static_cast<double>(descending.size()) * 0.01)));
+            const double slowTotal = std::accumulate(
+                descending.begin(), descending.begin() + slowCount, 0.0);
+            report.onePercentLowFramesPerSecond =
+                1000.0 / (slowTotal / static_cast<double>(slowCount));
+        }
         if (frames > 0.0)
         {
+            report.averageMainThreadFrameMilliseconds /= frames;
+            report.averageEventPumpMilliseconds /= frames;
+            report.averagePreSimulationMilliseconds /= frames;
             report.averageStepsPerRenderedFrame =
                 static_cast<double>(report.simulationFixedStepCount) / frames;
             report.averagePhysicsMillisecondsPerFrame /= frames;
@@ -528,10 +723,18 @@ namespace quantum::editor
             report.averagePresentMilliseconds /= frames;
             report.averageRawDeltaMilliseconds /= frames;
         }
+        if (report.gpuTimingSampleCount > 0)
+        {
+            report.averageGpuExecutionMilliseconds /=
+                static_cast<double>(report.gpuTimingSampleCount);
+        }
         report.averageFixedStepMilliseconds = report.simulationFixedStepCount > 0
             ? totals_.averageFixedStepMilliseconds
                 / static_cast<double>(report.simulationFixedStepCount)
             : 0.0;
+        report.timeSlices = timeSlices_;
+        if (currentTimeSlice_.renderedFrameCount > 0)
+            report.timeSlices.push_back(currentTimeSlice_);
         report.spikes.assign(spikes_.begin(), spikes_.begin() + spikeCount_);
         std::sort(report.spikes.begin(), report.spikes.end(),
             [&](const auto& left, const auto& right)
@@ -556,6 +759,9 @@ namespace quantum::editor
 
         nlohmann::json spikes = nlohmann::json::array();
         for (const auto& spike : report.spikes) spikes.push_back(spikeJson(spike));
+        nlohmann::json timeSlices = nlohmann::json::array();
+        for (const auto& slice : report.timeSlices)
+            timeSlices.push_back(timeSliceJson(slice));
         const nlohmann::json json = {
             {"run", {
                 {"document_path", report.documentPath.string()},
@@ -574,7 +780,20 @@ namespace quantum::editor
                 {"p95_frame_ms", report.p95FrameMilliseconds},
                 {"p99_frame_ms", report.p99FrameMilliseconds},
                 {"minimum_fps", report.minimumFramesPerSecond},
+                {"one_percent_low_fps", report.onePercentLowFramesPerSecond},
+                {"frames_over_16_667_ms", report.framesOver16Milliseconds},
+                {"frames_over_33_333_ms", report.framesOver33Milliseconds},
                 {"percentile_samples_dropped", report.percentileSamplesDropped}}},
+            {"cpu_frame", {
+                {"average_main_thread_ms", report.averageMainThreadFrameMilliseconds},
+                {"maximum_main_thread_ms", report.maximumMainThreadFrameMilliseconds},
+                {"average_event_pump_ms", report.averageEventPumpMilliseconds},
+                {"maximum_event_pump_ms", report.maximumEventPumpMilliseconds},
+                {"average_pre_simulation_ms", report.averagePreSimulationMilliseconds},
+                {"maximum_pre_simulation_ms", report.maximumPreSimulationMilliseconds}}},
+            {"resize", {
+                {"viewport_resize_count", report.viewportResizeCount},
+                {"swapchain_recreation_count", report.swapchainRecreationCount}}},
             {"physics", {
                 {"total_steps", report.simulationFixedStepCount},
                 {"average_steps_per_rendered_frame", report.averageStepsPerRenderedFrame},
@@ -612,6 +831,10 @@ namespace quantum::editor
                 {"maximum_acquire_cpu_ms", report.maximumAcquireMilliseconds},
                 {"average_present_cpu_ms", report.averagePresentMilliseconds},
                 {"maximum_present_cpu_ms", report.maximumPresentMilliseconds}}},
+            {"gpu_frame", {
+                {"sample_count", report.gpuTimingSampleCount},
+                {"average_execution_ms", report.averageGpuExecutionMilliseconds},
+                {"maximum_execution_ms", report.maximumGpuExecutionMilliseconds}}},
             {"catch_up_raw_delta", {
                 {"largest_raw_incoming_delta_ms", report.largestRawDeltaMilliseconds},
                 {"average_raw_delta_ms", report.averageRawDeltaMilliseconds},
@@ -620,6 +843,7 @@ namespace quantum::editor
                 {"maximum_consecutive_catch_up_frame_count", report.maximumConsecutiveCatchUpFrameCount},
                 {"total_discarded_wall_time_ms", report.totalDiscardedWallTimeMilliseconds},
                 {"discarded_wall_time_frame_count", report.discardedWallTimeFrameCount}}},
+            {"time_slices", std::move(timeSlices)},
             {"spikes", std::move(spikes)}
         };
 
@@ -640,10 +864,30 @@ namespace quantum::editor
             << "Frames / fixed steps: " << report.renderedFrameCount << " / "
             << report.simulationFixedStepCount << '\n'
             << "FPS avg/min: " << report.averageFramesPerSecond << " / "
-            << report.minimumFramesPerSecond << '\n'
+                << report.minimumFramesPerSecond << '\n'
+            << "FPS 1% low: " << report.onePercentLowFramesPerSecond << '\n'
             << "Frame ms avg/max/p95/p99: " << report.averageFrameMilliseconds
             << " / " << report.maximumFrameMilliseconds << " / "
             << report.p95FrameMilliseconds << " / " << report.p99FrameMilliseconds << '\n'
+            << "Frames >16.667/>33.333 ms: "
+            << report.framesOver16Milliseconds << " / "
+            << report.framesOver33Milliseconds << '\n'
+            << "Main thread ms avg/max: "
+            << report.averageMainThreadFrameMilliseconds << " / "
+            << report.maximumMainThreadFrameMilliseconds << '\n'
+            << "Event pump ms avg/max: "
+            << report.averageEventPumpMilliseconds << " / "
+            << report.maximumEventPumpMilliseconds << '\n'
+            << "Pre-simulation ms avg/max: "
+            << report.averagePreSimulationMilliseconds << " / "
+            << report.maximumPreSimulationMilliseconds << '\n'
+            << "Viewport resizes / swapchain recreations: "
+            << report.viewportResizeCount << " / "
+            << report.swapchainRecreationCount << '\n'
+            << "GPU execution ms avg/max (samples): "
+            << report.averageGpuExecutionMilliseconds << " / "
+            << report.maximumGpuExecutionMilliseconds << " ("
+            << report.gpuTimingSampleCount << ")\n"
             << "Physics ms/frame avg/max: "
             << report.averagePhysicsMillisecondsPerFrame << " / "
             << report.maximumPhysicsMillisecondsPerFrame << '\n'
@@ -664,7 +908,26 @@ namespace quantum::editor
             << report.maximumExecutedStepCount << '\n'
             << "Discarded wall time: " << report.totalDiscardedWallTimeMilliseconds
             << " ms across " << report.discardedWallTimeFrameCount << " frame(s)\n"
+            << "Five-second time slices: " << report.timeSlices.size() << '\n'
             << "Retained spikes: " << report.spikes.size() << '\n';
+        for (const auto& slice : report.timeSlices)
+        {
+            const double elapsedSeconds = slice.frameMilliseconds / 1'000.0;
+            textOutput << "  " << slice.beginSeconds << "-" << slice.endSeconds
+                << " s: "
+                << (elapsedSeconds > 0.0
+                    ? static_cast<double>(slice.renderedFrameCount)
+                        / elapsedSeconds
+                    : 0.0)
+                << " FPS, "
+                << ratio(static_cast<double>(slice.fixedStepCount),
+                    slice.renderedFrameCount)
+                << " steps/frame, "
+                << ratio(slice.fixedStepMilliseconds, slice.fixedStepCount)
+                << " ms/step, "
+                << ratio(slice.physicsMilliseconds, slice.renderedFrameCount)
+                << " physics ms/frame\n";
+        }
         if (!report.failureMessage.empty())
             textOutput << "Failure: " << report.failureMessage << '\n';
         for (const auto& spike : report.spikes)

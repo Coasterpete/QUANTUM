@@ -943,24 +943,35 @@ namespace quantum::physics
                     {
                         ++counters->connectorRefinementIterations;
                     }
-const double midpoint = 0.5
-                        * (lower.backwardOffsetMeters
-                            + upper.backwardOffsetMeters);
-                    ConnectionCandidate middle = connectionCandidate(
+                    const double bracketWidth =
+                        upper.backwardOffsetMeters
+                        - lower.backwardOffsetMeters;
+                    const double secantFraction = -lower.residualMeters
+                        / (upper.residualMeters - lower.residualMeters);
+                    const double candidateOffset =
+                        std::isfinite(secantFraction)
+                            && secantFraction >= 0.01
+                            && secantFraction <= 0.99
+                        ? std::lerp(
+                            lower.backwardOffsetMeters,
+                            upper.backwardOffsetMeters,
+                            secantFraction)
+                        : lower.backwardOffsetMeters + 0.5 * bracketWidth;
+                    ConnectionCandidate candidate = connectionCandidate(
                         track,
                         followingDefinition,
                         leadingPose,
                         connection.rigidLengthMeters,
-                        midpoint,
+                        candidateOffset,
                         counters);
                     if (std::signbit(lower.residualMeters)
-                        == std::signbit(middle.residualMeters))
+                        == std::signbit(candidate.residualMeters))
                     {
-                        lower = std::move(middle);
+                        lower = std::move(candidate);
                     }
                     else
                     {
-                        upper = std::move(middle);
+                        upper = std::move(candidate);
                     }
                 }
 

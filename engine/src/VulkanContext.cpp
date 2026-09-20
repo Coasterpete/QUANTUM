@@ -1319,6 +1319,15 @@ namespace quantum::renderer
         createTrackPipelines();
         createCommandResources();
         createSynchronizationResources();
+
+        quantum::logging::logMessagef(
+            quantum::logging::LogLevel::Info,
+            "VK",
+            "Frame pacing initialized with %u frame(s) in flight, FIFO "
+            "presentation, and %zu swapchain image(s).",
+            maxFramesInFlight,
+            swapchainImages_.size()
+        );
     }
 
     void VulkanContext::selectPhysicalDevice()
@@ -2424,6 +2433,31 @@ namespace quantum::renderer
         {
             throwVulkanError("vkAllocateCommandBuffers", result);
         }
+
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+        timestampPeriodNanoseconds_ = properties.limits.timestampPeriod;
+
+        std::uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(
+            physicalDevice_, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(
+            physicalDevice_, &queueFamilyCount, queueFamilies.data());
+        timestampValidBits_ = queueFamilies.at(graphicsQueueFamily_)
+            .timestampValidBits;
+
+        if (timestampValidBits_ > 0 && timestampPeriodNanoseconds_ > 0.0F)
+        {
+            VkQueryPoolCreateInfo queryPoolInfo{};
+            queryPoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+            queryPoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            queryPoolInfo.queryCount = maxFramesInFlight * 2;
+            result = vkCreateQueryPool(
+                device_, &queryPoolInfo, nullptr, &frameTimestampQueryPool_);
+            if (result != VK_SUCCESS)
+                throwVulkanError("vkCreateQueryPool for frame timing", result);
+        }
     }
 
     void VulkanContext::createSynchronizationResources()
@@ -3368,6 +3402,15 @@ namespace quantum::renderer
             throwVulkanError("vkBeginCommandBuffer", result);
         }
 
+        if (frameTimestampQueryPool_ != VK_NULL_HANDLE)
+        {
+            const std::uint32_t firstQuery = frameSlot * 2;
+            vkCmdResetQueryPool(
+                commandBuffer, frameTimestampQueryPool_, firstQuery, 2);
+            vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                frameTimestampQueryPool_, firstQuery);
+        }
+
         if (viewportImage_ != VK_NULL_HANDLE)
         {
             VkImageMemoryBarrier toColorAttachmentBarrier{};
@@ -3945,6 +3988,13 @@ namespace quantum::renderer
             &toPresentBarrier
         );
 
+        if (frameTimestampQueryPool_ != VK_NULL_HANDLE)
+        {
+            vkCmdWriteTimestamp(commandBuffer,
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                frameTimestampQueryPool_, frameSlot * 2 + 1);
+        }
+
         result = vkEndCommandBuffer(commandBuffer);
 
         if (result != VK_SUCCESS)
@@ -3998,6 +4048,7 @@ namespace quantum::renderer
                 Clock::now().time_since_epoch()).count();
         };
         auto& synchronization = lastDrawFrameCpuTelemetry_.synchronization;
+        synchronization.framesInFlight = maxFramesInFlight;
         auto& submission = synchronization.current;
         submission.drawId = ++drawAttemptId_;
         submission.frameSlot = currentFrameSlot();
@@ -4052,6 +4103,36 @@ namespace quantum::renderer
         lastDrawFrameCpuTelemetry_.frameSlotWaitMilliseconds =
             std::chrono::duration<double, std::milli>(
                 Clock::now() - frameSlotWaitBegin).count();
+
+        if (frameTimestampQueryPool_ != VK_NULL_HANDLE
+            && frameTimestampSubmitted_[frameSlot])
+        {
+            std::array<std::uint64_t, 2> timestamps{};
+            const VkResult queryResult = vkGetQueryPoolResults(
+                device_, frameTimestampQueryPool_, frameSlot * 2, 2,
+                sizeof(timestamps), timestamps.data(), sizeof(std::uint64_t),
+                VK_QUERY_RESULT_64_BIT);
+            if (queryResult == VK_SUCCESS)
+            {
+                std::uint64_t delta = timestamps[1] - timestamps[0];
+                if (timestampValidBits_ < 64)
+                {
+                    const std::uint64_t mask =
+                        (std::uint64_t{1} << timestampValidBits_) - 1;
+                    delta &= mask;
+                }
+                lastDrawFrameCpuTelemetry_.gpuExecutionMilliseconds =
+                    static_cast<double>(delta)
+                    * static_cast<double>(timestampPeriodNanoseconds_)
+                    / 1'000'000.0;
+                lastDrawFrameCpuTelemetry_.gpuTimingAvailable = true;
+            }
+            else if (queryResult != VK_NOT_READY)
+            {
+                throwVulkanError("vkGetQueryPoolResults for frame timing",
+                    queryResult);
+            }
+        }
 
         if (trainPreviewFrameBuffers_[frameSlot].requiresUpdate)
         {
@@ -4148,6 +4229,11 @@ namespace quantum::renderer
         submission.submitEndMilliseconds = millisecondsNow();
         submission.submitResult = result;
         submission.submitted = result == VK_SUCCESS;
+        if (result == VK_SUCCESS
+            && frameTimestampQueryPool_ != VK_NULL_HANDLE)
+        {
+            frameTimestampSubmitted_[frameSlot] = true;
+        }
 
         if (result != VK_SUCCESS)
         {
@@ -4365,6 +4451,14 @@ namespace quantum::renderer
             }
 
             commandBuffers_.fill(VK_NULL_HANDLE);
+
+            if (frameTimestampQueryPool_ != VK_NULL_HANDLE)
+            {
+                vkDestroyQueryPool(
+                    device_, frameTimestampQueryPool_, nullptr);
+                frameTimestampQueryPool_ = VK_NULL_HANDLE;
+            }
+            frameTimestampSubmitted_.fill(false);
 
             if (commandPool_ != VK_NULL_HANDLE)
             {
