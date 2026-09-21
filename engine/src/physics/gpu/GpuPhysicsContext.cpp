@@ -1805,8 +1805,16 @@ namespace quantum::physics::gpu
         return results;
     }
 
-    std::vector<PhysicsTrackSample> GpuPhysicsContext::sampleTrackGpu(std::span<const GpuTrackQuery> queries)
+    std::vector<PhysicsTrackSample> GpuPhysicsContext::sampleTrackGpu(
+        const std::span<const GpuTrackQuery> queries,
+        GpuTrackSamplingTimings* const timings)
     {
+        using Clock = std::chrono::steady_clock;
+        if (timings)
+        {
+            *timings = {};
+        }
+        const auto totalBegin = Clock::now();
         lastSampleUsedGpu_ = false;
         if (queries.empty()) return {};
         if (!trackUploaded_)
@@ -1829,8 +1837,10 @@ namespace quantum::physics::gpu
         auto& frame = frames_[slot];
         uploadQueries(slot, queries);
         updateFrameDescriptors(slot);
+        const auto preparationEnd = Clock::now();
 
         // Reset fence and record command buffer
+        const auto recordingBegin = Clock::now();
         vkResetFences(device_, 1, &fence);
         VkCommandBuffer cmd = commandBuffers_[slot];
         vkResetCommandBuffer(cmd, 0);
@@ -1874,15 +1884,20 @@ namespace quantum::physics::gpu
 
         if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
             return sampleTrackForValidation(queries);
+        const auto recordingEnd = Clock::now();
 
         VkSubmitInfo submit{};
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1;
         submit.pCommandBuffers = &cmd;
+        const auto submitBegin = Clock::now();
         if (vkQueueSubmit(computeQueue_, 1, &submit, fence) != VK_SUCCESS)
             return sampleTrackForValidation(queries);
+        const auto submitEnd = Clock::now();
 
+        const auto waitBegin = Clock::now();
         const VkResult wait = vkWaitForFences(device_, 1, &fence, VK_TRUE, 5'000'000'000ULL);
+        const auto waitEnd = Clock::now();
         if (wait != VK_SUCCESS)
         {
             vkDeviceWaitIdle(device_);
@@ -1890,6 +1905,7 @@ namespace quantum::physics::gpu
         }
 
         // Invalidate readback if non-coherent, then copy out
+        const auto readbackBegin = Clock::now();
         vmaInvalidateAllocation(allocator_, frame.readbackAllocation, 0, VK_WHOLE_SIZE);
         std::vector<PhysicsTrackSample> out(queries.size());
         if (frame.readbackMapped)
@@ -1901,7 +1917,28 @@ namespace quantum::physics::gpu
             std::memcpy(out.data(), mapped, copy.size);
             vmaUnmapMemory(allocator_, frame.readbackAllocation);
         }
+        const auto readbackEnd = Clock::now();
         lastSampleUsedGpu_ = true;
+        if (timings)
+        {
+            const auto microseconds = [](const auto begin, const auto end)
+            {
+                return std::chrono::duration<double, std::micro>(
+                    end - begin).count();
+            };
+            timings->preparationMicroseconds = microseconds(
+                totalBegin, preparationEnd);
+            timings->commandRecordingMicroseconds = microseconds(
+                recordingBegin, recordingEnd);
+            timings->queueSubmitMicroseconds = microseconds(
+                submitBegin, submitEnd);
+            timings->fenceWaitMicroseconds = microseconds(
+                waitBegin, waitEnd);
+            timings->readbackMicroseconds = microseconds(
+                readbackBegin, readbackEnd);
+            timings->totalMicroseconds = microseconds(
+                totalBegin, readbackEnd);
+        }
         return out;
     }
 

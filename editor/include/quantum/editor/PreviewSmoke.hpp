@@ -35,6 +35,7 @@ namespace quantum::editor
         bool transitionDrag = false;
         bool resizeWindow = false;
         bool disableGpuPreviewSampling = false;
+        bool captureFrameTrace = false;
         std::optional<PreviewSmokeRegionStyleEdit> regionStyleEdit;
     };
 
@@ -145,6 +146,7 @@ namespace quantum::editor
         std::uint64_t percentileSamplesDropped = 0;
         std::vector<PreviewSmokeTimeSlice> timeSlices;
         std::vector<PreviewSmokeSpikeRecord> spikes;
+        std::vector<FramePerformanceSample> frameTrace;
     };
 
     class PreviewSmokeCollector
@@ -174,6 +176,7 @@ namespace quantum::editor
         std::optional<FramePerformanceSample> previousSample_;
         std::vector<PreviewSmokeTimeSlice> timeSlices_;
         PreviewSmokeTimeSlice currentTimeSlice_;
+        std::vector<FramePerformanceSample> frameTrace_;
         PreviewSmokeReport totals_;
     };
 

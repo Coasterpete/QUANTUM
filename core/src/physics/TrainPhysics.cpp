@@ -4932,10 +4932,18 @@ if (std::abs(solved.residualMeters)
 
         if (track.topology() == coaster::TopologyKind::OpenLinear)
         {
-committedPose = trySolveTrainPose(
+            if (counters)
+            {
+                ++counters->openBoundaryPoseAttempts;
+            }
+            committedPose = trySolveTrainPose(
                 track, definition, advancement.location, counters);
             if (!committedPose)
             {
+                if (counters)
+                {
+                    ++counters->openBoundaryPoseFailures;
+                }
                 boundaryIntervention = true;
                 consistBoundary = requestedDistance < 0.0
                     ? TrackBoundary::Start
@@ -4946,6 +4954,11 @@ committedPose = trySolveTrainPose(
                     iteration < boundaryRefinementIterationCount;
                     ++iteration)
                 {
+                    if (counters)
+                    {
+                        ++counters->openBoundaryRefinementIterations;
+                        ++counters->openBoundaryPoseAttempts;
+                    }
                     const double midpoint = 0.5
                         * (legalFraction + illegalFraction);
                     const TrackLocation candidate = track.advance(
@@ -4954,7 +4967,7 @@ committedPose = trySolveTrainPose(
                     TrackLocation orientedCandidate = candidate;
                     orientedCandidate.direction =
                         currentState.generalizedReferenceLocation.direction;
-if (auto candidatePose = trySolveTrainPose(
+                    if (auto candidatePose = trySolveTrainPose(
                             track, definition, orientedCandidate, counters))
                     {
                         legalFraction = midpoint;
@@ -4962,6 +4975,10 @@ if (auto candidatePose = trySolveTrainPose(
                     }
                     else
                     {
+                        if (counters)
+                        {
+                            ++counters->openBoundaryPoseFailures;
+                        }
                         illegalFraction = midpoint;
                     }
                 }
@@ -5014,7 +5031,7 @@ if (auto candidatePose = trySolveTrainPose(
 
         // Match Phase 1: pose is for the committed state while forces and the
         // per-car Jacobians are those used to integrate from the prior state.
-if (!committedPose)
+        if (!committedPose)
         {
             committedPose.emplace(solveTrainPoseForValidatedDefinition(
                 track, definition, nextState.generalizedReferenceLocation,

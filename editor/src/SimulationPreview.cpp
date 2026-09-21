@@ -429,6 +429,21 @@ namespace quantum::editor
             frameTelemetry_.accumulatorBeforeMilliseconds;
         frameTelemetry_.accumulatorRemainingMilliseconds =
             frameTelemetry_.accumulatorBeforeMilliseconds;
+        if (dynamicsState_)
+        {
+            frameTelemetry_.startingTick = dynamicsState_->tick;
+            frameTelemetry_.endingTick = dynamicsState_->tick;
+            frameTelemetry_.startingStationMeters = dynamicsState_
+                ->generalizedReferenceLocation.stationMeters;
+            frameTelemetry_.endingStationMeters =
+                frameTelemetry_.startingStationMeters;
+            frameTelemetry_.startingSignedVelocityMetersPerSecond =
+                dynamicsState_->signedVelocityMetersPerSecond;
+            frameTelemetry_.endingSignedVelocityMetersPerSecond =
+                frameTelemetry_.startingSignedVelocityMetersPerSecond;
+            frameTelemetry_.minimumAbsoluteVelocityMetersPerSecond = std::abs(
+                frameTelemetry_.startingSignedVelocityMetersPerSecond);
+        }
 
         if (playbackState_ != PlaybackState::Playing
             || !isAvailable()
@@ -487,6 +502,8 @@ namespace quantum::editor
                         - accumulatorToleranceSeconds
                 && stepCount < maximumStepsPerFrame)
             {
+                const double previousVelocity =
+                    dynamicsState_->signedVelocityMetersPerSecond;
                 const auto stepBegin = std::chrono::steady_clock::now();
                 physics::TrainStepResult result = physics::stepTrain(
                     *compiledTrack_,
@@ -512,6 +529,28 @@ namespace quantum::editor
                 previousPose_ = std::move(pose_);
                 dynamicsState_ = result.state;
                 pose_ = std::move(result.telemetry.pose);
+                const double nextVelocity =
+                    dynamicsState_->signedVelocityMetersPerSecond;
+                frameTelemetry_.minimumAbsoluteVelocityMetersPerSecond =
+                    std::min(
+                        frameTelemetry_.minimumAbsoluteVelocityMetersPerSecond,
+                        std::abs(nextVelocity));
+                if (nextVelocity == 0.0)
+                {
+                    ++frameTelemetry_.zeroVelocityStepCount;
+                }
+                if (previousVelocity != 0.0 && nextVelocity == 0.0)
+                {
+                    ++frameTelemetry_.zeroSpeedTransitionCount;
+                }
+                if (previousVelocity >= 0.0 && nextVelocity < 0.0)
+                {
+                    ++frameTelemetry_.rollbackStartCount;
+                }
+                if (nextVelocity < 0.0)
+                {
+                    ++frameTelemetry_.rollbackStepCount;
+                }
                 poseChanged = true;
                 accumulatorSeconds_ = std::max(
                     0.0,
@@ -552,21 +591,43 @@ namespace quantum::editor
                     const auto gpuStart = std::chrono::steady_clock::now();
                     bool usedGpu = false;
                     std::vector<physics::gpu::PhysicsTrackSample> gpuSamples;
+                    physics::gpu::GpuTrackSamplingTimings gpuTimings;
                     try
                     {
-                        gpuSamples = gpuContext_->sampleTrackGpu(queries);
+                        gpuSamples = gpuContext_->sampleTrackGpu(
+                            queries, &gpuTimings);
                         usedGpu = gpuContext_->lastSampleUsedGpu();
                     }
                     catch (...) { usedGpu = false; }
                     const double gpuMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gpuStart).count();
+                    frameTelemetry_.gpuPreviewSamplingMilliseconds += gpuMs;
+                    frameTelemetry_.gpuPreviewPreparationMilliseconds +=
+                        gpuTimings.preparationMicroseconds / 1'000.0;
+                    frameTelemetry_
+                        .gpuPreviewCommandRecordingMilliseconds +=
+                        gpuTimings.commandRecordingMicroseconds / 1'000.0;
+                    frameTelemetry_.gpuPreviewQueueSubmitMilliseconds +=
+                        gpuTimings.queueSubmitMicroseconds / 1'000.0;
+                    frameTelemetry_.gpuPreviewFenceWaitMilliseconds +=
+                        gpuTimings.fenceWaitMicroseconds / 1'000.0;
+                    frameTelemetry_.gpuPreviewReadbackMilliseconds +=
+                        gpuTimings.readbackMicroseconds / 1'000.0;
+                    frameTelemetry_.gpuPreviewQueryCount += queries.size();
                     if (usedGpu && gpuSamples.size() == queries.size())
                     {
                         ++gpuDispatchCount_;
+                        ++frameTelemetry_.gpuPreviewDispatchCount;
                         gpuBatchedSampleCount_ += queries.size();
                         // M2 real consumption: retain GPU samples for rebuildVertices
                         lastGpuBogieSamples_ = gpuSamples;
                         lastGpuBogieQueries_ = queries;
+                        const auto validationStart =
+                            std::chrono::steady_clock::now();
                         auto cpuSamples = gpuContext_->sampleTrackForValidation(queries);
+                        frameTelemetry_.gpuPreviewValidationMilliseconds +=
+                            std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now()
+                                    - validationStart).count();
                         double maxPosErr = 0.0, maxStationErr = 0.0, maxCurvErr = 0.0;
                         double maxTdeg = 0.0, maxLdeg = 0.0, maxUdeg = 0.0;
                         for (size_t i = 0; i < gpuSamples.size(); ++i)
@@ -605,6 +666,7 @@ namespace quantum::editor
                     else
                     {
                         ++cpuFallbackCount_;
+                        ++frameTelemetry_.gpuPreviewFallbackCount;
                         lastGpuBogieSamples_.clear();
                         lastGpuBogieQueries_.clear();
                     }
@@ -632,6 +694,11 @@ namespace quantum::editor
                     physicsEnd - physicsBegin).count();
             frameTelemetry_.accumulatorRemainingMilliseconds =
                 accumulatorSeconds_ * 1000.0;
+            frameTelemetry_.endingTick = dynamicsState_->tick;
+            frameTelemetry_.endingStationMeters = dynamicsState_
+                ->generalizedReferenceLocation.stationMeters;
+            frameTelemetry_.endingSignedVelocityMetersPerSecond =
+                dynamicsState_->signedVelocityMetersPerSecond;
             renderAlpha_ = playbackState_ == PlaybackState::Playing
                 ? std::clamp(accumulatorSeconds_
                     / physics::defaultFixedTimeStepSeconds, 0.0, 1.0)

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "layoutMode": "Shuttle",
   "physicalSettings": {
-    "initialSpeed": 6.0,
+    "initialSpeed": 10.0,
     "metersPerCoordinateUnit": 1.0,
     "gravityAcceleration": 9.80665
   },
