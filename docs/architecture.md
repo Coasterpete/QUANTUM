@@ -321,8 +321,10 @@ order. Empty collections produce empty visualization and draw streams.
 The renderer treats support members as an ordinary renderer-neutral line
 stream and draws them through the existing viewport line pipeline. Updates
 follow the retained track-curve buffer pattern: candidate allocation happens
-first, in-flight frames are drained before replacement, and only a successful
-upload may precede document commit. Empty updates logically clear the draw.
+first, publication replaces the active handle without draining the frame, and
+the displaced allocation is reclaimed only after its owning frame-slot fence
+completes. Only a successful upload may precede document commit. Empty updates
+logically clear the draw.
 Node markers and selected/hovered member
 emphasis are image-clipped ImGui overlays; M0B deliberately has no support
 mesh, material, profile shading, or support-specific graphics pipeline.

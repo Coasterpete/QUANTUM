@@ -524,7 +524,9 @@ namespace quantum::physics
             const std::size_t frontIndex,
             const std::size_t rearIndex,
             const double travelSign,
-            TrainSolveCounters* const counters = nullptr)
+            TrainSolveCounters* const counters = nullptr,
+            detail::RigidBogieContinuationHint* const continuationHint =
+                nullptr)
         {
             detail::ScopedCounterTimer timer{
                 counters,
@@ -560,6 +562,26 @@ namespace quantum::physics
                 return magnitude(stations.front.positionMeters
                     - stations.rear.positionMeters) - pivotSeparation;
             };
+            const auto solved = [&](SolvedBogieStations stations,
+                                    const double addedStationSeparation,
+                                    const std::size_t refinementCount,
+                                    const bool usedContinuation)
+            {
+                if (continuationHint)
+                {
+                    continuationHint->track = &track;
+                    continuationHint->referenceLocation = referenceLocation;
+                    continuationHint->nominalStationSeparationMeters =
+                        nominalStationSeparation;
+                    continuationHint->pivotSeparationMeters = pivotSeparation;
+                    continuationHint->addedStationSeparationMeters =
+                        addedStationSeparation;
+                    continuationHint->continuationRecommended =
+                        usedContinuation || refinementCount > 1;
+                    continuationHint->valid = true;
+                }
+                return stations;
+            };
 
             SolvedBogieStations lowerStations = sampleAt(0.0);
             double lowerResidual = residual(lowerStations);
@@ -567,7 +589,7 @@ namespace quantum::physics
                 lowerStations.front, lowerStations.rear, pivotSeparation);
             if (std::abs(lowerResidual) <= tolerance)
             {
-                return lowerStations;
+                return solved(std::move(lowerStations), 0.0, 0, false);
             }
             if (lowerResidual > 0.0)
             {
@@ -623,12 +645,51 @@ namespace quantum::physics
             }
             if (std::abs(upperResidual) <= tolerance)
             {
-                return upperStations;
+                return solved(
+                    std::move(upperStations), upperAdjustment, 0, false);
             }
             if (upperResidual < 0.0)
             {
                 throw std::domain_error(
                     "The authored rigid bogie pivots cannot be placed within the local track interval.");
+            }
+
+            bool useContinuationHint = false;
+            double hintedAdjustment = 0.0;
+            if (continuationHint && continuationHint->valid)
+            {
+                hintedAdjustment =
+                    continuationHint->addedStationSeparationMeters;
+                const double nearbyDistance = std::abs(
+                    referenceLocation.stationMeters
+                    - continuationHint->referenceLocation.stationMeters);
+                const double bracketWidth =
+                    upperAdjustment - lowerAdjustment;
+                const double bracketFraction =
+                    (hintedAdjustment - lowerAdjustment) / bracketWidth;
+                const bool appropriate =
+                    continuationHint->track == &track
+                    && continuationHint->referenceLocation.path
+                        == referenceLocation.path
+                    && continuationHint->referenceLocation.direction
+                        == referenceLocation.direction
+                    && std::isfinite(hintedAdjustment)
+                    && std::isfinite(nearbyDistance)
+                    && continuationHint->nominalStationSeparationMeters
+                        == nominalStationSeparation
+                    && continuationHint->pivotSeparationMeters
+                        == pivotSeparation
+                    // A large station jump includes a closed-circuit seam and
+                    // is not adjacent geometry for this short-lived hint.
+                    && nearbyDistance <= pivotSeparation
+                    && std::isfinite(bracketFraction)
+                    && bracketFraction > 0.0
+                    && bracketFraction < 1.0
+                    // Cheap adjacent solves retain their original path. Once
+                    // the current local geometry needs safeguarded refinement,
+                    // continuation remains active for this connector solve.
+                    && continuationHint->continuationRecommended;
+                useContinuationHint = appropriate;
             }
 
             for (std::size_t iteration = 0;
@@ -643,22 +704,37 @@ namespace quantum::physics
                     upperAdjustment - lowerAdjustment;
                 const double secantFraction = -lowerResidual
                     / (upperResidual - lowerResidual);
-                const double adjustment =
-                    std::isfinite(secantFraction)
-                        && secantFraction >= 0.01
-                        && secantFraction <= 0.99
-                    ? std::lerp(
-                        lowerAdjustment,
-                        upperAdjustment,
-                        secantFraction)
-                    : lowerAdjustment + 0.5 * bracketWidth;
+                double adjustment = lowerAdjustment + 0.5 * bracketWidth;
+                if (iteration == 0 && useContinuationHint)
+                {
+                    adjustment = hintedAdjustment;
+                }
+                else
+                {
+                    const bool secantIsSafeguarded =
+                        std::isfinite(secantFraction)
+                        && (iteration == 1 && useContinuationHint
+                            ? secantFraction > 0.0
+                                && secantFraction < 1.0
+                            : secantFraction >= 0.01
+                                && secantFraction <= 0.99);
+                    if (secantIsSafeguarded)
+                    {
+                        adjustment = std::lerp(
+                            lowerAdjustment,
+                            upperAdjustment,
+                            secantFraction);
+                    }
+                }
                 SolvedBogieStations candidate = sampleAt(adjustment);
                 const double candidateResidual = residual(candidate);
                 tolerance = rigidBogieTolerance(
                     candidate.front, candidate.rear, pivotSeparation);
                 if (std::abs(candidateResidual) <= tolerance)
                 {
-                    return candidate;
+                    return solved(
+                        std::move(candidate), adjustment, iteration + 1,
+                        useContinuationHint);
                 }
                 if (candidateResidual < 0.0)
                 {
@@ -680,7 +756,11 @@ namespace quantum::physics
             if (std::abs(residual(best)) <= rigidBogieTolerance(
                     best.front, best.rear, pivotSeparation))
             {
-                return best;
+                return solved(best,
+                    &best == &lowerStations
+                        ? lowerAdjustment : upperAdjustment,
+                    bogieStationRefinementIterationCount,
+                    useContinuationHint);
             }
             throw std::domain_error(
                 "The rigid-bogie station solve did not converge within tolerance.");
@@ -712,7 +792,8 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
             const TrackLocation& referenceLocation,
-            TrainSolveCounters* const counters = nullptr)
+            TrainSolveCounters* const counters = nullptr,
+            detail::RigidBogieContinuationHint* const bogieHint = nullptr)
         {
             detail::ScopedCounterTimer timer{
                 counters,
@@ -751,7 +832,8 @@ namespace quantum::physics
                 frontIndex,
                 rearIndex,
                 travelSign,
-                counters);
+                counters,
+                bogieHint);
             result.front = std::move(stations.front);
             result.rear = std::move(stations.rear);
             result.bodyFrame = bodyFrameFromBogies(
@@ -797,10 +879,11 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
             const TrackLocation& referenceLocation,
-            TrainSolveCounters* const counters = nullptr)
+            TrainSolveCounters* const counters = nullptr,
+            detail::RigidBogieContinuationHint* const bogieHint = nullptr)
         {
             SolvedCarBodyGeometry body = solveCarBodyGeometry(
-                track, definition, referenceLocation, counters);
+                track, definition, referenceLocation, counters, bogieHint);
             SolvedCarGeometry result{
                 std::move(body.front),
                 std::move(body.rear),
@@ -1237,10 +1320,11 @@ namespace quantum::physics
         const CarDefinition& definition,
         const TrackLocation& referenceLocation,
         const CarLoadout& loadout,
-        TrainSolveCounters* const counters)
+        TrainSolveCounters* const counters,
+        RigidBogieContinuationHint* const bogieHint)
     {
         const SolvedCarGeometry geometry = solveCarGeometry(
-            track, definition, referenceLocation, counters);
+            track, definition, referenceLocation, counters, bogieHint);
         const glm::dquat bodyOrientation = orientationFromFrame(
             geometry.bodyFrame);
 
@@ -1302,10 +1386,11 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const CarDefinition& definition,
         const TrackLocation& referenceLocation,
-        TrainSolveCounters* const counters)
+        TrainSolveCounters* const counters,
+        RigidBogieContinuationHint* const bogieHint)
     {
         const SolvedCarBodyGeometry geometry = solveCarBodyGeometry(
-            track, definition, referenceLocation, counters);
+            track, definition, referenceLocation, counters, bogieHint);
         const glm::dvec3 frontHitchPositionMeters = transformPoint(
             geometry.bodyPositionMeters,
             geometry.bodyFrame,

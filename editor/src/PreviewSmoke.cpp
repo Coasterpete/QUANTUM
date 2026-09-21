@@ -613,6 +613,13 @@ namespace quantum::editor
                 totals_.maximumGpuExecutionMilliseconds,
                 sample.gpuExecutionMilliseconds);
         }
+        totals_.maximumDeferredBufferCount = std::max(
+            totals_.maximumDeferredBufferCount,
+            sample.deferredBufferCountBeforeReclaim);
+        totals_.maximumDeferredBufferBytes = std::max(
+            totals_.maximumDeferredBufferBytes,
+            sample.deferredBufferBytesBeforeReclaim);
+        totals_.totalReclaimedBufferCount += sample.reclaimedBufferCount;
 
         totals_.largestRawDeltaMilliseconds = std::max(
             totals_.largestRawDeltaMilliseconds,
@@ -835,6 +842,10 @@ namespace quantum::editor
                 {"sample_count", report.gpuTimingSampleCount},
                 {"average_execution_ms", report.averageGpuExecutionMilliseconds},
                 {"maximum_execution_ms", report.maximumGpuExecutionMilliseconds}}},
+            {"deferred_buffers", {
+                {"maximum_pending_count", report.maximumDeferredBufferCount},
+                {"maximum_pending_bytes", report.maximumDeferredBufferBytes},
+                {"total_reclaimed_count", report.totalReclaimedBufferCount}}},
             {"catch_up_raw_delta", {
                 {"largest_raw_incoming_delta_ms", report.largestRawDeltaMilliseconds},
                 {"average_raw_delta_ms", report.averageRawDeltaMilliseconds},
@@ -888,6 +899,10 @@ namespace quantum::editor
             << report.averageGpuExecutionMilliseconds << " / "
             << report.maximumGpuExecutionMilliseconds << " ("
             << report.gpuTimingSampleCount << ")\n"
+            << "Deferred buffers max count/bytes, total reclaimed: "
+            << report.maximumDeferredBufferCount << " / "
+            << report.maximumDeferredBufferBytes << " / "
+            << report.totalReclaimedBufferCount << '\n'
             << "Physics ms/frame avg/max: "
             << report.averagePhysicsMillisecondsPerFrame << " / "
             << report.maximumPhysicsMillisecondsPerFrame << '\n'

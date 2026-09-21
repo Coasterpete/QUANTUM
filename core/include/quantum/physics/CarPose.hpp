@@ -172,6 +172,21 @@ namespace quantum::physics
 
     namespace detail
     {
+        // Short-lived state for adjacent exact solves of the same car on the
+        // same track. The rigid-bogie solver validates every field before it
+        // uses the previous adjustment and retains its bracketed solve as the
+        // fallback.
+        struct RigidBogieContinuationHint
+        {
+            const CompiledPhysicsTrack* track = nullptr;
+            TrackLocation referenceLocation;
+            double nominalStationSeparationMeters = 0.0;
+            double pivotSeparationMeters = 0.0;
+            double addedStationSeparationMeters = 0.0;
+            bool continuationRecommended = false;
+            bool valid = false;
+        };
+
         // Internal seam for train solvers that have already validated the
         // complete immutable TrainDefinition before evaluating candidates.
         [[nodiscard]] CarPose solveCarPoseForValidatedDefinition(
@@ -179,7 +194,8 @@ namespace quantum::physics
             const CarDefinition& definition,
             const TrackLocation& referenceLocation,
             const CarLoadout& loadout,
-            TrainSolveCounters* counters = nullptr);
+            TrainSolveCounters* counters = nullptr,
+            RigidBogieContinuationHint* bogieHint = nullptr);
 
         // Connector root searches need only this point for each candidate;
         // constructing complete diagnostic poses there is redundant.
@@ -188,7 +204,8 @@ namespace quantum::physics
             const CompiledPhysicsTrack& track,
             const CarDefinition& definition,
             const TrackLocation& referenceLocation,
-            TrainSolveCounters* counters = nullptr);
+            TrainSolveCounters* counters = nullptr,
+            RigidBogieContinuationHint* bogieHint = nullptr);
     }
 
     // Read-only solved bogie state. trackFrame() is the canonical increasing-
@@ -238,7 +255,8 @@ namespace quantum::physics
             const CarDefinition&,
             const TrackLocation&,
             const CarLoadout&,
-            TrainSolveCounters*);
+            TrainSolveCounters*,
+            detail::RigidBogieContinuationHint*);
     };
 
     // Immutable/read-only result for one physical car. The two solved bogies
@@ -298,7 +316,8 @@ namespace quantum::physics
             const CarDefinition&,
             const TrackLocation&,
             const CarLoadout&,
-            TrainSolveCounters*);
+            TrainSolveCounters*,
+            detail::RigidBogieContinuationHint*);
     };
 
     // The reference location corresponds nominally to car-local X = 0. Bogie

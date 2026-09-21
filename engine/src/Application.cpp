@@ -3454,6 +3454,12 @@ editorUi.selectSection(restoredSelection, true);
                                     draw.presentCallMilliseconds,
                                 .gpuExecutionMilliseconds =
                                     draw.gpuExecutionMilliseconds,
+                                .deferredBufferCountBeforeReclaim =
+                                    draw.deferredBufferCountBeforeReclaim,
+                                .deferredBufferBytesBeforeReclaim =
+                                    draw.deferredBufferBytesBeforeReclaim,
+                                .reclaimedBufferCount =
+                                    draw.reclaimedBufferCount,
                                 .gpuTimingAvailable =
                                     draw.gpuTimingAvailable,
                                 .previewStreamUpdated =
