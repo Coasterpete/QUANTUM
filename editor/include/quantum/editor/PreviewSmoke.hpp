@@ -35,6 +35,7 @@ namespace quantum::editor
         bool transitionDrag = false;
         bool resizeWindow = false;
         bool disableGpuPreviewSampling = false;
+        bool enableGpuValidation = false;
         bool captureFrameTrace = false;
         std::optional<PreviewSmokeRegionStyleEdit> regionStyleEdit;
     };

@@ -573,6 +573,7 @@ namespace
         SimulationPreview gpuPreview;
         SimulationPreview cpuPreview;
         gpuPreview.setGpuContext(&gpu);
+        gpuPreview.setGpuValidationEnabled(true);
         const auto initialTrack = straightTrack();
         require(gpuPreview.rebuild(initialTrack)
                 && cpuPreview.rebuild(initialTrack),

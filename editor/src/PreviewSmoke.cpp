@@ -483,6 +483,11 @@ namespace quantum::editor
                 options.disableGpuPreviewSampling = true;
                 continue;
             }
+            if (argument == "--enable-gpu-validation")
+            {
+                options.enableGpuValidation = true;
+                continue;
+            }
             if (argument == "--frame-trace")
             {
                 options.captureFrameTrace = true;
