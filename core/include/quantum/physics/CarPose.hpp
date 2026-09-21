@@ -38,6 +38,11 @@ namespace quantum::physics
         std::uint64_t trackSampleCalls = 0;
         // General searches after a hint cannot resolve locally.
         std::uint64_t intervalHintMisses = 0;
+        // Open-track committed-pose probes and the boundary bisection they
+        // trigger. These distinguish endpoint handling from ordinary rollback.
+        std::uint64_t openBoundaryPoseAttempts = 0;
+        std::uint64_t openBoundaryPoseFailures = 0;
+        std::uint64_t openBoundaryRefinementIterations = 0;
 
         // Inclusive timings are collected only when this diagnostics object is
         // supplied. Nested totals intentionally overlap so callers can compare

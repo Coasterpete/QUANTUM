@@ -65,6 +65,7 @@ namespace
             "--camera-orbit", "--transition-drag",
             "--resize-window",
             "--disable-gpu-preview-sampling",
+            "--frame-trace",
             "--region-style-edit", "hardware-spacing"});
         require(stoppedEdit && stoppedEdit->has_value()
                 && (**stoppedEdit).stoppedPreview
@@ -72,6 +73,7 @@ namespace
                 && (**stoppedEdit).transitionDrag
                 && (**stoppedEdit).resizeWindow
                 && (**stoppedEdit).disableGpuPreviewSampling
+                && (**stoppedEdit).captureFrameTrace
                 && (**stoppedEdit).regionStyleEdit
                     == quantum::editor::PreviewSmokeRegionStyleEdit::
                         HardwareSpacing,
@@ -128,6 +130,7 @@ namespace
         options.documentPath = "fixture.quantum";
         options.spikeFrameMilliseconds = 1000.0;
         options.spikeStepThreshold = 1000;
+        options.captureFrameTrace = true;
         quantum::editor::PreviewSmokeCollector collector(options);
 
         quantum::editor::FramePerformanceSample first;
@@ -155,6 +158,9 @@ namespace
         first.solverCounters.rigidBogieBracketExpansions = 2;
         first.solverCounters.connectorRefinementIterations = 3;
         first.solverCounters.intervalHintMisses = 4;
+        first.solverCounters.openBoundaryPoseAttempts = 5;
+        first.solverCounters.openBoundaryPoseFailures = 1;
+        first.solverCounters.openBoundaryRefinementIterations = 2;
         collector.record(first);
 
         auto second = first;
@@ -178,6 +184,9 @@ namespace
         second.solverCounters.rigidBogieBracketExpansions = 5;
         second.solverCounters.connectorRefinementIterations = 6;
         second.solverCounters.intervalHintMisses = 7;
+        second.solverCounters.openBoundaryPoseAttempts = 8;
+        second.solverCounters.openBoundaryPoseFailures = 3;
+        second.solverCounters.openBoundaryRefinementIterations = 4;
         collector.record(second);
 
         const auto report = collector.finish(1.0, true, false);
@@ -210,8 +219,15 @@ namespace
             1.0e-12, "discarded time sum");
         require(report.solverCounters.rigidBogieBracketExpansions == 7
                 && report.solverCounters.connectorRefinementIterations == 9
-                && report.solverCounters.intervalHintMisses == 11,
+                && report.solverCounters.intervalHintMisses == 11
+                && report.solverCounters.openBoundaryPoseAttempts == 13
+                && report.solverCounters.openBoundaryPoseFailures == 4
+                && report.solverCounters.openBoundaryRefinementIterations == 6,
             "solver diagnostics aggregate without per-iteration reporting");
+        require(report.frameTrace.size() == 2
+                && report.frameTrace.front().frameId == 1
+                && report.frameTrace.back().frameId == 2,
+            "opt-in frame trace retains every recorded frame");
     }
 
     void spikeRetentionIsBounded()

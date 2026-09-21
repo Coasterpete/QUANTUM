@@ -47,6 +47,16 @@ namespace quantum::physics::gpu
     static_assert(offsetof(PhysicsTrackSample, tangent) == 64, "PhysicsTrackSample tangent offset");
     static_assert(offsetof(PhysicsTrackSample, curvature) == 160, "PhysicsTrackSample curvature offset");
 
+    struct GpuTrackSamplingTimings
+    {
+        double preparationMicroseconds = 0.0;
+        double commandRecordingMicroseconds = 0.0;
+        double queueSubmitMicroseconds = 0.0;
+        double fenceWaitMicroseconds = 0.0;
+        double readbackMicroseconds = 0.0;
+        double totalMicroseconds = 0.0;
+    };
+
     enum class GpuRigidBogieStatus : std::uint32_t
     {
         Solved = 0,
@@ -344,7 +354,8 @@ namespace quantum::physics::gpu
         [[nodiscard]] bool gpuTrackReady() const noexcept;
         [[nodiscard]] bool lastSampleUsedGpu() const noexcept;
         [[nodiscard]] std::vector<PhysicsTrackSample> sampleTrackGpu(
-            std::span<const GpuTrackQuery> queries);
+            std::span<const GpuTrackQuery> queries,
+            GpuTrackSamplingTimings* timings = nullptr);
         [[nodiscard]] bool gpuRigidBogieReady() const noexcept;
         [[nodiscard]] GpuComputeDeviceInfo computeDeviceInfo() const noexcept;
         [[nodiscard]] std::vector<GpuRigidBogieResult> solveRigidBogiesGpu(

@@ -35,6 +35,27 @@ namespace quantum::editor
         std::size_t renderPoseSolveCount = 0;
         std::size_t renderPoseFailureCount = 0;
         double vertexPreparationMilliseconds = 0.0;
+        std::uint64_t startingTick = 0;
+        std::uint64_t endingTick = 0;
+        double startingStationMeters = 0.0;
+        double endingStationMeters = 0.0;
+        double startingSignedVelocityMetersPerSecond = 0.0;
+        double endingSignedVelocityMetersPerSecond = 0.0;
+        double minimumAbsoluteVelocityMetersPerSecond = 0.0;
+        std::size_t zeroVelocityStepCount = 0;
+        std::size_t zeroSpeedTransitionCount = 0;
+        std::size_t rollbackStartCount = 0;
+        std::size_t rollbackStepCount = 0;
+        double gpuPreviewSamplingMilliseconds = 0.0;
+        double gpuPreviewPreparationMilliseconds = 0.0;
+        double gpuPreviewCommandRecordingMilliseconds = 0.0;
+        double gpuPreviewQueueSubmitMilliseconds = 0.0;
+        double gpuPreviewFenceWaitMilliseconds = 0.0;
+        double gpuPreviewReadbackMilliseconds = 0.0;
+        double gpuPreviewValidationMilliseconds = 0.0;
+        std::size_t gpuPreviewQueryCount = 0;
+        std::size_t gpuPreviewDispatchCount = 0;
+        std::size_t gpuPreviewFallbackCount = 0;
         physics::TrainSolveCounters solveCounters;
     };
 

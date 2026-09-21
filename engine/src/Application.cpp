@@ -3492,6 +3492,46 @@ editorUi.selectSection(restoredSelection, true);
                                 .renderPoseFailureCount = preview.renderPoseFailureCount,
                                 .previewVertexPreparationMilliseconds =
                                     preview.vertexPreparationMilliseconds,
+                                .simulationStartingTick = preview.startingTick,
+                                .simulationEndingTick = preview.endingTick,
+                                .simulationStartingStationMeters =
+                                    preview.startingStationMeters,
+                                .simulationEndingStationMeters =
+                                    preview.endingStationMeters,
+                                .startingSignedVelocityMetersPerSecond =
+                                    preview.startingSignedVelocityMetersPerSecond,
+                                .endingSignedVelocityMetersPerSecond =
+                                    preview.endingSignedVelocityMetersPerSecond,
+                                .minimumAbsoluteVelocityMetersPerSecond =
+                                    preview.minimumAbsoluteVelocityMetersPerSecond,
+                                .zeroVelocityStepCount =
+                                    preview.zeroVelocityStepCount,
+                                .zeroSpeedTransitionCount =
+                                    preview.zeroSpeedTransitionCount,
+                                .rollbackStartCount = preview.rollbackStartCount,
+                                .rollbackStepCount = preview.rollbackStepCount,
+                                .boundaryStopped = preview.boundaryStopped,
+                                .gpuPreviewSamplingMilliseconds =
+                                    preview.gpuPreviewSamplingMilliseconds,
+                                .gpuPreviewPreparationMilliseconds =
+                                    preview.gpuPreviewPreparationMilliseconds,
+                                .gpuPreviewCommandRecordingMilliseconds =
+                                    preview
+                                        .gpuPreviewCommandRecordingMilliseconds,
+                                .gpuPreviewQueueSubmitMilliseconds =
+                                    preview.gpuPreviewQueueSubmitMilliseconds,
+                                .gpuPreviewFenceWaitMilliseconds =
+                                    preview.gpuPreviewFenceWaitMilliseconds,
+                                .gpuPreviewReadbackMilliseconds =
+                                    preview.gpuPreviewReadbackMilliseconds,
+                                .gpuPreviewValidationMilliseconds =
+                                    preview.gpuPreviewValidationMilliseconds,
+                                .gpuPreviewQueryCount =
+                                    preview.gpuPreviewQueryCount,
+                                .gpuPreviewDispatchCount =
+                                    preview.gpuPreviewDispatchCount,
+                                .gpuPreviewFallbackCount =
+                                    preview.gpuPreviewFallbackCount,
                                 .previewVertexPublishMilliseconds =
                                     previewVertexPublishMilliseconds,
                                 .previewFrameSlotUpdateMilliseconds =

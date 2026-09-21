@@ -43,6 +43,12 @@ namespace
         destination.connectorFallbackUses += source.connectorFallbackUses;
         destination.trackSampleCalls += source.trackSampleCalls;
         destination.intervalHintMisses += source.intervalHintMisses;
+        destination.openBoundaryPoseAttempts +=
+            source.openBoundaryPoseAttempts;
+        destination.openBoundaryPoseFailures +=
+            source.openBoundaryPoseFailures;
+        destination.openBoundaryRefinementIterations +=
+            source.openBoundaryRefinementIterations;
         destination.solveTrainPoseNanoseconds +=
             source.solveTrainPoseNanoseconds;
         destination.solveCarGeometryNanoseconds +=
@@ -265,12 +271,32 @@ namespace
             {"discarded_wall_time_ms", current.discardedWallTimeMilliseconds},
             {"requested_steps", current.requestedPhysicsStepCount},
             {"executed_steps", current.fixedPhysicsStepCount},
+            {"simulation_tick", {
+                {"begin", current.simulationStartingTick},
+                {"end", current.simulationEndingTick}}},
+            {"station_m", {
+                {"begin", current.simulationStartingStationMeters},
+                {"end", current.simulationEndingStationMeters}}},
+            {"signed_velocity_mps", {
+                {"begin", current.startingSignedVelocityMetersPerSecond},
+                {"end", current.endingSignedVelocityMetersPerSecond},
+                {"minimum_absolute",
+                    current.minimumAbsoluteVelocityMetersPerSecond}}},
+            {"zero_velocity_steps", current.zeroVelocityStepCount},
+            {"zero_speed_transitions", current.zeroSpeedTransitionCount},
+            {"rollback_starts", current.rollbackStartCount},
+            {"rollback_steps", current.rollbackStepCount},
+            {"boundary_stopped", current.boundaryStopped},
             {"maximum_step_limit_hit", current.maximumPhysicsStepsHit},
             {"physics_step_cpu_ms", {
                 {"minimum", current.minimumPhysicsStepMilliseconds},
                 {"average", current.averagePhysicsStepMilliseconds},
                 {"maximum", current.maximumPhysicsStepMilliseconds}}},
             {"total_physics_cpu_ms", current.physicsMilliseconds},
+            {"gpu_preview_sampling_cpu_ms",
+                current.gpuPreviewSamplingMilliseconds},
+            {"gpu_preview_validation_cpu_ms",
+                current.gpuPreviewValidationMilliseconds},
             {"interpolation_cpu_ms", current.interpolationMilliseconds},
             {"current_pre_simulation_cpu_ms", current.preSimulationCpuMilliseconds},
             {"event_pump_ms", current.eventPumpMilliseconds},
@@ -301,6 +327,82 @@ namespace
                 {"total_physics_cpu_ms", spike.next.physicsMilliseconds}}
                 : nlohmann::json(nullptr)},
             {"consecutive_catch_up_frames", current.consecutiveCatchUpFrameCount}
+        };
+    }
+
+    [[nodiscard]] nlohmann::json frameTraceJson(
+        const FramePerformanceSample& sample)
+    {
+        const auto& counters = sample.solverCounters;
+        return {
+            {"frame_id", sample.frameId},
+            {"simulation_tick_begin", sample.simulationStartingTick},
+            {"simulation_tick_end", sample.simulationEndingTick},
+            {"station_begin_m", sample.simulationStartingStationMeters},
+            {"station_end_m", sample.simulationEndingStationMeters},
+            {"signed_velocity_begin_mps",
+                sample.startingSignedVelocityMetersPerSecond},
+            {"signed_velocity_end_mps",
+                sample.endingSignedVelocityMetersPerSecond},
+            {"minimum_absolute_velocity_mps",
+                sample.minimumAbsoluteVelocityMetersPerSecond},
+            {"zero_velocity_steps", sample.zeroVelocityStepCount},
+            {"zero_speed_transitions", sample.zeroSpeedTransitionCount},
+            {"rollback_starts", sample.rollbackStartCount},
+            {"rollback_steps", sample.rollbackStepCount},
+            {"boundary_stopped", sample.boundaryStopped},
+            {"raw_delta_ms", sample.rawSimulationDeltaMilliseconds},
+            {"frame_interval_ms", sample.frameTimeMilliseconds},
+            {"requested_steps", sample.requestedPhysicsStepCount},
+            {"executed_steps", sample.fixedPhysicsStepCount},
+            {"fixed_step_cpu_ms", {
+                {"minimum", sample.minimumPhysicsStepMilliseconds},
+                {"average", sample.averagePhysicsStepMilliseconds},
+                {"maximum", sample.maximumPhysicsStepMilliseconds}}},
+            {"physics_and_gpu_preview_cpu_ms", sample.physicsMilliseconds},
+            {"interpolation_cpu_ms", sample.interpolationMilliseconds},
+            {"render_pose_solve_cpu_ms", sample.renderPoseSolveMilliseconds},
+            {"render_pose_solves", sample.renderPoseSolveCount},
+            {"gpu_preview", {
+                {"sampling_cpu_ms", sample.gpuPreviewSamplingMilliseconds},
+                {"preparation_cpu_ms",
+                    sample.gpuPreviewPreparationMilliseconds},
+                {"command_recording_cpu_ms",
+                    sample.gpuPreviewCommandRecordingMilliseconds},
+                {"queue_submit_cpu_ms",
+                    sample.gpuPreviewQueueSubmitMilliseconds},
+                {"fence_wait_cpu_ms",
+                    sample.gpuPreviewFenceWaitMilliseconds},
+                {"readback_cpu_ms",
+                    sample.gpuPreviewReadbackMilliseconds},
+                {"validation_cpu_ms", sample.gpuPreviewValidationMilliseconds},
+                {"queries", sample.gpuPreviewQueryCount},
+                {"dispatches", sample.gpuPreviewDispatchCount},
+                {"fallbacks", sample.gpuPreviewFallbackCount}}},
+            {"renderer", {
+                {"gpu_execution_ms", sample.gpuTimingAvailable
+                    ? nlohmann::json(sample.gpuExecutionMilliseconds)
+                    : nlohmann::json(nullptr)},
+                {"fence_wait_ms", sample.previewFrameSlotWaitMilliseconds},
+                {"acquire_cpu_ms", sample.acquireCallMilliseconds},
+                {"present_cpu_ms", sample.presentCallMilliseconds}}},
+            {"solver", {
+                {"solve_train_pose_calls", counters.solveTrainPoseCalls},
+                {"rigid_bogie_solve_calls", counters.rigidBogieSolveCalls},
+                {"rigid_bogie_refinement_iterations",
+                    counters.rigidBogieRefinementIterations},
+                {"connection_candidate_evaluations",
+                    counters.connectionCandidateEvaluations},
+                {"connector_refinement_iterations",
+                    counters.connectorRefinementIterations},
+                {"connector_fallback_uses", counters.connectorFallbackUses},
+                {"track_sample_calls", counters.trackSampleCalls},
+                {"open_boundary_pose_attempts",
+                    counters.openBoundaryPoseAttempts},
+                {"open_boundary_pose_failures",
+                    counters.openBoundaryPoseFailures},
+                {"open_boundary_refinement_iterations",
+                    counters.openBoundaryRefinementIterations}}}
         };
     }
 
@@ -379,6 +481,11 @@ namespace quantum::editor
             if (argument == "--disable-gpu-preview-sampling")
             {
                 options.disableGpuPreviewSampling = true;
+                continue;
+            }
+            if (argument == "--frame-trace")
+            {
+                options.captureFrameTrace = true;
                 continue;
             }
             if (argument == "--dev-preview-smoke")
@@ -489,6 +596,10 @@ namespace quantum::editor
     void PreviewSmokeCollector::record(
         const FramePerformanceSample& sample) noexcept
     {
+        if (options_.captureFrameTrace)
+        {
+            frameTrace_.push_back(sample);
+        }
         for (std::size_t index = 0; index < spikeCount_; ++index)
         {
             if (!spikes_[index].hasNext)
@@ -743,6 +854,7 @@ namespace quantum::editor
         if (currentTimeSlice_.renderedFrameCount > 0)
             report.timeSlices.push_back(currentTimeSlice_);
         report.spikes.assign(spikes_.begin(), spikes_.begin() + spikeCount_);
+        report.frameTrace = frameTrace_;
         std::sort(report.spikes.begin(), report.spikes.end(),
             [&](const auto& left, const auto& right)
             {
@@ -769,6 +881,9 @@ namespace quantum::editor
         nlohmann::json timeSlices = nlohmann::json::array();
         for (const auto& slice : report.timeSlices)
             timeSlices.push_back(timeSliceJson(slice));
+        nlohmann::json frameTrace = nlohmann::json::array();
+        for (const auto& sample : report.frameTrace)
+            frameTrace.push_back(frameTraceJson(sample));
         const nlohmann::json json = {
             {"run", {
                 {"document_path", report.documentPath.string()},
@@ -820,7 +935,13 @@ namespace quantum::editor
                 {"connector_refinement_iterations", report.solverCounters.connectorRefinementIterations},
                 {"connector_fallback_uses", report.solverCounters.connectorFallbackUses},
                 {"track_sample_calls", report.solverCounters.trackSampleCalls},
-                {"interval_hint_misses", report.solverCounters.intervalHintMisses}}},
+                {"interval_hint_misses", report.solverCounters.intervalHintMisses},
+                {"open_boundary_pose_attempts",
+                    report.solverCounters.openBoundaryPoseAttempts},
+                {"open_boundary_pose_failures",
+                    report.solverCounters.openBoundaryPoseFailures},
+                {"open_boundary_refinement_iterations",
+                    report.solverCounters.openBoundaryRefinementIterations}}},
             {"interpolation", {
                 {"average_cpu_ms", report.averageInterpolationMilliseconds},
                 {"maximum_cpu_ms", report.maximumInterpolationMilliseconds},
@@ -855,6 +976,7 @@ namespace quantum::editor
                 {"total_discarded_wall_time_ms", report.totalDiscardedWallTimeMilliseconds},
                 {"discarded_wall_time_frame_count", report.discardedWallTimeFrameCount}}},
             {"time_slices", std::move(timeSlices)},
+            {"frame_trace", std::move(frameTrace)},
             {"spikes", std::move(spikes)}
         };
 
@@ -918,6 +1040,10 @@ namespace quantum::editor
             << " fallbacks=" << report.solverCounters.connectorFallbackUses
             << " track_samples=" << report.solverCounters.trackSampleCalls
             << " hintmisses=" << report.solverCounters.intervalHintMisses << '\n'
+            << "Open-boundary pose attempts/failures/refinements: "
+            << report.solverCounters.openBoundaryPoseAttempts << " / "
+            << report.solverCounters.openBoundaryPoseFailures << " / "
+            << report.solverCounters.openBoundaryRefinementIterations << '\n'
             << "Catch-up requested/executed max: "
             << report.maximumRequestedStepCount << " / "
             << report.maximumExecutedStepCount << '\n'
@@ -925,6 +1051,11 @@ namespace quantum::editor
             << " ms across " << report.discardedWallTimeFrameCount << " frame(s)\n"
             << "Five-second time slices: " << report.timeSlices.size() << '\n'
             << "Retained spikes: " << report.spikes.size() << '\n';
+        if (!report.frameTrace.empty())
+        {
+            textOutput << "Frame trace samples: " << report.frameTrace.size()
+                << '\n';
+        }
         for (const auto& slice : report.timeSlices)
         {
             const double elapsedSeconds = slice.frameMilliseconds / 1'000.0;
