@@ -74,6 +74,63 @@ infrastructure for development-time correctness audits.
   `QuantumEngine.GpuTrainPoseResidency` study remains disabled.
 - Debug build: passed.
 
+## M2 startup regression (human validation)
+
+### Symptom
+
+Normal interactive editor startup crashed with a missing/unreadable SPIR-V
+shader error immediately after the M2 commit.
+
+### Root cause
+
+Two issues in `GpuPhysicsContext`:
+
+1. `createTrainPosePipeline()` threw `std::runtime_error` when the
+   `train_pose.comp.spv` shader was not found, rather than degrading
+   gracefully. This exception could propagate through `uploadTrainDefinition`
+   into paths that were not guarded by the constructor's catch block.
+
+2. `createTrainPosePipeline()` was missing the `SDL_GetBasePath()` candidate
+   path that `createComputePipeline` already used, creating an inconsistency
+   in shader resolution between the two pipeline-creation paths. This meant
+   the train-pose pipeline could fail to locate a shader that was correctly
+   placed next to the executable by the CMake POST_BUILD copy step.
+
+Additionally, `readSpirvFile` exceptions from `createComputePipeline` could
+propagate through the lambda into the constructor's catch block without
+attempting the remaining candidate paths, causing partial initialization and
+fragile cleanup of Vulkan resources.
+
+### Fix
+
+- `createTrainPosePipeline()` now returns gracefully (with a log message and
+  CPU fallback) instead of throwing when the shader is not found, the file is
+  unreadable, or `vkCreateComputePipelines` fails. This matches the
+  `createComputePipeline` pattern.
+
+- `createTrainPosePipeline()` now includes the `SDL_GetBasePath() / "shaders"`
+  candidate path, consistent with `createComputePipeline`.
+
+- `createComputePipeline` now wraps `readSpirvFile` in a try/catch so that a
+  corrupt or unreadable candidate does not abort the search; it logs and
+  continues to the next candidate.
+
+- `uploadTrainDefinition()` now checks `trainPosePipelineReady_` after
+  `createTrainPosePipeline()` and returns early if the pipeline could not be
+  created, instead of proceeding to GPU buffer operations.
+
+### Validation
+
+- Release build: editor startup succeeds, smoke tests pass.
+- Debug build: editor startup succeeds, smoke tests pass.
+- Added three new regression tests to `SimulationPreviewTests`:
+  - `startupGracefullyDegradesWithoutGpuContext`: verifies CPU-only preview
+    initialization, playback, and vertex generation.
+  - `startupGpuContextConstructionNeverThrows`: verifies the GpuPhysicsContext
+    constructor never throws regardless of GPU availability.
+  - `startupGpuValidationOptInDoesNotBlockStartup`: verifies validation
+    opt-in does not affect normal startup or production playback.
+
 ## Remaining work
 
 - A Release workload matrix (idle, playback, camera orbit, transition drag)

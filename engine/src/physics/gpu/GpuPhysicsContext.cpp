@@ -873,13 +873,23 @@ namespace quantum::physics::gpu
             for (const auto& path : candidates)
             {
                 if (!std::filesystem::exists(path)) continue;
-                code = readSpirvFile(path);
+                try
+                {
+                    code = readSpirvFile(path);
+                }
+                catch (const std::exception& e)
+                {
+                    quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                        "VK", "GpuPhysicsContext: %s unreadable at %s: %s",
+                        fileName, path.string().c_str(), e.what());
+                    continue;
+                }
                 break;
             }
             if (code.empty())
             {
                 quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
-                    "VK", "GpuPhysicsContext: %s not found", fileName);
+                    "VK", "GpuPhysicsContext: %s not found, CPU fallback", fileName);
                 return false;
             }
 
@@ -955,15 +965,42 @@ namespace quantum::physics::gpu
                 "shaders/train_pose.comp.spv"));
         }
         catch (...) {}
+        if (SDL_WasInit(SDL_INIT_VIDEO))
+        {
+            try
+            {
+                const auto basePath = SDL_GetBasePath();
+                if (basePath != nullptr)
+                {
+                    std::filesystem::path p(basePath);
+                    candidates.push_back(p / "shaders" / "train_pose.comp.spv");
+                }
+            }
+            catch (...) {}
+        }
         std::vector<std::uint32_t> code;
         for (const auto& path : candidates)
         {
             if (!std::filesystem::exists(path)) continue;
-            code = readSpirvFile(path);
+            try
+            {
+                code = readSpirvFile(path);
+            }
+            catch (const std::exception& e)
+            {
+                quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                    "VK", "GpuPhysicsContext: train_pose shader unreadable at %s: %s",
+                    path.string().c_str(), e.what());
+                continue;
+            }
             break;
         }
         if (code.empty())
-            throw std::runtime_error("train_pose.comp.spv not found");
+        {
+            quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                "VK", "GpuPhysicsContext: train_pose.comp.spv not found, CPU fallback");
+            return;
+        }
         VkShaderModule module = createShaderModuleLocal(device_, code);
         VkPipelineShaderStageCreateInfo stage{};
         stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -984,8 +1021,11 @@ namespace quantum::physics::gpu
             VK_NULL_HANDLE, 1, &info, nullptr, &trainPosePipeline_);
         vkDestroyShaderModule(device_, module, nullptr);
         if (result != VK_SUCCESS)
-            throw std::runtime_error(
-                "vkCreateComputePipelines failed for train_pose.comp.spv");
+        {
+            quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                "VK", "GpuPhysicsContext: vkCreateComputePipelines failed for train_pose.comp.spv, CPU fallback");
+            return;
+        }
         trainPosePipelineReady_ = true;
         quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
             "VK", "GpuPhysicsContext: train-pose residency prototype pipeline ready");
@@ -1443,6 +1483,8 @@ namespace quantum::physics::gpu
         if (device_ == VK_NULL_HANDLE)
             return;
         createTrainPosePipeline();
+        if (!trainPosePipelineReady_)
+            return;
 
         GpuResidentTrainDefinition resident;
         resident.firstCar = static_cast<std::uint32_t>(trainPose_.cars.size());

@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -606,6 +607,94 @@ namespace
         std::cout << "GPU preview production-path test EXECUTED\n";
     }
 
+    void startupGracefullyDegradesWithoutGpuContext()
+    {
+        SimulationPreview preview;
+        require(preview.rebuild(straightTrack()),
+            "CPU-only preview must initialize without GPU context");
+        require(!preview.hasGpuContext(),
+            "preview must not have a GPU context");
+        require(preview.isAvailable(),
+            "CPU-only preview must be available");
+        require(preview.pose() != nullptr,
+            "CPU-only preview must have a pose");
+        require(preview.vertices().size() == 150,
+            "CPU-only preview must produce vertices");
+
+        preview.play();
+        constexpr double dt = defaultFixedTimeStepSeconds;
+        preview.update(dt);
+        require(preview.dynamicsState()->tick == 1,
+            "CPU-only preview must advance physics");
+        require(preview.isAvailable(),
+            "CPU-only preview must remain available after update");
+        std::cout << "Startup CPU-only degradation test EXECUTED\n";
+    }
+
+    void startupGpuContextConstructionNeverThrows()
+    {
+        bool threwDuringConstruction = false;
+        quantum::physics::gpu::GpuPhysicsContext::HeadlessHandles handles;
+        try
+        {
+            handles = quantum::physics::gpu::GpuPhysicsContext::
+                createHeadlessHandles();
+        }
+        catch (const std::exception& exception)
+        {
+            std::cout << "GPU context construction test skipped: "
+                << exception.what() << '\n';
+            return;
+        }
+
+        std::unique_ptr<quantum::physics::gpu::GpuPhysicsContext> gpu;
+        try
+        {
+            gpu = std::make_unique<quantum::physics::gpu::GpuPhysicsContext>(
+                std::move(handles));
+        }
+        catch (const std::exception&)
+        {
+            threwDuringConstruction = true;
+        }
+        require(!threwDuringConstruction,
+            "GpuPhysicsContext constructor must never throw");
+
+        if (gpu)
+        {
+            SimulationPreview preview;
+            preview.setGpuContext(gpu.get());
+            require(preview.rebuild(straightTrack()),
+                "preview must rebuild with GPU context regardless of availability");
+            require(preview.isAvailable(),
+                "preview must be available even if GPU pipelines failed");
+        }
+        std::cout << "GPU context construction safety test EXECUTED\n";
+    }
+
+    void startupGpuValidationOptInDoesNotBlockStartup()
+    {
+        SimulationPreview preview;
+        preview.setGpuValidationEnabled(false);
+        require(preview.rebuild(straightTrack()),
+            "preview must rebuild with validation disabled");
+        require(!preview.gpuValidationEnabled(),
+            "validation must be disabled by default");
+        preview.play();
+        preview.update(defaultFixedTimeStepSeconds);
+        require(preview.frameTelemetry().gpuPreviewDispatchCount == 0
+                && preview.frameTelemetry().gpuPreviewFallbackCount == 0,
+            "validation-disabled preview must not dispatch GPU validation");
+
+        SimulationPreview validationPreview;
+        validationPreview.setGpuValidationEnabled(true);
+        require(validationPreview.rebuild(straightTrack()),
+            "preview must rebuild with validation enabled");
+        require(validationPreview.gpuValidationEnabled(),
+            "validation flag must be stored");
+        std::cout << "GPU validation opt-in test EXECUTED\n";
+    }
+
     void openTrackPausesAtItsLegalEndpoint()
     {
         SimulationPreview preview;
@@ -980,6 +1069,9 @@ int main()
         rendererVerticesRespectDocumentScale();
         rebuildAndShortTrackInvalidationAreSafe();
         gpuPreviewUploadAndInterpolationCacheAreSafe();
+        startupGracefullyDegradesWithoutGpuContext();
+        startupGpuContextConstructionNeverThrows();
+        startupGpuValidationOptInDoesNotBlockStartup();
         openTrackPausesAtItsLegalEndpoint();
         transitionPlaybackKeepsEveryCommittedCarRigid();
     }
