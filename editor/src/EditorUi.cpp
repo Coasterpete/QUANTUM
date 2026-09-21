@@ -7547,10 +7547,16 @@ ImGui::MenuItem(
         );
 
         drawPerformanceTelemetry();
-        if (auto setup = drawCoasterSetupWindow(
-                authoredTrack_, &coasterSetupWindowOpen_, fonts_))
+        CoasterSetupWindowEdits setupEdits = drawCoasterSetupWindow(
+            authoredTrack_, &coasterSetupWindowOpen_, fonts_);
+        if (setupEdits.coasterSetup.has_value())
         {
-            pendingCoasterSetupEdit_ = std::move(*setup);
+            pendingCoasterSetupEdit_ = std::move(*setupEdits.coasterSetup);
+        }
+        if (setupEdits.physicalSettings.has_value())
+        {
+            pendingPhysicalSettingsEdit_ =
+                std::move(*setupEdits.physicalSettings);
         }
 
         const ImGuiID dockspaceId = ImGui::GetID(editorDockspaceName);
@@ -10014,6 +10020,14 @@ std::optional<coaster::LayoutMode>
         return setup;
     }
 
+    std::optional<coaster::TrackPhysicalSettings>
+    EditorUi::takePendingPhysicalSettingsEdit() noexcept
+    {
+        const auto settings = pendingPhysicalSettingsEdit_;
+        pendingPhysicalSettingsEdit_.reset();
+        return settings;
+    }
+
     bool EditorUi::takeCircuitCompletionRequest() noexcept
     {
         const bool requested = pendingCircuitCompletion_;
@@ -10102,6 +10116,8 @@ std::optional<coaster::LayoutMode>
         trackCommand_.reset();
         sectionLengthEdit_.reset();
         regionCommand_.reset();
+        pendingCoasterSetupEdit_.reset();
+        pendingPhysicalSettingsEdit_.reset();
         pendingSimulationControl_.reset();
     }
 
