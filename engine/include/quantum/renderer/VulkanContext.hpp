@@ -10,6 +10,7 @@
 #include <vk_mem_alloc.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -65,6 +66,9 @@ namespace quantum::renderer
         // Elapsed GPU time between top-of-pipe and bottom-of-pipe timestamps
         // for the previous submission that owned the current frame slot.
         double gpuExecutionMilliseconds = 0.0;
+        std::size_t deferredBufferCountBeforeReclaim = 0;
+        VkDeviceSize deferredBufferBytesBeforeReclaim = 0;
+        std::size_t reclaimedBufferCount = 0;
         bool gpuTimingAvailable = false;
         bool previewStreamUpdated = false;
         bool swapchainRecreated = false;
@@ -209,6 +213,17 @@ namespace quantum::renderer
         void createSynchronizationResources();
         [[nodiscard]] std::uint32_t currentFrameSlot() const noexcept;
         void waitForFrameCompletion();
+        void reserveDeferredBufferRetirements(std::size_t additionalCount);
+        void deferBufferRetirement(
+            VkBuffer buffer,
+            VmaAllocation allocation,
+            VkDeviceSize capacity
+        ) noexcept;
+        void reclaimDeferredBuffers(std::uint32_t frameSlot) noexcept;
+        [[nodiscard]] std::size_t deferredBufferCount(
+            std::uint32_t frameSlot) const noexcept;
+        [[nodiscard]] VkDeviceSize deferredBufferBytes(
+            std::uint32_t frameSlot) const noexcept;
         void uploadRenderableTrackMesh(
             const coaster::ContinuousTrackMesh& mesh,
             std::span<const coaster::TrackMaterial> materials);
@@ -310,10 +325,6 @@ namespace quantum::renderer
         VkDeviceSize trackCurveVertexCapacity_ = 0;
         std::uint32_t trackCurveVertexCount_ = 0;
         std::uint32_t trackVerticesPerCurve_ = 0;
-        VkBuffer spareTrackCurveVertexBuffer_ = VK_NULL_HANDLE;
-        VmaAllocation spareTrackCurveVertexAllocation_ = VK_NULL_HANDLE;
-        void* spareTrackCurveVertexMappedData_ = nullptr;
-        VkDeviceSize spareTrackCurveVertexCapacity_ = 0;
         VkBuffer supportVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation supportVertexAllocation_ = VK_NULL_HANDLE;
         void* supportVertexMappedData_ = nullptr;
@@ -403,6 +414,20 @@ namespace quantum::renderer
         std::array<VkSemaphore, maxFramesInFlight> imageAvailableSemaphores_{};
         std::vector<VkSemaphore> renderFinishedSemaphores_;
         std::array<VkFence, maxFramesInFlight> frameFences_{};
+        struct DeferredBuffer
+        {
+            VkBuffer buffer = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkDeviceSize capacity = 0;
+        };
+
+        // A displaced retained buffer stays attached to the frame slot whose
+        // most recent submission is its final possible user. This follows from
+        // the intentional one-frame policy above; the slot fence is waited
+        // before these allocations are reclaimed.
+        static_assert(maxFramesInFlight == 1);
+        std::array<std::vector<DeferredBuffer>, maxFramesInFlight>
+            deferredBuffers_{};
         std::uint32_t frameIndex_ = 0;
         DrawFrameCpuTelemetry lastDrawFrameCpuTelemetry_;
         double lastFrameCompletionWaitMilliseconds_ = 0.0;

@@ -56,6 +56,9 @@ namespace quantum::editor
         double acquireCallMilliseconds = 0.0;
         double presentCallMilliseconds = 0.0;
         double gpuExecutionMilliseconds = 0.0;
+        std::size_t deferredBufferCountBeforeReclaim = 0;
+        std::uint64_t deferredBufferBytesBeforeReclaim = 0;
+        std::size_t reclaimedBufferCount = 0;
         bool gpuTimingAvailable = false;
         bool previewStreamUpdated = false;
         bool swapchainRecreated = false;

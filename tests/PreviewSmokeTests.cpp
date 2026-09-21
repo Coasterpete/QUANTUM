@@ -147,6 +147,9 @@ namespace
         first.drawFrameCpuMilliseconds = 1.5;
         first.acquireCallMilliseconds = 0.5;
         first.presentCallMilliseconds = 0.6;
+        first.deferredBufferCountBeforeReclaim = 4;
+        first.deferredBufferBytesBeforeReclaim = 4096;
+        first.reclaimedBufferCount = 4;
         first.blockingEvents.viewportResized = true;
         first.swapchainRecreated = true;
         first.solverCounters.rigidBogieBracketExpansions = 2;
@@ -165,6 +168,9 @@ namespace
         second.physicsMilliseconds = 3.0;
         second.interpolationMilliseconds = 0.4;
         second.discardedWallTimeMilliseconds = 2.0;
+        second.deferredBufferCountBeforeReclaim = 2;
+        second.deferredBufferBytesBeforeReclaim = 2048;
+        second.reclaimedBufferCount = 2;
         second.maximumPhysicsStepsHit = true;
         second.blockingEvents.viewportResized = false;
         second.swapchainRecreated = false;
@@ -196,6 +202,10 @@ namespace
             "resize and swapchain recreation counts");
         require(report.interpolationSolveFailureCount == 1,
             "interpolation failure count");
+        require(report.maximumDeferredBufferCount == 4
+                && report.maximumDeferredBufferBytes == 4096
+                && report.totalReclaimedBufferCount == 6,
+            "deferred buffer retirement diagnostics aggregate");
         requireNear(report.totalDiscardedWallTimeMilliseconds, 2.0,
             1.0e-12, "discarded time sum");
         require(report.solverCounters.rigidBogieBracketExpansions == 7
@@ -247,6 +257,9 @@ namespace
         sample.frameId = 1;
         sample.frameTimeMilliseconds = 16.0;
         sample.previewFrameSlotWaitMilliseconds = 479.0;
+        sample.deferredBufferCountBeforeReclaim = 5;
+        sample.deferredBufferBytesBeforeReclaim = 8192;
+        sample.reclaimedBufferCount = 5;
         sample.synchronization.framesInFlight = 1;
         sample.synchronization.current.drawId = 3;
         sample.synchronization.current.frameSlot = 0;
@@ -274,8 +287,10 @@ namespace
             "JSON contains structured summary and spikes");
         require(json.find("\"waited_submission\"") != std::string::npos
                 && json.find("\"render_finished_semaphore_image_index\"") != std::string::npos
-                && json.find("\"frames_in_flight\": 1") != std::string::npos,
-            "JSON includes frame policy, causal fence, and semaphore identity");
+                && json.find("\"frames_in_flight\": 1") != std::string::npos
+                && json.find("\"maximum_pending_count\": 5") != std::string::npos
+                && json.find("\"total_reclaimed_count\": 5") != std::string::npos,
+            "JSON includes frame policy, fence ownership, and retirement counts");
         jsonInput.close();
         std::filesystem::remove(paths.json);
         std::filesystem::remove(paths.text);

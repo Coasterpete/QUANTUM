@@ -149,46 +149,6 @@ namespace
         }
     }
 
-    template<typename Element>
-    void updateHostVisibleBuffer(
-        const VmaAllocator allocator,
-        const std::span<const Element> elements,
-        const VkBufferUsageFlags usage,
-        VkBuffer& buffer,
-        VmaAllocation& allocation,
-        void*& mappedData,
-        VkDeviceSize& capacity,
-        std::uint32_t& elementCount,
-        const char* const context)
-    {
-        if (elements.empty())
-        {
-            elementCount = 0;
-            return;
-        }
-
-        const VkDeviceSize size = sizeof(Element) * elements.size();
-        if (buffer != VK_NULL_HANDLE && size <= capacity)
-        {
-            writeHostVisibleBuffer(
-                allocator, allocation, mappedData, capacity, elements, context);
-            elementCount = static_cast<std::uint32_t>(elements.size());
-            return;
-        }
-
-        CreatedBuffer created = createHostVisibleBuffer(
-            allocator, elements, usage, context);
-        if (buffer != VK_NULL_HANDLE)
-        {
-            vmaDestroyBuffer(allocator, buffer, allocation);
-        }
-        buffer = created.buffer;
-        allocation = created.allocation;
-        mappedData = created.mappedData;
-        capacity = created.capacity;
-        elementCount = created.elementCount;
-    }
-
     [[nodiscard]] bool finite(const glm::vec3& value) noexcept
     {
         return std::isfinite(value.x) && std::isfinite(value.y)
@@ -1805,7 +1765,7 @@ namespace quantum::renderer
     // so this only needs the retained persistent mapping of the static aid
     // buffer. Earlier submissions can still be executing between drawFrame
     // calls and reading this buffer, so all in-flight frames must be drained
-    // first, exactly like the other persistent mapped-buffer update paths.
+    // before this allocation is rewritten in place.
     void VulkanContext::rewriteViewportAidVertices(
         const float centerX,
         const float centerY,
@@ -2541,6 +2501,57 @@ namespace quantum::renderer
         return frameIndex_ % maxFramesInFlight;
     }
 
+    void VulkanContext::reserveDeferredBufferRetirements(
+        const std::size_t additionalCount)
+    {
+        std::vector<DeferredBuffer>& buffers =
+            deferredBuffers_[currentFrameSlot()];
+        buffers.reserve(buffers.size() + additionalCount);
+    }
+
+    void VulkanContext::deferBufferRetirement(
+        const VkBuffer buffer,
+        const VmaAllocation allocation,
+        const VkDeviceSize capacity) noexcept
+    {
+        if (buffer == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        // Publication paths reserve before replacing active handles, so this
+        // push cannot allocate after ownership has begun to move.
+        deferredBuffers_[currentFrameSlot()].push_back(
+            {buffer, allocation, capacity});
+    }
+
+    void VulkanContext::reclaimDeferredBuffers(
+        const std::uint32_t frameSlot) noexcept
+    {
+        for (const DeferredBuffer& buffer : deferredBuffers_[frameSlot])
+        {
+            vmaDestroyBuffer(allocator_, buffer.buffer, buffer.allocation);
+        }
+        deferredBuffers_[frameSlot].clear();
+    }
+
+    std::size_t VulkanContext::deferredBufferCount(
+        const std::uint32_t frameSlot) const noexcept
+    {
+        return deferredBuffers_[frameSlot].size();
+    }
+
+    VkDeviceSize VulkanContext::deferredBufferBytes(
+        const std::uint32_t frameSlot) const noexcept
+    {
+        VkDeviceSize bytes = 0;
+        for (const DeferredBuffer& buffer : deferredBuffers_[frameSlot])
+        {
+            bytes += buffer.capacity;
+        }
+        return bytes;
+    }
+
     void VulkanContext::waitForFrameCompletion()
     {
         const auto begin = std::chrono::steady_clock::now();
@@ -2561,6 +2572,11 @@ namespace quantum::renderer
         if (result != VK_SUCCESS)
         {
             throwVulkanError("vkWaitForFences", result);
+        }
+        for (std::uint32_t frameSlot = 0;
+            frameSlot < maxFramesInFlight; ++frameSlot)
+        {
+            reclaimDeferredBuffers(frameSlot);
         }
         lastFrameCompletionWaitMilliseconds_ =
             std::chrono::duration<double, std::milli>(
@@ -2587,6 +2603,7 @@ namespace quantum::renderer
         {
             throwVulkanError("vkWaitForFences", result);
         }
+        reclaimDeferredBuffers(frameSlot);
     }
 
     void VulkanContext::resizeViewportTarget(
@@ -2663,115 +2680,39 @@ namespace quantum::renderer
             trackVerticesPerCurve
         );
 
-        const std::span<const LineVertex> candidateVertices =
-            trackCurveVertices;
-        const VkDeviceSize candidateSize = sizeof(LineVertex)
-            * candidateVertices.size();
-
-        if (candidateVertices.empty())
+        CreatedVertexBuffer candidate;
+        if (!trackCurveVertices.empty())
         {
-            waitForFrameCompletion();
-            trackCurveVertexCount_ = 0;
-            trackVerticesPerCurve_ = 0;
-            return;
+            candidate = createHostVisibleVertexBuffer(
+                allocator_, trackCurveVertices);
         }
-
-        if (trackCurveVertexBuffer_ != VK_NULL_HANDLE
-            && candidateSize <= trackCurveVertexCapacity_)
-        {
-            waitForFrameCompletion();
-            writeHostVisibleVertexBuffer(
-                allocator_,
-                trackCurveVertexAllocation_,
-                trackCurveVertexMappedData_,
-                trackCurveVertexCapacity_,
-                candidateVertices
-            );
-            trackCurveVertexCount_ = static_cast<std::uint32_t>(
-                candidateVertices.size()
-            );
-            trackVerticesPerCurve_ = trackVerticesPerCurve;
-            return;
-        }
-
-        if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE
-            && candidateSize <= spareTrackCurveVertexCapacity_)
-        {
-            // The previous update retired this spare only after the frame that
-            // used it completed. Waiting here likewise retires the current
-            // buffer before the two allocations exchange roles.
-            waitForFrameCompletion();
-            writeHostVisibleVertexBuffer(
-                allocator_,
-                spareTrackCurveVertexAllocation_,
-                spareTrackCurveVertexMappedData_,
-                spareTrackCurveVertexCapacity_,
-                candidateVertices
-            );
-            std::swap(
-                trackCurveVertexBuffer_,
-                spareTrackCurveVertexBuffer_
-            );
-            std::swap(
-                trackCurveVertexAllocation_,
-                spareTrackCurveVertexAllocation_
-            );
-            std::swap(
-                trackCurveVertexMappedData_,
-                spareTrackCurveVertexMappedData_
-            );
-            std::swap(
-                trackCurveVertexCapacity_,
-                spareTrackCurveVertexCapacity_
-            );
-            trackCurveVertexCount_ = static_cast<std::uint32_t>(
-                candidateVertices.size()
-            );
-            trackVerticesPerCurve_ = trackVerticesPerCurve;
-            return;
-        }
-
-        const CreatedVertexBuffer candidate = createHostVisibleVertexBuffer(
-            allocator_,
-            candidateVertices
-        );
 
         try
         {
-            // Draining every in-flight frame is required: any of them may still
-            // read the old track-curve allocation. Waiting here is needed only
-            // for an authored edit, not for every buffer creation or every
-            // frame.
-            waitForFrameCompletion();
+            reserveDeferredBufferRetirements(
+                trackCurveVertexBuffer_ != VK_NULL_HANDLE ? 1 : 0);
         }
         catch (...)
         {
-            vmaDestroyBuffer(
-                allocator_,
-                candidate.buffer,
-                candidate.allocation
-            );
+            if (candidate.buffer != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(
+                    allocator_, candidate.buffer, candidate.allocation);
+            }
             throw;
         }
 
-        if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE)
-        {
-            vmaDestroyBuffer(
-                allocator_,
-                spareTrackCurveVertexBuffer_,
-                spareTrackCurveVertexAllocation_
-            );
-        }
-        spareTrackCurveVertexBuffer_ = trackCurveVertexBuffer_;
-        spareTrackCurveVertexAllocation_ = trackCurveVertexAllocation_;
-        spareTrackCurveVertexMappedData_ = trackCurveVertexMappedData_;
-        spareTrackCurveVertexCapacity_ = trackCurveVertexCapacity_;
+        deferBufferRetirement(
+            trackCurveVertexBuffer_,
+            trackCurveVertexAllocation_,
+            trackCurveVertexCapacity_);
         trackCurveVertexBuffer_ = candidate.buffer;
         trackCurveVertexAllocation_ = candidate.allocation;
         trackCurveVertexMappedData_ = candidate.mappedData;
         trackCurveVertexCapacity_ = candidate.capacity;
         trackCurveVertexCount_ = candidate.vertexCount;
         trackVerticesPerCurve_ = trackVerticesPerCurve;
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
     void VulkanContext::updateTrainPreviewVertices(
@@ -2889,48 +2830,35 @@ namespace quantum::renderer
             }
         }
 
-        if (vertices.empty())
+        CreatedVertexBuffer candidate;
+        if (!vertices.empty())
         {
-            waitForFrameCompletion();
-            supportVertexCount_ = 0;
-            return;
+            candidate = createHostVisibleVertexBuffer(allocator_, vertices);
         }
-
-        const VkDeviceSize size = sizeof(LineVertex) * vertices.size();
-        if (supportVertexBuffer_ != VK_NULL_HANDLE
-            && size <= supportVertexCapacity_)
-        {
-            waitForFrameCompletion();
-            writeHostVisibleVertexBuffer(
-                allocator_, supportVertexAllocation_,
-                supportVertexMappedData_, supportVertexCapacity_, vertices);
-            supportVertexCount_ = static_cast<std::uint32_t>(vertices.size());
-            return;
-        }
-
-        const CreatedVertexBuffer candidate = createHostVisibleVertexBuffer(
-            allocator_, vertices);
         try
         {
-            waitForFrameCompletion();
+            reserveDeferredBufferRetirements(
+                supportVertexBuffer_ != VK_NULL_HANDLE ? 1 : 0);
         }
         catch (...)
         {
-            vmaDestroyBuffer(
-                allocator_, candidate.buffer, candidate.allocation);
+            if (candidate.buffer != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(
+                    allocator_, candidate.buffer, candidate.allocation);
+            }
             throw;
         }
 
-        if (supportVertexBuffer_ != VK_NULL_HANDLE)
-        {
-            vmaDestroyBuffer(
-                allocator_, supportVertexBuffer_, supportVertexAllocation_);
-        }
+        deferBufferRetirement(
+            supportVertexBuffer_, supportVertexAllocation_,
+            supportVertexCapacity_);
         supportVertexBuffer_ = candidate.buffer;
         supportVertexAllocation_ = candidate.allocation;
         supportVertexMappedData_ = candidate.mappedData;
         supportVertexCapacity_ = candidate.capacity;
         supportVertexCount_ = candidate.vertexCount;
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
     StaticMeshGpuHandle VulkanContext::uploadStaticMeshOnce(
@@ -3034,50 +2962,89 @@ namespace quantum::renderer
         const coaster::ContinuousTrackMesh& mesh,
         const std::span<const coaster::TrackMaterial> materials)
     {
-        updateHostVisibleBuffer(
-            allocator_,
-            std::span<const coaster::TrackMeshVertex>{mesh.vertices},
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            trackMeshVertexBuffer_,
-            trackMeshVertexAllocation_,
-            trackMeshVertexMappedData_,
-            trackMeshVertexCapacity_,
-            trackMeshVertexCount_,
-            "track mesh vertex upload"
-        );
-        updateHostVisibleBuffer(
-            allocator_,
-            std::span<const std::uint32_t>{mesh.triangleIndices},
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-            trackTriangleIndexBuffer_,
-            trackTriangleIndexAllocation_,
-            trackTriangleIndexMappedData_,
-            trackTriangleIndexCapacity_,
-            trackTriangleIndexCount_,
-            "track triangle-index upload"
-        );
-        updateHostVisibleBuffer(
-            allocator_,
-            std::span<const std::uint32_t>{mesh.edgeIndices},
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-            trackEdgeIndexBuffer_,
-            trackEdgeIndexAllocation_,
-            trackEdgeIndexMappedData_,
-            trackEdgeIndexCapacity_,
-            trackEdgeIndexCount_,
-            "track edge-index upload"
-        );
-        trackDrawBatches_.clear();
-        trackDrawBatches_.reserve(mesh.submeshes.size());
+        std::vector<TrackDrawBatch> candidateDrawBatches;
+        candidateDrawBatches.reserve(mesh.submeshes.size());
         for (const coaster::TrackSubmesh& submesh : mesh.submeshes)
         {
             const glm::vec4 color =
                 materials[submesh.materialIndex].baseColor;
-            trackDrawBatches_.push_back({
+            candidateDrawBatches.push_back({
                 submesh.firstIndex,
                 submesh.indexCount,
                 {color.r, color.g, color.b, color.a}});
         }
+
+        CreatedBuffer vertexBuffer;
+        CreatedBuffer triangleBuffer;
+        CreatedBuffer edgeBuffer;
+        const auto destroyCandidates = [this, &vertexBuffer,
+            &triangleBuffer, &edgeBuffer]() noexcept
+        {
+            for (CreatedBuffer* const buffer : {
+                &vertexBuffer, &triangleBuffer, &edgeBuffer})
+            {
+                if (buffer->buffer != VK_NULL_HANDLE)
+                {
+                    vmaDestroyBuffer(
+                        allocator_, buffer->buffer, buffer->allocation);
+                    buffer->buffer = VK_NULL_HANDLE;
+                }
+            }
+        };
+
+        try
+        {
+            vertexBuffer = createHostVisibleBuffer(
+                allocator_,
+                std::span<const coaster::TrackMeshVertex>{mesh.vertices},
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                "track mesh vertex upload");
+            triangleBuffer = createHostVisibleBuffer(
+                allocator_,
+                std::span<const std::uint32_t>{mesh.triangleIndices},
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                "track triangle-index upload");
+            edgeBuffer = createHostVisibleBuffer(
+                allocator_,
+                std::span<const std::uint32_t>{mesh.edgeIndices},
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                "track edge-index upload");
+            reserveDeferredBufferRetirements(
+                (trackMeshVertexBuffer_ != VK_NULL_HANDLE ? 1 : 0)
+                + (trackTriangleIndexBuffer_ != VK_NULL_HANDLE ? 1 : 0)
+                + (trackEdgeIndexBuffer_ != VK_NULL_HANDLE ? 1 : 0));
+        }
+        catch (...)
+        {
+            destroyCandidates();
+            throw;
+        }
+
+        deferBufferRetirement(
+            trackMeshVertexBuffer_, trackMeshVertexAllocation_,
+            trackMeshVertexCapacity_);
+        deferBufferRetirement(
+            trackTriangleIndexBuffer_, trackTriangleIndexAllocation_,
+            trackTriangleIndexCapacity_);
+        deferBufferRetirement(
+            trackEdgeIndexBuffer_, trackEdgeIndexAllocation_,
+            trackEdgeIndexCapacity_);
+        trackMeshVertexBuffer_ = vertexBuffer.buffer;
+        trackMeshVertexAllocation_ = vertexBuffer.allocation;
+        trackMeshVertexMappedData_ = vertexBuffer.mappedData;
+        trackMeshVertexCapacity_ = vertexBuffer.capacity;
+        trackMeshVertexCount_ = vertexBuffer.elementCount;
+        trackTriangleIndexBuffer_ = triangleBuffer.buffer;
+        trackTriangleIndexAllocation_ = triangleBuffer.allocation;
+        trackTriangleIndexMappedData_ = triangleBuffer.mappedData;
+        trackTriangleIndexCapacity_ = triangleBuffer.capacity;
+        trackTriangleIndexCount_ = triangleBuffer.elementCount;
+        trackEdgeIndexBuffer_ = edgeBuffer.buffer;
+        trackEdgeIndexAllocation_ = edgeBuffer.allocation;
+        trackEdgeIndexMappedData_ = edgeBuffer.mappedData;
+        trackEdgeIndexCapacity_ = edgeBuffer.capacity;
+        trackEdgeIndexCount_ = edgeBuffer.elementCount;
+        trackDrawBatches_ = std::move(candidateDrawBatches);
     }
 
     void VulkanContext::uploadTrackHardware(
@@ -3096,10 +3063,10 @@ namespace quantum::renderer
             );
         }
         instances.reserve(totalInstanceCount);
-        hardwareDrawBatches_.clear();
-        hardwareDrawBatches_.reserve(batches.size());
-        hardwareAssetLoadStatuses_.clear();
-        hardwareAssetLoadStatuses_.reserve(batches.size());
+        std::vector<HardwareDrawBatch> candidateDrawBatches;
+        candidateDrawBatches.reserve(batches.size());
+        std::vector<HardwareAssetLoadStatus> candidateLoadStatuses;
+        candidateLoadStatuses.reserve(batches.size());
         for (const auto& batch : batches)
         {
             HardwareDrawBatch drawBatch;
@@ -3141,30 +3108,46 @@ namespace quantum::renderer
             {
                 drawBatch.mesh = uploadStaticMeshOnce(*meshAsset);
             }
-            hardwareAssetLoadStatuses_.push_back(std::move(loadStatus));
+            candidateLoadStatuses.push_back(std::move(loadStatus));
             instances.insert(
                 instances.end(), batch.instances.begin(), batch.instances.end());
-            hardwareDrawBatches_.push_back(drawBatch);
+            candidateDrawBatches.push_back(drawBatch);
         }
 
-        if (instances.empty())
+        CreatedBuffer candidate;
+        if (!instances.empty())
         {
-            hardwareInstanceCount_ = 0;
-        }
-        else
-        {
-            updateHostVisibleBuffer(
+            candidate = createHostVisibleBuffer(
                 allocator_,
                 std::span<const coaster::HardwareInstance>{instances},
                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                hardwareInstanceBuffer_,
-                hardwareInstanceAllocation_,
-                hardwareInstanceMappedData_,
-                hardwareInstanceCapacity_,
-                hardwareInstanceCount_,
-                "track hardware instance upload"
-            );
+                "track hardware instance upload");
         }
+        try
+        {
+            reserveDeferredBufferRetirements(
+                hardwareInstanceBuffer_ != VK_NULL_HANDLE ? 1 : 0);
+        }
+        catch (...)
+        {
+            if (candidate.buffer != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(
+                    allocator_, candidate.buffer, candidate.allocation);
+            }
+            throw;
+        }
+
+        deferBufferRetirement(
+            hardwareInstanceBuffer_, hardwareInstanceAllocation_,
+            hardwareInstanceCapacity_);
+        hardwareInstanceBuffer_ = candidate.buffer;
+        hardwareInstanceAllocation_ = candidate.allocation;
+        hardwareInstanceMappedData_ = candidate.mappedData;
+        hardwareInstanceCapacity_ = candidate.capacity;
+        hardwareInstanceCount_ = candidate.elementCount;
+        hardwareDrawBatches_ = std::move(candidateDrawBatches);
+        hardwareAssetLoadStatuses_ = std::move(candidateLoadStatuses);
     }
 
     void VulkanContext::updateRenderableTrack(
@@ -3178,10 +3161,10 @@ namespace quantum::renderer
         }
 
         requireValidRenderableTrack(renderableTrack);
-        waitForFrameCompletion();
         uploadRenderableTrackMesh(
             renderableTrack.continuousMesh, renderableTrack.materials);
         uploadTrackHardware(renderableTrack.hardwareBatches);
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
     void VulkanContext::updateRenderableTrackMesh(
@@ -3194,8 +3177,8 @@ namespace quantum::renderer
                 "VulkanContext cannot update track mesh data before initialization.");
         }
         requireValidTrackMesh(mesh, materials);
-        waitForFrameCompletion();
         uploadRenderableTrackMesh(mesh, materials);
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
     void VulkanContext::updateTrackMaterials(
@@ -3238,8 +3221,8 @@ namespace quantum::renderer
                 "VulkanContext cannot update track hardware before initialization.");
         }
         requireValidTrackHardware(batches);
-        waitForFrameCompletion();
         uploadTrackHardware(batches);
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
     void VulkanContext::updateTrackHardwareMaterials(
@@ -4088,6 +4071,10 @@ namespace quantum::renderer
         }
 
         const std::uint32_t frameSlot = currentFrameSlot();
+        lastDrawFrameCpuTelemetry_.deferredBufferCountBeforeReclaim =
+            deferredBufferCount(frameSlot);
+        lastDrawFrameCpuTelemetry_.deferredBufferBytesBeforeReclaim =
+            deferredBufferBytes(frameSlot);
         synchronization.waitedSubmission = frameSubmissions_[frameSlot];
         const double statusBegin = millisecondsNow();
         const VkResult fenceStatus = vkGetFenceStatus(device_, frameFences_[frameSlot]);
@@ -4099,6 +4086,8 @@ namespace quantum::renderer
         synchronization.waitBeginMilliseconds = std::chrono::duration<double, std::milli>(
             frameSlotWaitBegin.time_since_epoch()).count();
         waitForFrameSlot(frameSlot);
+        lastDrawFrameCpuTelemetry_.reclaimedBufferCount =
+            lastDrawFrameCpuTelemetry_.deferredBufferCountBeforeReclaim;
         synchronization.waitEndMilliseconds = millisecondsNow();
         lastDrawFrameCpuTelemetry_.frameSlotWaitMilliseconds =
             std::chrono::duration<double, std::milli>(
@@ -4339,6 +4328,11 @@ namespace quantum::renderer
         {
             throwVulkanError("vkDeviceWaitIdle", result);
         }
+        for (std::uint32_t frameSlot = 0;
+            frameSlot < maxFramesInFlight; ++frameSlot)
+        {
+            reclaimDeferredBuffers(frameSlot);
+        }
 
         if (!createSwapchain())
         {
@@ -4517,6 +4511,11 @@ namespace quantum::renderer
                     allocation = VK_NULL_HANDLE;
                 }
             };
+            for (std::uint32_t frameSlot = 0;
+                frameSlot < maxFramesInFlight; ++frameSlot)
+            {
+                reclaimDeferredBuffers(frameSlot);
+            }
             destroyAllocatedBuffer(
                 trackMeshVertexBuffer_, trackMeshVertexAllocation_);
             destroyAllocatedBuffer(
@@ -4586,20 +4585,6 @@ namespace quantum::renderer
             supportVertexMappedData_ = nullptr;
             supportVertexCapacity_ = 0;
             supportVertexCount_ = 0;
-
-            if (spareTrackCurveVertexBuffer_ != VK_NULL_HANDLE)
-            {
-                vmaDestroyBuffer(
-                    allocator_,
-                    spareTrackCurveVertexBuffer_,
-                    spareTrackCurveVertexAllocation_
-                );
-                spareTrackCurveVertexBuffer_ = VK_NULL_HANDLE;
-                spareTrackCurveVertexAllocation_ = VK_NULL_HANDLE;
-            }
-
-            spareTrackCurveVertexMappedData_ = nullptr;
-            spareTrackCurveVertexCapacity_ = 0;
 
             if (staticVertexBuffer_ != VK_NULL_HANDLE)
             {

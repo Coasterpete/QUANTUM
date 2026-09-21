@@ -129,6 +129,9 @@ namespace quantum::editor
         double averageGpuExecutionMilliseconds = 0.0;
         double maximumGpuExecutionMilliseconds = 0.0;
         std::uint64_t gpuTimingSampleCount = 0;
+        std::size_t maximumDeferredBufferCount = 0;
+        std::uint64_t maximumDeferredBufferBytes = 0;
+        std::uint64_t totalReclaimedBufferCount = 0;
 
         double largestRawDeltaMilliseconds = 0.0;
         double averageRawDeltaMilliseconds = 0.0;
