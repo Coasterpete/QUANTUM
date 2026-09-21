@@ -422,6 +422,9 @@ namespace quantum::engine
                     centerlineCache.generation();
                 quantum::coaster::LayoutMode simulationLayoutMode =
                     authoredTrack.layoutMode();
+                quantum::coaster::TrackPhysicalSettings
+                    simulationPhysicalSettings =
+                        authoredTrack.physicalSettings();
                 std::uint64_t uploadedSimulationVertexGeneration =
                     std::numeric_limits<std::uint64_t>::max();
 
@@ -3105,6 +3108,51 @@ editorUi.selectSection(restoredSelection, true);
                             }
                         }
 
+                        const auto requestedPhysicalSettings =
+                            editorUi.takePendingPhysicalSettingsEdit();
+
+                        if (requestedPhysicalSettings.has_value()
+                            && *requestedPhysicalSettings
+                                != authoredTrack.physicalSettings())
+                        {
+                            try
+                            {
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    physicalSettingsTransaction{authoredTrack};
+                                physicalSettingsTransaction.candidate()
+                                    .setPhysicalSettings(
+                                        *requestedPhysicalSettings);
+                                quantum::coaster::RiderLoadHistory
+                                    candidateRiderLoads = quantum::editor::
+                                        evaluateRiderLoadDiagnostics(
+                                            physicalSettingsTransaction
+                                                .candidate());
+                                physicalSettingsTransaction
+                                    .requireAcceptableRiderLoads(
+                                        candidateRiderLoads);
+                                physicalSettingsTransaction.commit(
+                                    authoredTrack);
+                                documentHistory.record(authoredTrack);
+                                editorUi.setRiderLoadHistory(
+                                    std::move(candidateRiderLoads));
+                                synchronizeDirtyState();
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "CFG",
+                                    "Initial speed set to %.3f m/s",
+                                    authoredTrack.physicalSettings()
+                                        .initialSpeed);
+                            }
+                            catch (const std::invalid_argument& error)
+                            {
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Error,
+                                    "CFG",
+                                    "Physical settings rejected: %s",
+                                    error.what());
+                            }
+                        }
+
                         // Circuit completion: run solver and show
                         // result.
                         if (editorUi.takeCircuitCompletionRequest())
@@ -3209,19 +3257,23 @@ editorUi.selectSection(restoredSelection, true);
                                 window);
                         }
 
-                        // Any accepted geometry/document replacement advances
-                        // the cache generation. Layout mode is also tracked
-                        // because it changes open/circuit physics semantics
-                        // without regenerating visible geometry.
+                        // Geometry/document replacement advances the cache
+                        // generation. Layout mode and physical settings are
+                        // tracked separately because they change preview
+                        // physics without regenerating visible geometry.
                         if (simulationTrackGeneration
                                 != centerlineCache.generation()
                             || simulationLayoutMode
-                                != authoredTrack.layoutMode())
+                                != authoredTrack.layoutMode()
+                            || simulationPhysicalSettings
+                                != authoredTrack.physicalSettings())
                         {
                             simulationTrackGeneration =
                                 centerlineCache.generation();
                             simulationLayoutMode =
                                 authoredTrack.layoutMode();
+                            simulationPhysicalSettings =
+                                authoredTrack.physicalSettings();
                             const auto rebuildBegin = PerformanceClock::now();
                             rebuildSimulationPreview();
                             if (fullEditTelemetry.has_value())

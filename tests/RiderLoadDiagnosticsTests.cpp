@@ -346,6 +346,35 @@ namespace
         requireNear(samples.back().normalG, 202.0, 0.0,
             "replacement exit value is current");
     }
+
+    void authoredInitialSpeedRefreshesDiagnostics()
+    {
+        AuthoredTrack track = createMixedTrack();
+        auto settings = track.physicalSettings();
+        settings.initialSpeed = 8.0;
+        track.setPhysicalSettings(settings);
+
+        RiderLoadDiagnosticsModel model;
+        model.update(
+            track,
+            quantum::editor::evaluateRiderLoadDiagnostics(track));
+        requireNear(
+            model.selectedSection().samples.front().vehicleSpeed,
+            8.0,
+            1.0e-12,
+            "diagnostics use the first authored initial speed");
+
+        settings.initialSpeed = 16.0;
+        track.setPhysicalSettings(settings);
+        model.update(
+            track,
+            quantum::editor::evaluateRiderLoadDiagnostics(track));
+        requireNear(
+            model.selectedSection().samples.front().vehicleSpeed,
+            16.0,
+            1.0e-12,
+            "refreshed diagnostics use the newly authored initial speed");
+    }
 }
 
 int main()
@@ -366,7 +395,9 @@ int main()
         {"unreachable history truncates diagnostics",
             unreachableHistoryStopsWithoutFabricatedSamples},
         {"empty and no-valid history", emptyAndNoValidHistoryRemainSafe},
-        {"new history replaces stale samples", newHistoryReplacesOldSamples}
+        {"new history replaces stale samples", newHistoryReplacesOldSamples},
+        {"authored initial speed refreshes diagnostics",
+            authoredInitialSpeedRefreshesDiagnostics}
     };
 
     try

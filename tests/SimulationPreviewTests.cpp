@@ -315,6 +315,29 @@ namespace
             "four boxes, eight bogie markers, and three connectors");
     }
 
+    void rebuildUsesNewInitialSpeedAndResetsPlayback()
+    {
+        SimulationPreview preview;
+        require(preview.rebuild(straightTrack(60.0, 14.0)),
+            "initial preview rebuild");
+        preview.play();
+        preview.update(quantum::physics::defaultFixedTimeStepSeconds);
+        require(preview.playbackState()
+                == SimulationPreview::PlaybackState::Playing
+                && preview.dynamicsState()->tick == 1,
+            "preview must advance before the physical-setting edit");
+
+        require(preview.rebuild(straightTrack(60.0, 6.5)),
+            "preview rebuild after an initial-speed edit");
+        require(preview.playbackState()
+                == SimulationPreview::PlaybackState::Stopped,
+            "rebuild must reset playback");
+        require(preview.dynamicsState()->tick == 0,
+            "rebuild must restore the initial simulation tick");
+        requireNear(preview.speedMetersPerSecond(), 6.5, 0.0,
+            "rebuilt preview uses the newly authored initial speed");
+    }
+
     void playbackUsesFixedStepsAndResetIsDeterministic()
     {
         SimulationPreview preview;
@@ -949,6 +972,7 @@ int main()
         renderCadenceDoesNotAffectPhysics();
         spikeRollbackInterpolation();
         initializesFromAuthoredPhysicalSettings();
+        rebuildUsesNewInitialSpeedAndResetsPlayback();
         playbackUsesFixedStepsAndResetIsDeterministic();
         catchUpIsBounded();
         timingDiscontinuityPreservesFractionalTick();

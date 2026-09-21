@@ -11,19 +11,23 @@
 
 namespace quantum::editor
 {
-    std::optional<coaster::CoasterSetup> drawCoasterSetupWindow(
+    CoasterSetupWindowEdits drawCoasterSetupWindow(
         const coaster::AuthoredTrack* const authoredTrack,
         bool* const open,
         const EditorFonts& fonts)
     {
         if (open == nullptr || !*open || authoredTrack == nullptr)
         {
-            return std::nullopt;
+            return {};
         }
 
         const coaster::CoasterSetup& committed =
             authoredTrack->coasterSetup();
         coaster::CoasterSetup draft = committed;
+        const coaster::TrackPhysicalSettings& committedPhysicalSettings =
+            authoredTrack->physicalSettings();
+        coaster::TrackPhysicalSettings physicalSettings =
+            committedPhysicalSettings;
         bool changed = false;
 
         ImGui::SetNextWindowPos(
@@ -35,7 +39,7 @@ namespace quantum::editor
                 ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::End();
-            return std::nullopt;
+            return {};
         }
         ImGui::PushID("Coaster Setup Window");
 
@@ -48,7 +52,7 @@ namespace quantum::editor
                 "edited with this catalog.");
             ImGui::PopID();
             ImGui::End();
-            return std::nullopt;
+            return {};
         }
 
         // Style changes use the selected definition's complete defaults while
@@ -96,7 +100,7 @@ namespace quantum::editor
             ImGui::TextUnformatted("No options are defined for this style.");
             ImGui::PopID();
             ImGui::End();
-            return std::nullopt;
+            return {};
         }
 
         for (const coaster::CoasterOptionDefinition* option :
@@ -226,13 +230,30 @@ namespace quantum::editor
             "Affects the viewport reference curve only; authored track "
             "geometry and physics are unchanged.");
 
+        ImGui::Separator();
+        editorHeading("Physical settings", fonts);
+        ImGui::InputDouble(
+            "Initial speed (m/s)",
+            &physicalSettings.initialSpeed,
+            0.5,
+            5.0,
+            "%.3f");
+        editorSecondaryTextWrapped(
+            "Initial train speed used by Force Diagnostics and Simulation "
+            "Preview.");
+
         ImGui::PopID();
         ImGui::End();
 
+        CoasterSetupWindowEdits edits;
         if (changed && draft != committed)
         {
-            return draft;
+            edits.coasterSetup = std::move(draft);
         }
-        return std::nullopt;
+        if (physicalSettings != committedPhysicalSettings)
+        {
+            edits.physicalSettings = physicalSettings;
+        }
+        return edits;
     }
 }

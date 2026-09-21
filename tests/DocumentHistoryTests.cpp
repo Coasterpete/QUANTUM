@@ -147,6 +147,30 @@ namespace
             "a rejected edit must not create a history entry");
     }
 
+    void physicalSettingsEditUsesTransactionAndHistory()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+
+        AuthoredTrackEditTransaction transaction{track};
+        auto settings = transaction.candidate().physicalSettings();
+        settings.initialSpeed = 12.5;
+        transaction.candidate().setPhysicalSettings(settings);
+        transaction.commit(track);
+        history.record(track);
+
+        require(transaction.committed()
+                && track.physicalSettings().initialSpeed == 12.5,
+            "initial speed edit must commit the authoritative Core setting");
+        track = requireState(history.undo(), "physical-settings Undo missing");
+        require(track.physicalSettings().initialSpeed == 20.0,
+            "physical-settings Undo must restore the document default");
+        track = requireState(history.redo(), "physical-settings Redo missing");
+        require(track.physicalSettings().initialSpeed == 12.5,
+            "physical-settings Redo must restore the authored value");
+    }
+
     void dirtyStateTracksSavedRevision()
     {
         AuthoredTrack track = quantum::coaster::createNewDocument();
@@ -575,6 +599,7 @@ int main()
         sequentialEditsAndBranching();
         representativeStructuralAndProfileEditsUndo();
         rejectedTransactionDoesNotEnterHistory();
+        physicalSettingsEditUsesTransactionAndHistory();
         dirtyStateTracksSavedRevision();
         newOpenResetAndContinuousCoalescing();
         trackHardwareEditsUndoAndRedo();
