@@ -151,8 +151,14 @@ configuration the stable ID `modern-steel` and the display name `Modern Steel`.
 `findTrackConfiguration` resolves that identity to a
 `TrackConfigurationDefinition`, and `resolveTrackConfiguration` produces the
 validated base `TrackStylePreset` through the existing Modern Steel factory.
-Documents continue to own and serialize that complete concrete preset; Track
-Configuration identity is not document state in this milestone.
+Documents own and serialize both the stable configuration ID and the complete
+concrete appearance snapshot. The snapshot remains authoritative when a
+configuration ID is unknown or its defaults change. Older documents without
+the ID retain their serialized style and can select Modern Steel in the editor.
+Applying a configuration replaces the base snapshot while preserving sparse
+region overrides; explicit reset clears those overrides. Both actions use the
+existing presentation products and cached solved samples when the track
+geometry family and dual-rail topology are supported.
 The start pose stores a world position and normalized quaternion that rotates
 the canonical local `(T, L, U)` axes into the initial rider frame. The UI calls
 the ordered section values regions; the Core type retains the established
@@ -188,12 +194,14 @@ and consumes the existing `CenterlineVisualizationCache::samples` and section
 slices. It does not integrate the authored track again. Material-only changes
 update CPU draw colors without waiting for in-flight frames; hardware placement,
 mesh, and engineering-curve changes retain their existing synchronized Vulkan
-buffer lifetime rules. Applying a candidate advances only the cache's
+buffer lifetime rules. Configuration selection also rebuilds changed hardware
+assets, phase, transforms, and rail/spine tessellation through these
+presentation products. Applying a visual candidate advances only the cache's
 presentation generation. The canonical centerline generation, rider-load
 history, support visualization, and Simulation Preview track generation remain
-unchanged. Undo and redo retain this impact with their history revision. Any
-unrecognized structural style difference is classified as full regeneration
-and uses the existing generic document path.
+unchanged. Undo and redo retain this impact with their history revision.
+Unsupported geometry families or rail topologies remain outside this
+presentation path; the editor configuration action rejects those cases.
 
 That stored length defines the canonical section-local distance
 domain `[0, length]`; the selected region's editor and the Core solver use the

@@ -3154,6 +3154,69 @@ editorUi.selectSection(restoredSelection, true);
                             }
                         }
 
+                        const auto requestedTrackConfiguration =
+                            editorUi.takePendingTrackConfigurationSelection();
+                        const bool resetTrackConfiguration =
+                            editorUi.takePendingTrackConfigurationReset();
+                        if (requestedTrackConfiguration.has_value()
+                            || resetTrackConfiguration)
+                        {
+                            try
+                            {
+                                quantum::coaster::AuthoredTrack candidateTrack =
+                                    authoredTrack;
+                                if (requestedTrackConfiguration.has_value())
+                                {
+                                    candidateTrack.applyTrackConfiguration(
+                                        *requestedTrackConfiguration);
+                                }
+                                if (resetTrackConfiguration)
+                                {
+                                    candidateTrack.resetToConfigurationDefaults();
+                                }
+                                if (quantum::coaster::serializeCoasterDocument(
+                                        candidateTrack)
+                                    != quantum::coaster::serializeCoasterDocument(
+                                        authoredTrack))
+                                {
+                                    const auto impact = quantum::editor::
+                                        classifyDocumentTrackStyleEdit(
+                                            authoredTrack, candidateTrack);
+                                    if (impact.requiresFullRegeneration())
+                                    {
+                                        throw std::invalid_argument(
+                                            "This track style cannot be changed "
+                                            "through the current presentation path.");
+                                    }
+                                    publishTrackStylePresentation(
+                                        candidateTrack, impact);
+                                    applicationBlockingEvents
+                                        .trackBufferMutation =
+                                            impact.affects(quantum::editor::
+                                                TrackStylePresentationProduct::
+                                                    EngineeringRails)
+                                            || impact.affects(quantum::editor::
+                                                TrackStylePresentationProduct::
+                                                    RenderableMesh)
+                                            || impact.affects(quantum::editor::
+                                                TrackStylePresentationProduct::
+                                                    HardwareInstances);
+                                    authoredTrack = std::move(candidateTrack);
+                                    documentHistory.record(
+                                        authoredTrack, false, impact);
+                                    synchronizeDirtyState();
+                                }
+                            }
+                            catch (const std::exception& error)
+                            {
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Error,
+                                    "CFG",
+                                    "Track configuration rejected: %s",
+                                    error.what());
+                            }
+                        }
+
                         // Circuit completion: run solver and show
                         // result.
                         if (editorUi.takeCircuitCompletionRequest())

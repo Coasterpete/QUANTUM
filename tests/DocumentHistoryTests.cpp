@@ -589,6 +589,52 @@ namespace
         require(snapshot(track) == overridden,
             "clearing all overrides must be undoable");
     }
+
+    void trackConfigurationSelectionAndResetUndoExactly()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        track.setTrackStyle(quantum::coaster::createStandardDualRailPreset());
+        track.setTrackConfigurationId("");
+        auto& overrides = track.section(0).trackStyleOverrides;
+        overrides.enabled = true;
+        overrides.hardwareSpacing = 2.0;
+        DocumentHistory history;
+        history.reset(track);
+        const std::string legacy = snapshot(track);
+
+        AuthoredTrack selected = track;
+        selected.applyTrackConfiguration("modern-steel");
+        const auto selectionImpact = quantum::editor::
+            classifyDocumentTrackStyleEdit(track, selected);
+        history.record(selected, false, selectionImpact);
+        const std::string selectedSnapshot = snapshot(selected);
+        require(selected.section(0).trackStyleOverrides.hardwareSpacing == 2.0,
+            "selection preserves regional override state");
+
+        AuthoredTrack reset = selected;
+        reset.resetToConfigurationDefaults();
+        const auto resetImpact = quantum::editor::
+            classifyDocumentTrackStyleEdit(selected, reset);
+        history.record(reset, false, resetImpact);
+        require(!reset.section(0).trackStyleOverrides.enabled,
+            "explicit reset clears region override state");
+
+        track = requireState(history.undo(), "configuration reset Undo missing");
+        require(snapshot(track) == selectedSnapshot
+                && history.lastRestoreTrackStylePresentationImpact()
+                    .has_value(),
+            "reset Undo restores selected style and regional overrides");
+        track = requireState(history.undo(),
+            "configuration selection Undo missing");
+        require(snapshot(track) == legacy
+                && history.lastRestoreTrackStylePresentationImpact()
+                    .has_value(),
+            "selection Undo restores the legacy document exactly");
+        track = requireState(history.redo(),
+            "configuration selection Redo missing");
+        require(snapshot(track) == selectedSnapshot,
+            "selection Redo restores the concrete snapshot");
+    }
 }
 
 int main()
@@ -608,6 +654,7 @@ int main()
         supportAnchorMetadataUsesWholeDocumentHistory();
         supportMemberEndConnectionsUndoRedoIsExact();
         regionStyleOverridesUseWholeDocumentHistory();
+        trackConfigurationSelectionAndResetUndoExactly();
     }
     catch (const std::exception& exception)
     {

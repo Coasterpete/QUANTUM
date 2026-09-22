@@ -7558,6 +7558,13 @@ ImGui::MenuItem(
             pendingPhysicalSettingsEdit_ =
                 std::move(*setupEdits.physicalSettings);
         }
+        if (setupEdits.trackConfigurationId.has_value())
+        {
+            pendingTrackConfigurationSelection_ =
+                std::move(*setupEdits.trackConfigurationId);
+        }
+        pendingTrackConfigurationReset_ |=
+            setupEdits.resetTrackConfiguration;
 
         const ImGuiID dockspaceId = ImGui::GetID(editorDockspaceName);
         const bool defaultLayoutRequired =
@@ -10026,6 +10033,21 @@ std::optional<coaster::LayoutMode>
         const auto settings = pendingPhysicalSettingsEdit_;
         pendingPhysicalSettingsEdit_.reset();
         return settings;
+    }
+
+    std::optional<std::string>
+    EditorUi::takePendingTrackConfigurationSelection() noexcept
+    {
+        auto selection = std::move(pendingTrackConfigurationSelection_);
+        pendingTrackConfigurationSelection_.reset();
+        return selection;
+    }
+
+    bool EditorUi::takePendingTrackConfigurationReset() noexcept
+    {
+        const bool reset = pendingTrackConfigurationReset_;
+        pendingTrackConfigurationReset_ = false;
+        return reset;
     }
 
     bool EditorUi::takeCircuitCompletionRequest() noexcept

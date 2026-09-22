@@ -5,6 +5,7 @@
 #include <quantum/editor/EditorStyle.hpp>
 
 #include <optional>
+#include <string>
 
 namespace quantum::coaster
 {
@@ -20,6 +21,8 @@ namespace quantum::editor
     {
         std::optional<coaster::CoasterSetup> coasterSetup;
         std::optional<coaster::TrackPhysicalSettings> physicalSettings;
+        std::optional<std::string> trackConfigurationId;
+        bool resetTrackConfiguration = false;
     };
 
     // Draws the self-contained Coaster Setup panel and returns one complete

@@ -1,4 +1,5 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/TrackConfiguration.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/math/ScalarTransition.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
@@ -41,6 +42,7 @@ namespace
     using quantum::editor::createCenterlineVisualization;
     using quantum::editor::createTrackStylePresentationCandidate;
     using quantum::editor::classifyRegionTrackStyleEdit;
+    using quantum::editor::classifyDocumentTrackStyleEdit;
     using quantum::editor::TrackStylePresentationProduct;
     using quantum::math::TransitionType;
 
@@ -979,6 +981,110 @@ namespace
         require(fallback.requiresFullRegeneration(),
             "unknown style structure conservatively requires full regeneration");
     }
+
+    void configurationSelectionRebuildsOnlyChangedPresentation()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        track.appendSection();
+        track.setTrackStyle(quantum::coaster::createStandardDualRailPreset());
+        track.setTrackConfigurationId("");
+        auto& overrides = track.section(1).trackStyleOverrides;
+        overrides.enabled = true;
+        overrides.railMaterial = quantum::coaster::TrackMaterial{
+            glm::vec4{0.1F, 0.2F, 0.3F, 1.0F}};
+        overrides.hardwareSpacing = 2.0;
+
+        CenterlineVisualizationCache cache;
+        cache.setTrackStyle(track.trackStyle());
+        require(cache.rebuildIfDirty(track), "legacy fixture builds");
+        const auto canonicalGeneration = cache.generation();
+        const auto* solvedSamples = cache.visualization().samples.data();
+        const auto oldRail = cache.visualization().vertices.front();
+        const auto oldMeshVertexCount = cache.visualization()
+            .renderableTrack.continuousMesh.vertices.size();
+
+        AuthoredTrack selected = track;
+        selected.applyTrackConfiguration(
+            quantum::coaster::modernSteelTrackConfigurationId);
+        require(selected.section(1).trackStyleOverrides.hardwareSpacing == 2.0
+                && selected.section(1).trackStyleOverrides.railMaterial
+                    .has_value(),
+            "selection preserves authored regional appearance");
+        const auto impact = classifyDocumentTrackStyleEdit(track, selected);
+        require(impact.affects(TrackStylePresentationProduct::RenderableMesh)
+                && impact.affects(TrackStylePresentationProduct::EngineeringRails)
+                && impact.affects(TrackStylePresentationProduct::HardwareInstances)
+                && !impact.requiresFullRegeneration(),
+            "legacy to Modern Steel rebuilds affected visual products");
+        require(!impact.invalidatesCanonicalTrack()
+                && !impact.invalidatesRiderLoads()
+                && !impact.invalidatesSimulationPreview()
+                && !impact.invalidatesSupports(),
+            "selection leaves engineering and physics products valid");
+        auto candidate = createTrackStylePresentationCandidate(
+            selected, cache.visualization(), impact);
+        require(candidate.continuousMesh.has_value()
+                && candidate.hardwareBatches.has_value()
+                && candidate.referenceCurveVertices.has_value(),
+            "selection stages new mesh, hardware and rail curves");
+        cache.applyTrackStylePresentation(std::move(candidate));
+        require(cache.generation() == canonicalGeneration
+                && cache.visualization().samples.data() == solvedSamples,
+            "configuration selection reuses solved samples");
+        require(cache.visualization().renderableTrack
+                .continuousMesh.vertices.size() > oldMeshVertexCount,
+            "Modern Steel spine adds continuous mesh vertices");
+        const auto newRail = cache.visualization().vertices.front();
+        require(newRail.x != oldRail.x || newRail.y != oldRail.y
+                || newRail.z != oldRail.z,
+            "configuration selection updates engineering rail positions");
+        require(cache.trackStyle().name == "ModernSteel",
+            "cache retains the selected document style for later rebuilds");
+
+        AuthoredTrack reset = selected;
+        reset.resetToConfigurationDefaults();
+        const auto resetImpact = classifyDocumentTrackStyleEdit(selected, reset);
+        require(resetImpact.affects(
+                    TrackStylePresentationProduct::HardwareInstances)
+                && resetImpact.affects(
+                    TrackStylePresentationProduct::TrackMaterials)
+                && !resetImpact.requiresFullRegeneration(),
+            "reset classifies inherited regional changes");
+        candidate = createTrackStylePresentationCandidate(
+            reset, cache.visualization(), resetImpact);
+        cache.applyTrackStylePresentation(std::move(candidate));
+        require(cache.generation() == canonicalGeneration
+                && cache.visualization().samples.data() == solvedSamples,
+            "reset also preserves the canonical solve");
+
+        AuthoredTrack identityOnly = reset;
+        identityOnly.setTrackConfigurationId("future-config");
+        const auto identityImpact =
+            classifyDocumentTrackStyleEdit(reset, identityOnly);
+        require(identityImpact.empty(),
+            "configuration identity alone does not invalidate presentation");
+        const auto presentationGeneration =
+            cache.presentationGeneration();
+        candidate = createTrackStylePresentationCandidate(
+            identityOnly, cache.visualization(), identityImpact);
+        cache.applyTrackStylePresentation(std::move(candidate));
+        require(cache.generation() == canonicalGeneration
+                && cache.presentationGeneration() == presentationGeneration,
+            "identity-only update advances no geometry generation");
+    }
+
+    void hardwareStructureChangesRebuildInstances()
+    {
+        auto before = quantum::coaster::createModernSteelPreset();
+        auto after = before;
+        after.repeatingHardware.front().localPosition.z -= 0.2;
+        const auto impact = quantum::editor::
+            classifyResolvedTrackStylePresentationChange(before, after);
+        require(impact.affects(TrackStylePresentationProduct::HardwareInstances)
+                && !impact.requiresFullRegeneration()
+                && !impact.invalidatesCanonicalTrack(),
+            "hardware transform rebuilds instances from cached samples");
+    }
 }
 
 int main()
@@ -1018,6 +1124,10 @@ int main()
         regionStylesDriveViewportAndHardwareGeneration);
     run("regionStylePresentationInvalidationIsProductSpecific",
         regionStylePresentationInvalidationIsProductSpecific);
+    run("configurationSelectionRebuildsOnlyChangedPresentation",
+        configurationSelectionRebuildsOnlyChangedPresentation);
+    run("hardwareStructureChangesRebuildInstances",
+        hardwareStructureChangesRebuildInstances);
 
     std::cout << "\n  " << passed << " passed, "
         << failed << " failed\n";

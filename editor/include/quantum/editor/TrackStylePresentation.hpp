@@ -4,6 +4,11 @@
 
 #include <cstdint>
 
+namespace quantum::coaster
+{
+    class AuthoredTrack;
+}
+
 namespace quantum::editor
 {
     enum class TrackStylePresentationProduct : std::uint8_t
@@ -36,8 +41,9 @@ namespace quantum::editor
         TrackStylePresentationImpact first,
         TrackStylePresentationImpact second) noexcept;
 
-    // This is the single classification point for sparse region-style edits.
-    // Unknown structural differences fall back to FullRegeneration.
+    // Sparse region edits and document configuration edits share this
+    // classification. Unsupported generator/topology changes fall back to
+    // FullRegeneration.
     [[nodiscard]] TrackStylePresentationImpact classifyRegionTrackStyleEdit(
         const coaster::TrackStylePreset& documentStyle,
         const coaster::RegionTrackStyleOverrides& before,
@@ -47,4 +53,10 @@ namespace quantum::editor
     classifyResolvedTrackStylePresentationChange(
         const coaster::TrackStylePreset& before,
         const coaster::TrackStylePreset& after) noexcept;
+
+    // Classifies the effective appearance of every region after a document
+    // configuration edit, including changes hidden by sparse overrides.
+    [[nodiscard]] TrackStylePresentationImpact classifyDocumentTrackStyleEdit(
+        const coaster::AuthoredTrack& before,
+        const coaster::AuthoredTrack& after);
 }

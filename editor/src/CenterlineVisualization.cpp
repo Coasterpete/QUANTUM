@@ -482,6 +482,7 @@ namespace quantum::editor
 
         TrackStylePresentationCandidate candidate;
         candidate.impact = impact;
+        candidate.documentStyle = track.trackStyle();
         candidate.resolvedRegionStyles = resolveRegionStyles(
             track, cachedVisualization.sectionSlices.size());
 
@@ -702,7 +703,11 @@ namespace quantum::editor
         }
         visualization_.resolvedRegionStyles =
             std::move(candidate.resolvedRegionStyles);
-        ++presentationGeneration_;
+        trackStyle_ = std::move(candidate.documentStyle);
+        if (!candidate.impact.empty())
+        {
+            ++presentationGeneration_;
+        }
     }
 
     bool CenterlineVisualizationCache::isDirty() const noexcept
