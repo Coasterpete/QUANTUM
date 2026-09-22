@@ -26,4 +26,10 @@ namespace quantum::coaster
     // configuration. Throws std::invalid_argument for an unknown definition.
     [[nodiscard]] TrackStylePreset resolveTrackConfiguration(
         const TrackConfigurationDefinition& configuration);
+
+    // Convenience overload: looks up the configuration by stable ID and
+    // resolves its validated default TrackStylePreset. Throws
+    // std::invalid_argument when the ID is unknown.
+    [[nodiscard]] TrackStylePreset resolveTrackConfiguration(
+        std::string_view configurationId);
 }

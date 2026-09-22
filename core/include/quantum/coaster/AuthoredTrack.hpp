@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -212,6 +213,26 @@ namespace quantum::coaster
         // Validates the complete preset before replacing authored style state.
         void setTrackStyle(const TrackStylePreset& style);
 
+        // Stable track configuration identity. This is provenance/reset
+        // identity, NOT the authoritative appearance definition. The
+        // document's concrete TrackStylePreset remains authoritative.
+        // An empty string indicates no known configuration identity
+        // (legacy documents or manually edited styles).
+        [[nodiscard]] std::string_view trackConfigurationId() const noexcept;
+        void setTrackConfigurationId(std::string_view id);
+
+        // Applies a track configuration: resolves the requested
+        // configuration, copies its validated default TrackStylePreset
+        // into the document, preserves existing region overrides, and
+        // updates the configuration identity. Throws
+        // std::invalid_argument for an unknown configuration ID.
+        void applyTrackConfiguration(std::string_view configurationId);
+
+        // Resets the document's concrete appearance to the current
+        // configuration's validated defaults and clears all region
+        // overrides. No-op when no configuration identity is set.
+        void resetToConfigurationDefaults();
+
         [[nodiscard]] const CoasterSetup& coasterSetup() const noexcept;
         // Validates the complete coaster configuration before replacing the
         // document's authored style/options/train/heartline state.
@@ -321,6 +342,7 @@ namespace quantum::coaster
         LayoutMode layoutMode_ = LayoutMode::Circuit;
         AuthoredStartPose startPose_;
         TrackPhysicalSettings physicalSettings_;
+        std::string trackConfigurationId_;
         TrackStylePreset trackStyle_;
         CoasterSetup coasterSetup_ =
             createCoasterSetupForStyle(defaultCoasterStyleId);
