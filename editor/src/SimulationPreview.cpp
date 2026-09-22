@@ -569,7 +569,9 @@ namespace quantum::editor
             // M2: batched GPU sampling for current pose's bogies (8 queries) – single production use
             // Collects all bogie TrackLocations for the committed pose before interpolation,
             // dispatches once via GpuPhysicsContext, validates against CPU.
-            if (gpuContext_ && gpuTrackReady_ && pose_ && compiledTrack_ && poseChanged)
+            // Gated behind gpuValidationEnabled_ – this is synchronous diagnostic
+            // infrastructure that blocks the critical playback path when enabled.
+            if (gpuValidationEnabled_ && gpuContext_ && gpuTrackReady_ && pose_ && compiledTrack_ && poseChanged)
             {
                 std::vector<physics::gpu::GpuTrackQuery> queries;
                 queries.reserve(pose_->carCount() * 2);
@@ -898,5 +900,15 @@ namespace quantum::editor
     bool SimulationPreview::hasGpuContext() const noexcept
     {
         return gpuContext_ != nullptr;
+    }
+
+    void SimulationPreview::setGpuValidationEnabled(const bool enabled) noexcept
+    {
+        gpuValidationEnabled_ = enabled;
+    }
+
+    bool SimulationPreview::gpuValidationEnabled() const noexcept
+    {
+        return gpuValidationEnabled_;
     }
 }

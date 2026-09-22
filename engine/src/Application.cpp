@@ -413,11 +413,12 @@ namespace quantum::engine
 
                 quantum::editor::SimulationPreview simulationPreview;
                 simulationPreview.setGpuContext(
-                    gpuContext.has_value()
-                            && (previewSmokeOptions == nullptr
-                                || !previewSmokeOptions
-                                    ->disableGpuPreviewSampling)
-                        ? &*gpuContext : nullptr);
+                    gpuContext.has_value() ? &*gpuContext : nullptr);
+                if (previewSmokeOptions != nullptr
+                    && previewSmokeOptions->enableGpuValidation)
+                {
+                    simulationPreview.setGpuValidationEnabled(true);
+                }
                 std::uint64_t simulationTrackGeneration =
                     centerlineCache.generation();
                 quantum::coaster::LayoutMode simulationLayoutMode =

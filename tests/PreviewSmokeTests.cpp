@@ -65,6 +65,7 @@ namespace
             "--camera-orbit", "--transition-drag",
             "--resize-window",
             "--disable-gpu-preview-sampling",
+            "--enable-gpu-validation",
             "--frame-trace",
             "--region-style-edit", "hardware-spacing"});
         require(stoppedEdit && stoppedEdit->has_value()
@@ -73,6 +74,7 @@ namespace
                 && (**stoppedEdit).transitionDrag
                 && (**stoppedEdit).resizeWindow
                 && (**stoppedEdit).disableGpuPreviewSampling
+                && (**stoppedEdit).enableGpuValidation
                 && (**stoppedEdit).captureFrameTrace
                 && (**stoppedEdit).regionStyleEdit
                     == quantum::editor::PreviewSmokeRegionStyleEdit::

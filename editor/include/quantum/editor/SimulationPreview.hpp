@@ -123,6 +123,13 @@ namespace quantum::editor
         void setGpuContext(physics::gpu::GpuPhysicsContext* gpu) noexcept;
         [[nodiscard]] bool hasGpuContext() const noexcept;
 
+        // When enabled, every frame performs a synchronous GPU track-sampling
+        // dispatch followed by CPU reference validation.  This is diagnostic
+        // infrastructure and is OFF by default to avoid blocking the critical
+        // playback path.  Enable explicitly for validation smoke tests.
+        void setGpuValidationEnabled(bool enabled) noexcept;
+        [[nodiscard]] bool gpuValidationEnabled() const noexcept;
+
         static constexpr std::size_t maximumStepsPerFrame = 60;
         // Eight steps is 33.3 ms of demand at 240 Hz and is deliberately
         // diagnostic only; it never changes accumulator or playback behavior.
@@ -153,6 +160,7 @@ namespace quantum::editor
         std::string error_;
         physics::gpu::GpuPhysicsContext* gpuContext_ = nullptr;
         bool gpuTrackReady_ = false;
+        bool gpuValidationEnabled_ = false;
         // M2 telemetry for batched GPU sampling (8 bogies per pose)
         std::size_t gpuBatchedSampleCount_ = 0;
         std::size_t gpuDispatchCount_ = 0;
