@@ -74,6 +74,7 @@ namespace quantum::editor
     struct TrackStylePresentationCandidate
     {
         TrackStylePresentationImpact impact;
+        coaster::TrackStylePreset documentStyle;
         std::vector<coaster::TrackStylePreset> resolvedRegionStyles;
         std::optional<coaster::ContinuousTrackMesh> continuousMesh;
         std::optional<std::vector<coaster::TrackMaterial>> trackMaterials;

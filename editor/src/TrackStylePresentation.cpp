@@ -1,5 +1,7 @@
 #include <quantum/editor/TrackStylePresentation.hpp>
 
+#include <quantum/coaster/AuthoredTrack.hpp>
+
 #include <glm/vector_relational.hpp>
 
 #include <algorithm>
@@ -123,16 +125,13 @@ namespace quantum::editor
     {
         TrackStylePresentationImpact impact;
 
-        // Region overrides cannot author these fields. If they differ, the
-        // edit is not the M0 presentation-only shape that this path knows.
-        if (before.name != after.name
-            || before.geometryFamily != after.geometryFamily
+        // A different generator family has no presentation-only path yet.
+        // Preset names are metadata; all other concrete inputs are classified
+        // below so configuration selection can reuse the solved centerline.
+        if (before.geometryFamily != after.geometryFamily
             || before.railCount != after.railCount
-            || before.railRadialSegments != after.railRadialSegments
             || before.railOffsets.size() != after.railOffsets.size()
-            || before.spine.radialSegments != after.spine.radialSegments
-            || before.repeatingHardware.size()
-                != after.repeatingHardware.size())
+            || before.railOffsets.size() != 2)
         {
             add(impact, TrackStylePresentationProduct::FullRegeneration);
             return impact;
@@ -144,7 +143,8 @@ namespace quantum::editor
             add(impact, TrackStylePresentationProduct::HardwareInstances);
         }
         if (before.railsVisible != after.railsVisible
-            || before.railRadius != after.railRadius)
+            || before.railRadius != after.railRadius
+            || before.railRadialSegments != after.railRadialSegments)
         {
             add(impact, TrackStylePresentationProduct::RenderableMesh);
         }
@@ -159,7 +159,8 @@ namespace quantum::editor
         if (before.spine.enabled != after.spine.enabled
             || before.spine.type != after.spine.type
             || !sameOffset(before.spine.offset, after.spine.offset)
-            || before.spine.dimensions != after.spine.dimensions)
+            || before.spine.dimensions != after.spine.dimensions
+            || before.spine.radialSegments != after.spine.radialSegments)
         {
             add(impact, TrackStylePresentationProduct::RenderableMesh);
         }
@@ -169,6 +170,12 @@ namespace quantum::editor
             add(impact, TrackStylePresentationProduct::TrackMaterials);
         }
 
+        if (before.repeatingHardware.size() != after.repeatingHardware.size())
+        {
+            add(impact, TrackStylePresentationProduct::HardwareInstances);
+            return impact;
+        }
+
         for (std::size_t index = 0;
             index < before.repeatingHardware.size(); ++index)
         {
@@ -176,8 +183,7 @@ namespace quantum::editor
             const auto& afterHardware = after.repeatingHardware[index];
             if (!sameHardwareStructure(beforeHardware, afterHardware))
             {
-                add(impact, TrackStylePresentationProduct::FullRegeneration);
-                return impact;
+                add(impact, TrackStylePresentationProduct::HardwareInstances);
             }
             if (beforeHardware.enabled != afterHardware.enabled
                 || beforeHardware.spacing != afterHardware.spacing)
@@ -191,6 +197,33 @@ namespace quantum::editor
             }
         }
 
+        return impact;
+    }
+
+    TrackStylePresentationImpact classifyDocumentTrackStyleEdit(
+        const coaster::AuthoredTrack& before,
+        const coaster::AuthoredTrack& after)
+    {
+        if (before.sectionCount() != after.sectionCount())
+        {
+            return {TrackStylePresentationProduct::FullRegeneration};
+        }
+
+        TrackStylePresentationImpact impact;
+        for (std::size_t index = 0; index < before.sectionCount(); ++index)
+        {
+            const coaster::TrackStylePreset beforeStyle =
+                coaster::resolveTrackStyle(
+                    before.trackStyle(),
+                    before.section(index).trackStyleOverrides);
+            const coaster::TrackStylePreset afterStyle =
+                coaster::resolveTrackStyle(
+                    after.trackStyle(),
+                    after.section(index).trackStyleOverrides);
+            impact = combineTrackStyleImpacts(impact,
+                classifyResolvedTrackStylePresentationChange(
+                    beforeStyle, afterStyle));
+        }
         return impact;
     }
 }

@@ -1,6 +1,8 @@
 #include <quantum/editor/CoasterSetupUi.hpp>
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/coaster/TrackConfiguration.hpp>
+#include <quantum/editor/TrackStylePresentation.hpp>
 
 #include <imgui.h>
 
@@ -11,6 +13,32 @@
 
 namespace quantum::editor
 {
+    namespace
+    {
+        [[nodiscard]] TrackStylePresentationImpact
+        computeModifiedStateImpact(
+            const coaster::AuthoredTrack& track)
+        {
+            const std::string_view configId = track.trackConfigurationId();
+            if (configId.empty())
+            {
+                return {};
+            }
+
+            const coaster::TrackConfigurationDefinition* definition =
+                coaster::findTrackConfiguration(configId);
+            if (definition == nullptr)
+            {
+                return {};
+            }
+
+            const coaster::TrackStylePreset defaults =
+                coaster::resolveTrackConfiguration(*definition);
+            return classifyResolvedTrackStylePresentationChange(
+                defaults, track.trackStyle());
+        }
+    }
+
     CoasterSetupWindowEdits drawCoasterSetupWindow(
         const coaster::AuthoredTrack* const authoredTrack,
         bool* const open,
@@ -29,6 +57,7 @@ namespace quantum::editor
         coaster::TrackPhysicalSettings physicalSettings =
             committedPhysicalSettings;
         bool changed = false;
+        CoasterSetupWindowEdits edits;
 
         ImGui::SetNextWindowPos(
             ImVec2(760.0F, 110.0F),
@@ -94,7 +123,65 @@ namespace quantum::editor
             capabilitySummary.c_str());
 
         ImGui::Separator();
-        editorHeading("Configuration", fonts);
+        editorHeading("Track configuration", fonts);
+
+        // Track appearance is independent of the coaster/train setup above.
+        {
+            const std::string_view configId =
+                authoredTrack->trackConfigurationId();
+            const coaster::TrackConfigurationDefinition* configDef =
+                configId.empty()
+                    ? nullptr
+                    : coaster::findTrackConfiguration(configId);
+
+            ImGui::TextColored(palette::textSecondary,
+                "Current: %s",
+                configDef != nullptr
+                    ? configDef->displayName.data()
+                    : configId.empty() ? "Unassigned" : "Unknown");
+            if (ImGui::Button("Apply Modern Steel"))
+            {
+                edits.trackConfigurationId =
+                    std::string(coaster::modernSteelTrackConfigurationId);
+            }
+            editorSecondaryTextWrapped(
+                "Applies the Modern Steel base appearance; region style "
+                "overrides are kept.");
+
+            if (configDef != nullptr)
+            {
+                const bool modified =
+                    !computeModifiedStateImpact(*authoredTrack).empty();
+                if (modified)
+                {
+                    ImGui::TextColored(palette::warning,
+                        "Base appearance modified");
+                }
+                if (ImGui::Button("Reset track appearance and regions"))
+                {
+                    ImGui::OpenPopup("Reset Track Appearance?");
+                }
+                if (ImGui::BeginPopupModal("Reset Track Appearance?",
+                        nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+                {
+                    ImGui::TextWrapped(
+                        "Restore the selected configuration defaults and "
+                        "clear all authored region style overrides?");
+                    if (ImGui::Button("Reset"))
+                    {
+                        edits.resetTrackConfiguration = true;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Cancel"))
+                    {
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+        }
+
         if (draftStyle == nullptr)
         {
             ImGui::TextUnformatted("No options are defined for this style.");
@@ -245,7 +332,6 @@ namespace quantum::editor
         ImGui::PopID();
         ImGui::End();
 
-        CoasterSetupWindowEdits edits;
         if (changed && draft != committed)
         {
             edits.coasterSetup = std::move(draft);

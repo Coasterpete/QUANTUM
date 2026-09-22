@@ -590,6 +590,10 @@ namespace quantum::editor
         [[nodiscard]] std::optional<coaster::TrackPhysicalSettings>
         takePendingPhysicalSettingsEdit() noexcept;
 
+        [[nodiscard]] std::optional<std::string>
+        takePendingTrackConfigurationSelection() noexcept;
+        [[nodiscard]] bool takePendingTrackConfigurationReset() noexcept;
+
         // Circuit completion: returns true once when the user clicks
         // Complete Circuit....  Application processes the actual
         // completion attempt.
@@ -872,6 +876,8 @@ bool canUndo_ = false;
         std::optional<coaster::CoasterSetup> pendingCoasterSetupEdit_;
         std::optional<coaster::TrackPhysicalSettings>
             pendingPhysicalSettingsEdit_;
+        std::optional<std::string> pendingTrackConfigurationSelection_;
+        bool pendingTrackConfigurationReset_ = false;
         bool coasterSetupWindowOpen_ = true;
         bool pendingCircuitCompletion_ = false;
 
