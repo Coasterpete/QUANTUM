@@ -1712,6 +1712,11 @@ TrackStylePreset deserializeTrackStyle(
             {"initialSpeed", physical.initialSpeed},
             {"metersPerCoordinateUnit", physical.metersPerCoordinateUnit},
             {"gravityAcceleration", physical.gravityAcceleration}};
+        if (!track.trackConfigurationId().empty())
+        {
+            root["trackConfigurationId"] =
+                std::string(track.trackConfigurationId());
+        }
         root["trackStyle"] = serializeTrackStyle(track.trackStyle());
         root["coasterSetup"] = serializeCoasterSetup(track.coasterSetup());
         root["supports"] = serializeSupportCollection(track.supports());
@@ -1749,7 +1754,8 @@ TrackStylePreset deserializeTrackStyle(
             // 3. Strict root-level fields.
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
-                "physicalSettings", "trackStyle", "coasterSetup", "supports"
+                "physicalSettings", "trackConfigurationId", "trackStyle",
+                "coasterSetup", "supports"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -1887,6 +1893,9 @@ TrackStylePreset deserializeTrackStyle(
             // historical viewport appearance even though new documents now
             // start with the Modern Steel preset.
             track.setTrackStyle(createStandardDualRailPreset());
+            // Clear the constructor's default configuration identity. A
+            // missing trackConfigurationId identifies a legacy document.
+            track.setTrackConfigurationId("");
 
             for (std::size_t i = 0; i < sections.size(); ++i)
             {
@@ -1922,6 +1931,15 @@ TrackStylePreset deserializeTrackStyle(
                 requireObject(root, "trackStyle", "root");
                 track.setTrackStyle(deserializeTrackStyle(
                     root["trackStyle"], "trackStyle"));
+            }
+            // Configuration identity is provenance/reset metadata, not the
+            // authoritative appearance. Old documents without this field
+            // retain their serialized concrete style.
+            if (root.contains("trackConfigurationId"))
+            {
+                requireString(root, "trackConfigurationId", "root");
+                track.setTrackConfigurationId(
+                    root["trackConfigurationId"].get<std::string>());
             }
 
             for (std::size_t index = 0; index < track.sectionCount(); ++index)

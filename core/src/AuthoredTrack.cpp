@@ -656,7 +656,8 @@ namespace quantum::coaster
     }
 
     AuthoredTrack::AuthoredTrack()
-        : trackStyle_(createDefaultDocumentTrackStyle())
+        : trackConfigurationId_(std::string(modernSteelTrackConfigurationId))
+        , trackStyle_(createDefaultDocumentTrackStyle())
     {
     }
 
@@ -870,6 +871,40 @@ namespace quantum::coaster
     {
         validateTrackStyle(style);
         trackStyle_ = style;
+    }
+
+    std::string_view AuthoredTrack::trackConfigurationId() const noexcept
+    {
+        return trackConfigurationId_;
+    }
+
+    void AuthoredTrack::setTrackConfigurationId(const std::string_view id)
+    {
+        trackConfigurationId_ = std::string(id);
+    }
+
+    void AuthoredTrack::applyTrackConfiguration(
+        const std::string_view configurationId)
+    {
+        const TrackStylePreset newStyle =
+            resolveTrackConfiguration(configurationId);
+        trackConfigurationId_ = std::string(configurationId);
+        trackStyle_ = newStyle;
+    }
+
+    void AuthoredTrack::resetToConfigurationDefaults()
+    {
+        if (trackConfigurationId_.empty())
+        {
+            return;
+        }
+        const TrackStylePreset defaults =
+            resolveTrackConfiguration(trackConfigurationId_);
+        trackStyle_ = defaults;
+        for (std::size_t index = 0; index < sections_.size(); ++index)
+        {
+            sections_[index].trackStyleOverrides = RegionTrackStyleOverrides{};
+        }
     }
 
     const CoasterSetup& AuthoredTrack::coasterSetup() const noexcept

@@ -61,4 +61,18 @@ namespace quantum::coaster
             "Unknown track configuration '"
             + std::string(configuration.id) + "'.");
     }
+
+    TrackStylePreset resolveTrackConfiguration(
+        const std::string_view configurationId)
+    {
+        const TrackConfigurationDefinition* definition =
+            findTrackConfiguration(configurationId);
+        if (definition == nullptr)
+        {
+            throw std::invalid_argument(
+                "Unknown track configuration '"
+                + std::string(configurationId) + "'.");
+        }
+        return resolveTrackConfiguration(*definition);
+    }
 }
