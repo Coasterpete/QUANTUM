@@ -5772,7 +5772,8 @@ namespace quantum::editor
         ImGuiIO& io = ImGui::GetIO();
         const float presentationScale = editorPresentationScale();
 
-        if (supportTrackPickActive_
+        if (workspaceMode_ == WorkspaceMode::Editor
+            && supportTrackPickActive_
             && ImGui::IsKeyPressed(ImGuiKey_Escape))
         {
             cancelSupportTrackPick();
@@ -5786,7 +5787,8 @@ namespace quantum::editor
         }
 
         const bool supportManipulationCaptured =
-            updateSupportNodeManipulation(
+            workspaceMode_ == WorkspaceMode::Editor
+            && updateSupportNodeManipulation(
                 viewportHovered,
                 pixelWidth,
                 pixelHeight,
@@ -5795,14 +5797,15 @@ namespace quantum::editor
         const bool supportConnectWaiting = supportConnectState_
             == SupportConnectState::WaitingForSecondNode;
         const bool startPoseManipulationCaptured =
-            supportManipulationCaptured
+            workspaceMode_ == WorkspaceMode::Editor
+            && (supportManipulationCaptured
                 || (!supportConnectWaiting
                     && !supportTrackPickActive_
                     && updateStartPoseManipulation(
                     viewportHovered,
                     logicalWidth,
                     logicalHeight
-                ));
+                )));
 
         if (io.AppFocusLost)
         {
@@ -5823,7 +5826,8 @@ namespace quantum::editor
         // viewport action only when the submitted viewport Image itself is
         // hovered; popup/modal blocking and clicks on the toolbar therefore
         // remain UI input even while WantCaptureMouse is true for the editor.
-        if (viewportHovered
+        if (workspaceMode_ == WorkspaceMode::Editor
+            && viewportHovered
             && !io.AppFocusLost
             && !startPoseManipulationCaptured
             && cameraGesture_ == CameraGesture::None
@@ -6216,7 +6220,8 @@ namespace quantum::editor
         const ImVec2 imageMaximum = ImGui::GetItemRectMax();
         drawList->PushClipRect(imageMinimum, imageMaximum, true);
 
-        if (centerlineVisualization_ != nullptr)
+        if (workspaceMode_ == WorkspaceMode::Editor
+            && centerlineVisualization_ != nullptr)
         {
             const auto project = [&](const renderer::LineVertex& vertex) -> std::optional<ImVec2>
             {
@@ -6290,9 +6295,12 @@ namespace quantum::editor
                 emphasize(*hoveredSection, false);
             emphasize(selectedSection_, true);
         }
-        drawSimulationTelemetry();
-        drawViewportTrackAnchors();
-        drawViewportSupports();
+        if (workspaceMode_ == WorkspaceMode::Editor)
+        {
+            drawSimulationTelemetry();
+            drawViewportTrackAnchors();
+            drawViewportSupports();
+        }
         drawList->PopClipRect();
     }
 
@@ -7198,6 +7206,13 @@ namespace quantum::editor
             ImGui::EndMenu();
         }
 
+        if (ImGui::MenuItem("Enter Simulator"))
+        {
+            workspaceMode_ = WorkspaceMode::Simulator;
+            cameraGesture_ = CameraGesture::None;
+            viewportNavigationActive_ = false;
+        }
+
         if (ImGui::BeginMenu("View"))
         {
             showViewportViewMenuItems();
@@ -7445,8 +7460,10 @@ ImGui::MenuItem(
                 == renderer::TrackPresentationMode::CenterlineDebug
             ? visibleTrackCurveMask(viewportSettings_) : 0;
         vulkan.setViewportElementVisibility(
-            viewportSettings_.gridVisible,
-            referenceCurveMask
+            workspaceMode_ == WorkspaceMode::Editor
+                && viewportSettings_.gridVisible,
+            workspaceMode_ == WorkspaceMode::Editor
+                ? referenceCurveMask : 0
         );
 
         // Recentre the ground grid around the solved track's bounds so it
@@ -7458,6 +7475,111 @@ ImGui::MenuItem(
                 static_cast<float>(viewportCamera_.boundsCenter().y),
                 static_cast<float>(viewportCamera_.boundsRadius())
             );
+        }
+    }
+
+    void EditorUi::drawSimulator(renderer::VulkanContext& vulkan)
+    {
+        ImGuiViewport* const mainViewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowViewport(mainViewport->ID);
+        ImGui::SetNextWindowPos(mainViewport->Pos);
+        ImGui::SetNextWindowSize(mainViewport->Size);
+        constexpr ImGuiWindowFlags windowFlags =
+            ImGuiWindowFlags_NoDocking
+            | ImGuiWindowFlags_NoDecoration
+            | ImGuiWindowFlags_NoMove
+            | ImGuiWindowFlags_NoResize
+            | ImGuiWindowFlags_NoSavedSettings;
+        bool returnToEditor = false;
+        const bool visible = ImGui::Begin("Simulator", nullptr, windowFlags);
+        if (visible)
+        {
+            ImGui::TextUnformatted("SIMULATOR");
+            ImGui::SameLine();
+            if (ImGui::Button("Return to Editor"))
+            {
+                if (simulationPlaybackState_ == SimulationPlaybackState::Playing)
+                    pendingSimulationControl_ = SimulationControlType::Pause;
+                returnToEditor = true;
+            }
+            ImGui::Separator();
+
+            const char* state = "Stopped";
+            if (simulationPlaybackState_ == SimulationPlaybackState::Playing)
+                state = "Playing";
+            else if (simulationPlaybackState_ == SimulationPlaybackState::Paused)
+                state = "Paused";
+
+            if (simulationAvailable_)
+            {
+                constexpr double milesPerHourPerMeterPerSecond =
+                    2.2369362920544;
+                ImGui::Text("Status: %s", state);
+                ImGui::SameLine(0.0F, 32.0F);
+                ImGui::Text("Speed: %.1f mph  |  %.2f m/s",
+                    simulationSpeedMps_ * milesPerHourPerMeterPerSecond,
+                    simulationSpeedMps_);
+            }
+            else
+            {
+                ImGui::TextColored(palette::warning, "Status: Unavailable");
+                if (!simulationError_.empty())
+                    ImGui::TextWrapped("%s", simulationError_.c_str());
+            }
+
+            ImGui::BeginDisabled(!simulationAvailable_
+                || simulationPlaybackState_ == SimulationPlaybackState::Playing);
+            if (ImGui::Button("Play"))
+                pendingSimulationControl_ = SimulationControlType::Play;
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!simulationAvailable_
+                || simulationPlaybackState_ != SimulationPlaybackState::Playing);
+            if (ImGui::Button("Pause"))
+                pendingSimulationControl_ = SimulationControlType::Pause;
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!simulationAvailable_);
+            if (ImGui::Button("Reset"))
+                pendingSimulationControl_ = SimulationControlType::Reset;
+            ImGui::EndDisabled();
+
+            ImGui::Separator();
+            const ImVec2 availableSize = ImGui::GetContentRegionAvail();
+            const ImVec2 framebufferScale =
+                ImGui::GetIO().DisplayFramebufferScale;
+            const std::uint32_t viewportWidth = contentPixelDimension(
+                availableSize.x, framebufferScale.x);
+            const std::uint32_t viewportHeight = contentPixelDimension(
+                availableSize.y, framebufferScale.y);
+            updateViewportTexture(vulkan, viewportWidth, viewportHeight);
+            if (viewportTexture_ != VK_NULL_HANDLE
+                && viewportWidth != 0 && viewportHeight != 0)
+            {
+                const ImTextureID textureId = static_cast<ImTextureID>(
+                    reinterpret_cast<std::uintptr_t>(viewportTexture_));
+                ImGui::Image(ImTextureRef{textureId}, availableSize);
+                updateViewportCamera(vulkan, ImGui::IsItemHovered(),
+                    viewportWidth, viewportHeight,
+                    availableSize.x, availableSize.y);
+            }
+            else if (availableSize.x > 0.0F && availableSize.y > 0.0F)
+            {
+                cameraGesture_ = CameraGesture::None;
+                viewportNavigationActive_ = false;
+                ImGui::Dummy(availableSize);
+            }
+        }
+        else
+        {
+            updateViewportTexture(vulkan, 0, 0);
+        }
+        ImGui::End();
+        if (returnToEditor)
+        {
+            workspaceMode_ = WorkspaceMode::Editor;
+            cameraGesture_ = CameraGesture::None;
+            viewportNavigationActive_ = false;
         }
     }
 
@@ -7498,6 +7620,13 @@ ImGui::MenuItem(
         ImGui::NewFrame();
         hardwareDragActive_ = false;
         regionStyleNumericEditActive_ = false;
+
+        if (workspaceMode_ == WorkspaceMode::Simulator)
+        {
+            drawSimulator(vulkan);
+            ImGui::Render();
+            return;
+        }
 
         if (captureSetupPending_)
         {
