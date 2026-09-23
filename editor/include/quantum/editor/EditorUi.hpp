@@ -636,6 +636,13 @@ namespace quantum::editor
         void applyPreviewSmokeCameraOrbit() noexcept;
 
     private:
+        enum class WorkspaceMode : std::uint8_t
+        {
+            Editor,
+            Simulator
+        };
+
+        void drawSimulator(renderer::VulkanContext& vulkan);
         enum class CameraGesture
         {
             None,
@@ -887,6 +894,7 @@ bool canUndo_ = false;
         double simulationSpeedMps_ = 0.0;
         bool simulationAvailable_ = false;
         std::string simulationError_;
+        WorkspaceMode workspaceMode_ = WorkspaceMode::Editor;
 
         static constexpr std::size_t performanceHistoryCapacity = 720;
         std::array<FramePerformanceSample, performanceHistoryCapacity>
