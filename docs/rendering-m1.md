@@ -48,6 +48,13 @@ crossties are present in both modes.
 | Selected region | ![Single sample viewport](rendering-m1/off/modern-steel.png) | ![4x MSAA viewport](rendering-m1/on/modern-steel.png) |
 | Close rail and hardware | ![Single sample close view](rendering-m1/close-off/modern-steel.png) | ![4x MSAA close view](rendering-m1/close-on/modern-steel.png) |
 
+The live Windows application also completed Editor → Simulator → Play → Return
+to Editor. The Simulator viewport displayed the track and train wireframe
+while stopped and playing; the Editor viewport returned with its grid and
+reference geometry intact.
+
+![Live Simulator viewport with track and train wireframe](rendering-m1/simulator.png)
+
 The 4x captures show smoother rail, crosstie, and grid silhouettes. The
 surface highlight remains visible, and box edges stay sharp. MSAA reduces
 coverage aliasing, but cannot eliminate subpixel shimmer from moving thin
