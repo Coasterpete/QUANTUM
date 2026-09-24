@@ -32,6 +32,7 @@ namespace quantum::editor
         bool repeat = false;
         bool stoppedPreview = false;
         bool cameraOrbit = false;
+        bool msaaOff = false;
         bool transitionDrag = false;
         bool resizeWindow = false;
         bool disableGpuPreviewSampling = false;

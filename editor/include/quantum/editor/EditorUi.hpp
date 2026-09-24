@@ -382,6 +382,7 @@ namespace quantum::editor
         float sunElevationDegrees = 55.0F;
         float sunIntensity = 3.0F;
         float exposure = 1.0F;
+        bool msaaEnabled = true;
 
         bool gridVisible = true;
         bool anchorsVisible = true;
@@ -430,6 +431,7 @@ namespace quantum::editor
         );
         void processEvent(const SDL_Event& event);
         void beginFrame(renderer::VulkanContext& vulkan);
+        void setViewportMsaaEnabled(bool enabled) noexcept;
         [[nodiscard]] std::optional<ScalarProfileEndpointValueEdit>
         takeProfileEndpointValueEdit() noexcept;
         [[nodiscard]] std::optional<ProfileTransitionTypeEdit>

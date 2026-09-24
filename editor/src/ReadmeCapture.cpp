@@ -120,13 +120,24 @@ namespace quantum::editor
         std::set<ReadmeCaptureKind> used;
         for (const auto& entry : scenarios)
         {
-            requireKeys(entry, {"name", "document", "region", "framing", "tool"});
+            requireKeys(entry, {"name", "document", "region", "framing", "tool", "msaa", "zoom"});
             const auto name = entry.at("name").get<std::string>();
             const auto found = std::find(names.begin(), names.end(), name);
             if (found == names.end())
                 throw std::invalid_argument("Unknown capture scenario: " + name);
             ReadmeCaptureScenario scenario;
             scenario.kind = static_cast<ReadmeCaptureKind>(found - names.begin());
+            if (entry.contains("msaa") && !entry["msaa"].is_boolean())
+                throw std::invalid_argument("Capture msaa must be a boolean.");
+            scenario.msaaEnabled = entry.value("msaa", true);
+            if (entry.contains("zoom"))
+            {
+                if (!entry["zoom"].is_number()
+                    || entry["zoom"] < 0.2 || entry["zoom"] > 1.0)
+                    throw std::invalid_argument(
+                        "Capture zoom must be a number in [0.2, 1.0].");
+                scenario.zoom = entry["zoom"].get<double>();
+            }
             if (!used.insert(scenario.kind).second)
                 throw std::invalid_argument("Duplicate capture scenario: " + name);
             scenario.document = resolvePath(base, entry.at("document"));

@@ -69,7 +69,15 @@ namespace
         require(manifest.width == 1600 && manifest.height == 900 && manifest.settleFrames == 16,
             "Deterministic default dimensions/timing changed.");
         require(!manifest.overwrite && !manifest.scenarios.front().focusSelected
-            && !manifest.scenarios.front().rotateGizmo, "Unsafe presentation defaults.");
+            && !manifest.scenarios.front().rotateGizmo
+            && manifest.scenarios.front().msaaEnabled, "Unsafe presentation defaults.");
+        auto noMsaa = base;
+        noMsaa["scenarios"][0]["msaa"] = false;
+        require(!load(noMsaa).scenarios.front().msaaEnabled,
+            "Capture MSAA override was ignored.");
+        noMsaa["scenarios"][0]["zoom"] = 0.5;
+        require(load(noMsaa).scenarios.front().zoom == 0.5,
+            "Capture zoom override was ignored.");
         require(manifest.scenarios.front().document == std::filesystem::weakly_canonical(fixture),
             "Document must resolve relative to manifest, not working directory.");
         require(readmeCaptureOutputPath(manifest, manifest.scenarios.front())
@@ -138,7 +146,8 @@ namespace
         badField("scenarios", json::array({base["scenarios"][0], base["scenarios"][0]}));
         for (const auto& [field, value] : std::vector<std::pair<std::string, json>>{
             {"name", "../escape"}, {"document", "missing.quantum"}, {"region", -1},
-            {"region", 0.5}, {"framing", "random"}, {"tool", "move"}, {"camera", "top"}})
+            {"region", 0.5}, {"framing", "random"}, {"tool", "move"},
+            {"msaa", "off"}, {"zoom", 0.1}, {"camera", "top"}})
         {
             auto invalid = base;
             invalid["scenarios"][0][field] = value;

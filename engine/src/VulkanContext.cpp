@@ -892,6 +892,31 @@ namespace
             & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
     }
 
+    bool deviceSupportsViewportMsaa4(const VkPhysicalDevice device) noexcept
+    {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(device, &properties);
+        const VkSampleCountFlags limits =
+            properties.limits.framebufferColorSampleCounts
+            & properties.limits.framebufferDepthSampleCounts;
+        if ((limits & VK_SAMPLE_COUNT_4_BIT) == 0)
+            return false;
+
+        VkImageFormatProperties color{};
+        VkImageFormatProperties depth{};
+        return vkGetPhysicalDeviceImageFormatProperties(device,
+                viewportColorFormat, VK_IMAGE_TYPE_2D,
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                0, &color) == VK_SUCCESS
+            && vkGetPhysicalDeviceImageFormatProperties(device,
+                viewportDepthFormat, VK_IMAGE_TYPE_2D,
+                VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                0, &depth) == VK_SUCCESS
+            && (color.sampleCounts & depth.sampleCounts
+                & VK_SAMPLE_COUNT_4_BIT) != 0;
+    }
+
     SwapchainSupport querySwapchainSupport(
         const VkPhysicalDevice device,
         const VkSurfaceKHR surface)
@@ -1378,6 +1403,9 @@ namespace quantum::renderer
             }
 
             physicalDevice_ = device;
+            viewportMsaa4Supported_ = deviceSupportsViewportMsaa4(device);
+            viewportSamples_ = viewportMsaa4Supported_
+                ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
             graphicsQueueFamily_ = *indices.graphics;
             presentQueueFamily_ = *indices.present;
             fillModeNonSolidSupported_ =
@@ -1395,6 +1423,10 @@ namespace quantum::renderer
                 "shaderFloat64=%d",
                 shaderFloat64Supported_ ? 1 : 0
             );
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Info, "VK",
+                "Viewport 4x MSAA %s",
+                viewportMsaa4Supported_ ? "supported" : "unsupported; using 1x");
             return;
         }
 
@@ -1916,7 +1948,7 @@ namespace quantum::renderer
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType =
             VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        multisampling.rasterizationSamples = viewportSamples_;
 
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
         depthStencil.sType =
@@ -2014,11 +2046,13 @@ namespace quantum::renderer
         layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutCreateInfo.pushConstantRangeCount = 1;
         layoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-        VkResult result = vkCreatePipelineLayout(
-            device_, &layoutCreateInfo, nullptr, &trackPipelineLayout_);
-        if (result != VK_SUCCESS)
+        VkResult result = VK_SUCCESS;
+        if (trackPipelineLayout_ == VK_NULL_HANDLE)
         {
-            throwVulkanError("vkCreatePipelineLayout for track", result);
+            result = vkCreatePipelineLayout(
+                device_, &layoutCreateInfo, nullptr, &trackPipelineLayout_);
+            if (result != VK_SUCCESS)
+                throwVulkanError("vkCreatePipelineLayout for track", result);
         }
 
         const VkShaderModule trackVertexShader = createShaderModule(
@@ -2121,7 +2155,7 @@ namespace quantum::renderer
                 VkPipelineMultisampleStateCreateInfo multisampling{};
                 multisampling.sType =
                     VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-                multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+                multisampling.rasterizationSamples = viewportSamples_;
 
                 VkPipelineDepthStencilStateCreateInfo depthStencil{};
                 depthStencil.sType =
@@ -2299,6 +2333,7 @@ namespace quantum::renderer
 
         VkImageCreateInfo depthImageCreateInfo = imageCreateInfo;
         depthImageCreateInfo.format = viewportDepthFormat;
+        depthImageCreateInfo.samples = viewportSamples_;
         depthImageCreateInfo.usage =
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
@@ -2348,9 +2383,41 @@ namespace quantum::renderer
             );
         }
 
+        VkImage msaaImage = VK_NULL_HANDLE;
+        VmaAllocation msaaAllocation = VK_NULL_HANDLE;
+        VkImageView msaaImageView = VK_NULL_HANDLE;
+        if (viewportSamples_ != VK_SAMPLE_COUNT_1_BIT)
+        {
+            VkImageCreateInfo msaaCreateInfo = imageCreateInfo;
+            msaaCreateInfo.samples = viewportSamples_;
+            msaaCreateInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            result = vmaCreateImage(allocator_, &msaaCreateInfo,
+                &allocationCreateInfo, &msaaImage, &msaaAllocation, nullptr);
+            if (result == VK_SUCCESS)
+            {
+                VkImageViewCreateInfo msaaViewCreateInfo = viewCreateInfo;
+                msaaViewCreateInfo.image = msaaImage;
+                result = vkCreateImageView(device_, &msaaViewCreateInfo,
+                    nullptr, &msaaImageView);
+            }
+            if (result != VK_SUCCESS)
+            {
+                if (msaaImage != VK_NULL_HANDLE)
+                    vmaDestroyImage(allocator_, msaaImage, msaaAllocation);
+                vkDestroyImageView(device_, depthImageView, nullptr);
+                vmaDestroyImage(allocator_, depthImage, depthAllocation);
+                vkDestroyImageView(device_, imageView, nullptr);
+                vmaDestroyImage(allocator_, image, allocation);
+                throwVulkanError("viewport multisample color target", result);
+            }
+        }
+
         viewportImage_ = image;
         viewportAllocation_ = allocation;
         viewportImageView_ = imageView;
+        viewportMsaaImage_ = msaaImage;
+        viewportMsaaAllocation_ = msaaAllocation;
+        viewportMsaaImageView_ = msaaImageView;
         viewportDepthImage_ = depthImage;
         viewportDepthAllocation_ = depthAllocation;
         viewportDepthImageView_ = depthImageView;
@@ -2610,7 +2677,8 @@ namespace quantum::renderer
         std::uint32_t width,
         std::uint32_t height,
         const ViewportTargetRetirementCallback retirementCallback,
-        void* const userData)
+        void* const userData,
+        const bool enableMsaa)
     {
         if (width == 0 || height == 0)
         {
@@ -2618,13 +2686,17 @@ namespace quantum::renderer
             height = 0;
         }
 
+        const VkSampleCountFlagBits requestedSamples =
+            enableMsaa && viewportMsaa4Supported_
+            ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
+        const bool sampleCountChanged = requestedSamples != viewportSamples_;
         if (viewportExtent_.width == width
-            && viewportExtent_.height == height)
+            && viewportExtent_.height == height && !sampleCountChanged)
         {
             return;
         }
 
-        if (viewportImage_ != VK_NULL_HANDLE)
+        if (viewportImage_ != VK_NULL_HANDLE || sampleCountChanged)
         {
             // Retiring every in-flight frame is required: any one of them may
             // still write the viewport color/depth attachments and sample the
@@ -2632,12 +2704,34 @@ namespace quantum::renderer
             // descriptor retirement and attachment destruction safe.
             waitForFrameCompletion();
 
-            if (retirementCallback != nullptr)
+            if (viewportImage_ != VK_NULL_HANDLE
+                && retirementCallback != nullptr)
             {
                 retirementCallback(userData);
             }
 
             destroyViewportTarget();
+        }
+
+        if (sampleCountChanged)
+        {
+            for (VkPipeline* const pipeline : {
+                &graphicsPipeline_, &trackShadedPipeline_, &trackEdgePipeline_,
+                &hardwareShadedPipeline_, &hardwareEdgePipeline_})
+            {
+                if (*pipeline != VK_NULL_HANDLE)
+                {
+                    vkDestroyPipeline(device_, *pipeline, nullptr);
+                    *pipeline = VK_NULL_HANDLE;
+                }
+            }
+            viewportSamples_ = requestedSamples;
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Info, "VK",
+                "Viewport sample count changed to %u",
+                viewportSamples_ == VK_SAMPLE_COUNT_4_BIT ? 4u : 1u);
+            createGraphicsPipeline();
+            createTrackPipelines();
         }
 
         if (width != 0 && height != 0)
@@ -2662,6 +2756,16 @@ namespace quantum::renderer
         }
 
         viewportViewProjection_ = viewProjection;
+    }
+
+    bool VulkanContext::supportsViewportMsaa4() const noexcept
+    {
+        return viewportMsaa4Supported_;
+    }
+
+    bool VulkanContext::viewportMsaaEnabled() const noexcept
+    {
+        return viewportSamples_ == VK_SAMPLE_COUNT_4_BIT;
     }
 
     void VulkanContext::setViewportCameraPosition(const glm::vec3& position)
@@ -3451,6 +3555,20 @@ namespace quantum::renderer
                 &toColorAttachmentBarrier
             );
 
+            if (viewportMsaaImage_ != VK_NULL_HANDLE)
+            {
+                VkImageMemoryBarrier toMsaaAttachmentBarrier =
+                    toColorAttachmentBarrier;
+                toMsaaAttachmentBarrier.srcAccessMask = 0;
+                toMsaaAttachmentBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                toMsaaAttachmentBarrier.image = viewportMsaaImage_;
+                vkCmdPipelineBarrier(commandBuffer,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                    0, nullptr, 0, nullptr, 1,
+                    &toMsaaAttachmentBarrier);
+            }
+
             if (!viewportImageInitialized_)
             {
                 VkImageMemoryBarrier toDepthAttachmentBarrier{};
@@ -3493,11 +3611,24 @@ namespace quantum::renderer
             VkRenderingAttachmentInfo viewportColorAttachment{};
             viewportColorAttachment.sType =
                 VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            viewportColorAttachment.imageView = viewportImageView_;
+            viewportColorAttachment.imageView =
+                viewportMsaaImageView_ != VK_NULL_HANDLE
+                ? viewportMsaaImageView_ : viewportImageView_;
             viewportColorAttachment.imageLayout =
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             viewportColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            viewportColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            viewportColorAttachment.storeOp =
+                viewportMsaaImageView_ != VK_NULL_HANDLE
+                ? VK_ATTACHMENT_STORE_OP_DONT_CARE
+                : VK_ATTACHMENT_STORE_OP_STORE;
+            if (viewportMsaaImageView_ != VK_NULL_HANDLE)
+            {
+                viewportColorAttachment.resolveMode =
+                    VK_RESOLVE_MODE_AVERAGE_BIT;
+                viewportColorAttachment.resolveImageView = viewportImageView_;
+                viewportColorAttachment.resolveImageLayout =
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            }
             viewportColorAttachment.clearValue.color = {
                 {0.001F, 0.001F, 0.001F, 1.0F}
             };
@@ -4378,6 +4509,11 @@ namespace quantum::renderer
 
     void VulkanContext::destroyViewportTarget() noexcept
     {
+        if (viewportMsaaImageView_ != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(device_, viewportMsaaImageView_, nullptr);
+            viewportMsaaImageView_ = VK_NULL_HANDLE;
+        }
         if (viewportImageView_ != VK_NULL_HANDLE)
         {
             vkDestroyImageView(device_, viewportImageView_, nullptr);
@@ -4399,6 +4535,14 @@ namespace quantum::renderer
             );
             viewportImage_ = VK_NULL_HANDLE;
             viewportAllocation_ = VK_NULL_HANDLE;
+        }
+
+        if (viewportMsaaImage_ != VK_NULL_HANDLE)
+        {
+            vmaDestroyImage(allocator_, viewportMsaaImage_,
+                viewportMsaaAllocation_);
+            viewportMsaaImage_ = VK_NULL_HANDLE;
+            viewportMsaaAllocation_ = VK_NULL_HANDLE;
         }
 
         if (viewportDepthImage_ != VK_NULL_HANDLE)
@@ -4653,6 +4797,8 @@ namespace quantum::renderer
         presentQueue_ = VK_NULL_HANDLE;
         physicalDevice_ = VK_NULL_HANDLE;
         fillModeNonSolidSupported_ = false;
+        viewportMsaa4Supported_ = false;
+        viewportSamples_ = VK_SAMPLE_COUNT_1_BIT;
 
         if (surface_ != VK_NULL_HANDLE)
         {
