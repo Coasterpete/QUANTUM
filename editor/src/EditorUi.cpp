@@ -5210,6 +5210,13 @@ namespace quantum::editor
         viewportSettings_.msaaEnabled = enabled;
     }
 
+    void EditorUi::enterSimulatorForPreviewSmoke() noexcept
+    {
+        workspaceMode_ = WorkspaceMode::Simulator;
+        cameraGesture_ = CameraGesture::None;
+        viewportNavigationActive_ = false;
+    }
+
     void EditorUi::retireViewportTexture(void* const userData) noexcept
     {
         static_cast<EditorUi*>(userData)->removeViewportTexture();

@@ -401,6 +401,8 @@ namespace quantum::engine
                 );
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->msaaOff)
                     editorUi.setViewportMsaaEnabled(false);
+                if (previewSmokeOptions != nullptr && previewSmokeOptions->simulator)
+                    editorUi.enterSimulatorForPreviewSmoke();
                 editorUi.setCenterlineSections(centerline.sectionSlices);
                 editorUi.setCenterlineVisualization(centerline);
                 editorUi.setSupportVisualization(supportVisualization);
@@ -3604,6 +3606,8 @@ editorUi.selectSection(restoredSelection, true);
                                     draw.previewFrameSlotUpdateMilliseconds,
                                 .previewFrameSlotWaitMilliseconds =
                                     draw.frameSlotWaitMilliseconds,
+                                .deferredBufferReclaimMilliseconds =
+                                    draw.deferredBufferReclaimMilliseconds,
                                 .drawFrameCpuMilliseconds =
                                     draw.totalMilliseconds,
                                 .acquireCallMilliseconds =

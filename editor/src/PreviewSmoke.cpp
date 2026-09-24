@@ -360,6 +360,8 @@ namespace
                 {"average", sample.averagePhysicsStepMilliseconds},
                 {"maximum", sample.maximumPhysicsStepMilliseconds}}},
             {"physics_and_gpu_preview_cpu_ms", sample.physicsMilliseconds},
+            {"event_pump_cpu_ms", sample.eventPumpMilliseconds},
+            {"pre_simulation_cpu_ms", sample.preSimulationCpuMilliseconds},
             {"interpolation_cpu_ms", sample.interpolationMilliseconds},
             {"render_pose_solve_cpu_ms", sample.renderPoseSolveMilliseconds},
             {"render_pose_solves", sample.renderPoseSolveCount},
@@ -380,12 +382,22 @@ namespace
                 {"dispatches", sample.gpuPreviewDispatchCount},
                 {"fallbacks", sample.gpuPreviewFallbackCount}}},
             {"renderer", {
+                {"synchronization", synchronizationJson(sample.synchronization)},
+                {"draw_frame_cpu_ms", sample.drawFrameCpuMilliseconds},
+                {"preview_slot_update_cpu_ms", sample.previewFrameSlotUpdateMilliseconds},
                 {"gpu_execution_ms", sample.gpuTimingAvailable
                     ? nlohmann::json(sample.gpuExecutionMilliseconds)
                     : nlohmann::json(nullptr)},
                 {"fence_wait_ms", sample.previewFrameSlotWaitMilliseconds},
+                {"deferred_buffer_reclaim_cpu_ms",
+                    sample.deferredBufferReclaimMilliseconds},
                 {"acquire_cpu_ms", sample.acquireCallMilliseconds},
-                {"present_cpu_ms", sample.presentCallMilliseconds}}},
+                {"present_cpu_ms", sample.presentCallMilliseconds},
+                {"deferred_buffer_count_before_reclaim",
+                    sample.deferredBufferCountBeforeReclaim},
+                {"deferred_buffer_bytes_before_reclaim",
+                    sample.deferredBufferBytesBeforeReclaim},
+                {"reclaimed_buffer_count", sample.reclaimedBufferCount}}},
             {"solver", {
                 {"solve_train_pose_calls", counters.solveTrainPoseCalls},
                 {"rigid_bogie_solve_calls", counters.rigidBogieSolveCalls},
@@ -461,6 +473,11 @@ namespace quantum::editor
             if (argument == "--stopped-preview")
             {
                 options.stoppedPreview = true;
+                continue;
+            }
+            if (argument == "--simulator")
+            {
+                options.simulator = true;
                 continue;
             }
             if (argument == "--camera-orbit")

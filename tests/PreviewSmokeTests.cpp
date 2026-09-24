@@ -57,6 +57,7 @@ namespace
             "default step threshold");
         require(!(**result).repeat, "repeat is opt-in");
         require(!(**result).msaaOff, "MSAA is on by default");
+        require(!(**result).simulator, "Editor is the default workspace");
         const auto repeated = parse({
             "--dev-preview-smoke", fixtureString, "--repeat"});
         require(repeated && repeated->has_value() && (**repeated).repeat,
@@ -64,6 +65,7 @@ namespace
         const auto stoppedEdit = parse({
             "--dev-preview-smoke", fixtureString, "--stopped-preview",
             "--camera-orbit", "--transition-drag", "--msaa-off",
+            "--simulator",
             "--resize-window",
             "--disable-gpu-preview-sampling",
             "--enable-gpu-validation",
@@ -73,6 +75,7 @@ namespace
                 && (**stoppedEdit).stoppedPreview
                 && (**stoppedEdit).cameraOrbit
                 && (**stoppedEdit).msaaOff
+                && (**stoppedEdit).simulator
                 && (**stoppedEdit).transitionDrag
                 && (**stoppedEdit).resizeWindow
                 && (**stoppedEdit).disableGpuPreviewSampling

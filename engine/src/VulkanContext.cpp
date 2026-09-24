@@ -2650,11 +2650,11 @@ namespace quantum::renderer
                 std::chrono::steady_clock::now() - begin).count();
     }
 
-    void VulkanContext::waitForFrameSlot(const std::uint32_t frameSlot)
+    double VulkanContext::waitForFrameSlot(const std::uint32_t frameSlot)
     {
         if (frameFences_[0] == VK_NULL_HANDLE)
         {
-            return;
+            return 0.0;
         }
 
         const VkFence fence = frameFences_[frameSlot];
@@ -2670,7 +2670,10 @@ namespace quantum::renderer
         {
             throwVulkanError("vkWaitForFences", result);
         }
+        const auto reclaimBegin = std::chrono::steady_clock::now();
         reclaimDeferredBuffers(frameSlot);
+        return std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - reclaimBegin).count();
     }
 
     void VulkanContext::resizeViewportTarget(
@@ -4252,13 +4255,16 @@ namespace quantum::renderer
         const auto frameSlotWaitBegin = Clock::now();
         synchronization.waitBeginMilliseconds = std::chrono::duration<double, std::milli>(
             frameSlotWaitBegin.time_since_epoch()).count();
-        waitForFrameSlot(frameSlot);
+        lastDrawFrameCpuTelemetry_.deferredBufferReclaimMilliseconds =
+            waitForFrameSlot(frameSlot);
         lastDrawFrameCpuTelemetry_.reclaimedBufferCount =
             lastDrawFrameCpuTelemetry_.deferredBufferCountBeforeReclaim;
-        synchronization.waitEndMilliseconds = millisecondsNow();
+        synchronization.waitEndMilliseconds = millisecondsNow()
+            - lastDrawFrameCpuTelemetry_.deferredBufferReclaimMilliseconds;
         lastDrawFrameCpuTelemetry_.frameSlotWaitMilliseconds =
             std::chrono::duration<double, std::milli>(
-                Clock::now() - frameSlotWaitBegin).count();
+                Clock::now() - frameSlotWaitBegin).count()
+            - lastDrawFrameCpuTelemetry_.deferredBufferReclaimMilliseconds;
 
         if (frameTimestampQueryPool_ != VK_NULL_HANDLE
             && frameTimestampSubmitted_[frameSlot])
