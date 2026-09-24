@@ -1,5 +1,6 @@
 #pragma once
 
+#include <quantum/coaster/TrackStyle.hpp>
 #include <glm/vec3.hpp>
 
 #include <cstddef>
@@ -29,11 +30,12 @@ namespace quantum::renderer
     {
         std::uint32_t firstIndex = 0;
         std::uint32_t indexCount = 0;
+        std::optional<coaster::TrackMaterial> material;
     };
 
-    // Immutable after publication through StaticMeshAssetCache. Materials are
-    // deliberately absent: the existing track-hardware material remains the
-    // rendering authority for this milestone.
+    // Immutable after publication through StaticMeshAssetCache. Primitive
+    // metallic-roughness factors are retained; track-style overrides take
+    // precedence when hardware is drawn.
     struct StaticMeshAsset
     {
         std::string identifier;

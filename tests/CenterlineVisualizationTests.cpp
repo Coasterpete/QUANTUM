@@ -902,6 +902,15 @@ namespace
                 && !impact.affects(TrackStylePresentationProduct::HardwareInstances)
                 && !impact.affects(TrackStylePresentationProduct::EngineeringRails),
             "rail color classifies as material-only");
+        auto roughnessEdit = after;
+        roughnessEdit.railMaterial->roughness = 0.8F;
+        const auto roughnessImpact = classifyRegionTrackStyleEdit(
+            track.trackStyle(), after, roughnessEdit);
+        require(roughnessImpact.affects(
+                TrackStylePresentationProduct::TrackMaterials)
+                && !roughnessImpact.affects(
+                    TrackStylePresentationProduct::RenderableMesh),
+            "roughness edits update draw materials without rebuilding geometry");
         track.section(2).trackStyleOverrides = after;
         const auto* const meshVertices = cache.visualization()
             .renderableTrack.continuousMesh.vertices.data();

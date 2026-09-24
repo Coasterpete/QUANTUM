@@ -28,7 +28,9 @@ namespace quantum::editor
             const coaster::TrackMaterial& first,
             const coaster::TrackMaterial& second) noexcept
         {
-            return glm::all(glm::equal(first.baseColor, second.baseColor));
+            return glm::all(glm::equal(first.baseColor, second.baseColor))
+                && first.metallic == second.metallic
+                && first.roughness == second.roughness;
         }
 
         [[nodiscard]] bool sameOffset(

@@ -264,6 +264,45 @@ namespace
             "invalidating one CPU entry preserves every other cached asset");
     }
 
+    void metallicRoughnessFactorsSurviveImport(
+        const std::filesystem::path& runtimeRoot)
+    {
+        const auto fixture = runtimeRoot / "assets" / "track"
+            / "test-crosstie-placeholder.glb";
+        const auto path = std::filesystem::temp_directory_path()
+            / ("quantum-pbr-material-" + std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count())
+                + ".glb");
+        writeEditedGlb(fixture, path, [](nlohmann::json& document)
+        {
+            document["materials"] = {{{"pbrMetallicRoughness", {
+                {"baseColorFactor", {0.5, 0.25, 0.1, 1.0}},
+                {"metallicFactor", 0.75}, {"roughnessFactor", 0.2}}}}};
+            document["meshes"][0]["primitives"][0]["material"] = 0;
+        });
+        try
+        {
+            const auto asset = loadStaticMeshGlb(
+                "assets://tests/pbr-material.glb", path);
+            require(asset.submeshes.size() == 1
+                    && asset.submeshes[0].material.has_value(),
+                "primitive retains its glTF material");
+            const auto& material = *asset.submeshes[0].material;
+            requireNear(material.metallic, 0.75F, 1.0e-6F,
+                "glTF metallic factor retained");
+            requireNear(material.roughness, 0.2F, 1.0e-6F,
+                "glTF roughness factor retained");
+            requireNear(material.baseColor.r, 0.73536F, 1.0e-4F,
+                "linear glTF base color converted to editor sRGB storage");
+        }
+        catch (...)
+        {
+            std::filesystem::remove(path);
+            throw;
+        }
+        std::filesystem::remove(path);
+    }
+
     void invalidAssetsReportTheirLogicalIdentity(
         const std::filesystem::path& runtimeRoot)
     {
@@ -360,6 +399,7 @@ int main(int argc, char* argv[])
         identifiersNormalizeAndRejectEscapes();
         validFixtureLoadsDeterministically(runtimeRoot);
         cpuAndGpuCachesReuseAssets(runtimeRoot);
+        metallicRoughnessFactorsSurviveImport(runtimeRoot);
         invalidAssetsReportTheirLogicalIdentity(runtimeRoot);
     }
     catch (const std::exception& exception)

@@ -113,6 +113,10 @@ namespace quantum::renderer
         void setViewportViewProjection(
             const std::array<float, 16>& viewProjection
         );
+        void setViewportCameraPosition(const glm::vec3& position);
+        // Direction points from the surface toward the sun in world space.
+        void setSunlight(const glm::vec3& direction, float intensity);
+        void setExposure(float exposure);
         void updateTrackCurveVertices(
             std::span<const LineVertex> trackCurveVertices,
             std::uint32_t trackVerticesPerCurve
@@ -301,6 +305,10 @@ namespace quantum::renderer
             0.0F, 0.0F, 1.0F, 0.0F,
             0.0F, 0.0F, 0.0F, 1.0F
         };
+        glm::vec3 viewportCameraPosition_{0.0F, -20.0F, 10.0F};
+        glm::vec3 sunlightDirection_{-0.45F, -0.35F, 0.82F};
+        float sunlightIntensity_ = 3.0F;
+        float exposure_ = 1.0F;
 
         VkBuffer staticVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation staticVertexAllocation_ = VK_NULL_HANDLE;
@@ -366,7 +374,7 @@ namespace quantum::renderer
         {
             std::uint32_t firstIndex = 0;
             std::uint32_t indexCount = 0;
-            std::array<float, 4> baseColor{0.20F, 0.34F, 0.48F, 1.0F};
+            coaster::TrackMaterial material;
         };
         std::vector<TrackDrawBatch> trackDrawBatches_;
 
@@ -381,6 +389,7 @@ namespace quantum::renderer
             std::uint32_t vertexCount = 0;
             std::uint32_t triangleIndexCount = 0;
             std::uint32_t edgeIndexCount = 0;
+            std::vector<StaticMeshSubmesh> submeshes;
         };
 
         // Instances remain one contiguous GPU stream. Each batch selects one
@@ -390,7 +399,7 @@ namespace quantum::renderer
             StaticMeshGpuHandle mesh;
             std::uint32_t firstInstance = 0;
             std::uint32_t instanceCount = 0;
-            std::array<float, 4> baseColor{0.28F, 0.30F, 0.32F, 1.0F};
+            std::optional<coaster::TrackMaterial> materialOverride;
         };
         StaticMeshAssetCache staticMeshAssets_;
         StaticMeshGpuHandleCache staticMeshGpuHandles_;

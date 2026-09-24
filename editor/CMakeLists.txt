@@ -82,6 +82,12 @@ target_compile_features(
         cxx_std_23
 )
 
+if(MSVC)
+    # Debug's deeper Application stack plus Vulkan validation's device-state
+    # construction can exceed the default 1 MiB Windows stack reserve.
+    target_link_options(QUANTUM PRIVATE "$<$<CONFIG:Debug>:/STACK:4194304>")
+endif()
+
 set(quantum_editor_font_files
     overpass-regular.otf
     overpass-semibold.otf

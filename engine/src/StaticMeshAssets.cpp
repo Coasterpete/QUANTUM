@@ -27,6 +27,60 @@ namespace
     using quantum::renderer::StaticMeshSubmesh;
     using quantum::renderer::StaticMeshVertex;
 
+    [[noreturn]] void assetError(std::string_view identifier,
+        std::string_view message);
+
+    [[nodiscard]] float linearToSrgb(const float value) noexcept
+    {
+        return value <= 0.0031308F ? 12.92F * value
+            : 1.055F * std::pow(value, 1.0F / 2.4F) - 0.055F;
+    }
+
+    [[nodiscard]] std::optional<quantum::coaster::TrackMaterial>
+        primitiveMaterial(const Json& document, const Json& primitive,
+            const std::string_view identifier)
+    {
+        if (!primitive.contains("material"))
+            return std::nullopt;
+        const auto materialIndex = primitive["material"].get<std::size_t>();
+        if (!document.contains("materials")
+            || !document["materials"].is_array()
+            || materialIndex >= document["materials"].size())
+            assetError(identifier, "primitive references an invalid material.");
+        const Json& material = document["materials"][materialIndex];
+        if (!material.is_object())
+            assetError(identifier, "material is malformed.");
+        const Json& pbr = material.contains("pbrMetallicRoughness")
+            ? material["pbrMetallicRoughness"] : Json::object();
+        if (!pbr.is_object())
+            assetError(identifier, "pbrMetallicRoughness is malformed.");
+        quantum::coaster::TrackMaterial result;
+        result.baseColor = {1.0F, 1.0F, 1.0F, 1.0F};
+        result.metallic = pbr.value("metallicFactor", 1.0F);
+        result.roughness = pbr.value("roughnessFactor", 1.0F);
+        if (pbr.contains("baseColorFactor"))
+        {
+            const Json& color = pbr["baseColorFactor"];
+            if (!color.is_array() || color.size() != 4)
+                assetError(identifier, "baseColorFactor must have four components.");
+            for (int channel = 0; channel < 3; ++channel)
+                result.baseColor[channel] = linearToSrgb(
+                    color[channel].get<float>());
+            result.baseColor.a = color[3].get<float>();
+        }
+        if (!std::isfinite(result.metallic)
+            || !std::isfinite(result.roughness)
+            || result.metallic < 0.0F || result.metallic > 1.0F
+            || result.roughness < 0.0F || result.roughness > 1.0F)
+            assetError(identifier, "metallic-roughness factors must be in [0, 1].");
+        for (int channel = 0; channel < 4; ++channel)
+            if (!std::isfinite(result.baseColor[channel])
+                || result.baseColor[channel] < 0.0F
+                || result.baseColor[channel] > 1.0F)
+                assetError(identifier, "baseColorFactor must be in [0, 1].");
+        return result;
+    }
+
     constexpr std::uint32_t glbMagic = 0x46546C67u;
     constexpr std::uint32_t glbVersion = 2u;
     constexpr std::uint32_t jsonChunkType = 0x4E4F534Au;
@@ -763,7 +817,8 @@ namespace quantum::renderer
                     asset.triangleIndices.push_back(baseVertex + localIndex);
                 }
                 asset.submeshes.push_back({
-                    firstIndex, static_cast<std::uint32_t>(indices.count)});
+                    firstIndex, static_cast<std::uint32_t>(indices.count),
+                    primitiveMaterial(document, primitive, asset.identifier)});
             }
             if (asset.vertices.empty() || asset.triangleIndices.empty())
             {

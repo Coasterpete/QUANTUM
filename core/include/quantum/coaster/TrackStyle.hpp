@@ -26,7 +26,10 @@ namespace quantum::coaster
 
     struct TrackMaterial
     {
+        // Editor colors are sRGB; the renderer decodes them before lighting.
         glm::vec4 baseColor{0.32F, 0.40F, 0.48F, 1.0F};
+        float metallic = 0.0F;
+        float roughness = 0.42F;
     };
 
     struct RailOffset
