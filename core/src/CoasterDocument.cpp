@@ -295,7 +295,9 @@ namespace quantum::coaster
                 {"r", material.baseColor.r},
                 {"g", material.baseColor.g},
                 {"b", material.baseColor.b},
-                {"a", material.baseColor.a}}}};
+                {"a", material.baseColor.a}}},
+                {"metallicFactor", material.metallic},
+                {"roughnessFactor", material.roughness}};
         }
 
         json serializeTrackStyle(const TrackStylePreset& style)
@@ -1055,7 +1057,8 @@ namespace quantum::coaster
             const json& object,
             const std::string& path)
         {
-            requireNoUnknownFields(object, {"baseColor"}, path);
+            requireNoUnknownFields(object,
+                {"baseColor", "metallicFactor", "roughnessFactor"}, path);
             requireObject(object, "baseColor", path);
             const json& color = object["baseColor"];
             requireNoUnknownFields(color, {"r", "g", "b", "a"},
@@ -1064,9 +1067,20 @@ namespace quantum::coaster
             {
                 requireNumber(color, component, path + ".baseColor");
             }
-            return TrackMaterial{{
+            TrackMaterial material{{
                 color["r"].get<float>(), color["g"].get<float>(),
                 color["b"].get<float>(), color["a"].get<float>()}};
+            if (object.contains("metallicFactor"))
+            {
+                requireNumber(object, "metallicFactor", path);
+                material.metallic = object["metallicFactor"].get<float>();
+            }
+            if (object.contains("roughnessFactor"))
+            {
+                requireNumber(object, "roughnessFactor", path);
+                material.roughness = object["roughnessFactor"].get<float>();
+            }
+            return material;
         }
 
         glm::dvec3 deserializeDvec3(

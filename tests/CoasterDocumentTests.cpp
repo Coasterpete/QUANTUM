@@ -851,6 +851,8 @@ namespace
         style.spine.dimensions = {0.36, 0.28};
         style.spine.radialSegments = 18;
         style.spine.material.baseColor = {0.12F, 0.24F, 0.36F, 1.0F};
+        style.spine.material.metallic = 0.7F;
+        style.spine.material.roughness = 0.63F;
         track.setTrackStyle(style);
 
         const std::string serialized = serializeCoasterDocument(track);
@@ -871,7 +873,9 @@ namespace
                 && restoredStyle.spine.radialSegments
                     == style.spine.radialSegments
                 && restoredStyle.spine.material.baseColor
-                    == style.spine.material.baseColor,
+                    == style.spine.material.baseColor
+                && restoredStyle.spine.material.metallic == 0.7F
+                && restoredStyle.spine.material.roughness == 0.63F,
             "Modern Steel spine profile and material must survive Save/Open");
         require(serializeCoasterDocument(*restored) == serialized,
             "Modern Steel serialization must remain deterministic");

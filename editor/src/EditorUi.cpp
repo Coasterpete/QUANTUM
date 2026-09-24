@@ -2027,6 +2027,20 @@ namespace
             committed = true;
         }
 
+        ImGui::SeparatorText("Outdoor Lighting");
+        committed = ImGui::SliderFloat("Sun Azimuth",
+            &settings.sunAzimuthDegrees, -180.0F, 180.0F, "%.0f deg")
+            || committed;
+        committed = ImGui::SliderFloat("Sun Elevation",
+            &settings.sunElevationDegrees, 5.0F, 90.0F, "%.0f deg")
+            || committed;
+        committed = ImGui::SliderFloat("Sun Intensity",
+            &settings.sunIntensity, 0.0F, 10.0F, "%.1f")
+            || committed;
+        committed = ImGui::SliderFloat("Exposure",
+            &settings.exposure, 0.1F, 3.0F, "%.2f")
+            || committed;
+
         ImGui::SeparatorText("Reference Elements");
 
         committed = ImGui::Checkbox(
@@ -2573,6 +2587,19 @@ namespace
             ImGui::BeginDisabled(!authored);
             if (ImGui::ColorEdit4("##Value", &value.baseColor.x,
                 ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar))
+            {
+                local = value;
+                changed = true;
+                continuous = ImGui::IsItemActive();
+            }
+            if (ImGui::SliderFloat("Metallic", &value.metallic, 0.0F, 1.0F))
+            {
+                local = value;
+                changed = true;
+                continuous = ImGui::IsItemActive();
+            }
+            if (ImGui::SliderFloat("Roughness", &value.roughness,
+                0.04F, 1.0F))
             {
                 local = value;
                 changed = true;
@@ -6215,6 +6242,16 @@ namespace quantum::editor
         vulkan.setTrackCurveHighlight(0, 0);
         const auto matrix = viewportCamera_.viewProjection(aspectRatio);
         vulkan.setViewportViewProjection(matrix);
+        vulkan.setViewportCameraPosition(
+            glm::vec3(viewportCamera_.position()));
+        const float sunAzimuth = glm::radians(
+            viewportSettings_.sunAzimuthDegrees);
+        const float sunElevation = glm::radians(
+            viewportSettings_.sunElevationDegrees);
+        vulkan.setSunlight({std::cos(sunElevation) * std::cos(sunAzimuth),
+            std::cos(sunElevation) * std::sin(sunAzimuth),
+            std::sin(sunElevation)}, viewportSettings_.sunIntensity);
+        vulkan.setExposure(viewportSettings_.exposure);
         ImDrawList* const drawList = ImGui::GetWindowDrawList();
         const ImVec2 imageMinimum = ImGui::GetItemRectMin();
         const ImVec2 imageMaximum = ImGui::GetItemRectMax();

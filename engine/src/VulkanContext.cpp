@@ -2008,7 +2008,7 @@ namespace quantum::renderer
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushConstantRange.offset = 0;
         pushConstantRange.size = sizeof(viewportViewProjection_)
-            + 8 * sizeof(float);
+            + 16 * sizeof(float);
 
         VkPipelineLayoutCreateInfo layoutCreateInfo{};
         layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -2664,6 +2664,30 @@ namespace quantum::renderer
         viewportViewProjection_ = viewProjection;
     }
 
+    void VulkanContext::setViewportCameraPosition(const glm::vec3& position)
+    {
+        if (!finite(position))
+            throw std::invalid_argument("Viewport camera position must be finite.");
+        viewportCameraPosition_ = position;
+    }
+
+    void VulkanContext::setSunlight(const glm::vec3& direction,
+        const float intensity)
+    {
+        if (!finite(direction) || glm::length(direction) <= 1.0e-6F
+            || !std::isfinite(intensity) || intensity < 0.0F)
+            throw std::invalid_argument("Sunlight direction and intensity must be valid.");
+        sunlightDirection_ = glm::normalize(direction);
+        sunlightIntensity_ = intensity;
+    }
+
+    void VulkanContext::setExposure(const float exposure)
+    {
+        if (!std::isfinite(exposure) || exposure <= 0.0F)
+            throw std::invalid_argument("Exposure must be positive and finite.");
+        exposure_ = exposure;
+    }
+
     void VulkanContext::updateTrackCurveVertices(
         const std::span<const LineVertex> trackCurveVertices,
         const std::uint32_t trackVerticesPerCurve)
@@ -2927,6 +2951,7 @@ namespace quantum::renderer
                     uploaded.edgeIndexBuffer = edgeBuffer.buffer;
                     uploaded.edgeIndexAllocation = edgeBuffer.allocation;
                     uploaded.edgeIndexCount = edgeBuffer.elementCount;
+                    uploaded.submeshes = meshAsset.submeshes;
 
                     StaticMeshGpuHandle handle;
                     if (availableHardwareMeshHandles_.empty())
@@ -2966,12 +2991,10 @@ namespace quantum::renderer
         candidateDrawBatches.reserve(mesh.submeshes.size());
         for (const coaster::TrackSubmesh& submesh : mesh.submeshes)
         {
-            const glm::vec4 color =
-                materials[submesh.materialIndex].baseColor;
             candidateDrawBatches.push_back({
                 submesh.firstIndex,
                 submesh.indexCount,
-                {color.r, color.g, color.b, color.a}});
+                materials[submesh.materialIndex]});
         }
 
         CreatedBuffer vertexBuffer;
@@ -3074,11 +3097,7 @@ namespace quantum::renderer
                 instances.size());
             drawBatch.instanceCount = static_cast<std::uint32_t>(
                 batch.instances.size());
-            if (batch.materialOverride.has_value())
-            {
-                const glm::vec4 color = batch.materialOverride->baseColor;
-                drawBatch.baseColor = {color.r, color.g, color.b, color.a};
-            }
+            drawBatch.materialOverride = batch.materialOverride;
             HardwareAssetLoadStatus loadStatus;
             loadStatus.requestedIdentifier = batch.asset.path;
             std::shared_ptr<const StaticMeshAsset> meshAsset;
@@ -3205,9 +3224,7 @@ namespace quantum::renderer
                 throw std::invalid_argument(
                     "Track material update changed the current submesh layout.");
             }
-            const glm::vec4 color = materials[submesh.materialIndex].baseColor;
-            trackDrawBatches_[index].baseColor =
-                {color.r, color.g, color.b, color.a};
+            trackDrawBatches_[index].material = materials[submesh.materialIndex];
         }
         lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
@@ -3240,14 +3257,7 @@ namespace quantum::renderer
         }
         for (std::size_t index = 0; index < materials.size(); ++index)
         {
-            hardwareDrawBatches_[index].baseColor =
-                {0.28F, 0.30F, 0.32F, 1.0F};
-            if (materials[index].has_value())
-            {
-                const glm::vec4 color = materials[index]->baseColor;
-                hardwareDrawBatches_[index].baseColor =
-                    {color.r, color.g, color.b, color.a};
-            }
+            hardwareDrawBatches_[index].materialOverride = materials[index];
         }
         lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
@@ -3535,12 +3545,22 @@ namespace quantum::renderer
                 presentationMode == TrackPresentationMode::Wireframe
                 || presentationMode
                     == TrackPresentationMode::ShadedWireframe;
-            constexpr std::array<float, 4> noTrackOverride{
-                1.0F, 0.82F, 0.12F, 0.0F};
             const auto pushTrackDraw = [this, commandBuffer](
-                const std::array<float, 4>& baseColor,
-                const std::array<float, 4>& colorOverride)
+                const coaster::TrackMaterial& material,
+                const bool unlit = false)
             {
+                const std::array<float, 4> baseColor{
+                    material.baseColor.r, material.baseColor.g,
+                    material.baseColor.b, material.baseColor.a};
+                const std::array<float, 4> cameraExposure{
+                    viewportCameraPosition_.x, viewportCameraPosition_.y,
+                    viewportCameraPosition_.z, exposure_};
+                const std::array<float, 4> sun{
+                    sunlightDirection_.x, sunlightDirection_.y,
+                    sunlightDirection_.z, sunlightIntensity_};
+                const std::array<float, 4> surface{
+                    material.metallic, material.roughness, 0.0F,
+                    unlit ? 1.0F : 0.0F};
                 vkCmdPushConstants(
                     commandBuffer, trackPipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -3555,7 +3575,16 @@ namespace quantum::renderer
                     commandBuffer, trackPipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                     sizeof(viewportViewProjection_) + sizeof(baseColor),
-                    sizeof(colorOverride), colorOverride.data());
+                    sizeof(cameraExposure), cameraExposure.data());
+                vkCmdPushConstants(commandBuffer, trackPipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    sizeof(viewportViewProjection_) + sizeof(baseColor)
+                        + sizeof(cameraExposure), sizeof(sun), sun.data());
+                vkCmdPushConstants(commandBuffer, trackPipelineLayout_,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    sizeof(viewportViewProjection_) + sizeof(baseColor)
+                        + sizeof(cameraExposure) + sizeof(sun),
+                    sizeof(surface), surface.data());
             };
 
             constexpr VkDeviceSize vertexOffset = 0;
@@ -3569,7 +3598,7 @@ namespace quantum::renderer
                     trackTriangleIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
                 for (const TrackDrawBatch& batch : trackDrawBatches_)
                 {
-                    pushTrackDraw(batch.baseColor, noTrackOverride);
+                    pushTrackDraw(batch.material);
                     vkCmdDrawIndexed(commandBuffer, batch.indexCount,
                         1, batch.firstIndex, 0, 0);
                 }
@@ -3594,11 +3623,16 @@ namespace quantum::renderer
                         vkCmdBindIndexBuffer(commandBuffer,
                             mesh.triangleIndexBuffer, 0,
                             VK_INDEX_TYPE_UINT32);
-                        pushTrackDraw(batch.baseColor, noTrackOverride);
-                        vkCmdDrawIndexed(commandBuffer,
-                            mesh.triangleIndexCount,
-                            batch.instanceCount, 0, 0,
-                            batch.firstInstance);
+                        const coaster::TrackMaterial fallback{
+                            {0.28F, 0.30F, 0.32F, 1.0F}, 0.8F, 0.58F};
+                        for (const StaticMeshSubmesh& submesh : mesh.submeshes)
+                        {
+                            pushTrackDraw(batch.materialOverride.value_or(
+                                submesh.material.value_or(fallback)));
+                            vkCmdDrawIndexed(commandBuffer,
+                                submesh.indexCount, batch.instanceCount,
+                                submesh.firstIndex, 0, batch.firstInstance);
+                        }
                     }
                 }
             }
@@ -3614,7 +3648,8 @@ namespace quantum::renderer
                     &trackMeshVertexBuffer_, &vertexOffset);
                 vkCmdBindIndexBuffer(commandBuffer,
                     trackEdgeIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
-                pushTrackDraw(edgeColor, noTrackOverride);
+                pushTrackDraw({glm::vec4{edgeColor[0], edgeColor[1],
+                    edgeColor[2], edgeColor[3]}}, true);
                 vkCmdDrawIndexed(commandBuffer, trackEdgeIndexCount_,
                     1, 0, 0, 0);
 
@@ -3638,7 +3673,8 @@ namespace quantum::renderer
                         vkCmdBindIndexBuffer(commandBuffer,
                             mesh.edgeIndexBuffer, 0,
                             VK_INDEX_TYPE_UINT32);
-                        pushTrackDraw(edgeColor, noTrackOverride);
+                        pushTrackDraw({glm::vec4{edgeColor[0], edgeColor[1],
+                            edgeColor[2], edgeColor[3]}}, true);
                         vkCmdDrawIndexed(commandBuffer,
                             mesh.edgeIndexCount, batch.instanceCount,
                             0, 0, batch.firstInstance);

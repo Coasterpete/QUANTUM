@@ -7,14 +7,16 @@ layout(location = 3) in vec4 instanceTransform1;
 layout(location = 4) in vec4 instanceTransform2;
 layout(location = 5) in vec4 instanceTransform3;
 
-layout(location = 0) out vec3 worldNormal;
-layout(location = 1) out vec4 vertexColor;
+layout(location = 0) out vec3 worldPosition;
+layout(location = 1) out vec3 worldNormal;
 
 layout(push_constant) uniform TrackDraw
 {
     mat4 viewProjection;
     vec4 baseColor;
-    vec4 colorOverride;
+    vec4 cameraExposure;
+    vec4 sunDirectionIntensity;
+    vec4 surface;
 } draw;
 
 void main()
@@ -25,12 +27,8 @@ void main()
         instanceTransform2,
         instanceTransform3
     );
-    vec4 worldPosition = transform * vec4(inPosition, 1.0);
-    gl_Position = draw.viewProjection * worldPosition;
+    vec4 position = transform * vec4(inPosition, 1.0);
+    gl_Position = draw.viewProjection * position;
+    worldPosition = position.xyz;
     worldNormal = normalize(transpose(inverse(mat3(transform))) * inNormal);
-    vertexColor = vec4(
-        mix(draw.baseColor.rgb, draw.colorOverride.rgb,
-            draw.colorOverride.a),
-        draw.baseColor.a
-    );
 }

@@ -56,11 +56,15 @@ namespace quantum::coaster
         {
             if (!finite(material.baseColor)
                 || glm::any(glm::lessThan(material.baseColor, glm::vec4{0.0F}))
-                || glm::any(glm::greaterThan(material.baseColor, glm::vec4{1.0F})))
+                || glm::any(glm::greaterThan(material.baseColor, glm::vec4{1.0F}))
+                || !std::isfinite(material.metallic)
+                || !std::isfinite(material.roughness)
+                || material.metallic < 0.0F || material.metallic > 1.0F
+                || material.roughness < 0.0F || material.roughness > 1.0F)
             {
                 throw std::invalid_argument(
                     std::string(context)
-                    + " base color must contain finite values in [0, 1]."
+                    + " material factors must contain finite values in [0, 1]."
                 );
             }
         }
@@ -395,6 +399,7 @@ namespace quantum::coaster
         style.railRadius = modernSteelRailDiameter * 0.5;
         style.railRadialSegments = modernSteelRailRadialSegments;
         style.railMaterial.baseColor = {0.72F, 0.16F, 0.08F, 1.0F};
+        style.railMaterial.roughness = 0.24F;
 
         style.spine.enabled = true;
         style.spine.type = ContinuousSpineType::Box;
@@ -402,6 +407,8 @@ namespace quantum::coaster
         style.spine.dimensions = modernSteelSpineDimensions;
         style.spine.radialSegments = 12;
         style.spine.material.baseColor = {0.20F, 0.23F, 0.27F, 1.0F};
+        style.spine.material.metallic = 0.8F;
+        style.spine.material.roughness = 0.58F;
 
         RepeatingHardwareStyle crosstie;
         crosstie.asset = {

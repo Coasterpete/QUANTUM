@@ -378,6 +378,10 @@ namespace quantum::editor
             static_cast<float>(defaultViewportMovementUnitsPerSecond);
         float fastMovementMultiplier =
             static_cast<float>(defaultViewportFastMovementMultiplier);
+        float sunAzimuthDegrees = -142.0F;
+        float sunElevationDegrees = 55.0F;
+        float sunIntensity = 3.0F;
+        float exposure = 1.0F;
 
         bool gridVisible = true;
         bool anchorsVisible = true;
