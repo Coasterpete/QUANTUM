@@ -1917,7 +1917,8 @@ namespace
 
     void showViewportSettingsWindow(
         quantum::editor::ViewportSettings& settings,
-        bool* const open)
+        bool* const open,
+        const bool msaaAvailable)
     {
         // ImGui's p_open parameter is only written by the title bar close
         // button; it does not hide the window. The flag must gate whether
@@ -1957,6 +1958,13 @@ namespace
                     presentationIndex));
             committed = true;
         }
+
+        ImGui::BeginDisabled(!msaaAvailable);
+        committed = ImGui::Checkbox("4x MSAA", &settings.msaaEnabled)
+            || committed;
+        ImGui::EndDisabled();
+        if (!msaaAvailable)
+            ImGui::TextDisabled("4x MSAA is unavailable on this Vulkan device.");
 
         const char* const projectionNames[] = {
             "Perspective", "Orthographic"
@@ -4858,6 +4866,7 @@ namespace quantum::editor
         );
         window_ = window;
         captureScenario_ = captureScenario;
+        viewportSettings_.msaaEnabled = vulkan.supportsViewportMsaa4();
         captureSetupPending_ = captureScenario != nullptr;
         authoredTrack_ = &authoredTrack;
         selectedSection_ = 0;
@@ -5164,14 +5173,18 @@ namespace quantum::editor
     {
         const VkExtent2D currentExtent = vulkan.viewportExtent();
 
-        if (currentExtent.width != width || currentExtent.height != height)
+        if (currentExtent.width != width || currentExtent.height != height
+            || vulkan.viewportMsaaEnabled()
+                != (viewportSettings_.msaaEnabled
+                    && vulkan.supportsViewportMsaa4()))
         {
             frameBlockingEvents_.viewportResized = true;
             vulkan.resizeViewportTarget(
                 width,
                 height,
                 &EditorUi::retireViewportTexture,
-                this
+                this,
+                viewportSettings_.msaaEnabled
             );
         }
 
@@ -5190,6 +5203,11 @@ namespace quantum::editor
                 );
             }
         }
+    }
+
+    void EditorUi::setViewportMsaaEnabled(const bool enabled) noexcept
+    {
+        viewportSettings_.msaaEnabled = enabled;
     }
 
     void EditorUi::retireViewportTexture(void* const userData) noexcept
@@ -5786,6 +5804,7 @@ namespace quantum::editor
                 focusSelectedSection();
             else
                 viewportCamera_.frame(aspectRatio);
+            viewportCamera_.zoom(std::log(1.0 / captureScenario_->zoom), 1.0);
             initialViewportFramePending_ = false;
         }
         else if (initialViewportFramePending_)
@@ -7670,6 +7689,8 @@ ImGui::MenuItem(
             resetTransientState();
             selectSection(captureScenario_->region, true);
             viewportSettings_ = {};
+            viewportSettings_.msaaEnabled = captureScenario_->msaaEnabled
+                && vulkan.supportsViewportMsaa4();
             viewportSettings_.anchorsVisible =
                 captureScenario_->kind == ReadmeCaptureKind::TrackStartGizmo;
             startPoseTransformMode_ = captureScenario_->rotateGizmo
@@ -7709,7 +7730,8 @@ ImGui::MenuItem(
 
         showViewportSettingsWindow(
             viewportSettings_,
-            &viewportSettingsWindowOpen_
+            &viewportSettingsWindowOpen_,
+            vulkan.supportsViewportMsaa4()
         );
 
         drawPerformanceTelemetry();

@@ -399,6 +399,8 @@ namespace quantum::engine
                     centerline.minimumPosition,
                     centerline.maximumPosition
                 );
+                if (previewSmokeOptions != nullptr && previewSmokeOptions->msaaOff)
+                    editorUi.setViewportMsaaEnabled(false);
                 editorUi.setCenterlineSections(centerline.sectionSlices);
                 editorUi.setCenterlineVisualization(centerline);
                 editorUi.setSupportVisualization(supportVisualization);

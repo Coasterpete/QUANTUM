@@ -29,6 +29,8 @@ namespace quantum::editor
         std::size_t region = 0;
         bool focusSelected = false;
         bool rotateGizmo = false;
+        bool msaaEnabled = true;
+        double zoom = 1.0;
     };
 
     struct ReadmeCaptureManifest

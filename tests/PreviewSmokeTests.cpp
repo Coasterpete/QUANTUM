@@ -56,13 +56,14 @@ namespace
         require((**result).spikeStepThreshold == 8,
             "default step threshold");
         require(!(**result).repeat, "repeat is opt-in");
+        require(!(**result).msaaOff, "MSAA is on by default");
         const auto repeated = parse({
             "--dev-preview-smoke", fixtureString, "--repeat"});
         require(repeated && repeated->has_value() && (**repeated).repeat,
             "developer repeat flag parses without a value");
         const auto stoppedEdit = parse({
             "--dev-preview-smoke", fixtureString, "--stopped-preview",
-            "--camera-orbit", "--transition-drag",
+            "--camera-orbit", "--transition-drag", "--msaa-off",
             "--resize-window",
             "--disable-gpu-preview-sampling",
             "--enable-gpu-validation",
@@ -71,6 +72,7 @@ namespace
         require(stoppedEdit && stoppedEdit->has_value()
                 && (**stoppedEdit).stoppedPreview
                 && (**stoppedEdit).cameraOrbit
+                && (**stoppedEdit).msaaOff
                 && (**stoppedEdit).transitionDrag
                 && (**stoppedEdit).resizeWindow
                 && (**stoppedEdit).disableGpuPreviewSampling

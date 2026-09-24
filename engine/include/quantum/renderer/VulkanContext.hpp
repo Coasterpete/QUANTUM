@@ -108,8 +108,11 @@ namespace quantum::renderer
             std::uint32_t width,
             std::uint32_t height,
             ViewportTargetRetirementCallback retirementCallback = nullptr,
-            void* userData = nullptr
+            void* userData = nullptr,
+            bool enableMsaa = true
         );
+        [[nodiscard]] bool supportsViewportMsaa4() const noexcept;
+        [[nodiscard]] bool viewportMsaaEnabled() const noexcept;
         void setViewportViewProjection(
             const std::array<float, 16>& viewProjection
         );
@@ -294,11 +297,16 @@ namespace quantum::renderer
         VkImage viewportImage_ = VK_NULL_HANDLE;
         VmaAllocation viewportAllocation_ = VK_NULL_HANDLE;
         VkImageView viewportImageView_ = VK_NULL_HANDLE;
+        VkImage viewportMsaaImage_ = VK_NULL_HANDLE;
+        VmaAllocation viewportMsaaAllocation_ = VK_NULL_HANDLE;
+        VkImageView viewportMsaaImageView_ = VK_NULL_HANDLE;
         VkImage viewportDepthImage_ = VK_NULL_HANDLE;
         VmaAllocation viewportDepthAllocation_ = VK_NULL_HANDLE;
         VkImageView viewportDepthImageView_ = VK_NULL_HANDLE;
         VkExtent2D viewportExtent_{};
         bool viewportImageInitialized_ = false;
+        bool viewportMsaa4Supported_ = false;
+        VkSampleCountFlagBits viewportSamples_ = VK_SAMPLE_COUNT_1_BIT;
         std::array<float, 16> viewportViewProjection_{
             1.0F, 0.0F, 0.0F, 0.0F,
             0.0F, 1.0F, 0.0F, 0.0F,

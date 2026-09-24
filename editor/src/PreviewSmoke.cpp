@@ -468,6 +468,11 @@ namespace quantum::editor
                 options.cameraOrbit = true;
                 continue;
             }
+            if (argument == "--msaa-off")
+            {
+                options.msaaOff = true;
+                continue;
+            }
             if (argument == "--transition-drag")
             {
                 options.transitionDrag = true;
