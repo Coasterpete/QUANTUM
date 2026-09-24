@@ -31,6 +31,7 @@ namespace quantum::editor
         std::size_t spikeStepThreshold = 8;
         bool repeat = false;
         bool stoppedPreview = false;
+        bool simulator = false;
         bool cameraOrbit = false;
         bool msaaOff = false;
         bool transitionDrag = false;

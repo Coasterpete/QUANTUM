@@ -432,6 +432,7 @@ namespace quantum::editor
         void processEvent(const SDL_Event& event);
         void beginFrame(renderer::VulkanContext& vulkan);
         void setViewportMsaaEnabled(bool enabled) noexcept;
+        void enterSimulatorForPreviewSmoke() noexcept;
         [[nodiscard]] std::optional<ScalarProfileEndpointValueEdit>
         takeProfileEndpointValueEdit() noexcept;
         [[nodiscard]] std::optional<ProfileTransitionTypeEdit>

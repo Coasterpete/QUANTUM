@@ -74,6 +74,7 @@ namespace quantum::editor
         double previewVertexPublishMilliseconds = 0.0;
         double previewFrameSlotUpdateMilliseconds = 0.0;
         double previewFrameSlotWaitMilliseconds = 0.0;
+        double deferredBufferReclaimMilliseconds = 0.0;
         double drawFrameCpuMilliseconds = 0.0;
         double acquireCallMilliseconds = 0.0;
         double presentCallMilliseconds = 0.0;

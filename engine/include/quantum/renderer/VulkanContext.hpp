@@ -59,6 +59,7 @@ namespace quantum::renderer
     {
         FrameSynchronizationTelemetry synchronization;
         double frameSlotWaitMilliseconds = 0.0;
+        double deferredBufferReclaimMilliseconds = 0.0;
         double previewFrameSlotUpdateMilliseconds = 0.0;
         double acquireCallMilliseconds = 0.0;
         double presentCallMilliseconds = 0.0;
@@ -236,7 +237,7 @@ namespace quantum::renderer
             std::span<const coaster::TrackMaterial> materials);
         void uploadTrackHardware(
             std::span<const coaster::HardwareInstanceBatch> batches);
-        void waitForFrameSlot(std::uint32_t frameSlot);
+        [[nodiscard]] double waitForFrameSlot(std::uint32_t frameSlot);
         void updateTrainPreviewFrameBuffer(std::uint32_t frameSlot);
         void recreateSwapchain();
         void recordDrawCommands(
