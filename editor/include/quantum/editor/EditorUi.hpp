@@ -743,6 +743,11 @@ void drawSimulationTelemetry();
         void drawViewportSupports();
         void drawSupportWorkspace();
         void drawTrackDevices();
+        void drawDeviceAccelerationProfileEditor(
+            coaster::TrackDevice& device, bool& commit);
+        [[nodiscard]] coaster::ProfileSegment* findDeviceProfileSegment(
+            coaster::ChannelProfile& profile,
+            coaster::SegmentId id) noexcept;
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
             float imageWidth,
@@ -917,6 +922,29 @@ void drawSimulationTelemetry();
         std::array<char, 128> deviceNameBuffer_{};
         std::string deviceEditError_;
         bool trackDeviceInitialDockPending_ = true;
+
+        // Acceleration profile editor state for the selected track device.
+        // Mirrors the Transition Editor's per-channel state but for a single
+        // scalar channel (commanded acceleration magnitude).
+        bool deviceProfileMode_ = false; // false = constant, true = custom profile
+        coaster::ChannelProfile deviceProfileEditBuffer_;
+        coaster::SegmentId deviceProfileNextSegmentId_ = 1;
+        std::uint32_t deviceProfileSelectedSegmentId_ = coaster::invalidSegmentId;
+        coaster::SegmentId deviceProfileDragSegmentId_ = coaster::invalidSegmentId;
+        ScalarProfileEndpoint deviceProfileSelectedEndpoint_ = ScalarProfileEndpoint::None;
+        ScalarProfileEndpoint deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
+        DragAxisLock deviceProfileDragAxisLock_ = DragAxisLock::None;
+        double deviceProfileDragAxisTravelX_ = 0.0;
+        double deviceProfileDragAxisTravelY_ = 0.0;
+        std::optional<double> deviceProfileDragLastValue_;
+        std::optional<ScalarDragAnchor> deviceProfileDragAnchor_;
+        double deviceProfileContextMenuSplitDistance_ = 0.0;
+        GraphValueRange deviceProfileGraphRange_{};
+        double deviceProfileValueEditBuffer_ = 0.0; // degrees per meter equivalent (m/s^2)
+        std::optional<ScalarProfileEndpointValueEdit> deviceProfileEndpointValueEdit_;
+        std::optional<ProfileTransitionTypeEdit> deviceProfileTransitionTypeEdit_;
+        std::optional<ProfileSegmentCommand> deviceProfileSegmentCommand_;
+        std::optional<ProfileSegmentDistanceEdit> deviceProfileSegmentDistanceEdit_;
         physics::TrackDeviceForceResult simulationDeviceForces_;
         double simulationRealizedAcceleration_ = 0.0;
         std::optional<SectionLengthEdit> sectionLengthEdit_;

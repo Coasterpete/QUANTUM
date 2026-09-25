@@ -16,6 +16,23 @@ namespace quantum::physics
         return result;
     }
 
+    // Computes the device-local distance of a station along the device's interval.
+    // For circuit-wrapping devices (start > end), the distance wraps through zero.
+    static double deviceLocalDistance(const coaster::TrackDevice& device,
+        double stationMeters, double trackLengthMeters, bool circuit) noexcept
+    {
+        if (!circuit || device.startStationMeters <= device.endStationMeters)
+        {
+            return stationMeters - device.startStationMeters;
+        }
+        // Circuit-wrapping device: [start, length) U [0, end)
+        if (stationMeters >= device.startStationMeters)
+        {
+            return stationMeters - device.startStationMeters;
+        }
+        return trackLengthMeters - device.startStationMeters + stationMeters;
+    }
+
     TrackDeviceForceResult evaluateTrackDeviceForces(
         const std::span<const coaster::TrackDevice> devices,
         const std::span<const TrackDeviceRuntimeState> runtimeStates,
@@ -57,9 +74,11 @@ namespace quantum::physics
                 const BogiePose* pose;
                 glm::dvec3 localPoint;
                 double requestedForce;
+                double commandedAcceleration;
             };
             std::vector<OccupiedBogie> occupied;
             double requestedTotal = 0.0;
+            double maxCommandedAcceleration = 0.0;
             for (std::size_t carIndex = 0; carIndex < pose.carCount(); ++carIndex)
             {
                 const TrainCarPose& car = pose.cars()[carIndex];
@@ -72,14 +91,33 @@ namespace quantum::physics
                         bogie->location().stationMeters,
                         track.lengthMeters(), circuit))
                         continue;
+
+                    double commandedAccel = device.targetAccelerationMetersPerSecondSquared;
+                    if (device.accelerationProfile.has_value())
+                    {
+                        const double localDist = deviceLocalDistance(device,
+                            bogie->location().stationMeters,
+                            track.lengthMeters(), circuit);
+                        // Profile is defined over [0, deviceLength]. Clamp to domain.
+                        const double deviceLength = circuit && device.startStationMeters > device.endStationMeters
+                            ? track.lengthMeters() - device.startStationMeters + device.endStationMeters
+                            : device.endStationMeters - device.startStationMeters;
+                        const double clampedDist = std::clamp(localDist, 0.0, deviceLength);
+                        commandedAccel = coaster::evaluateChannelProfile(
+                            device.accelerationProfile.value(), clampedDist);
+                        // Profile values are non-negative acceleration magnitudes.
+                    }
+
                     const double requested = 0.5
                         * car.loadedMassKilograms()
-                        * device.targetAccelerationMetersPerSecondSquared;
+                        * commandedAccel;
                     occupied.push_back({carIndex, bogie,
                         definition.bogies[bogie->definitionIndex()]
                             .referencePositionMeters,
-                        requested});
+                        requested, commandedAccel});
                     requestedTotal += requested;
+                    if (commandedAccel > maxCommandedAcceleration)
+                        maxCommandedAcceleration = commandedAccel;
                 }
             }
             telemetry.occupiedBogieCount = occupied.size();
@@ -102,7 +140,7 @@ namespace quantum::physics
                         * bogie.pose->trackFrame().tangent});
             }
             telemetry.commandedAccelerationMetersPerSecondSquared =
-                device.targetAccelerationMetersPerSecondSquared;
+                maxCommandedAcceleration;
             telemetry.appliedForceNewtons = direction * applied;
             result.devices.push_back(telemetry);
         }

@@ -22,6 +22,9 @@ namespace quantum::coaster
     {
         SegmentId id = invalidSegmentId;
         math::ScalarTransition transition{};
+
+        [[nodiscard]] friend bool operator==(
+            const ProfileSegment&, const ProfileSegment&) = default;
     };
 
     // One authored scalar channel (a rate or force target) as an ordered chain of
@@ -34,6 +37,19 @@ namespace quantum::coaster
     {
         std::vector<ProfileSegment> segments;
         SegmentId nextSegmentId = 1;
+
+        [[nodiscard]] friend bool operator==(
+            const ChannelProfile& a, const ChannelProfile& b)
+        {
+            if (a.segments.size() != b.segments.size())
+                return false;
+            for (std::size_t i = 0; i < a.segments.size(); ++i)
+            {
+                if (!(a.segments[i] == b.segments[i]))
+                    return false;
+            }
+            return a.nextSegmentId == b.nextSegmentId;
+        }
     };
 
     // Authored geometric-section channels. Angles use radians. The channels

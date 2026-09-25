@@ -46,6 +46,32 @@ namespace quantum::coaster
                 || !std::isfinite(device.maximumForceNewtons)
                 || device.maximumForceNewtons <= 0.0)
                 throw std::invalid_argument("Track device acceleration and force limit must be finite and positive.");
+
+            // Validate optional acceleration profile.
+            if (device.accelerationProfile.has_value())
+            {
+                const double deviceLength = device.endStationMeters - device.startStationMeters;
+                if (!circuit && device.startStationMeters > device.endStationMeters)
+                {
+                    // Wrapping device on circuit track - length computed differently.
+                    // For validation we just need a positive device length.
+                }
+                const double effectiveDeviceLength = circuit && device.startStationMeters > device.endStationMeters
+                    ? trackLengthMeters - device.startStationMeters + device.endStationMeters
+                    : device.endStationMeters - device.startStationMeters;
+                if (effectiveDeviceLength <= 0.0)
+                    throw std::invalid_argument("Track device with acceleration profile must have positive length.");
+                validateChannelProfile(device.accelerationProfile.value(), effectiveDeviceLength);
+                // Profile values must be non-negative (commanded acceleration magnitude).
+                for (const ProfileSegment& segment : device.accelerationProfile->segments)
+                {
+                    if (segment.transition.valueBegin < 0.0
+                        || segment.transition.valueEnd < 0.0)
+                    {
+                        throw std::invalid_argument("Acceleration profile values must be non-negative.");
+                    }
+                }
+            }
         }
         if (collection.nextId <= greatestId)
             throw std::invalid_argument("Track device next ID must exceed every allocated ID.");
