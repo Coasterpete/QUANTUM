@@ -495,6 +495,11 @@ namespace quantum::editor
                 options.msaaOff = true;
                 continue;
             }
+            if (argument == "--environment-off")
+            {
+                options.environmentOff = true;
+                continue;
+            }
             if (argument == "--transition-drag")
             {
                 options.transitionDrag = true;

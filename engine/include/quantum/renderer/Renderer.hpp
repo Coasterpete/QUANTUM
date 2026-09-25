@@ -67,6 +67,7 @@ namespace quantum::renderer
     struct RendererCapabilities
     {
         bool viewportMsaa4 = false;
+        bool hdrEnvironment = false;
     };
 
     // Owns the renderer's GPU resources. Geometry inputs are copied or uploaded;
@@ -98,6 +99,8 @@ namespace quantum::renderer
         virtual void setViewportCameraPosition(const glm::vec3& position) = 0;
         virtual void setSunlight(const glm::vec3& direction, float intensity) = 0;
         virtual void setExposure(float exposure) = 0;
+        virtual void setEnvironment(bool enabled, float rotationDegrees,
+            float lightingIntensity, bool skyVisible) = 0;
         virtual void updateTrackCurveVertices(std::span<const LineVertex> vertices,
             std::uint32_t verticesPerCurve) = 0;
         virtual void updateRenderableTrack(

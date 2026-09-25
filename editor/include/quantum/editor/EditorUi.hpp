@@ -383,6 +383,10 @@ namespace quantum::editor
         float sunElevationDegrees = 55.0F;
         float sunIntensity = 3.0F;
         float exposure = 1.0F;
+        bool environmentEnabled = true;
+        float environmentRotationDegrees = 0.0F;
+        float environmentIntensity = 0.35F;
+        bool skyVisible = true;
         bool msaaEnabled = true;
 
         bool gridVisible = true;
@@ -434,6 +438,7 @@ namespace quantum::editor
         void beginFrame(renderer::VulkanContext& vulkan);
         void installFrameRenderCallback(renderer::VulkanContext& vulkan) noexcept;
         void setViewportMsaaEnabled(bool enabled) noexcept;
+        void setViewportEnvironmentEnabled(bool enabled) noexcept;
         void enterSimulatorForPreviewSmoke() noexcept;
         void returnToEditorForPreviewSmoke() noexcept;
         void requestSimulationControlForPreviewSmoke(

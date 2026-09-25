@@ -30,6 +30,11 @@ namespace quantum::editor
         bool focusSelected = false;
         bool rotateGizmo = false;
         bool msaaEnabled = true;
+        bool environmentEnabled = true;
+        float environmentRotationDegrees = 0.0F;
+        float environmentIntensity = 0.35F;
+        bool skyVisible = true;
+        float sunIntensity = 3.0F;
         double zoom = 1.0;
     };
 

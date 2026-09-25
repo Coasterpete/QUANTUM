@@ -35,6 +35,7 @@ namespace quantum::editor
         bool modeCycle = false;
         bool cameraOrbit = false;
         bool msaaOff = false;
+        bool environmentOff = false;
         bool transitionDrag = false;
         bool resizeWindow = false;
         bool disableGpuPreviewSampling = false;

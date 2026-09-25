@@ -17,6 +17,10 @@ set(QUANTUM_TRACK_VERTEX_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/track.vert.spv")
 set(QUANTUM_TRACK_FRAGMENT_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/track.frag.spv")
+set(QUANTUM_SKY_VERTEX_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/sky.vert.spv")
+set(QUANTUM_SKY_FRAGMENT_SHADER
+    "${QUANTUM_SHADER_BINARY_DIR}/sky.frag.spv")
 set(QUANTUM_HARDWARE_VERTEX_SHADER
     "${QUANTUM_SHADER_BINARY_DIR}/hardware.vert.spv")
 set(QUANTUM_PHYSICS_COMPUTE_SHADER
@@ -32,6 +36,8 @@ add_custom_command(
         "${QUANTUM_FRAGMENT_SHADER}"
         "${QUANTUM_TRACK_VERTEX_SHADER}"
         "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+        "${QUANTUM_SKY_VERTEX_SHADER}"
+        "${QUANTUM_SKY_FRAGMENT_SHADER}"
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
         "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
         "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
@@ -65,6 +71,16 @@ add_custom_command(
         -o "${QUANTUM_TRACK_FRAGMENT_SHADER}"
     COMMAND
         "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert"
+        -o "${QUANTUM_SKY_VERTEX_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
+        -V --target-env vulkan1.3
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag"
+        -o "${QUANTUM_SKY_FRAGMENT_SHADER}"
+    COMMAND
+        "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
         -V
         --target-env vulkan1.3
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/hardware.vert"
@@ -92,6 +108,8 @@ add_custom_command(
         shaders/centerline.frag
         shaders/track.vert
         shaders/track.frag
+        shaders/sky.vert
+        shaders/sky.frag
         shaders/hardware.vert
         shaders/physics/track_sample.comp
         shaders/physics/rigid_bogie.comp
@@ -106,6 +124,8 @@ add_custom_target(
         "${QUANTUM_FRAGMENT_SHADER}"
         "${QUANTUM_TRACK_VERTEX_SHADER}"
         "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+        "${QUANTUM_SKY_VERTEX_SHADER}"
+        "${QUANTUM_SKY_FRAGMENT_SHADER}"
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
         "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
         "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
@@ -118,6 +138,8 @@ install(
         "${QUANTUM_FRAGMENT_SHADER}"
         "${QUANTUM_TRACK_VERTEX_SHADER}"
         "${QUANTUM_TRACK_FRAGMENT_SHADER}"
+        "${QUANTUM_SKY_VERTEX_SHADER}"
+        "${QUANTUM_SKY_FRAGMENT_SHADER}"
         "${QUANTUM_HARDWARE_VERTEX_SHADER}"
         "${QUANTUM_PHYSICS_COMPUTE_SHADER}"
         "${QUANTUM_RIGID_BOGIE_COMPUTE_SHADER}"
@@ -130,6 +152,8 @@ target_sources(
     QuantumEngine
     PRIVATE
         src/Logging.cpp
+        src/EnvironmentMap.cpp
+        src/EnvironmentVulkan.cpp
         src/StaticMeshAssets.cpp
         src/VulkanContext.cpp
         src/ViewportAids.cpp
@@ -139,6 +163,7 @@ target_sources(
         include/quantum/engine/Logging.hpp
         include/quantum/renderer/StaticMeshAssets.hpp
         include/quantum/renderer/Renderer.hpp
+        include/quantum/renderer/EnvironmentMap.hpp
         include/quantum/renderer/VulkanContext.hpp
         include/quantum/physics/gpu/GpuPhysicsContext.hpp
 )
