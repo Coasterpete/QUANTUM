@@ -68,6 +68,8 @@ namespace quantum::renderer
         // Direction points from the surface toward the sun in world space.
         void setSunlight(const glm::vec3& direction, float intensity);
         void setExposure(float exposure);
+        void setEnvironment(bool enabled, float rotationDegrees,
+            float lightingIntensity, bool skyVisible) override;
         void updateTrackCurveVertices(
             std::span<const LineVertex> trackCurveVertices,
             std::uint32_t trackVerticesPerCurve
@@ -165,6 +167,9 @@ namespace quantum::renderer
         );
         void createGraphicsPipeline();
         void createTrackPipelines();
+        void createSkyPipeline();
+        void createEnvironmentResources();
+        void destroyEnvironmentResources() noexcept;
         void createViewportTarget(std::uint32_t width, std::uint32_t height);
         void createCommandResources();
         void createSynchronizationResources();
@@ -243,6 +248,24 @@ namespace quantum::renderer
         VkPipeline trackEdgePipeline_ = VK_NULL_HANDLE;
         VkPipeline hardwareShadedPipeline_ = VK_NULL_HANDLE;
         VkPipeline hardwareEdgePipeline_ = VK_NULL_HANDLE;
+        VkPipelineLayout skyPipelineLayout_ = VK_NULL_HANDLE;
+        VkPipeline skyPipeline_ = VK_NULL_HANDLE;
+        VkDescriptorSetLayout environmentDescriptorLayout_ = VK_NULL_HANDLE;
+        VkDescriptorPool environmentDescriptorPool_ = VK_NULL_HANDLE;
+        VkDescriptorSet environmentDescriptorSet_ = VK_NULL_HANDLE;
+        VkSampler environmentSampler_ = VK_NULL_HANDLE;
+        struct EnvironmentImage
+        {
+            VkImage image = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkImageView view = VK_NULL_HANDLE;
+        };
+        std::array<EnvironmentImage, 4> environmentImages_{};
+        bool environmentAvailable_ = false;
+        bool environmentEnabled_ = true;
+        bool skyVisible_ = true;
+        float environmentRotationRadians_ = 0.0F;
+        float environmentIntensity_ = 0.35F;
 
         VkImage viewportImage_ = VK_NULL_HANDLE;
         VmaAllocation viewportAllocation_ = VK_NULL_HANDLE;

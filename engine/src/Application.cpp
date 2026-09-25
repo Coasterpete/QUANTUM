@@ -403,6 +403,8 @@ namespace quantum::engine
                 editorUi.installFrameRenderCallback(vulkan);
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->msaaOff)
                     editorUi.setViewportMsaaEnabled(false);
+                if (previewSmokeOptions != nullptr && previewSmokeOptions->environmentOff)
+                    editorUi.setViewportEnvironmentEnabled(false);
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->simulator)
                     editorUi.enterSimulatorForPreviewSmoke();
                 editorUi.setCenterlineSections(centerline.sectionSlices);

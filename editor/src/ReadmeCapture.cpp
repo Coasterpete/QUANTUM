@@ -120,7 +120,9 @@ namespace quantum::editor
         std::set<ReadmeCaptureKind> used;
         for (const auto& entry : scenarios)
         {
-            requireKeys(entry, {"name", "document", "region", "framing", "tool", "msaa", "zoom"});
+            requireKeys(entry, {"name", "document", "region", "framing", "tool", "msaa", "zoom",
+                "environment", "environment_rotation", "environment_intensity", "sky_visible",
+                "sun_intensity"});
             const auto name = entry.at("name").get<std::string>();
             const auto found = std::find(names.begin(), names.end(), name);
             if (found == names.end())
@@ -130,6 +132,28 @@ namespace quantum::editor
             if (entry.contains("msaa") && !entry["msaa"].is_boolean())
                 throw std::invalid_argument("Capture msaa must be a boolean.");
             scenario.msaaEnabled = entry.value("msaa", true);
+            for (const char* field : {"environment", "sky_visible"})
+                if (entry.contains(field) && !entry[field].is_boolean())
+                    throw std::invalid_argument(std::string("Capture ") + field
+                        + " must be a boolean.");
+            for (const char* field : {"environment_rotation", "environment_intensity", "sun_intensity"})
+                if (entry.contains(field) && !entry[field].is_number())
+                    throw std::invalid_argument(std::string("Capture ") + field
+                        + " must be a number.");
+            scenario.environmentEnabled = entry.value("environment", true);
+            scenario.skyVisible = entry.value("sky_visible", true);
+            scenario.environmentRotationDegrees = entry.value(
+                "environment_rotation", 0.0F);
+            scenario.environmentIntensity = entry.value(
+                "environment_intensity", 0.35F);
+            scenario.sunIntensity = entry.value("sun_intensity", 3.0F);
+            if (scenario.environmentRotationDegrees < 0.0F
+                || scenario.environmentRotationDegrees > 360.0F
+                || scenario.environmentIntensity < 0.0F
+                || scenario.environmentIntensity > 2.0F
+                || scenario.sunIntensity < 0.0F
+                || scenario.sunIntensity > 10.0F)
+                throw std::invalid_argument("Capture environment setting is out of range.");
             if (entry.contains("zoom"))
             {
                 if (!entry["zoom"].is_number()

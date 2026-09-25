@@ -177,6 +177,24 @@ add_custom_target(QUANTUMTrackAssets ALL
     DEPENDS "${quantum_track_asset_destination}")
 add_dependencies(QUANTUM QUANTUMTrackAssets)
 
+set(quantum_environment_asset_source
+    "${PROJECT_SOURCE_DIR}/assets/environment/rooitou_park_1k.hdr")
+set(quantum_environment_asset_destination
+    "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/environment/rooitou_park_1k.hdr")
+add_custom_command(
+    OUTPUT "${quantum_environment_asset_destination}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/environment"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${quantum_environment_asset_source}"
+        "${quantum_environment_asset_destination}"
+    DEPENDS "${quantum_environment_asset_source}"
+    VERBATIM
+)
+add_custom_target(QUANTUMEnvironmentAssets ALL
+    DEPENDS "${quantum_environment_asset_destination}")
+add_dependencies(QUANTUM QUANTUMEnvironmentAssets)
+
 add_custom_command(
     TARGET QUANTUM
     POST_BUILD
@@ -227,6 +245,9 @@ install(
     DESTINATION assets/track
     COMPONENT Runtime
 )
+
+install(FILES "${PROJECT_SOURCE_DIR}/assets/environment/rooitou_park_1k.hdr"
+    DESTINATION assets/environment COMPONENT Runtime)
 
 if(WIN32)
     install(

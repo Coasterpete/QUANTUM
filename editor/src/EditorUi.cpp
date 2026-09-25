@@ -1918,7 +1918,8 @@ namespace
     void showViewportSettingsWindow(
         quantum::editor::ViewportSettings& settings,
         bool* const open,
-        const bool msaaAvailable)
+        const bool msaaAvailable,
+        const bool environmentAvailable)
     {
         // ImGui's p_open parameter is only written by the title bar close
         // button; it does not hide the window. The flag must gate whether
@@ -2048,6 +2049,25 @@ namespace
         committed = ImGui::SliderFloat("Exposure",
             &settings.exposure, 0.1F, 3.0F, "%.2f")
             || committed;
+        int environmentIndex = settings.environmentEnabled ? 1 : 0;
+        ImGui::BeginDisabled(!environmentAvailable);
+        if (ImGui::Combo("Environment", &environmentIndex,
+            "None\0Rooitou Park (CC0)\0"))
+        {
+            settings.environmentEnabled = environmentIndex == 1;
+            committed = true;
+        }
+        committed = ImGui::SliderFloat("Environment Rotation",
+            &settings.environmentRotationDegrees, 0.0F, 360.0F,
+            "%.0f deg") || committed;
+        committed = ImGui::SliderFloat("Environment Lighting",
+            &settings.environmentIntensity, 0.0F, 2.0F, "%.2f")
+            || committed;
+        committed = ImGui::Checkbox("Show Sky", &settings.skyVisible)
+            || committed;
+        ImGui::EndDisabled();
+        if (!environmentAvailable)
+            ImGui::TextDisabled("HDR asset unavailable; constant ambient is active.");
 
         ImGui::SeparatorText("Reference Elements");
 
@@ -5223,6 +5243,11 @@ namespace quantum::editor
         viewportSettings_.msaaEnabled = enabled;
     }
 
+    void EditorUi::setViewportEnvironmentEnabled(const bool enabled) noexcept
+    {
+        viewportSettings_.environmentEnabled = enabled;
+    }
+
     void EditorUi::enterSimulatorForPreviewSmoke() noexcept
     {
         workspaceMode_ = WorkspaceMode::Simulator;
@@ -6304,6 +6329,10 @@ namespace quantum::editor
             std::cos(sunElevation) * std::sin(sunAzimuth),
             std::sin(sunElevation)}, viewportSettings_.sunIntensity);
         vulkan.setExposure(viewportSettings_.exposure);
+        vulkan.setEnvironment(viewportSettings_.environmentEnabled,
+            viewportSettings_.environmentRotationDegrees,
+            viewportSettings_.environmentIntensity,
+            viewportSettings_.skyVisible);
         ImDrawList* const drawList = ImGui::GetWindowDrawList();
         const ImVec2 imageMinimum = ImGui::GetItemRectMin();
         const ImVec2 imageMaximum = ImGui::GetItemRectMax();
@@ -7724,6 +7753,14 @@ ImGui::MenuItem(
             viewportSettings_ = {};
             viewportSettings_.msaaEnabled = captureScenario_->msaaEnabled
                 && vulkan.capabilities().viewportMsaa4;
+            viewportSettings_.environmentEnabled =
+                captureScenario_->environmentEnabled;
+            viewportSettings_.environmentRotationDegrees =
+                captureScenario_->environmentRotationDegrees;
+            viewportSettings_.environmentIntensity =
+                captureScenario_->environmentIntensity;
+            viewportSettings_.skyVisible = captureScenario_->skyVisible;
+            viewportSettings_.sunIntensity = captureScenario_->sunIntensity;
             viewportSettings_.anchorsVisible =
                 captureScenario_->kind == ReadmeCaptureKind::TrackStartGizmo;
             startPoseTransformMode_ = captureScenario_->rotateGizmo
@@ -7764,7 +7801,8 @@ ImGui::MenuItem(
         showViewportSettingsWindow(
             viewportSettings_,
             &viewportSettingsWindowOpen_,
-            vulkan.capabilities().viewportMsaa4
+            vulkan.capabilities().viewportMsaa4,
+            vulkan.capabilities().hdrEnvironment
         );
 
         drawPerformanceTelemetry();

@@ -2,11 +2,14 @@
 #define VMA_IMPLEMENTATION
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/StaticMeshAssets.hpp>
+#include <quantum/renderer/EnvironmentMap.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 #include <quantum/renderer/ViewportAids.hpp>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_video.h>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/matrix.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1300,9 +1303,11 @@ namespace quantum::renderer
             trackVerticesPerCurve,
             renderableTrack
         );
+        createCommandResources();
+        createEnvironmentResources();
         createGraphicsPipeline();
         createTrackPipelines();
-        createCommandResources();
+        createSkyPipeline();
         createSynchronizationResources();
 
         quantum::logging::logMessagef(
@@ -2046,6 +2051,8 @@ namespace quantum::renderer
         layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutCreateInfo.pushConstantRangeCount = 1;
         layoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+        layoutCreateInfo.setLayoutCount = 1;
+        layoutCreateInfo.pSetLayouts = &environmentDescriptorLayout_;
         VkResult result = VK_SUCCESS;
         if (trackPipelineLayout_ == VK_NULL_HANDLE)
         {
@@ -2247,6 +2254,121 @@ namespace quantum::renderer
         vkDestroyShaderModule(device_, fragmentShader, nullptr);
         vkDestroyShaderModule(device_, hardwareVertexShader, nullptr);
         vkDestroyShaderModule(device_, trackVertexShader, nullptr);
+    }
+
+    void VulkanContext::createSkyPipeline()
+    {
+        if (skyPipelineLayout_ == VK_NULL_HANDLE)
+        {
+            VkPushConstantRange range{};
+            range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            range.size = sizeof(viewportViewProjection_) + 4 * sizeof(float);
+            VkPipelineLayoutCreateInfo layoutInfo{};
+            layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            layoutInfo.setLayoutCount = 1;
+            layoutInfo.pSetLayouts = &environmentDescriptorLayout_;
+            layoutInfo.pushConstantRangeCount = 1;
+            layoutInfo.pPushConstantRanges = &range;
+            const VkResult result = vkCreatePipelineLayout(device_,
+                &layoutInfo, nullptr, &skyPipelineLayout_);
+            if (result != VK_SUCCESS)
+                throwVulkanError("vkCreatePipelineLayout for sky", result);
+        }
+
+        const VkShaderModule vertex = createShaderModule(device_,
+            readSpirv(shaderPath("sky.vert.spv")));
+        VkShaderModule fragment = VK_NULL_HANDLE;
+        try
+        {
+            fragment = createShaderModule(device_,
+                readSpirv(shaderPath("sky.frag.spv")));
+            std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
+            stages[0].sType =
+                VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+            stages[0].module = vertex;
+            stages[0].pName = "main";
+            stages[1].sType = stages[0].sType;
+            stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+            stages[1].module = fragment;
+            stages[1].pName = "main";
+
+            VkPipelineVertexInputStateCreateInfo vertexInput{};
+            vertexInput.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+            VkPipelineInputAssemblyStateCreateInfo assembly{};
+            assembly.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            VkPipelineViewportStateCreateInfo viewport{};
+            viewport.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+            viewport.viewportCount = 1;
+            viewport.scissorCount = 1;
+            VkPipelineRasterizationStateCreateInfo rasterization{};
+            rasterization.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+            rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.lineWidth = 1.0F;
+            VkPipelineMultisampleStateCreateInfo multisampling{};
+            multisampling.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+            multisampling.rasterizationSamples = viewportSamples_;
+            VkPipelineDepthStencilStateCreateInfo depth{};
+            depth.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+            depth.depthTestEnable = VK_FALSE;
+            depth.depthWriteEnable = VK_FALSE;
+            VkPipelineColorBlendAttachmentState blendAttachment{};
+            blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
+                | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT
+                | VK_COLOR_COMPONENT_A_BIT;
+            VkPipelineColorBlendStateCreateInfo blend{};
+            blend.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            blend.attachmentCount = 1;
+            blend.pAttachments = &blendAttachment;
+            constexpr std::array dynamicStates{
+                VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+            VkPipelineDynamicStateCreateInfo dynamic{};
+            dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            dynamic.dynamicStateCount =
+                static_cast<std::uint32_t>(dynamicStates.size());
+            dynamic.pDynamicStates = dynamicStates.data();
+            VkPipelineRenderingCreateInfo rendering{};
+            rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+            rendering.colorAttachmentCount = 1;
+            rendering.pColorAttachmentFormats = &viewportColorFormat;
+            rendering.depthAttachmentFormat = viewportDepthFormat;
+            VkGraphicsPipelineCreateInfo pipelineInfo{};
+            pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+            pipelineInfo.pNext = &rendering;
+            pipelineInfo.stageCount = static_cast<std::uint32_t>(stages.size());
+            pipelineInfo.pStages = stages.data();
+            pipelineInfo.pVertexInputState = &vertexInput;
+            pipelineInfo.pInputAssemblyState = &assembly;
+            pipelineInfo.pViewportState = &viewport;
+            pipelineInfo.pRasterizationState = &rasterization;
+            pipelineInfo.pMultisampleState = &multisampling;
+            pipelineInfo.pDepthStencilState = &depth;
+            pipelineInfo.pColorBlendState = &blend;
+            pipelineInfo.pDynamicState = &dynamic;
+            pipelineInfo.layout = skyPipelineLayout_;
+            const VkResult result = vkCreateGraphicsPipelines(device_,
+                VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &skyPipeline_);
+            if (result != VK_SUCCESS)
+                throwVulkanError("vkCreateGraphicsPipelines for sky", result);
+        }
+        catch (...)
+        {
+            if (fragment != VK_NULL_HANDLE)
+                vkDestroyShaderModule(device_, fragment, nullptr);
+            vkDestroyShaderModule(device_, vertex, nullptr);
+            throw;
+        }
+        vkDestroyShaderModule(device_, fragment, nullptr);
+        vkDestroyShaderModule(device_, vertex, nullptr);
     }
 
     void VulkanContext::createViewportTarget(
@@ -2720,7 +2842,8 @@ namespace quantum::renderer
         {
             for (VkPipeline* const pipeline : {
                 &graphicsPipeline_, &trackShadedPipeline_, &trackEdgePipeline_,
-                &hardwareShadedPipeline_, &hardwareEdgePipeline_})
+                &hardwareShadedPipeline_, &hardwareEdgePipeline_,
+                &skyPipeline_})
             {
                 if (*pipeline != VK_NULL_HANDLE)
                 {
@@ -2735,6 +2858,7 @@ namespace quantum::renderer
                 viewportSamples_ == VK_SAMPLE_COUNT_4_BIT ? 4u : 1u);
             createGraphicsPipeline();
             createTrackPipelines();
+            createSkyPipeline();
         }
 
         if (width != 0 && height != 0)
@@ -2793,6 +2917,20 @@ namespace quantum::renderer
         if (!std::isfinite(exposure) || exposure <= 0.0F)
             throw std::invalid_argument("Exposure must be positive and finite.");
         exposure_ = exposure;
+    }
+
+    void VulkanContext::setEnvironment(const bool enabled,
+        const float rotationDegrees, const float lightingIntensity,
+        const bool skyVisible)
+    {
+        if (!std::isfinite(rotationDegrees) || !std::isfinite(lightingIntensity)
+            || lightingIntensity < 0.0F)
+            throw std::invalid_argument("Invalid HDR environment settings.");
+        environmentEnabled_ = enabled;
+        environmentRotationRadians_ = glm::radians(
+            std::fmod(std::fmod(rotationDegrees, 360.0F) + 360.0F, 360.0F));
+        environmentIntensity_ = lightingIntensity;
+        skyVisible_ = skyVisible;
     }
 
     void VulkanContext::updateTrackCurveVertices(
@@ -3669,6 +3807,27 @@ namespace quantum::renderer
             scissor.extent = viewportExtent_;
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+            if (environmentAvailable_ && environmentEnabled_ && skyVisible_)
+            {
+                const glm::mat4 matrix = glm::make_mat4(
+                    viewportViewProjection_.data());
+                const glm::mat4 inverse = glm::inverse(matrix);
+                const std::array<float, 4> skySettings{
+                    environmentRotationRadians_, exposure_, 0.0F, 0.0F};
+                vkCmdBindPipeline(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline_);
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipelineLayout_,
+                    0, 1, &environmentDescriptorSet_, 0, nullptr);
+                vkCmdPushConstants(commandBuffer, skyPipelineLayout_,
+                    VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(inverse),
+                    glm::value_ptr(inverse));
+                vkCmdPushConstants(commandBuffer, skyPipelineLayout_,
+                    VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(inverse),
+                    sizeof(skySettings), skySettings.data());
+                vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            }
+
             const TrackPresentationMode presentationMode =
                 trackPresentation_.mode();
             const bool drawShadedTrack =
@@ -3693,8 +3852,11 @@ namespace quantum::renderer
                     sunlightDirection_.x, sunlightDirection_.y,
                     sunlightDirection_.z, sunlightIntensity_};
                 const std::array<float, 4> surface{
-                    material.metallic, material.roughness, 0.0F,
-                    unlit ? 1.0F : 0.0F};
+                    material.metallic, material.roughness,
+                    environmentIntensity_,
+                    unlit ? -2.0F
+                        : (environmentAvailable_ && environmentEnabled_
+                            ? environmentRotationRadians_ : -1.0F)};
                 vkCmdPushConstants(
                     commandBuffer, trackPipelineLayout_,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -3724,6 +3886,9 @@ namespace quantum::renderer
             constexpr VkDeviceSize vertexOffset = 0;
             if (drawShadedTrack && trackTriangleIndexCount_ > 0)
             {
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, trackPipelineLayout_,
+                    0, 1, &environmentDescriptorSet_, 0, nullptr);
                 vkCmdBindPipeline(commandBuffer,
                     VK_PIPELINE_BIND_POINT_GRAPHICS, trackShadedPipeline_);
                 vkCmdBindVertexBuffers(commandBuffer, 0, 1,
@@ -3773,6 +3938,9 @@ namespace quantum::renderer
 
             if (drawTrackEdges && trackEdgeIndexCount_ > 0)
             {
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, trackPipelineLayout_,
+                    0, 1, &environmentDescriptorSet_, 0, nullptr);
                 const std::array<float, 4> edgeColor = drawShadedTrack
                     ? std::array<float, 4>{0.025F, 0.035F, 0.045F, 1.0F}
                     : std::array<float, 4>{0.30F, 0.68F, 0.95F, 1.0F};
@@ -4196,7 +4364,8 @@ namespace quantum::renderer
 
     RendererCapabilities VulkanContext::capabilities() const noexcept
     {
-        return {.viewportMsaa4 = supportsViewportMsaa4()};
+        return {.viewportMsaa4 = supportsViewportMsaa4(),
+            .hdrEnvironment = environmentAvailable_};
     }
 
     void VulkanContext::drawFrame(FrameImage* const readback)
@@ -4697,6 +4866,17 @@ namespace quantum::renderer
                     device_, trackPipelineLayout_, nullptr);
                 trackPipelineLayout_ = VK_NULL_HANDLE;
             }
+            if (skyPipeline_ != VK_NULL_HANDLE)
+            {
+                vkDestroyPipeline(device_, skyPipeline_, nullptr);
+                skyPipeline_ = VK_NULL_HANDLE;
+            }
+            if (skyPipelineLayout_ != VK_NULL_HANDLE)
+            {
+                vkDestroyPipelineLayout(device_, skyPipelineLayout_, nullptr);
+                skyPipelineLayout_ = VK_NULL_HANDLE;
+            }
+            destroyEnvironmentResources();
 
             const auto destroyAllocatedBuffer = [this](
                 VkBuffer& buffer, VmaAllocation& allocation)

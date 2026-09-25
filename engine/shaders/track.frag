@@ -4,6 +4,10 @@ layout(location = 0) in vec3 worldPosition;
 layout(location = 1) in vec3 worldNormal;
 layout(location = 0) out vec4 outColor;
 
+layout(set = 0, binding = 0) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 1) uniform samplerCube specularMap;
+layout(set = 0, binding = 2) uniform sampler2D brdfMap;
+
 layout(push_constant) uniform TrackDraw
 {
     mat4 viewProjection;
@@ -29,10 +33,18 @@ vec3 toneMap(vec3 color)
         (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
 }
 
+vec3 rotateEnvironment(vec3 direction, float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return vec3(c * direction.x + s * direction.y,
+        -s * direction.x + c * direction.y, direction.z);
+}
+
 void main()
 {
     vec3 base = srgbToLinear(draw.baseColor.rgb);
-    if (draw.surface.w > 0.5)
+    if (draw.surface.w < -1.5)
     {
         // Wireframe and editor edges preserve their authored display colors.
         outColor = vec4(base, draw.baseColor.a);
@@ -63,8 +75,26 @@ void main()
     vec3 diffuse = (1.0 - F) * (1.0 - metallic) * base / pi;
     vec3 direct = (diffuse + specular) * NoL
         * draw.sunDirectionIntensity.w;
-    // A modest sky fill keeps unlit faces readable until image lighting exists.
-    vec3 ambient = 0.18 * base * (1.0 - metallic) + 0.06 * F0;
+    vec3 ambient;
+    if (draw.surface.w >= 0.0)
+    {
+        vec3 Fambient = F0 + (max(vec3(1.0 - roughness), F0) - F0)
+            * pow(1.0 - NoV, 5.0);
+        vec3 irradiance = texture(irradianceMap,
+            rotateEnvironment(N, draw.surface.w)).rgb;
+        vec3 reflection = reflect(-V, N);
+        vec3 prefiltered = textureLod(specularMap,
+            rotateEnvironment(reflection, draw.surface.w),
+            roughness * 5.0).rgb;
+        vec2 brdf = texture(brdfMap, vec2(NoV, roughness)).rg;
+        ambient = ((1.0 - Fambient) * (1.0 - metallic) * base
+            * irradiance + prefiltered * (Fambient * brdf.x + brdf.y))
+            * draw.surface.z;
+    }
+    else
+    {
+        ambient = 0.18 * base * (1.0 - metallic) + 0.06 * F0;
+    }
     outColor = vec4(toneMap((direct + ambient)
         * draw.cameraExposure.w), draw.baseColor.a);
 }
