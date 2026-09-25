@@ -1,7 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
-#include <quantum/renderer/VulkanContext.hpp>
+#include <quantum/renderer/Renderer.hpp>
 
 #include <glm/vec3.hpp>
 

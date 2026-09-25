@@ -27,6 +27,7 @@ struct SDL_Window;
 
 namespace quantum::renderer
 {
+    class Renderer;
     class VulkanContext;
 }
 
@@ -431,8 +432,12 @@ namespace quantum::editor
         );
         void processEvent(const SDL_Event& event);
         void beginFrame(renderer::VulkanContext& vulkan);
+        void installFrameRenderCallback(renderer::VulkanContext& vulkan) noexcept;
         void setViewportMsaaEnabled(bool enabled) noexcept;
         void enterSimulatorForPreviewSmoke() noexcept;
+        void returnToEditorForPreviewSmoke() noexcept;
+        void requestSimulationControlForPreviewSmoke(
+            SimulationControlType control) noexcept;
         [[nodiscard]] std::optional<ScalarProfileEndpointValueEdit>
         takeProfileEndpointValueEdit() noexcept;
         [[nodiscard]] std::optional<ProfileTransitionTypeEdit>
@@ -698,7 +703,7 @@ namespace quantum::editor
             std::uint32_t height
         );
         void updateViewportCamera(
-            renderer::VulkanContext& vulkan,
+            renderer::Renderer& vulkan,
             bool viewportHovered,
             std::uint32_t pixelWidth,
             std::uint32_t pixelHeight,
@@ -737,7 +742,7 @@ void drawSimulationTelemetry();
         void refreshViewportDisplayBounds();
         [[nodiscard]] const CenterlineSectionSlice*
         selectedSectionSlice() const noexcept;
-        void applyViewportSettings(renderer::VulkanContext& vulkan);
+        void applyViewportSettings(renderer::Renderer& vulkan);
 
         bool contextCreated_ = false;
         // Non-owning, fixed for this UI lifetime. Capture never loads/saves user settings.
@@ -745,6 +750,8 @@ void drawSimulationTelemetry();
         bool captureSetupPending_ = false;
         bool sdlBackendInitialized_ = false;
         bool vulkanBackendInitialized_ = false;
+        // Non-owning; the UI is destroyed before its Vulkan renderer.
+        renderer::VulkanContext* frameRenderer_ = nullptr;
         VkDevice device_ = VK_NULL_HANDLE;
         VkDescriptorSet viewportTexture_ = VK_NULL_HANDLE;
         std::uint64_t swapchainGeneration_ = 0;

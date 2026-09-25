@@ -18,7 +18,8 @@ VMA, Dear ImGui, and Editor code.
 
 ### `QuantumEngine`
 
-`QuantumEngine` is the Vulkan renderer library. `VulkanContext` owns the
+`QuantumEngine` contains the `Renderer` contract and its production Vulkan
+implementation. `VulkanContext` owns the
 current Vulkan instance, presentation surface, selected device and queues,
 VMA allocator, swapchain, viewport and track pipelines, renderer-side static
 mesh cache, GPU mesh allocations, viewport-aid and dynamic track/instance
@@ -26,6 +27,44 @@ buffers, offscreen viewport color/depth attachments, command resources, and
 synchronization resources. SDL3 supplies the native window and Vulkan surface
 integration. It consumes renderer-neutral generated geometry and asset
 references from `QuantumCore`; Core does not depend on the renderer.
+
+### Rendering Hardware Interface M0
+
+`quantum::renderer::Renderer` is the narrow application-facing boundary for
+initialization, frame submission, viewport size and sample configuration,
+lighting and camera settings, generated track geometry, static hardware
+instances, dynamic support/train lines, and renderer diagnostics. The
+contract uses Core's `RenderableTrack`, mesh, material, and instance data
+directly. `LineVertex`, frame readback, and the 4x MSAA capability report are
+renderer-neutral values. The renderer owns uploaded GPU resources; the
+authored document and generated CPU data remain with the application/Core.
+There is one virtual call per coarse renderer operation, not per vertex,
+instance, or draw. The current `VulkanContext` implements this contract and
+retains its established VMA allocations, mesh cache, one-frame-in-flight FIFO
+policy, deferred retirement, timestamp queries, and synchronization.
+
+`Application` is the composition root: it creates `VulkanContext`, then uses a
+`Renderer&` for track uploads, Simulator preview lines, and frame submission.
+Both workspaces share that renderer and the same `SimulationPreview`. The
+Editor uses the contract for renderer-neutral camera, lighting, presentation,
+asset status, and viewport-aid operations. Its existing Dear ImGui Vulkan
+integration still registers the viewport image and records UI commands through
+a Vulkan-only callback installed on `VulkanContext`. This is an explicit M0
+boundary limit: the ImGui swapchain and viewport-texture integration, the
+GPU-physics prototype's direct Vulkan device access, and the screenshot
+capture composition remain backend-specific. A second backend would need its
+own UI integration and platform window/surface path before it could run the
+Editor; the interface alone does not make macOS builds functional.
+
+The capability report currently answers only whether 4x viewport MSAA is
+available. A future backend can report its own supported features without
+assuming parity. Rendering M2 can add environment resources and their upload
+and pass operations when their concrete data and lifetime requirements are
+designed; no cubemap, irradiance, reflection, or shadow API is reserved now.
+Shader translation/compilation and platform device selection likewise belong
+to later backend work. `QuantumCore` needs no graphics-backend change.
+The M0 audit, validation, and performance measurements are recorded in
+[`rendering-rhi-m0.md`](rendering-rhi-m0.md).
 
 The deliberately small Blender/GLB contract and asset lifetime boundary are
 documented in [`static-mesh-assets.md`](static-mesh-assets.md).

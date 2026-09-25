@@ -3,7 +3,7 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
-#include <quantum/renderer/VulkanContext.hpp>
+#include <quantum/renderer/Renderer.hpp>
 
 #include <cstddef>
 #include <cstdint>

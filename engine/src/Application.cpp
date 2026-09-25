@@ -375,14 +375,15 @@ namespace quantum::engine
                 );
 
                 quantum::renderer::VulkanContext vulkan;
+                quantum::renderer::Renderer& renderer = vulkan;
                 std::optional<quantum::physics::gpu::GpuPhysicsContext> gpuContext;
-                vulkan.initialize(
+                renderer.initialize(
                     window,
                     centerline.vertices,
                     centerline.verticesPerCurve,
                     centerline.renderableTrack
                 );
-                vulkan.updateSupportVertices(
+                renderer.updateSupportVertices(
                     supportVisualization.memberVertices);
                 // M2: batched GPU sampling for SimulationPreview (8 bogies per pose)
                 gpuContext.emplace(vulkan);
@@ -399,6 +400,7 @@ namespace quantum::engine
                     centerline.minimumPosition,
                     centerline.maximumPosition
                 );
+                editorUi.installFrameRenderCallback(vulkan);
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->msaaOff)
                     editorUi.setViewportMsaaEnabled(false);
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->simulator)
@@ -512,7 +514,8 @@ namespace quantum::engine
                     else
                     {
                         previewSmokeStart = PerformanceClock::now();
-                        if (!previewSmokeOptions->stoppedPreview)
+                        if (!previewSmokeOptions->stoppedPreview
+                            && !previewSmokeOptions->modeCycle)
                             simulationPreview.play();
                     }
                 }
@@ -582,31 +585,31 @@ namespace quantum::engine
                     if (candidate.referenceCurveVertices.has_value())
                     {
                         const auto begin = PerformanceClock::now();
-                        vulkan.updateTrackCurveVertices(
+                        renderer.updateTrackCurveVertices(
                             *candidate.referenceCurveVertices,
                             centerlineCache.visualization().verticesPerCurve);
                         curveUploadMilliseconds =
                             std::chrono::duration<double, std::milli>(
                                 PerformanceClock::now() - begin).count();
                         frameFenceWaitMilliseconds +=
-                            vulkan.lastFrameCompletionWaitMilliseconds();
+                            renderer.lastFrameCompletionWaitMilliseconds();
                     }
                     if (candidate.continuousMesh.has_value())
                     {
                         const auto begin = PerformanceClock::now();
-                        vulkan.updateRenderableTrackMesh(
+                        renderer.updateRenderableTrackMesh(
                             *candidate.continuousMesh,
                             *candidate.trackMaterials);
                         meshUploadMilliseconds =
                             std::chrono::duration<double, std::milli>(
                                 PerformanceClock::now() - begin).count();
                         frameFenceWaitMilliseconds +=
-                            vulkan.lastFrameCompletionWaitMilliseconds();
+                            renderer.lastFrameCompletionWaitMilliseconds();
                     }
                     else if (candidate.trackMaterials.has_value())
                     {
                         const auto begin = PerformanceClock::now();
-                        vulkan.updateTrackMaterials(
+                        renderer.updateTrackMaterials(
                             centerline.renderableTrack.continuousMesh.submeshes,
                             *candidate.trackMaterials);
                         materialPublicationMilliseconds +=
@@ -616,17 +619,17 @@ namespace quantum::engine
                     if (candidate.hardwareBatches.has_value())
                     {
                         const auto begin = PerformanceClock::now();
-                        vulkan.updateTrackHardware(*candidate.hardwareBatches);
+                        renderer.updateTrackHardware(*candidate.hardwareBatches);
                         hardwareUploadMilliseconds =
                             std::chrono::duration<double, std::milli>(
                                 PerformanceClock::now() - begin).count();
                         frameFenceWaitMilliseconds +=
-                            vulkan.lastFrameCompletionWaitMilliseconds();
+                            renderer.lastFrameCompletionWaitMilliseconds();
                     }
                     else if (candidate.hardwareMaterials.has_value())
                     {
                         const auto begin = PerformanceClock::now();
-                        vulkan.updateTrackHardwareMaterials(
+                        renderer.updateTrackHardwareMaterials(
                             *candidate.hardwareMaterials);
                         materialPublicationMilliseconds +=
                             std::chrono::duration<double, std::milli>(
@@ -701,12 +704,12 @@ namespace quantum::engine
                     // Use the same generated geometry and renderer uploads as
                     // a forward authored edit before publishing the restored
                     // authoritative state.
-                    vulkan.updateTrackCurveVertices(
+                    renderer.updateTrackCurveVertices(
                         restoredCenterline.vertices,
                         restoredCenterline.verticesPerCurve);
-                    vulkan.updateRenderableTrack(
+                    renderer.updateRenderableTrack(
                         restoredCenterline.renderableTrack);
-                    vulkan.updateSupportVertices(
+                    renderer.updateSupportVertices(
                         restoredSupports.memberVertices);
 
                     const std::size_t restoredSelection = std::min(
@@ -803,6 +806,7 @@ editorUi.selectSection(restoredSelection, true);
                 std::optional<PerformanceClock::time_point>
                     previousRenderedFrameStart;
                 std::uint64_t renderedFrameId = 0;
+                std::size_t previewModeCycleActionCount = 0;
                 bool previewRegionStyleEditApplied = false;
 
                 while (running)
@@ -1110,13 +1114,13 @@ editorUi.selectSection(restoredSelection, true);
                                     );
                                     applicationBlockingEvents
                                         .trackBufferMutation = true;
-                                    vulkan.updateTrackCurveVertices(
+                                    renderer.updateTrackCurveVertices(
                                         centerline.vertices,
                                         centerline.verticesPerCurve
                                     );
-                                    vulkan.updateRenderableTrack(
+                                    renderer.updateRenderableTrack(
                                         centerline.renderableTrack);
-                                    vulkan.updateSupportVertices(
+                                    renderer.updateSupportVertices(
                                         supportVisualization.memberVertices);
                                     editorUi.updateWindowTitle(
                                         documentState.windowTitle()
@@ -1152,12 +1156,12 @@ editorUi.selectSection(restoredSelection, true);
                                         {
                                             applicationBlockingEvents
                                                 .trackBufferMutation = true;
-                                            vulkan.updateTrackCurveVertices(
+                                            renderer.updateTrackCurveVertices(
                                                 loaded->centerline.vertices,
                                                 loaded->centerline.verticesPerCurve);
-                                            vulkan.updateRenderableTrack(
+                                            renderer.updateRenderableTrack(
                                                 loaded->centerline.renderableTrack);
-                                            vulkan.updateSupportVertices(
+                                            renderer.updateSupportVertices(
                                                 loaded->supports.memberVertices);
                                             authoredTrack =
                                                 std::move(loaded->track);
@@ -1398,7 +1402,7 @@ editorUi.selectSection(restoredSelection, true);
                                 // The retained upload drains in-flight users;
                                 // publication occurs only after the candidate
                                 // visualization and GPU update both succeed.
-                                vulkan.updateSupportVertices(
+                                renderer.updateSupportVertices(
                                     candidateSupports.memberVertices);
                                 supportTransaction.commit(authoredTrack);
                                 supportVisualization =
@@ -1570,7 +1574,7 @@ editorUi.selectSection(restoredSelection, true);
                                 // The retained upload drains in-flight users;
                                 // publication occurs only after the candidate
                                 // visualization and GPU update both succeed.
-                                vulkan.updateSupportVertices(
+                                renderer.updateSupportVertices(
                                     candidateSupports.memberVertices);
                                 supportTransaction.commit(authoredTrack);
                                 supportVisualization =
@@ -1711,7 +1715,7 @@ editorUi.selectSection(restoredSelection, true);
                                     candidateSupports = quantum::editor::
                                         createSupportVisualization(
                                             candidate, centerline.samples);
-                                vulkan.updateSupportVertices(
+                                renderer.updateSupportVertices(
                                     candidateSupports.memberVertices);
                                 supportTransaction.commit(authoredTrack);
                                 supportVisualization =
@@ -2018,7 +2022,7 @@ editorUi.selectSection(restoredSelection, true);
                                 {
                                     applicationBlockingEvents
                                         .hardwareAssetReload = true;
-                                    vulkan.reloadTrackHardwareAsset(
+                                    renderer.reloadTrackHardwareAsset(
                                         requestedHardwareEdit
                                             ->hardware.asset.path,
                                         centerline.renderableTrack);
@@ -2595,7 +2599,7 @@ editorUi.selectSection(restoredSelection, true);
                                 );
                                 boundsApplied = true;
                                 phaseBegin = PerformanceClock::now();
-                                vulkan.updateTrackCurveVertices(
+                                renderer.updateTrackCurveVertices(
                                     candidateCenterline.vertices,
                                     candidateCenterline.verticesPerCurve
                                 );
@@ -2604,25 +2608,25 @@ editorUi.selectSection(restoredSelection, true);
                                         PerformanceClock::now()
                                             - phaseBegin).count();
                                 telemetry.frameFenceWaitMilliseconds +=
-                                    vulkan.lastFrameCompletionWaitMilliseconds();
+                                    renderer.lastFrameCompletionWaitMilliseconds();
                                 phaseBegin = PerformanceClock::now();
-                                vulkan.updateRenderableTrack(
+                                renderer.updateRenderableTrack(
                                     candidateCenterline.renderableTrack);
                                 telemetry.renderableUploadMilliseconds =
                                     std::chrono::duration<double, std::milli>(
                                         PerformanceClock::now()
                                             - phaseBegin).count();
                                 telemetry.frameFenceWaitMilliseconds +=
-                                    vulkan.lastFrameCompletionWaitMilliseconds();
+                                    renderer.lastFrameCompletionWaitMilliseconds();
                                 phaseBegin = PerformanceClock::now();
-                                vulkan.updateSupportVertices(
+                                renderer.updateSupportVertices(
                                     candidateSupports.memberVertices);
                                 telemetry.supportUploadMilliseconds =
                                     std::chrono::duration<double, std::milli>(
                                         PerformanceClock::now()
                                             - phaseBegin).count();
                                 telemetry.frameFenceWaitMilliseconds +=
-                                    vulkan.lastFrameCompletionWaitMilliseconds();
+                                    renderer.lastFrameCompletionWaitMilliseconds();
 
                                 centerlineCache.setTrackStyle(
                                     candidateTrack.trackStyle());
@@ -3077,7 +3081,7 @@ editorUi.selectSection(restoredSelection, true);
                                         createCenterlineVisualization(
                                             candidateTrack,
                                             candidateTrack.trackStyle());
-                                    vulkan.updateTrackCurveVertices(
+                                    renderer.updateTrackCurveVertices(
                                         candidateCenterline->vertices,
                                         candidateCenterline->verticesPerCurve);
                                     applicationBlockingEvents
@@ -3270,10 +3274,10 @@ editorUi.selectSection(restoredSelection, true);
                                     newCenterline.sectionSlices);
                                 applicationBlockingEvents
                                     .trackBufferMutation = true;
-                                vulkan.updateTrackCurveVertices(
+                                renderer.updateTrackCurveVertices(
                                     newCenterline.vertices,
                                     newCenterline.verticesPerCurve);
-                                vulkan.updateRenderableTrack(
+                                renderer.updateRenderableTrack(
                                     newCenterline.renderableTrack);
 
                                 centerlineCache.setTrackStyle(
@@ -3358,6 +3362,54 @@ editorUi.selectSection(restoredSelection, true);
                         editorUi.setHistoryAvailability(
                             documentHistory.canUndo(),
                             documentHistory.canRedo());
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->modeCycle)
+                        {
+                            using quantum::editor::SimulationControlType;
+                            const char* action = nullptr;
+                            switch (renderedFrameId)
+                            {
+                            case 30:
+                            case 180:
+                                editorUi.enterSimulatorForPreviewSmoke();
+                                editorUi.requestSimulationControlForPreviewSmoke(
+                                    SimulationControlType::Play);
+                                action = "enter Simulator and play";
+                                break;
+                            case 60:
+                            case 210:
+                                editorUi.requestSimulationControlForPreviewSmoke(
+                                    SimulationControlType::Pause);
+                                action = "pause";
+                                break;
+                            case 90:
+                                editorUi.requestSimulationControlForPreviewSmoke(
+                                    SimulationControlType::Play);
+                                action = "resume";
+                                break;
+                            case 120:
+                                editorUi.requestSimulationControlForPreviewSmoke(
+                                    SimulationControlType::Reset);
+                                action = "reset";
+                                break;
+                            case 150:
+                            case 240:
+                                editorUi.returnToEditorForPreviewSmoke();
+                                action = "return to Editor";
+                                break;
+                            default:
+                                break;
+                            }
+                            if (action != nullptr)
+                            {
+                                ++previewModeCycleActionCount;
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "SMOKE", "Mode cycle frame %llu: %s",
+                                    static_cast<unsigned long long>(
+                                        renderedFrameId), action);
+                            }
+                        }
                         if (previewSmokeOptions != nullptr
                             && previewSmokeOptions->cameraOrbit
                             && renderedFrameId >= 60)
@@ -3486,7 +3538,7 @@ editorUi.selectSection(restoredSelection, true);
                         {
                             const auto previewPublishBegin =
                                 PerformanceClock::now();
-                            vulkan.updateTrainPreviewVertices(
+                            renderer.updateTrainPreviewVertices(
                                 simulationPreview.vertices());
                             previewVertexPublishMilliseconds =
                                 std::chrono::duration<double, std::milli>(
@@ -3496,21 +3548,13 @@ editorUi.selectSection(restoredSelection, true);
                                 simulationPreview.vertexGeneration();
                         }
 
-                        vulkan.drawFrame(
-                    [](VkCommandBuffer commandBuffer, void* userData)
-                    {
-                        static_cast<quantum::editor::EditorUi*>(
-                            userData
-                        )->render(commandBuffer);
-                    },
-                    &editorUi
-                        );
+                        renderer.drawFrame();
 
                         const quantum::editor::
                             SimulationPreviewFrameTelemetry& preview =
                                 simulationPreview.frameTelemetry();
                         const quantum::renderer::DrawFrameCpuTelemetry& draw =
-                            vulkan.lastDrawFrameCpuTelemetry();
+                            renderer.lastDrawFrameCpuTelemetry();
                         const quantum::editor::FramePerformanceSample
                             performanceSample{
                                 .frameId = renderedFrameId,
@@ -3655,6 +3699,7 @@ editorUi.selectSection(restoredSelection, true);
                                 running = false;
                             }
                             else if (!previewSmokeOptions->stoppedPreview
+                                && !previewSmokeOptions->modeCycle
                                 && simulationPreview.playbackState()
                                 != quantum::editor::SimulationPreview::
                                     PlaybackState::Playing
@@ -3693,6 +3738,13 @@ editorUi.selectSection(restoredSelection, true);
 
                 if (previewSmokeCollector.has_value())
                 {
+                    if (previewSmokeOptions->modeCycle
+                        && previewModeCycleActionCount != 8)
+                    {
+                        previewSmokeFailure = true;
+                        previewSmokeFailureMessage =
+                            "Mode cycle did not complete eight actions.";
+                    }
                     const double elapsedSeconds = previewSmokeStart
                         ? std::chrono::duration<double>(
                             PerformanceClock::now()

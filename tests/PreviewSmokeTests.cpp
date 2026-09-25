@@ -58,10 +58,16 @@ namespace
         require(!(**result).repeat, "repeat is opt-in");
         require(!(**result).msaaOff, "MSAA is on by default");
         require(!(**result).simulator, "Editor is the default workspace");
+        require(!(**result).modeCycle, "mode cycle is opt-in");
         const auto repeated = parse({
             "--dev-preview-smoke", fixtureString, "--repeat"});
         require(repeated && repeated->has_value() && (**repeated).repeat,
             "developer repeat flag parses without a value");
+        const auto modeCycle = parse({
+            "--dev-preview-smoke", fixtureString, "--mode-cycle"});
+        require(modeCycle && modeCycle->has_value()
+                && (**modeCycle).modeCycle,
+            "mode cycle flag parses without a value");
         const auto stoppedEdit = parse({
             "--dev-preview-smoke", fixtureString, "--stopped-preview",
             "--camera-orbit", "--transition-drag", "--msaa-off",

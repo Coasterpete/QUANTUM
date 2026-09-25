@@ -94,6 +94,7 @@ namespace quantum::editor
             EditorUi ui;
             ui.initialize(window.get(), vulkan, loaded.track,
                 loaded.centerline.minimumPosition, loaded.centerline.maximumPosition, &scenario);
+            ui.installFrameRenderCallback(vulkan);
             ui.setCenterlineSections(loaded.centerline.sectionSlices);
             ui.setCenterlineVisualization(loaded.centerline);
             ui.setSupportVisualization(loaded.supports);
@@ -132,8 +133,8 @@ namespace quantum::editor
                 previousViewport = viewport;
                 generation = vulkan.swapchainGeneration();
                 const bool capture = stableFrames >= manifest.settleFrames;
-                vulkan.drawFrame([](VkCommandBuffer command, void* data)
-                    { static_cast<EditorUi*>(data)->render(command); }, &ui, capture ? &image : nullptr);
+                renderer::Renderer& renderer = vulkan;
+                renderer.drawFrame(capture ? &image : nullptr);
                 if (generation != vulkan.swapchainGeneration())
                     stableFrames = 0;
                 else

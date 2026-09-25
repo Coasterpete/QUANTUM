@@ -2172,7 +2172,7 @@ namespace
     [[nodiscard]] std::optional<quantum::editor::TrackHardwareEdit>
     showTrackHardwareControls(
         const quantum::coaster::AuthoredTrack& track,
-        const quantum::renderer::VulkanContext& vulkan,
+        const quantum::renderer::Renderer& vulkan,
         SDL_Window* const window,
         std::array<char, 512>& assetIdBuffer,
         std::string& assetIdBufferSource,
@@ -2768,7 +2768,7 @@ namespace
 
     [[nodiscard]] TrackWorkspaceEdit showTrackWorkspace(
         const quantum::coaster::AuthoredTrack& track,
-        const quantum::renderer::VulkanContext& vulkan,
+        const quantum::renderer::Renderer& vulkan,
         SDL_Window* const window,
         const std::size_t selectedIndex,
         double* const sectionLengthEdit,
@@ -4866,7 +4866,7 @@ namespace quantum::editor
         );
         window_ = window;
         captureScenario_ = captureScenario;
-        viewportSettings_.msaaEnabled = vulkan.supportsViewportMsaa4();
+        viewportSettings_.msaaEnabled = vulkan.capabilities().viewportMsaa4;
         captureSetupPending_ = captureScenario != nullptr;
         authoredTrack_ = &authoredTrack;
         selectedSection_ = 0;
@@ -5176,10 +5176,11 @@ namespace quantum::editor
         if (currentExtent.width != width || currentExtent.height != height
             || vulkan.viewportMsaaEnabled()
                 != (viewportSettings_.msaaEnabled
-                    && vulkan.supportsViewportMsaa4()))
+                    && vulkan.capabilities().viewportMsaa4))
         {
             frameBlockingEvents_.viewportResized = true;
-            vulkan.resizeViewportTarget(
+            renderer::Renderer& renderer = vulkan;
+            renderer.resizeViewportTarget(
                 width,
                 height,
                 &EditorUi::retireViewportTexture,
@@ -5205,6 +5206,18 @@ namespace quantum::editor
         }
     }
 
+    void EditorUi::installFrameRenderCallback(
+        renderer::VulkanContext& vulkan) noexcept
+    {
+        frameRenderer_ = &vulkan;
+        vulkan.setFrameRenderCallback(
+            [](VkCommandBuffer commandBuffer, void* userData)
+            {
+                static_cast<EditorUi*>(userData)->render(commandBuffer);
+            },
+            this);
+    }
+
     void EditorUi::setViewportMsaaEnabled(const bool enabled) noexcept
     {
         viewportSettings_.msaaEnabled = enabled;
@@ -5215,6 +5228,19 @@ namespace quantum::editor
         workspaceMode_ = WorkspaceMode::Simulator;
         cameraGesture_ = CameraGesture::None;
         viewportNavigationActive_ = false;
+    }
+
+    void EditorUi::returnToEditorForPreviewSmoke() noexcept
+    {
+        workspaceMode_ = WorkspaceMode::Editor;
+        cameraGesture_ = CameraGesture::None;
+        viewportNavigationActive_ = false;
+    }
+
+    void EditorUi::requestSimulationControlForPreviewSmoke(
+        const SimulationControlType control) noexcept
+    {
+        pendingSimulationControl_ = control;
     }
 
     void EditorUi::retireViewportTexture(void* const userData) noexcept
@@ -5790,7 +5816,7 @@ namespace quantum::editor
     }
 
     void EditorUi::updateViewportCamera(
-        renderer::VulkanContext& vulkan,
+        renderer::Renderer& vulkan,
         const bool viewportHovered,
         const std::uint32_t pixelWidth,
         const std::uint32_t pixelHeight,
@@ -7512,7 +7538,7 @@ ImGui::MenuItem(
         return slice.vertexCount >= 2 ? &slice : nullptr;
     }
 
-    void EditorUi::applyViewportSettings(renderer::VulkanContext& vulkan)
+    void EditorUi::applyViewportSettings(renderer::Renderer& vulkan)
     {
         viewportSettings_.applyCameraSettings(viewportCamera_);
 
@@ -7697,7 +7723,7 @@ ImGui::MenuItem(
             selectSection(captureScenario_->region, true);
             viewportSettings_ = {};
             viewportSettings_.msaaEnabled = captureScenario_->msaaEnabled
-                && vulkan.supportsViewportMsaa4();
+                && vulkan.capabilities().viewportMsaa4;
             viewportSettings_.anchorsVisible =
                 captureScenario_->kind == ReadmeCaptureKind::TrackStartGizmo;
             startPoseTransformMode_ = captureScenario_->rotateGizmo
@@ -7738,7 +7764,7 @@ ImGui::MenuItem(
         showViewportSettingsWindow(
             viewportSettings_,
             &viewportSettingsWindowOpen_,
-            vulkan.supportsViewportMsaa4()
+            vulkan.capabilities().viewportMsaa4
         );
 
         drawPerformanceTelemetry();
@@ -9711,6 +9737,11 @@ ImGui::MenuItem(
 
     void EditorUi::shutdown() noexcept
     {
+        if (frameRenderer_ != nullptr)
+        {
+            frameRenderer_->setFrameRenderCallback(nullptr, nullptr);
+            frameRenderer_ = nullptr;
+        }
         if (vulkanBackendInitialized_)
         {
             shutdownVulkanBackend();

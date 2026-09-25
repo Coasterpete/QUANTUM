@@ -4,7 +4,7 @@
 #include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/editor/TrackStylePresentation.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
-#include <quantum/renderer/VulkanContext.hpp>
+#include <quantum/renderer/Renderer.hpp>
 
 #include <glm/vec3.hpp>
 

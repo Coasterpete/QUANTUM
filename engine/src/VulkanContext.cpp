@@ -4187,11 +4187,22 @@ namespace quantum::renderer
         readbackSize_ = size;
     }
 
-    void VulkanContext::drawFrame(
-        const FrameRenderCallback renderCallback,
-        void* const userData,
-        FrameImage* const readback)
+    void VulkanContext::setFrameRenderCallback(
+        const FrameRenderCallback callback, void* const userData) noexcept
     {
+        frameRenderCallback_ = callback;
+        frameRenderUserData_ = userData;
+    }
+
+    RendererCapabilities VulkanContext::capabilities() const noexcept
+    {
+        return {.viewportMsaa4 = supportsViewportMsaa4()};
+    }
+
+    void VulkanContext::drawFrame(FrameImage* const readback)
+    {
+        const FrameRenderCallback renderCallback = frameRenderCallback_;
+        void* const userData = frameRenderUserData_;
         using Clock = std::chrono::steady_clock;
         const auto drawFrameBegin = Clock::now();
         lastDrawFrameCpuTelemetry_ = {};

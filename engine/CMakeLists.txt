@@ -138,6 +138,7 @@ target_sources(
         include/quantum/renderer/ViewportTrackPresentation.hpp
         include/quantum/engine/Logging.hpp
         include/quantum/renderer/StaticMeshAssets.hpp
+        include/quantum/renderer/Renderer.hpp
         include/quantum/renderer/VulkanContext.hpp
         include/quantum/physics/gpu/GpuPhysicsContext.hpp
 )
