@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
+#include <quantum/physics/TrackDeviceForces.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/renderer/Renderer.hpp>
 
@@ -88,6 +89,12 @@ namespace quantum::editor
         [[nodiscard]] bool rebuild(
             const coaster::AuthoredTrack& authoredTrack) noexcept;
 
+        // Device-only document edits refresh operational inputs without
+        // recompiling canonical geometry or uploading track buffers.
+        void setTrackDevices(const coaster::TrackDeviceCollection& devices);
+        [[nodiscard]] const physics::TrackDeviceForceResult&
+            lastDeviceForces() const noexcept;
+
         void play() noexcept;
         void pause() noexcept;
         void reset() noexcept;
@@ -142,6 +149,9 @@ namespace quantum::editor
         std::optional<physics::CompiledPhysicsTrack> compiledTrack_;
         physics::PhysicsEnvironment environment_;
         physics::TrainDefinition trainDefinition_;
+        std::vector<coaster::TrackDevice> trackDevices_;
+        std::vector<physics::TrackDeviceRuntimeState> deviceRuntimeStates_;
+        physics::TrackDeviceForceResult lastDeviceForces_;
         std::optional<physics::TrainDynamicsState> initialState_;
         std::optional<physics::TrainDynamicsState> dynamicsState_;
         std::optional<physics::TrainDynamicsState> previousState_;

@@ -1,0 +1,208 @@
+{
+  "coasterSetup": {
+    "carsPerTrain": 4,
+    "heartline": {
+      "enabled": true,
+      "offsetMeters": 1.4
+    },
+    "options": [
+      {
+        "choice": "layout-1",
+        "optionId": "train-layout"
+      }
+    ],
+    "styleId": "placeholder-style-1"
+  },
+  "formatVersion": 1,
+  "layoutMode": "Circuit",
+  "physicalSettings": {
+    "gravityAcceleration": 9.80665,
+    "initialSpeed": 8.0,
+    "metersPerCoordinateUnit": 1.0
+  },
+  "sections": [
+    {
+      "kind": "RateProfiles",
+      "length": 60.0,
+      "rateProfiles": {
+        "pitch": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 60.0,
+                "type": "Linear",
+                "valueBegin": 0.0,
+                "valueEnd": 0.0
+              }
+            }
+          ]
+        },
+        "roll": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 60.0,
+                "type": "Linear",
+                "valueBegin": 0.0,
+                "valueEnd": 0.0
+              }
+            }
+          ]
+        },
+        "yaw": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 60.0,
+                "type": "Linear",
+                "valueBegin": 0.0,
+                "valueEnd": 0.0
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "startPose": {
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    }
+  },
+  "supports": {
+    "nextStructureId": 1,
+    "structures": []
+  },
+  "trackConfigurationId": "modern-steel",
+  "trackDevices": {
+    "devices": [
+      {
+        "enabled": true,
+        "endStationMeters": 30.0,
+        "id": 1,
+        "kind": "Launch",
+        "maximumForceNewtons": 10000.0,
+        "name": "Launch",
+        "startStationMeters": 0.0,
+        "targetAccelerationMetersPerSecondSquared": 3.0
+      },
+      {
+        "enabled": true,
+        "endStationMeters": 55.0,
+        "id": 2,
+        "kind": "Brake",
+        "maximumForceNewtons": 10000.0,
+        "name": "Brake",
+        "startStationMeters": 35.0,
+        "targetAccelerationMetersPerSecondSquared": 4.0
+      }
+    ],
+    "nextId": 3
+  },
+  "trackStyle": {
+    "geometryFamily": "DualRailTubular",
+    "name": "ModernSteel",
+    "railCount": 2,
+    "railMaterial": {
+      "baseColor": {
+        "a": 1.0,
+        "b": 0.07999999821186066,
+        "g": 0.1599999964237213,
+        "r": 0.7200000286102295
+      },
+      "metallicFactor": 0.0,
+      "roughnessFactor": 0.23999999463558197
+    },
+    "railOffsets": [
+      {
+        "lateral": -0.55,
+        "vertical": 0.0
+      },
+      {
+        "lateral": 0.55,
+        "vertical": 0.0
+      }
+    ],
+    "railRadialSegments": 16,
+    "railRadius": 0.075,
+    "railsVisible": true,
+    "repeatingHardware": [
+      {
+        "asset": {
+          "id": "assets://track/test-crosstie-placeholder.glb",
+          "placeholder": true
+        },
+        "enabled": true,
+        "frameFollow": "TrackFrame",
+        "localPosition": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": -0.12
+        },
+        "localRotationRadians": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "localScale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "materialOverride": {
+          "baseColor": {
+            "a": 1.0,
+            "b": 0.4300000071525574,
+            "g": 0.38999998569488525,
+            "r": 0.36000001430511475
+          },
+          "metallicFactor": 0.0,
+          "roughnessFactor": 0.41999998688697815
+        },
+        "spacing": 0.75,
+        "startOffset": 0.0
+      }
+    ],
+    "spine": {
+      "dimensions": {
+        "x": 0.32,
+        "y": 0.42
+      },
+      "enabled": true,
+      "material": {
+        "baseColor": {
+          "a": 1.0,
+          "b": 0.27000001072883606,
+          "g": 0.23000000417232513,
+          "r": 0.20000000298023224
+        },
+        "metallicFactor": 0.800000011920929,
+        "roughnessFactor": 0.5799999833106995
+      },
+      "offset": {
+        "lateral": 0.0,
+        "vertical": -0.46
+      },
+      "radialSegments": 12,
+      "type": "Box"
+    },
+    "visible": true
+  }
+}

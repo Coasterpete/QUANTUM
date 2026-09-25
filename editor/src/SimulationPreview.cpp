@@ -313,10 +313,17 @@ namespace quantum::editor
                 authoredTrack.physicalSettings(),
                 authoredTrack.layoutMode(),
                 derivedTopology);
+            coaster::validateTrackDevices(authoredTrack.trackDevices(),
+                compiledTrack_->lengthMeters(),
+                compiledTrack_->topology()
+                    == coaster::TopologyKind::ClosedCircuit);
             environment_ = physics::physicsEnvironmentFrom(
                 authoredTrack.physicalSettings());
             coordinateUnitsPerMeter_ = 1.0
                 / authoredTrack.physicalSettings().metersPerCoordinateUnit;
+            trackDevices_ = authoredTrack.trackDevices().devices;
+            deviceRuntimeStates_ =
+                physics::initialTrackDeviceRuntimeStates(trackDevices_);
 
             InitialPlacement placement = findInitialPlacement(
                 *compiledTrack_, trainDefinition_);
@@ -372,6 +379,26 @@ namespace quantum::editor
         }
     }
 
+    void SimulationPreview::setTrackDevices(
+        const coaster::TrackDeviceCollection& devices)
+    {
+        if (compiledTrack_)
+            coaster::validateTrackDevices(devices,
+                compiledTrack_->lengthMeters(),
+                compiledTrack_->topology()
+                    == coaster::TopologyKind::ClosedCircuit);
+        trackDevices_ = devices.devices;
+        deviceRuntimeStates_ =
+            physics::initialTrackDeviceRuntimeStates(trackDevices_);
+        lastDeviceForces_ = {};
+    }
+
+    const physics::TrackDeviceForceResult&
+    SimulationPreview::lastDeviceForces() const noexcept
+    {
+        return lastDeviceForces_;
+    }
+
     void SimulationPreview::play() noexcept
     {
         if (!isAvailable())
@@ -401,6 +428,7 @@ namespace quantum::editor
         renderAlpha_ = 0.0;
         lastGpuBogieSamples_.clear();
         lastGpuBogieQueries_.clear();
+        lastDeviceForces_ = {};
         if (!initialState_ || !initialPose_)
         {
             return;
@@ -505,13 +533,17 @@ namespace quantum::editor
                 const double previousVelocity =
                     dynamicsState_->signedVelocityMetersPerSecond;
                 const auto stepBegin = std::chrono::steady_clock::now();
+                lastDeviceForces_ = physics::evaluateTrackDeviceForces(
+                    trackDevices_, deviceRuntimeStates_, *compiledTrack_,
+                    trainDefinition_, *pose_,
+                    dynamicsState_->signedVelocityMetersPerSecond);
                 physics::TrainStepResult result = physics::stepTrain(
                     *compiledTrack_,
                     trainDefinition_,
                     environment_,
                     *dynamicsState_,
                     {},
-                    {},
+                    lastDeviceForces_.applications,
                     &frameTelemetry_.solveCounters);
                 const double stepMilliseconds =
                     std::chrono::duration<double, std::milli>(
@@ -829,6 +861,9 @@ namespace quantum::editor
         consecutiveCatchUpFrameCount_ = 0;
         lastGpuBogieSamples_.clear();
         lastGpuBogieQueries_.clear();
+        trackDevices_.clear();
+        deviceRuntimeStates_.clear();
+        lastDeviceForces_ = {};
         gpuTrackReady_ = false;
         error_ = std::move(error);
     }

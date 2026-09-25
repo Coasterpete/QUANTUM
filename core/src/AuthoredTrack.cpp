@@ -666,6 +666,10 @@ namespace quantum::coaster
         AuthoredTrack candidate = *this;
         candidate.layoutMode_ = mode;
         validateSupportAnchors(candidate);
+        if (!candidate.trackDevices_.devices.empty())
+            validateTrackDevices(candidate.trackDevices_,
+                candidate.trackLengthMeters(),
+                mode == LayoutMode::Circuit);
         layoutMode_ = mode;
     }
 
@@ -859,6 +863,11 @@ namespace quantum::coaster
     void AuthoredTrack::setPhysicalSettings(const TrackPhysicalSettings& settings)
     {
         validateTrackPhysicalSettings(settings);
+        if (!trackDevices_.devices.empty())
+            validateTrackDevices(trackDevices_,
+                authoredTrackLength(*this)
+                    * settings.metersPerCoordinateUnit,
+                layoutMode_ == LayoutMode::Circuit);
         physicalSettings_ = settings;
     }
 
@@ -928,6 +937,57 @@ namespace quantum::coaster
     {
         validateSupportAnchorsForTrack(supports, *this);
         supports_ = supports;
+    }
+
+    const TrackDeviceCollection& AuthoredTrack::trackDevices() const noexcept
+    {
+        return trackDevices_;
+    }
+
+    double AuthoredTrack::trackLengthMeters() const
+    {
+        return authoredTrackLength(*this)
+            * physicalSettings_.metersPerCoordinateUnit;
+    }
+
+    void AuthoredTrack::setTrackDevices(const TrackDeviceCollection& devices)
+    {
+        validateTrackDevices(devices, trackLengthMeters(),
+            layoutMode_ == LayoutMode::Circuit);
+        trackDevices_ = devices;
+    }
+
+    TrackDeviceId AuthoredTrack::addTrackDevice(TrackDevice device)
+    {
+        TrackDeviceCollection candidate = trackDevices_;
+        device.id = candidate.nextId++;
+        candidate.devices.push_back(std::move(device));
+        setTrackDevices(candidate);
+        return candidate.devices.back().id;
+    }
+
+    void AuthoredTrack::updateTrackDevice(const TrackDevice& device)
+    {
+        TrackDeviceCollection candidate = trackDevices_;
+        const auto found = std::find_if(candidate.devices.begin(),
+            candidate.devices.end(), [&](const TrackDevice& value)
+            { return value.id == device.id; });
+        if (found == candidate.devices.end())
+            throw std::invalid_argument("Unknown track device ID.");
+        *found = device;
+        setTrackDevices(candidate);
+    }
+
+    void AuthoredTrack::removeTrackDevice(const TrackDeviceId id)
+    {
+        TrackDeviceCollection candidate = trackDevices_;
+        const auto found = std::find_if(candidate.devices.begin(),
+            candidate.devices.end(), [&](const TrackDevice& value)
+            { return value.id == id; });
+        if (found == candidate.devices.end())
+            throw std::invalid_argument("Unknown track device ID.");
+        candidate.devices.erase(found);
+        setTrackDevices(candidate);
     }
 
     void AuthoredTrack::setSupportNodePosition(
