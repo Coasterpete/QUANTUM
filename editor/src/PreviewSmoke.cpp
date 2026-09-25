@@ -480,6 +480,11 @@ namespace quantum::editor
                 options.simulator = true;
                 continue;
             }
+            if (argument == "--mode-cycle")
+            {
+                options.modeCycle = true;
+                continue;
+            }
             if (argument == "--camera-orbit")
             {
                 options.cameraOrbit = true;

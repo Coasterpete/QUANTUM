@@ -1,9 +1,6 @@
 #pragma once
 
-#include <quantum/coaster/TrackStyle.hpp>
-#include <quantum/renderer/StaticMeshAssets.hpp>
-#include <quantum/renderer/FrameSynchronizationTelemetry.hpp>
-#include <quantum/renderer/ViewportTrackPresentation.hpp>
+#include <quantum/renderer/Renderer.hpp>
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
@@ -19,27 +16,6 @@
 
 namespace quantum::renderer
 {
-    // One endpoint of a viewport line-list segment. Every viewport geometry
-    // stream (ground grid, world axes, authored-track reference curves,
-    // support members, diagnostics) uses this vertex layout, matching the
-    // graphics pipeline's vertex input.
-    struct LineVertex
-    {
-        float x;
-        float y;
-        float z;
-        std::array<float, 4> color;
-    };
-
-    // The track-curve stream concatenates four equal-length reference-curve
-    // runs in this order; visibility bits address these indices.
-    inline constexpr std::uint32_t viewportLeftRailCurve = 0;
-    inline constexpr std::uint32_t viewportRightRailCurve = 1;
-    inline constexpr std::uint32_t viewportCenterlineCurve = 2;
-    inline constexpr std::uint32_t viewportHeartlineCurve = 3;
-    inline constexpr std::uint32_t viewportCurveCount = 4;
-    inline constexpr std::uint32_t viewportAllCurvesVisibleMask = 0xFu;
-
     // QUANTUM intentionally permits one submitted frame at a time under FIFO
     // presentation. Every slot-owned command, synchronization, timestamp, and
     // dynamic-preview resource below is sized from this policy. Render-finished
@@ -47,43 +23,13 @@ namespace quantum::renderer
     inline constexpr std::uint32_t maxFramesInFlight = 1;
     static_assert(maxFramesInFlight > 0);
 
-    // Tightly packed, top-to-bottom RGBA8 pixels of the complete client area.
-    struct FrameImage
-    {
-        std::uint32_t width = 0;
-        std::uint32_t height = 0;
-        std::vector<std::uint8_t> pixels;
-    };
-
-    struct DrawFrameCpuTelemetry
-    {
-        FrameSynchronizationTelemetry synchronization;
-        double frameSlotWaitMilliseconds = 0.0;
-        double deferredBufferReclaimMilliseconds = 0.0;
-        double previewFrameSlotUpdateMilliseconds = 0.0;
-        double acquireCallMilliseconds = 0.0;
-        double presentCallMilliseconds = 0.0;
-        double totalMilliseconds = 0.0;
-        // Elapsed GPU time between top-of-pipe and bottom-of-pipe timestamps
-        // for the previous submission that owned the current frame slot.
-        double gpuExecutionMilliseconds = 0.0;
-        std::size_t deferredBufferCountBeforeReclaim = 0;
-        VkDeviceSize deferredBufferBytesBeforeReclaim = 0;
-        std::size_t reclaimedBufferCount = 0;
-        bool gpuTimingAvailable = false;
-        bool previewStreamUpdated = false;
-        bool swapchainRecreated = false;
-        bool synchronousReadback = false;
-    };
-
-    class VulkanContext
+    class VulkanContext final : public Renderer
     {
     public:
         using FrameRenderCallback = void (*)(VkCommandBuffer, void*);
-        using ViewportTargetRetirementCallback = void (*)(void*) noexcept;
 
         VulkanContext() = default;
-        ~VulkanContext();
+        ~VulkanContext() override;
 
         VulkanContext(const VulkanContext&) = delete;
         VulkanContext& operator=(const VulkanContext&) = delete;
@@ -97,22 +43,23 @@ namespace quantum::renderer
             std::uint32_t trackVerticesPerCurve,
             const coaster::RenderableTrack& renderableTrack,
             bool enableFrameReadback = false
-        );
+        ) override;
         // Optional synchronous readback after the render callback. Empty on a
         // skipped/out-of-date frame; requires opt-in during initialize().
-        void drawFrame(
-            FrameRenderCallback renderCallback = nullptr,
-            void* userData = nullptr,
-            FrameImage* readback = nullptr
-        );
+        void drawFrame(FrameImage* readback = nullptr) override;
+        // The Vulkan ImGui integration installs its command recording hook.
+        // Native handles never enter the renderer-neutral Renderer contract.
+        void setFrameRenderCallback(FrameRenderCallback callback,
+            void* userData) noexcept;
         void resizeViewportTarget(
             std::uint32_t width,
             std::uint32_t height,
-            ViewportTargetRetirementCallback retirementCallback = nullptr,
-            void* userData = nullptr,
-            bool enableMsaa = true
-        );
+            ViewportTargetRetirementCallback retirementCallback,
+            void* userData,
+            bool enableMsaa
+        ) override;
         [[nodiscard]] bool supportsViewportMsaa4() const noexcept;
+        [[nodiscard]] RendererCapabilities capabilities() const noexcept override;
         [[nodiscard]] bool viewportMsaaEnabled() const noexcept;
         void setViewportViewProjection(
             const std::array<float, 16>& viewProjection
@@ -181,7 +128,7 @@ namespace quantum::renderer
             float centerY,
             float referenceRadius
         );
-        void shutdown() noexcept;
+        void shutdown() noexcept override;
 
         [[nodiscard]] VkInstance instance() const noexcept;
         [[nodiscard]] VkPhysicalDevice physicalDevice() const noexcept;
@@ -206,6 +153,8 @@ namespace quantum::renderer
         [[nodiscard]] bool shaderFloat64Enabled() const noexcept;
 
     private:
+        FrameRenderCallback frameRenderCallback_ = nullptr;
+        void* frameRenderUserData_ = nullptr;
         void selectPhysicalDevice();
         void createDevice();
         [[nodiscard]] bool createSwapchain();
