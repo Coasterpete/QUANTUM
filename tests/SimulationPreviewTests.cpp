@@ -1052,6 +1052,69 @@ namespace
             << " exhaustive_fallbacks=" << fallbacks << '\n';
     }
 
+    void authoredLaunchAndBrakePlayback()
+    {
+        auto track = straightTrack(100.0, 5.0);
+        track.setLayoutMode(quantum::coaster::LayoutMode::Shuttle);
+        quantum::coaster::TrackDevice launch;
+        launch.name = "Test launch";
+        launch.startStationMeters = 0.0;
+        launch.endStationMeters = 25.0;
+        launch.targetAccelerationMetersPerSecondSquared = 8.0;
+        launch.maximumForceNewtons = 100000.0;
+        const auto launchId = track.addTrackDevice(launch);
+        quantum::coaster::TrackDevice brake = launch;
+        brake.kind = quantum::coaster::TrackDeviceKind::Brake;
+        brake.name = "Test brake";
+        brake.startStationMeters = 25.0;
+        brake.endStationMeters = 70.0;
+        brake.targetAccelerationMetersPerSecondSquared = 12.0;
+        const auto brakeId = track.addTrackDevice(brake);
+
+        SimulationPreview preview;
+        require(preview.rebuild(track), "device preview must rebuild");
+        const auto firstTick = [&]
+        {
+            preview.reset();
+            preview.play();
+            preview.update(quantum::physics::defaultFixedTimeStepSeconds);
+            return preview.dynamicsState()->signedVelocityMetersPerSecond;
+        };
+        const double first = firstTick();
+        require(first > 5.0, "authored launch must accelerate preview");
+        requireNear(firstTick(), first, 0.0,
+            "reset must reproduce launch first step");
+
+        bool launchActive = false;
+        bool brakeActive = false;
+        bool decreased = false;
+        double previousSpeed = preview.speedMetersPerSecond();
+        for (int frame = 0; frame < 180 && !decreased; ++frame)
+        {
+            preview.update(1.0 / 60.0);
+            for (const auto& device : preview.lastDeviceForces().devices)
+            {
+                if (device.id == launchId)
+                    launchActive |= device.appliedForceNewtons > 0.0;
+                if (device.id == brakeId)
+                    brakeActive |= device.appliedForceNewtons < 0.0;
+            }
+            decreased |= brakeActive
+                && preview.speedMetersPerSecond() < previousSpeed;
+            previousSpeed = preview.speedMetersPerSecond();
+        }
+        require(launchActive && brakeActive && decreased,
+            "launch then brake must change actual preview speed");
+
+        auto disabled = track.trackDevices();
+        disabled.devices.front().enabled = false;
+        preview.setTrackDevices(disabled);
+        preview.reset();
+        preview.play();
+        preview.update(quantum::physics::defaultFixedTimeStepSeconds);
+        require(preview.speedMetersPerSecond() < first,
+            "device-only disable must update playback without track rebuild");
+    }
 }
 
 int main()
@@ -1074,6 +1137,7 @@ int main()
         startupGpuValidationOptInDoesNotBlockStartup();
         openTrackPausesAtItsLegalEndpoint();
         transitionPlaybackKeepsEveryCommittedCarRigid();
+        authoredLaunchAndBrakePlayback();
     }
     catch (const std::exception& exception)
     {

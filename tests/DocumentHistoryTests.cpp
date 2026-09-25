@@ -635,6 +635,44 @@ namespace
         require(snapshot(track) == selectedSnapshot,
             "selection Redo restores the concrete snapshot");
     }
+    void trackDeviceEditsUseWholeDocumentHistory()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        const std::string baseline = snapshot(track);
+        quantum::coaster::TrackDevice launch;
+        launch.name = "Launch";
+        launch.startStationMeters = 0.0;
+        launch.endStationMeters = 15.0;
+        AuthoredTrackEditTransaction add{track};
+        const auto id = add.candidate().addTrackDevice(launch);
+        add.commit(track);
+        history.record(track);
+        const std::string added = snapshot(track);
+        require(added != baseline, "device creation changes document");
+
+        AuthoredTrackEditTransaction rejected{track};
+        auto invalid = rejected.candidate().trackDevices().devices.front();
+        invalid.endStationMeters = 1000.0;
+        bool threw = false;
+        try { rejected.candidate().updateTrackDevice(invalid); }
+        catch (const std::invalid_argument&) { threw = true; }
+        require(threw && snapshot(track) == added,
+            "invalid device candidate leaves committed state intact");
+
+        require(snapshot(requireState(history.undo(), "device Undo missing"))
+                == baseline, "Undo removes authored device");
+        require(snapshot(requireState(history.redo(), "device Redo missing"))
+                == added, "Redo restores authored device");
+
+        AuthoredTrackEditTransaction remove{track};
+        remove.candidate().removeTrackDevice(id);
+        remove.commit(track);
+        history.record(track);
+        require(snapshot(requireState(history.undo(), "delete Undo missing"))
+                == added, "Undo restores deleted device and stable ID");
+    }
 }
 
 int main()
@@ -655,6 +693,7 @@ int main()
         supportMemberEndConnectionsUndoRedoIsExact();
         regionStyleOverridesUseWholeDocumentHistory();
         trackConfigurationSelectionAndResetUndoExactly();
+        trackDeviceEditsUseWholeDocumentHistory();
     }
     catch (const std::exception& exception)
     {

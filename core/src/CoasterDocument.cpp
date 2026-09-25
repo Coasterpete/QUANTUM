@@ -1717,6 +1717,8 @@ TrackStylePreset deserializeTrackStyle(
     std::string serializeCoasterDocument(const AuthoredTrack& track)
     {
         validateSupportAnchors(track);
+        validateTrackDevices(track.trackDevices(), track.trackLengthMeters(),
+            track.layoutMode() == LayoutMode::Circuit);
         json root;
         root["formatVersion"] = currentFormatVersion;
         root["layoutMode"] = layoutModeToString(track.layoutMode());
@@ -1734,6 +1736,25 @@ TrackStylePreset deserializeTrackStyle(
         root["trackStyle"] = serializeTrackStyle(track.trackStyle());
         root["coasterSetup"] = serializeCoasterSetup(track.coasterSetup());
         root["supports"] = serializeSupportCollection(track.supports());
+        json devicesJson = json::array();
+        for (const TrackDevice& device : track.trackDevices().devices)
+        {
+            devicesJson.push_back({
+                {"id", device.id},
+                {"kind", device.kind == TrackDeviceKind::Launch ? "Launch" : "Brake"},
+                {"name", device.name},
+                {"enabled", device.enabled},
+                {"startStationMeters", device.startStationMeters},
+                {"endStationMeters", device.endStationMeters},
+                {"targetAccelerationMetersPerSecondSquared",
+                    device.targetAccelerationMetersPerSecondSquared},
+                {"maximumForceNewtons", device.maximumForceNewtons}
+            });
+        }
+        root["trackDevices"] = {
+            {"nextId", track.trackDevices().nextId},
+            {"devices", std::move(devicesJson)}
+        };
 
         json sectionsJson = json::array();
 
@@ -1769,7 +1790,7 @@ TrackStylePreset deserializeTrackStyle(
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
                 "physicalSettings", "trackConfigurationId", "trackStyle",
-                "coasterSetup", "supports"
+                "coasterSetup", "supports", "trackDevices"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -1979,6 +2000,62 @@ TrackStylePreset deserializeTrackStyle(
                 requireObject(root, "supports", "root");
                 track.setSupports(deserializeSupportCollection(
                     root["supports"], "supports"));
+            }
+
+            if (root.contains("trackDevices"))
+            {
+                requireObject(root, "trackDevices", "root");
+                const json& collectionJson = root["trackDevices"];
+                requireNoUnknownFields(collectionJson,
+                    {"nextId", "devices"}, "trackDevices");
+                requireInteger(collectionJson, "nextId", "trackDevices");
+                requireArray(collectionJson, "devices", "trackDevices");
+                if (collectionJson["nextId"] < 0)
+                    throw std::runtime_error(
+                        "trackDevices.nextId: device ID is out of range");
+                TrackDeviceCollection collection;
+                collection.nextId = collectionJson["nextId"].get<TrackDeviceId>();
+                for (std::size_t index = 0;
+                    index < collectionJson["devices"].size(); ++index)
+                {
+                    const json& item = collectionJson["devices"][index];
+                    const std::string path = "trackDevices.devices["
+                        + std::to_string(index) + "]";
+                    if (!item.is_object())
+                        throw std::runtime_error(path + ": expected an object");
+                    requireNoUnknownFields(item, {"id", "kind", "name",
+                        "enabled", "startStationMeters", "endStationMeters",
+                        "targetAccelerationMetersPerSecondSquared",
+                        "maximumForceNewtons"}, path);
+                    requireInteger(item, "id", path);
+                    if (item["id"] < 0)
+                        throw std::runtime_error(
+                            path + ".id: device ID is out of range");
+                    requireString(item, "kind", path);
+                    requireString(item, "name", path);
+                    requireBoolean(item, "enabled", path);
+                    for (const char* key : {"startStationMeters",
+                        "endStationMeters",
+                        "targetAccelerationMetersPerSecondSquared",
+                        "maximumForceNewtons"})
+                        requireNumber(item, key, path);
+                    TrackDevice device;
+                    device.id = item["id"].get<TrackDeviceId>();
+                    const std::string kind = item["kind"].get<std::string>();
+                    if (kind == "Launch") device.kind = TrackDeviceKind::Launch;
+                    else if (kind == "Brake") device.kind = TrackDeviceKind::Brake;
+                    else throw std::runtime_error(path + ".kind: unknown device kind");
+                    device.name = item["name"].get<std::string>();
+                    device.enabled = item["enabled"].get<bool>();
+                    device.startStationMeters = item["startStationMeters"].get<double>();
+                    device.endStationMeters = item["endStationMeters"].get<double>();
+                    device.targetAccelerationMetersPerSecondSquared =
+                        item["targetAccelerationMetersPerSecondSquared"].get<double>();
+                    device.maximumForceNewtons =
+                        item["maximumForceNewtons"].get<double>();
+                    collection.devices.push_back(std::move(device));
+                }
+                track.setTrackDevices(collection);
             }
 
             return track;

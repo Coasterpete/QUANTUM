@@ -490,6 +490,10 @@ namespace quantum::engine
                     editorUi.setSimulationStatus(
                         uiState,
                         simulationPreview.speedMetersPerSecond());
+                    editorUi.setSimulationDeviceTelemetry(
+                        simulationPreview.lastDeviceForces(),
+                        simulationPreview.dynamicsState()
+                            ->generalizedAccelerationMetersPerSecondSquared);
                 };
 
                 rebuildSimulationPreview();
@@ -675,6 +679,38 @@ namespace quantum::engine
                         const std::optional<quantum::editor::
                             TrackStylePresentationImpact>& presentationImpact)
                 {
+                    if (restoredTrack.trackDevices()
+                        != authoredTrack.trackDevices())
+                    {
+                        bool deviceOnlyChange = false;
+                        try
+                        {
+                            quantum::coaster::AuthoredTrack deviceOnly =
+                                authoredTrack;
+                            deviceOnly.setTrackDevices(
+                                restoredTrack.trackDevices());
+                            deviceOnlyChange =
+                                quantum::coaster::serializeCoasterDocument(
+                                    deviceOnly)
+                                == quantum::coaster::serializeCoasterDocument(
+                                    restoredTrack);
+                        }
+                        catch (const std::invalid_argument&)
+                        {
+                            // The restored geometry may have a different
+                            // station domain; use ordinary full publication.
+                        }
+                        if (deviceOnlyChange)
+                        {
+                            simulationPreview.setTrackDevices(
+                                restoredTrack.trackDevices());
+                            authoredTrack = restoredTrack;
+                            if (!simulationPreview.isAvailable())
+                                rebuildSimulationPreview();
+                            editorUi.selectTrackDevice(0);
+                            return;
+                        }
+                    }
                     if (presentationImpact.has_value()
                         && !presentationImpact->requiresFullRegeneration())
                     {
@@ -1254,6 +1290,71 @@ editorUi.selectSection(restoredSelection, true);
                                             .c_str()
                                     );
                                 }
+                            }
+                        }
+
+                        if (const auto deviceCommand =
+                                editorUi.takeTrackDeviceCommand())
+                        {
+                            try
+                            {
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    transaction{authoredTrack};
+                                auto& candidate = transaction.candidate();
+                                quantum::coaster::TrackDeviceId selectedId = 0;
+                                using quantum::editor::TrackDeviceCommandType;
+                                switch (deviceCommand->type)
+                                {
+                                case TrackDeviceCommandType::AddLaunch:
+                                case TrackDeviceCommandType::AddBrake:
+                                {
+                                    quantum::coaster::TrackDevice device;
+                                    const bool launch = deviceCommand->type
+                                        == TrackDeviceCommandType::AddLaunch;
+                                    device.kind = launch
+                                        ? quantum::coaster::TrackDeviceKind::Launch
+                                        : quantum::coaster::TrackDeviceKind::Brake;
+                                    device.name = launch ? "Launch" : "Brake";
+                                    const double length =
+                                        candidate.trackLengthMeters();
+                                    device.startStationMeters = launch
+                                        ? 0.0 : length * 0.5;
+                                    device.endStationMeters = launch
+                                        ? length * 0.25 : length * 0.75;
+                                    device.targetAccelerationMetersPerSecondSquared =
+                                        launch ? 3.0 : 4.0;
+                                    selectedId = candidate.addTrackDevice(
+                                        std::move(device));
+                                    break;
+                                }
+                                case TrackDeviceCommandType::Update:
+                                    candidate.updateTrackDevice(
+                                        deviceCommand->device);
+                                    selectedId = deviceCommand->device.id;
+                                    break;
+                                case TrackDeviceCommandType::Delete:
+                                    candidate.removeTrackDevice(
+                                        deviceCommand->device.id);
+                                    break;
+                                }
+                                if (simulationPreview.isAvailable())
+                                    simulationPreview.setTrackDevices(
+                                        candidate.trackDevices());
+                                transaction.commit(authoredTrack);
+                                if (!simulationPreview.isAvailable())
+                                    rebuildSimulationPreview();
+                                documentHistory.record(authoredTrack);
+                                synchronizeDirtyState();
+                                editorUi.selectTrackDevice(selectedId);
+                                editorUi.setTrackDeviceEditError({});
+                            }
+                            catch (const std::exception& error)
+                            {
+                                editorUi.setTrackDeviceEditError(error.what());
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "EDIT", "Track device edit rejected: %s",
+                                    error.what());
                             }
                         }
 
@@ -2511,6 +2612,13 @@ editorUi.selectSection(restoredSelection, true);
 
                             if (candidateChanged)
                             {
+                                if (!candidateTrack.trackDevices()
+                                        .devices.empty())
+                                    quantum::coaster::validateTrackDevices(
+                                        candidateTrack.trackDevices(),
+                                        candidateTrack.trackLengthMeters(),
+                                        candidateTrack.layoutMode()
+                                            == quantum::coaster::LayoutMode::Circuit);
                                 const bool regionStyleOnly =
                                     requestedRegionStyleEdit.has_value()
                                     && !requestedHardwareEdit.has_value()

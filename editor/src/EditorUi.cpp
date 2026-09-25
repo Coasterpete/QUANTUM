@@ -23,6 +23,7 @@
 #include <imgui_impl_vulkan.h>
 #include <imgui_internal.h>
 
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
 #include <algorithm>
@@ -4218,6 +4219,7 @@ namespace
         ImGui::DockBuilderDockWindow(trackWorkspaceWindowName, leftId);
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
+        ImGui::DockBuilderDockWindow("Track Devices", rightId);
         ImGui::DockBuilderDockWindow(
             quantum::editor::coasterSetupWindowName, rightId);
         if (captureLayout)
@@ -4844,6 +4846,101 @@ namespace quantum::editor
                 "The selected support no longer exists.");
         }
 
+        ImGui::End();
+    }
+
+    void EditorUi::drawTrackDevices()
+    {
+        if (authoredTrack_ == nullptr)
+            return;
+        if (trackDeviceInitialDockPending_)
+        {
+            ImGuiWindow* supportWindow = ImGui::FindWindowByName(
+                supportWorkspaceWindowName);
+            if (supportWindow != nullptr && supportWindow->DockId != 0)
+            {
+                ImGui::SetNextWindowDockID(supportWindow->DockId,
+                    ImGuiCond_Always);
+                trackDeviceInitialDockPending_ = false;
+            }
+        }
+        ImGui::SetNextWindowSizeConstraints(ImVec2(300.0F, 360.0F),
+            ImVec2(FLT_MAX, FLT_MAX));
+        ImGui::SetNextWindowSize(ImVec2(340.0F, 430.0F),
+            ImGuiCond_FirstUseEver);
+        ImGui::Begin("Track Devices");
+        ImGui::TextUnformatted("Launch and brake forces");
+        if (ImGui::Button("Add Launch"))
+            trackDeviceCommand_ = {TrackDeviceCommandType::AddLaunch, {}};
+        ImGui::SameLine();
+        if (ImGui::Button("Add Brake"))
+            trackDeviceCommand_ = {TrackDeviceCommandType::AddBrake, {}};
+        ImGui::Text("Track length %.2f m", authoredTrack_->trackLengthMeters());
+        ImGui::Separator();
+
+        const auto& devices = authoredTrack_->trackDevices().devices;
+        for (const auto& device : devices)
+        {
+            ImGui::PushID(static_cast<int>(device.id));
+            const std::string label = device.name + "  ["
+                + (device.kind == coaster::TrackDeviceKind::Launch
+                    ? "Launch" : "Brake") + "]";
+            if (ImGui::Selectable(label.c_str(),
+                    selectedTrackDeviceId_ == device.id))
+                selectTrackDevice(device.id);
+            ImGui::PopID();
+        }
+
+        const auto selected = std::find_if(devices.begin(), devices.end(),
+            [&](const coaster::TrackDevice& device)
+            { return device.id == selectedTrackDeviceId_; });
+        if (selected != devices.end())
+        {
+            if (deviceBufferId_ != selected->id)
+            {
+                deviceEditBuffer_ = *selected;
+                std::snprintf(deviceNameBuffer_.data(),
+                    deviceNameBuffer_.size(), "%s", selected->name.c_str());
+                deviceBufferId_ = selected->id;
+            }
+            ImGui::Separator();
+            ImGui::Text("%s #%llu",
+                selected->kind == coaster::TrackDeviceKind::Launch
+                    ? "Launch" : "Brake",
+                static_cast<unsigned long long>(selected->id));
+            bool commit = false;
+            if (ImGui::Checkbox("Enabled", &deviceEditBuffer_.enabled))
+                commit = true;
+            ImGui::InputText("Name", deviceNameBuffer_.data(),
+                deviceNameBuffer_.size());
+            if (ImGui::IsItemDeactivatedAfterEdit())
+            {
+                deviceEditBuffer_.name = deviceNameBuffer_.data();
+                commit = true;
+            }
+            ImGui::InputDouble("Start (m)",
+                &deviceEditBuffer_.startStationMeters, 0.0, 0.0, "%.3f");
+            commit |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::InputDouble("End (m)",
+                &deviceEditBuffer_.endStationMeters, 0.0, 0.0, "%.3f");
+            commit |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::InputDouble("Acceleration (m/s^2)",
+                &deviceEditBuffer_.targetAccelerationMetersPerSecondSquared,
+                0.0, 0.0, "%.3f");
+            commit |= ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::InputDouble("Max force (N)",
+                &deviceEditBuffer_.maximumForceNewtons,
+                0.0, 0.0, "%.0f");
+            commit |= ImGui::IsItemDeactivatedAfterEdit();
+            if (commit)
+                trackDeviceCommand_ = {TrackDeviceCommandType::Update,
+                    deviceEditBuffer_};
+            if (ImGui::Button("Delete Device"))
+                trackDeviceCommand_ = {TrackDeviceCommandType::Delete,
+                    *selected};
+        }
+        if (!deviceEditError_.empty())
+            ImGui::TextWrapped("%s", deviceEditError_.c_str());
         ImGui::End();
     }
 
@@ -6412,6 +6509,88 @@ namespace quantum::editor
             if (hoveredSection && *hoveredSection != selectedSection_)
                 emphasize(*hoveredSection, false);
             emphasize(selectedSection_, true);
+
+            if (authoredTrack_ != nullptr)
+            {
+                const auto& samples = centerlineVisualization_->samples;
+                const double scaleMeters = authoredTrack_->physicalSettings()
+                    .metersPerCoordinateUnit;
+                const double lengthMeters = authoredTrack_->trackLengthMeters();
+                for (const auto& device : authoredTrack_->trackDevices().devices)
+                {
+                    const ImU32 color = device.kind
+                        == coaster::TrackDeviceKind::Launch
+                        ? IM_COL32(255, 139, 36, 255)
+                        : IM_COL32(60, 180, 255, 255);
+                    const float width = device.id == selectedTrackDeviceId_
+                        ? 7.0F : 4.0F;
+                    const auto drawInterval = [&](const double start,
+                        const double end)
+                    {
+                        for (std::size_t i = 1; i < samples.size(); ++i)
+                        {
+                            const double a = samples[i - 1].distance
+                                * scaleMeters;
+                            const double b = samples[i].distance
+                                * scaleMeters;
+                            const double low = std::max(a, start);
+                            const double high = std::min(b, end);
+                            if (high <= low || b <= a)
+                                continue;
+                            const glm::dvec3 delta = samples[i].position
+                                - samples[i - 1].position;
+                            const double firstT = (low - a) / (b - a);
+                            const double lastT = (high - a) / (b - a);
+                            const glm::dvec3 first = samples[i - 1].position
+                                + firstT * delta;
+                            const glm::dvec3 last = samples[i - 1].position
+                                + lastT * delta;
+                            const auto projectedFirst = projectViewportPoint(
+                                viewportCamera_, first, aspectRatio);
+                            const auto projectedLast = projectViewportPoint(
+                                viewportCamera_, last, aspectRatio);
+                            if (projectedFirst && projectedLast)
+                            {
+                                ImVec2 firstScreen{
+                                    imageMinimum.x + static_cast<float>(
+                                        projectedFirst->normalizedPosition.x) * logicalWidth,
+                                    imageMinimum.y + static_cast<float>(
+                                        projectedFirst->normalizedPosition.y) * logicalHeight};
+                                ImVec2 lastScreen{
+                                    imageMinimum.x + static_cast<float>(
+                                        projectedLast->normalizedPosition.x) * logicalWidth,
+                                    imageMinimum.y + static_cast<float>(
+                                        projectedLast->normalizedPosition.y) * logicalHeight};
+                                // Offset perpendicular to the projected path
+                                // so the span stays legible in every view.
+                                const float dx = lastScreen.x - firstScreen.x;
+                                const float dy = lastScreen.y - firstScreen.y;
+                                const float segmentLength = std::hypot(dx, dy);
+                                if (segmentLength <= 0.001F)
+                                    continue;
+                                const float offset = 13.0F * presentationScale
+                                    / segmentLength;
+                                firstScreen.x -= dy * offset;
+                                firstScreen.y += dx * offset;
+                                lastScreen.x -= dy * offset;
+                                lastScreen.y += dx * offset;
+                                drawList->AddLine(firstScreen, lastScreen,
+                                    IM_COL32(0, 0, 0, 220), width + 3.0F);
+                                drawList->AddLine(firstScreen, lastScreen,
+                                    color, device.enabled ? width : 2.0F);
+                            }
+                        }
+                    };
+                    if (device.startStationMeters > device.endStationMeters)
+                    {
+                        drawInterval(device.startStationMeters, lengthMeters);
+                        drawInterval(0.0, device.endStationMeters);
+                    }
+                    else
+                        drawInterval(device.startStationMeters,
+                            device.endStationMeters);
+                }
+            }
         }
         if (workspaceMode_ == WorkspaceMode::Editor)
         {
@@ -7637,6 +7816,18 @@ ImGui::MenuItem(
                 ImGui::Text("Speed: %.1f mph  |  %.2f m/s",
                     simulationSpeedMps_ * milesPerHourPerMeterPerSecond,
                     simulationSpeedMps_);
+                ImGui::Text("Net acceleration: %+.3f m/s^2",
+                    simulationRealizedAcceleration_);
+                for (const auto& device : simulationDeviceForces_.devices)
+                {
+                    if (device.occupiedBogieCount == 0)
+                        continue;
+                    ImGui::Text("Device #%llu: %zu bogies | command %.2f m/s^2 | applied %+.0f N",
+                        static_cast<unsigned long long>(device.id),
+                        device.occupiedBogieCount,
+                        device.commandedAccelerationMetersPerSecondSquared,
+                        device.appliedForceNewtons);
+                }
             }
             else
             {
@@ -8300,6 +8491,7 @@ ImGui::MenuItem(
         if (captureScenario_ == nullptr
             || authoredTrack_->section(selectedSection_).kind == coaster::RegionKind::RateProfiles)
             drawSupportWorkspace();
+        drawTrackDevices();
 
         // Clamp the selection against the live document before any panel
         // reads it; structural commits can shrink or reorder sections.
@@ -10323,6 +10515,10 @@ std::optional<coaster::LayoutMode>
 
     void EditorUi::resetTransientState()
     {
+        selectedTrackDeviceId_ = 0;
+        deviceBufferId_ = 0;
+        trackDeviceCommand_.reset();
+        deviceEditError_.clear();
         cameraGesture_ = CameraGesture::None;
         viewportNavigationActive_ = false;
         selectedSection_ = 0;
@@ -10431,6 +10627,35 @@ std::optional<coaster::LayoutMode>
         simulationSpeedMps_ = speedMetersPerSecond;
         simulationAvailable_ = true;
         simulationError_.clear();
+    }
+
+    std::optional<TrackDeviceCommand>
+    EditorUi::takeTrackDeviceCommand() noexcept
+    {
+        auto command = std::move(trackDeviceCommand_);
+        trackDeviceCommand_.reset();
+        return command;
+    }
+
+    void EditorUi::selectTrackDevice(const coaster::TrackDeviceId id) noexcept
+    {
+        selectedTrackDeviceId_ = id;
+        deviceBufferId_ = 0;
+        deviceEditError_.clear();
+    }
+
+    void EditorUi::setTrackDeviceEditError(std::string error)
+    {
+        deviceEditError_ = std::move(error);
+    }
+
+    void EditorUi::setSimulationDeviceTelemetry(
+        const physics::TrackDeviceForceResult& forces,
+        const double realizedAccelerationMetersPerSecondSquared)
+    {
+        simulationDeviceForces_ = forces;
+        simulationRealizedAcceleration_ =
+            realizedAccelerationMetersPerSecondSquared;
     }
 
     void EditorUi::setSimulationUnavailable(const std::string& error)

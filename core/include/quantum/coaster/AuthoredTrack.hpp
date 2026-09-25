@@ -1,4 +1,5 @@
 #pragma once
+#include <quantum/coaster/TrackDevices.hpp>
 
 #include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/coaster/GeometricSection.hpp>
@@ -242,6 +243,13 @@ namespace quantum::coaster
         // Validates the complete collection before replacing persistent
         // support state.
         void setSupports(const SupportCollection& supports);
+
+        [[nodiscard]] const TrackDeviceCollection& trackDevices() const noexcept;
+        void setTrackDevices(const TrackDeviceCollection& devices);
+        [[nodiscard]] TrackDeviceId addTrackDevice(TrackDevice device);
+        void updateTrackDevice(const TrackDevice& device);
+        void removeTrackDevice(TrackDeviceId id);
+        [[nodiscard]] double trackLengthMeters() const;
         // Changes one node by stable document/element identity. Throws for
         // an unknown ID or non-finite position and leaves the document
         // unchanged on failure.
@@ -347,6 +355,7 @@ namespace quantum::coaster
         CoasterSetup coasterSetup_ =
             createCoasterSetupForStyle(defaultCoasterStyleId);
         SupportCollection supports_;
+        TrackDeviceCollection trackDevices_;
         std::vector<AuthoredTrackSection> sections_;
     };
 

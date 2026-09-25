@@ -12,6 +12,7 @@
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
+#include <quantum/physics/TrackDeviceForces.hpp>
 
 #include <SDL3/SDL_events.h>
 #include <vulkan/vulkan.h>
@@ -149,6 +150,20 @@ namespace quantum::editor
     {
         TrackCommandType type = TrackCommandType::AppendSection;
         std::size_t sectionIndex = 0;
+    };
+
+    enum class TrackDeviceCommandType
+    {
+        AddLaunch,
+        AddBrake,
+        Update,
+        Delete
+    };
+
+    struct TrackDeviceCommand
+    {
+        TrackDeviceCommandType type = TrackDeviceCommandType::Update;
+        coaster::TrackDevice device;
     };
 
     struct SectionLengthEdit
@@ -626,6 +641,13 @@ namespace quantum::editor
         // Simulation Preview 1: returns any pending simulation control request.
         [[nodiscard]] std::optional<SimulationControlType>
         takeSimulationControl() noexcept;
+        [[nodiscard]] std::optional<TrackDeviceCommand>
+        takeTrackDeviceCommand() noexcept;
+        void selectTrackDevice(coaster::TrackDeviceId id) noexcept;
+        void setTrackDeviceEditError(std::string error);
+        void setSimulationDeviceTelemetry(
+            const physics::TrackDeviceForceResult& forces,
+            double realizedAccelerationMetersPerSecondSquared);
 
         // Updates the compact viewport playback telemetry. Physics state and
         // render geometry remain owned by the application-side preview.
@@ -720,6 +742,7 @@ void drawSimulationTelemetry();
         void drawViewportTrackAnchors();
         void drawViewportSupports();
         void drawSupportWorkspace();
+        void drawTrackDevices();
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
             float imageWidth,
@@ -887,6 +910,15 @@ void drawSimulationTelemetry();
         std::optional<ProfileSegmentCommand> profileSegmentCommand_;
         std::optional<ProfileSegmentDistanceEdit> profileSegmentDistanceEdit_;
         std::optional<TrackCommand> trackCommand_;
+        std::optional<TrackDeviceCommand> trackDeviceCommand_;
+        coaster::TrackDeviceId selectedTrackDeviceId_ = 0;
+        coaster::TrackDeviceId deviceBufferId_ = 0;
+        coaster::TrackDevice deviceEditBuffer_;
+        std::array<char, 128> deviceNameBuffer_{};
+        std::string deviceEditError_;
+        bool trackDeviceInitialDockPending_ = true;
+        physics::TrackDeviceForceResult simulationDeviceForces_;
+        double simulationRealizedAcceleration_ = 0.0;
         std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
         std::optional<RegionTrackStyleEdit> regionTrackStyleEdit_;
