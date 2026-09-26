@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
+
+#include <quantum/coaster/GeometricSection.hpp>
 
 namespace quantum::coaster
 {
@@ -27,8 +30,26 @@ namespace quantum::coaster
         double targetAccelerationMetersPerSecondSquared = 1.0;
         double maximumForceNewtons = 10000.0;
 
+        // Optional custom acceleration profile over the device-local
+        // distance domain [0, deviceLength]. When present, this profile
+        // replaces the constant targetAccelerationMetersPerSecondSquared.
+        // The profile values represent commanded acceleration magnitude
+        // (always >= 0). For brakes, the physical force opposes travel.
+        std::optional<ChannelProfile> accelerationProfile;
+
         [[nodiscard]] friend bool operator==(
-            const TrackDevice&, const TrackDevice&) = default;
+            const TrackDevice& a, const TrackDevice& b)
+        {
+            return a.id == b.id
+                && a.kind == b.kind
+                && a.name == b.name
+                && a.enabled == b.enabled
+                && a.startStationMeters == b.startStationMeters
+                && a.endStationMeters == b.endStationMeters
+                && a.targetAccelerationMetersPerSecondSquared == b.targetAccelerationMetersPerSecondSquared
+                && a.maximumForceNewtons == b.maximumForceNewtons
+                && a.accelerationProfile == b.accelerationProfile;
+        }
     };
 
     struct TrackDeviceCollection
@@ -48,4 +69,12 @@ namespace quantum::coaster
 
     [[nodiscard]] bool trackDeviceContainsStation(const TrackDevice& device,
         double stationMeters, double trackLengthMeters, bool circuit) noexcept;
+
+    // Travel length of one device along its own interval. A circuit device
+    // with start > end wraps through station zero, so its length is
+    // trackLengthMeters - start + end rather than end - start. This is the
+    // single authority for the device-local distance domain that an authored
+    // acceleration profile is validated and evaluated against.
+    [[nodiscard]] double trackDeviceLengthMeters(const TrackDevice& device,
+        double trackLengthMeters, bool circuit) noexcept;
 }

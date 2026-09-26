@@ -6,9 +6,11 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace
@@ -208,6 +210,300 @@ namespace
             track, train, brakePose, 0.0);
         require(rest.applications.empty(), "brake must be inactive at rest");
     }
+
+    void accelerationProfileTests()
+    {
+        using namespace quantum;
+        using namespace quantum::coaster;
+        using namespace quantum::physics;
+        using namespace quantum::math;
+
+        // Use the same track as the original test to ensure compatibility.
+        const CompiledPhysicsTrack track = straightPhysicsTrack();
+        const TrainDefinition train = coaster::resolveTrainConfiguration(
+            coaster::createDefaultTrainConfiguration());
+
+        // All tests use the same train position as the original test (14.75)
+        // to ensure the train fits within the track.
+        const double testStation = 14.75;
+
+        // Test 1: Constant acceleration (no profile) matches legacy behavior.
+        {
+            const TrackLocation location{primaryTrackPathId, testStation,
+                TravelDirection::IncreasingStation};
+            const TrainPose pose = solveTrainPose(track, train, location);
+
+            TrackDevice launch;
+            launch.id = 1;
+            launch.name = "Launch";
+            launch.startStationMeters = 0.0;
+            launch.endStationMeters = 20.0;
+            launch.targetAccelerationMetersPerSecondSquared = 4.0;
+            launch.maximumForceNewtons = 5000.0;
+            // No acceleration profile - uses constant acceleration.
+
+            const auto controls = initialTrackDeviceRuntimeStates(
+                std::span<const TrackDevice>(&launch, 1));
+            const auto forces = evaluateTrackDeviceForces(
+                std::span<const TrackDevice>(&launch, 1),
+                controls, track, train, pose, 5.0);
+
+            // Without a profile every occupied bogie commands the same value,
+            // so the reported mean is exactly the authored constant.
+            require(forces.devices[0].commandedAccelerationMetersPerSecondSquared == 4.0,
+                "constant acceleration matches target");
+        }
+
+        // Test 2: Custom acceleration profile with ramp-up.
+        {
+            const TrackLocation location{primaryTrackPathId, testStation,
+                TravelDirection::IncreasingStation};
+            const TrainPose pose = solveTrainPose(track, train, location);
+
+            TrackDevice launch;
+            launch.id = 1;
+            launch.name = "Launch";
+            launch.startStationMeters = 0.0;
+            launch.endStationMeters = 20.0;
+            launch.targetAccelerationMetersPerSecondSquared = 4.0; // Fallback
+            launch.maximumForceNewtons = 5000.0;
+
+            // Create a ramp-up profile: 0 -> 4 m/s^2 over [0, 20]
+            launch.accelerationProfile = ChannelProfile{};
+            launch.accelerationProfile->segments.push_back(ProfileSegment{
+                1,
+                ScalarTransition{
+                    .domainBegin = 0.0,
+                    .domainEnd = 20.0,
+                    .valueBegin = 0.0,
+                    .valueEnd = 4.0,
+                    .transitionType = TransitionType::Linear
+                }
+            });
+            launch.accelerationProfile->nextSegmentId = 2;
+
+            const auto controls = initialTrackDeviceRuntimeStates(
+                std::span<const TrackDevice>(&launch, 1));
+            const auto forces = evaluateTrackDeviceForces(
+                std::span<const TrackDevice>(&launch, 1),
+                controls, track, train, pose, 5.0);
+
+            // At testStation, acceleration should be > 0.
+            require(forces.devices[0].commandedAccelerationMetersPerSecondSquared > 0.0,
+                "profile evaluation gives positive acceleration");
+        }
+
+        // Test 3: Multi-segment profile (ramp-up, sustain, ramp-down).
+        {
+            const TrackLocation location{primaryTrackPathId, testStation,
+                TravelDirection::IncreasingStation};
+            const TrainPose pose = solveTrainPose(track, train, location);
+
+            TrackDevice launch;
+            launch.id = 1;
+            launch.name = "Launch";
+            launch.startStationMeters = 0.0;
+            launch.endStationMeters = 30.0;
+            launch.targetAccelerationMetersPerSecondSquared = 5.0;
+            launch.maximumForceNewtons = 10000.0;
+
+            // Three segments: ramp 0->5 over [0,10], sustain 5 over [10,20], ramp 5->0 over [20,30]
+            launch.accelerationProfile = ChannelProfile{};
+            launch.accelerationProfile->segments.push_back(ProfileSegment{
+                1,
+                ScalarTransition{0.0, 10.0, 0.0, 5.0, TransitionType::Linear}
+            });
+            launch.accelerationProfile->segments.push_back(ProfileSegment{
+                2,
+                ScalarTransition{10.0, 20.0, 5.0, 5.0, TransitionType::Linear}
+            });
+            launch.accelerationProfile->segments.push_back(ProfileSegment{
+                3,
+                ScalarTransition{20.0, 30.0, 5.0, 0.0, TransitionType::Linear}
+            });
+            launch.accelerationProfile->nextSegmentId = 4;
+
+            const auto controls = initialTrackDeviceRuntimeStates(
+                std::span<const TrackDevice>(&launch, 1));
+
+            // The train spans the whole ramp, so the reported mean command
+            // must sit below the sustain peak instead of pinning to it. With
+            // the default four-car train this measures 3.318750 m/s^2; the
+            // band only has to stay clearly inside the ramp, never at 5.0.
+            {
+                const auto forces = evaluateTrackDeviceForces(
+                    std::span<const TrackDevice>(&launch, 1), controls,
+                    track, train, pose, 5.0);
+                const double command =
+                    forces.devices[0].commandedAccelerationMetersPerSecondSquared;
+                char detail[160];
+                std::snprintf(detail, sizeof(detail),
+                    "sustain/sustain/ramp profile at %.2f m reports %.6f m/s^2, "
+                    "expected the occupied-bogie mean near 3.32, never the 5.0 peak",
+                    testStation, command);
+                require(command > 3.0 && command < 3.6, detail);
+            }
+        }
+
+        // Test 4: Brake with profile - force opposes travel.
+        {
+            const TrackLocation location{primaryTrackPathId, testStation,
+                TravelDirection::IncreasingStation};
+            const TrainPose pose = solveTrainPose(track, train, location);
+
+            TrackDevice brake;
+            brake.id = 1;
+            brake.kind = TrackDeviceKind::Brake;
+            brake.name = "Brake";
+            brake.startStationMeters = 0.0;
+            brake.endStationMeters = 20.0;
+            brake.maximumForceNewtons = 5000.0;
+            brake.accelerationProfile = ChannelProfile{};
+            brake.accelerationProfile->segments.push_back(ProfileSegment{
+                1,
+                ScalarTransition{0.0, 20.0, 2.0, 4.0, TransitionType::Linear}
+            });
+            brake.accelerationProfile->nextSegmentId = 2;
+
+            const auto controls = initialTrackDeviceRuntimeStates(
+                std::span<const TrackDevice>(&brake, 1));
+            const auto forces = evaluateTrackDeviceForces(
+                std::span<const TrackDevice>(&brake, 1), controls,
+                track, train, pose, 8.0);
+
+            // Brake force should be negative (opposing forward travel).
+            require(forces.devices[0].appliedForceNewtons < 0.0,
+                "brake with profile opposes forward travel");
+            // At testStation, profile value should be between 2 and 4.
+            require(forces.devices[0].commandedAccelerationMetersPerSecondSquared > 2.0
+                    && forces.devices[0].commandedAccelerationMetersPerSecondSquared < 4.0,
+                "brake profile evaluation gives value in (2, 4)");
+        }
+
+        // Test 5: Profile serialization round-trip.
+        {
+            AuthoredTrack document = createNewDocument();
+            document.setLayoutMode(LayoutMode::Shuttle);
+
+            TrackDevice launch;
+            launch.name = "LSM Profile";
+            launch.startStationMeters = 0.0;
+            launch.endStationMeters = 20.0;
+            launch.targetAccelerationMetersPerSecondSquared = 3.0;
+            launch.maximumForceNewtons = 5000.0;
+            launch.accelerationProfile = ChannelProfile{};
+            launch.accelerationProfile->segments.push_back(ProfileSegment{
+                1,
+                ScalarTransition{0.0, 20.0, 1.0, 5.0, TransitionType::Smoothstep}
+            });
+            launch.accelerationProfile->nextSegmentId = 2;
+
+            const TrackDeviceId launchId = document.addTrackDevice(launch);
+
+            const std::string json = serializeCoasterDocument(document);
+            const auto reopened = deserializeCoasterDocument(json);
+            require(reopened.has_value(), "profile document must reopen");
+
+            const auto& reopenedDevice = reopened->trackDevices().devices[0];
+            require(reopenedDevice.accelerationProfile.has_value(),
+                "profile must be present after round-trip");
+            require(reopenedDevice.accelerationProfile->segments.size() == 1,
+                "profile segment count preserved");
+            const auto& seg = reopenedDevice.accelerationProfile->segments[0];
+            require(seg.transition.valueBegin == 1.0 && seg.transition.valueEnd == 5.0,
+                "profile values preserved");
+            require(seg.transition.transitionType == TransitionType::Smoothstep,
+                "transition type preserved");
+        }
+
+        // Test 6: Legacy document without profile still works.
+        {
+            const std::string legacyJson = R"({
+                "formatVersion": 1,
+                "layoutMode": "Shuttle",
+                "startPose": {"position": {"x": 0, "y": 0, "z": 0}, "orientation": {"w": 1, "x": 0, "y": 0, "z": 0}},
+                "physicalSettings": {"initialSpeed": 0, "metersPerCoordinateUnit": 1, "gravityAcceleration": 9.81},
+                "trackStyle": {"name": "Test", "geometryFamily": "DualRailTubular", "visible": true, "railsVisible": true, "railCount": 2, "railOffsets": [{"lateral": -1, "vertical": 0}, {"lateral": 1, "vertical": 0}], "railRadius": 0.1, "railRadialSegments": 8, "railMaterial": {"baseColor": {"r": 1, "g": 1, "b": 1, "a": 1}, "metallicFactor": 1, "roughnessFactor": 0.5}, "spine": {"enabled": true, "type": "Tubular", "offset": {"lateral": 0, "vertical": 0}, "dimensions": {"x": 0.2, "y": 0.2}, "radialSegments": 8, "material": {"baseColor": {"r": 0.5, "g": 0.5, "b": 0.5, "a": 1}, "metallicFactor": 1, "roughnessFactor": 0.5}}, "repeatingHardware": []},
+                "coasterSetup": {"styleId": "custom", "carsPerTrain": 2, "options": [{"optionId": "train-layout", "choice": "layout-1"}, {"optionId": "launch", "boolean": false}, {"optionId": "restraint", "choice": "restraint-option-1"}], "heartline": {"enabled": false, "offsetMeters": 0}},
+                "supports": {"nextStructureId": 1, "structures": []},
+                "trackDevices": {"nextId": 2, "devices": [{"id": 1, "kind": "Launch", "name": "Launch", "enabled": true, "startStationMeters": 0, "endStationMeters": 10, "targetAccelerationMetersPerSecondSquared": 3, "maximumForceNewtons": 5000}]},
+                "sections": [{"kind": "RateProfiles", "length": 100, "rateProfiles": {"pitch": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0, "domainEnd": 100, "valueBegin": 0, "valueEnd": 0, "type": "Linear"}}]}, "yaw": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0, "domainEnd": 100, "valueBegin": 0, "valueEnd": 0, "type": "Linear"}}]}, "roll": {"nextSegmentId": 2, "segments": [{"id": 1, "transition": {"domainBegin": 0, "domainEnd": 100, "valueBegin": 0, "valueEnd": 0, "type": "Linear"}}]}}}]
+            })";
+
+            const auto document = deserializeCoasterDocument(legacyJson);
+            if (!document.has_value()) {
+                std::cerr << "Deserialize error: " << document.error() << std::endl;
+            }
+            require(document.has_value(), "legacy document without profile loads");
+            require(document->trackDevices().devices.size() == 1,
+                "legacy device loads without profile");
+            require(!document->trackDevices().devices[0].accelerationProfile.has_value(),
+                "legacy device has no profile");
+        }
+
+        // Test 7: The profile domain follows the wrap-aware device length.
+        {
+            TrackDevice seam;
+            seam.id = 1;
+            seam.name = "Seam Launch";
+            seam.startStationMeters = 55.0;
+            seam.endStationMeters = 5.0;
+
+            require(trackDeviceLengthMeters(seam, 60.0, true) == 10.0,
+                "wrapping circuit device length must span the seam");
+            require(trackDeviceLengthMeters(seam, 60.0, false) == -50.0,
+                "the same interval is not a valid open device");
+
+            seam.accelerationProfile = ChannelProfile{};
+            seam.accelerationProfile->segments.push_back(ProfileSegment{
+                1, ScalarTransition{0.0, 10.0, 0.0, 3.0, TransitionType::Linear}
+            });
+            seam.accelerationProfile->nextSegmentId = 2;
+
+            TrackDeviceCollection collection;
+            collection.devices.push_back(seam);
+            collection.nextId = 2;
+            validateTrackDevices(collection, 60.0, true);
+
+            // A profile built over the plain end - start difference does not
+            // cover the device and must be refused.
+            TrackDeviceCollection shortProfile = collection;
+            shortProfile.devices.front().accelerationProfile->segments.front()
+                .transition.domainEnd = 1.0;
+            rejects([&] { validateTrackDevices(shortProfile, 60.0, true); });
+        }
+
+        // Test 8: Profile integrity rules beyond chain coverage.
+        {
+            TrackDevice launch;
+            launch.id = 1;
+            launch.name = "Launch";
+            launch.startStationMeters = 0.0;
+            launch.endStationMeters = 20.0;
+            launch.accelerationProfile = ChannelProfile{};
+            launch.accelerationProfile->segments.push_back(ProfileSegment{
+                1, ScalarTransition{0.0, 20.0, 1.0, 4.0, TransitionType::Linear}
+            });
+            launch.accelerationProfile->nextSegmentId = 2;
+
+            TrackDeviceCollection collection;
+            collection.devices.push_back(launch);
+            collection.nextId = 2;
+            validateTrackDevices(collection, 60.0, true);
+
+            // A negative command would reverse the device's own semantics.
+            TrackDeviceCollection negative = collection;
+            negative.devices.front().accelerationProfile->segments.front()
+                .transition.valueBegin = -1.0;
+            rejects([&] { validateTrackDevices(negative, 60.0, true); });
+
+            // The allocator must stay ahead of every authored segment so a
+            // later split cannot reuse an ID.
+            TrackDeviceCollection staleNextId = collection;
+            staleNextId.devices.front().accelerationProfile->nextSegmentId = 1;
+            rejects([&] { validateTrackDevices(staleNextId, 60.0, true); });
+        }
+    }
 }
 
 int main()
@@ -216,6 +512,7 @@ int main()
     {
         validationAndPersistence();
         forceOccupancyAndDynamics();
+        accelerationProfileTests();
         std::cout << "TrackDevicesTests passed\n";
         return EXIT_SUCCESS;
     }

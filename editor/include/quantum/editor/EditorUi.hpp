@@ -743,6 +743,13 @@ void drawSimulationTelemetry();
         void drawViewportSupports();
         void drawSupportWorkspace();
         void drawTrackDevices();
+        void drawDeviceAccelerationProfileEditor(
+            coaster::TrackDevice& device, bool& commit);
+        void seedDeviceProfileBuffer(const coaster::TrackDevice& device,
+            double accelerationMetersPerSecondSquared);
+        [[nodiscard]] coaster::ProfileSegment* findDeviceProfileSegment(
+            coaster::ChannelProfile& profile,
+            coaster::SegmentId id) noexcept;
         [[nodiscard]] bool updateStartPoseManipulation(
             bool viewportHovered,
             float imageWidth,
@@ -917,6 +924,28 @@ void drawSimulationTelemetry();
         std::array<char, 128> deviceNameBuffer_{};
         std::string deviceEditError_;
         bool trackDeviceInitialDockPending_ = true;
+
+        // Acceleration profile editor state for the selected track device.
+        // Mirrors the Transition Editor's per-channel state but for a single
+        // scalar channel (commanded acceleration magnitude). The buffer owns
+        // segment ID allocation, so no parallel next-ID counter is kept here.
+        bool deviceProfileMode_ = false; // false = constant, true = custom profile
+        coaster::ChannelProfile deviceProfileEditBuffer_;
+        coaster::SegmentId deviceProfileSelectedSegmentId_ = coaster::invalidSegmentId;
+        coaster::SegmentId deviceProfileDragSegmentId_ = coaster::invalidSegmentId;
+        ScalarProfileEndpoint deviceProfileSelectedEndpoint_ = ScalarProfileEndpoint::None;
+        ScalarProfileEndpoint deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
+        DragAxisLock deviceProfileDragAxisLock_ = DragAxisLock::None;
+        double deviceProfileDragAxisTravelX_ = 0.0;
+        double deviceProfileDragAxisTravelY_ = 0.0;
+        std::optional<ScalarDragAnchor> deviceProfileDragAnchor_;
+        double deviceProfileContextMenuSplitDistance_ = 0.0;
+        GraphValueRange deviceProfileGraphRange_{};
+        double deviceProfileValueEditBuffer_ = 0.0; // m/s^2
+        coaster::SegmentId deviceProfileValueEditSegmentId_ =
+            coaster::invalidSegmentId;
+        ScalarProfileEndpoint deviceProfileValueEditEndpoint_ =
+            ScalarProfileEndpoint::None;
         physics::TrackDeviceForceResult simulationDeviceForces_;
         double simulationRealizedAcceleration_ = 0.0;
         std::optional<SectionLengthEdit> sectionLengthEdit_;

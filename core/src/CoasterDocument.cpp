@@ -1739,7 +1739,7 @@ TrackStylePreset deserializeTrackStyle(
         json devicesJson = json::array();
         for (const TrackDevice& device : track.trackDevices().devices)
         {
-            devicesJson.push_back({
+            json deviceJson = {
                 {"id", device.id},
                 {"kind", device.kind == TrackDeviceKind::Launch ? "Launch" : "Brake"},
                 {"name", device.name},
@@ -1749,7 +1749,12 @@ TrackStylePreset deserializeTrackStyle(
                 {"targetAccelerationMetersPerSecondSquared",
                     device.targetAccelerationMetersPerSecondSquared},
                 {"maximumForceNewtons", device.maximumForceNewtons}
-            });
+            };
+            if (device.accelerationProfile.has_value())
+            {
+                deviceJson["accelerationProfile"] = serializeChannelProfile(device.accelerationProfile.value());
+            }
+            devicesJson.push_back(std::move(deviceJson));
         }
         root["trackDevices"] = {
             {"nextId", track.trackDevices().nextId},
@@ -2023,10 +2028,11 @@ TrackStylePreset deserializeTrackStyle(
                         + std::to_string(index) + "]";
                     if (!item.is_object())
                         throw std::runtime_error(path + ": expected an object");
-                    requireNoUnknownFields(item, {"id", "kind", "name",
+                    static const std::vector<std::string> deviceAllowed = {"id", "kind", "name",
                         "enabled", "startStationMeters", "endStationMeters",
                         "targetAccelerationMetersPerSecondSquared",
-                        "maximumForceNewtons"}, path);
+                        "maximumForceNewtons", "accelerationProfile"};
+                    requireNoUnknownFields(item, deviceAllowed, path);
                     requireInteger(item, "id", path);
                     if (item["id"] < 0)
                         throw std::runtime_error(
@@ -2053,6 +2059,12 @@ TrackStylePreset deserializeTrackStyle(
                         item["targetAccelerationMetersPerSecondSquared"].get<double>();
                     device.maximumForceNewtons =
                         item["maximumForceNewtons"].get<double>();
+                    if (item.contains("accelerationProfile"))
+                    {
+                        requireObject(item, "accelerationProfile", path);
+                        device.accelerationProfile = deserializeChannelProfile(
+                            item["accelerationProfile"], path + ".accelerationProfile");
+                    }
                     collection.devices.push_back(std::move(device));
                 }
                 track.setTrackDevices(collection);

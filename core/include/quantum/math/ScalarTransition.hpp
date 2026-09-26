@@ -11,6 +11,9 @@ namespace quantum::math
         double valueBegin;
         double valueEnd;
         TransitionType transitionType;
+
+        [[nodiscard]] friend bool operator==(
+            const ScalarTransition&, const ScalarTransition&) = default;
     };
 
     // Evaluates an authored scalar transition over its inclusive domain.

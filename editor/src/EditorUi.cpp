@@ -4849,6 +4849,651 @@ namespace quantum::editor
         ImGui::End();
     }
 
+    // Helper for the device acceleration profile editor: finds a segment by ID.
+    [[nodiscard]] coaster::ProfileSegment* EditorUi::findDeviceProfileSegment(
+        coaster::ChannelProfile& profile,
+        const coaster::SegmentId id) noexcept
+    {
+        for (coaster::ProfileSegment& segment : profile.segments)
+        {
+            if (segment.id == id)
+                return &segment;
+        }
+        return nullptr;
+    }
+
+    // Replaces the profile edit buffer with one constant segment spanning the
+    // whole device. Ids come from the buffer's own allocator so a later split
+    // can never reuse an authored segment ID.
+    void EditorUi::seedDeviceProfileBuffer(const coaster::TrackDevice& device,
+        const double accelerationMetersPerSecondSquared)
+    {
+        const double deviceLength = coaster::trackDeviceLengthMeters(device,
+            authoredTrack_->trackLengthMeters(),
+            authoredTrack_->layoutMode() == coaster::LayoutMode::Circuit);
+        deviceProfileEditBuffer_ = coaster::ChannelProfile{};
+        deviceProfileEditBuffer_.segments.push_back(coaster::ProfileSegment{
+            deviceProfileEditBuffer_.nextSegmentId++,
+            quantum::math::ScalarTransition{
+                .domainBegin = 0.0,
+                // A degenerate length is not representable, but the buffer
+                // must stay non-empty so the graph has something to draw. The
+                // core rejects the device until its interval is authored.
+                .domainEnd = deviceLength > 0.0 ? deviceLength : 1.0,
+                .valueBegin = accelerationMetersPerSecondSquared,
+                .valueEnd = accelerationMetersPerSecondSquared,
+                .transitionType = quantum::math::TransitionType::Linear
+            }
+        });
+    }
+
+    // Draws the custom acceleration profile editor for the selected track device.
+    // Mirrors the Transition Editor's single-channel interaction model.
+    void EditorUi::drawDeviceAccelerationProfileEditor(
+        coaster::TrackDevice& device, bool& commit)
+    {
+        // The profile domain must match the length the core validates and
+        // evaluates against, including a circuit device that wraps past
+        // station zero.
+        const double deviceLength = coaster::trackDeviceLengthMeters(device,
+            authoredTrack_->trackLengthMeters(),
+            authoredTrack_->layoutMode() == coaster::LayoutMode::Circuit);
+        const double effectiveLength = deviceLength > 0.0 ? deviceLength : 1.0;
+
+        if (deviceProfileEditBuffer_.segments.empty())
+        {
+            seedDeviceProfileBuffer(device,
+                device.targetAccelerationMetersPerSecondSquared);
+            deviceProfileSelectedSegmentId_ = deviceProfileEditBuffer_.segments.front().id;
+            deviceProfileDragSegmentId_ = deviceProfileSelectedSegmentId_;
+        }
+
+        // Resizing the device interval stretches the outermost boundaries so
+        // the chain stays gap-free and still covers the new device length.
+        deviceProfileEditBuffer_.segments.front().transition.domainBegin = 0.0;
+        deviceProfileEditBuffer_.segments.back().transition.domainEnd = effectiveLength;
+
+        // Initialize graph range on first draw.
+        if (!deviceProfileGraphRange_.valid())
+        {
+            std::vector<double> endpointValues;
+            for (const auto& seg : deviceProfileEditBuffer_.segments)
+            {
+                endpointValues.push_back(seg.transition.valueBegin);
+                endpointValues.push_back(seg.transition.valueEnd);
+            }
+            deviceProfileGraphRange_ = fitSymmetricGraphRange(
+                endpointValues, 10.0, 0.15);
+        }
+
+        // Selected segment and endpoint.
+        coaster::ProfileSegment* focusedSegment = findDeviceProfileSegment(
+            deviceProfileEditBuffer_, deviceProfileSelectedSegmentId_);
+        if (focusedSegment == nullptr && !deviceProfileEditBuffer_.segments.empty())
+        {
+            focusedSegment = &deviceProfileEditBuffer_.segments.back();
+            deviceProfileSelectedSegmentId_ = focusedSegment->id;
+            deviceProfileDragSegmentId_ = focusedSegment->id;
+        }
+
+        // Profile endpoint value edit (numeric input).
+        if (focusedSegment != nullptr)
+        {
+            const ScalarProfileEndpoint numericEndpoint =
+                deviceProfileSelectedEndpoint_ == ScalarProfileEndpoint::Begin
+                    ? ScalarProfileEndpoint::Begin
+                    : ScalarProfileEndpoint::End;
+
+            // The field mirrors exactly one endpoint. Re-seed it whenever the
+            // selection moves elsewhere, otherwise the number can disagree
+            // with the curve the graph is drawing.
+            if (deviceProfileValueEditSegmentId_ != focusedSegment->id
+                || deviceProfileValueEditEndpoint_ != numericEndpoint)
+            {
+                deviceProfileValueEditSegmentId_ = focusedSegment->id;
+                deviceProfileValueEditEndpoint_ = numericEndpoint;
+                deviceProfileValueEditBuffer_ =
+                    numericEndpoint == ScalarProfileEndpoint::Begin
+                        ? focusedSegment->transition.valueBegin
+                        : focusedSegment->transition.valueEnd;
+            }
+
+            ImGui::TextDisabled("%s",
+                numericEndpoint == ScalarProfileEndpoint::Begin
+                    ? "Start acceleration" : "End acceleration");
+            ImGui::SetNextItemWidth(-1.0F);
+            ImGui::PushFont(fonts_.technical, quantum::editor::editorTechnicalFontSize);
+            const bool valueEdited = ImGui::InputDouble(
+                "##DeviceProfileValue",
+                &deviceProfileValueEditBuffer_,
+                0.25,
+                1.0,
+                "%.3f m/s^2");
+            ImGui::PopFont();
+            if (valueEdited && std::isfinite(deviceProfileValueEditBuffer_)
+                && deviceProfileValueEditBuffer_ >= 0.0)
+            {
+                if (numericEndpoint == ScalarProfileEndpoint::Begin)
+                {
+                    focusedSegment->transition.valueBegin = deviceProfileValueEditBuffer_;
+                    // Propagate to previous segment's end for C0 continuity.
+                    for (std::size_t i = 0; i < deviceProfileEditBuffer_.segments.size(); ++i)
+                    {
+                        if (deviceProfileEditBuffer_.segments[i].id == deviceProfileSelectedSegmentId_)
+                        {
+                            if (i > 0)
+                            {
+                                deviceProfileEditBuffer_.segments[i - 1].transition.valueEnd = deviceProfileValueEditBuffer_;
+                            }
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    focusedSegment->transition.valueEnd = deviceProfileValueEditBuffer_;
+                    // Propagate to next segment's begin for C0 continuity.
+                    for (std::size_t i = 0; i < deviceProfileEditBuffer_.segments.size(); ++i)
+                    {
+                        if (deviceProfileEditBuffer_.segments[i].id == deviceProfileSelectedSegmentId_)
+                        {
+                            if (i + 1 < deviceProfileEditBuffer_.segments.size())
+                            {
+                                deviceProfileEditBuffer_.segments[i + 1].transition.valueBegin = deviceProfileValueEditBuffer_;
+                            }
+                            break;
+                        }
+                    }
+                }
+                deviceProfileGraphRange_ = expandGraphRangeToInclude(
+                    deviceProfileGraphRange_, deviceProfileValueEditBuffer_, 0.15);
+                commit = true;
+            }
+            else if (valueEdited)
+            {
+                // Restore on invalid input.
+                deviceProfileValueEditBuffer_ = (numericEndpoint == ScalarProfileEndpoint::Begin)
+                    ? focusedSegment->transition.valueBegin
+                    : focusedSegment->transition.valueEnd;
+            }
+        }
+
+        // Transition type selector.
+        ImGui::SameLine();
+        if (focusedSegment != nullptr)
+        {
+            ImGui::TextDisabled("Shape");
+            const auto typeChange = drawTransitionTypeCombo(
+                "##DeviceProfileTransition",
+                focusedSegment->transition.transitionType);
+            if (typeChange.has_value())
+            {
+                focusedSegment->transition.transitionType = *typeChange;
+                commit = true;
+            }
+        }
+
+        ImGui::Separator();
+
+        // Profile graph - simplified single-channel version.
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, palette::black);
+        constexpr ImGuiWindowFlags plotFlags = ImGuiWindowFlags_NoScrollbar
+            | ImGuiWindowFlags_NoScrollWithMouse;
+        const float plotHeight = std::max(160.0F, ImGui::GetContentRegionAvail().y - 40.0F);
+        if (ImGui::BeginChild("##DeviceProfilePlot", ImVec2(0.0F, plotHeight),
+                ImGuiChildFlags_Borders, plotFlags))
+        {
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const ImVec2 canvasBegin = ImGui::GetCursorScreenPos();
+            const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+            const ImVec2 canvasEnd{
+                canvasBegin.x + canvasSize.x,
+                canvasBegin.y + canvasSize.y
+            };
+            const float rulerHeight = 3.0F * ImGui::GetTextLineHeight() + 14.0F;
+            const float plotBeginX = canvasBegin.x + endpointHandleRadius + 3.0F;
+            const float plotEndX = canvasEnd.x - (endpointHandleRadius + 3.0F);
+            const float plotBeginY = canvasBegin.y + rulerHeight + style.ItemSpacing.y + 8.0F;
+            const float plotEndY = canvasEnd.y - 8.0F;
+
+            if (plotEndX - plotBeginX >= 48.0F && plotEndY - plotBeginY >= 48.0F)
+            {
+                // Verify profile covers the domain.
+                if (!deviceProfileEditBuffer_.segments.empty()
+                    && deviceProfileEditBuffer_.segments.front().transition.domainBegin == 0.0
+                    && deviceProfileEditBuffer_.segments.back().transition.domainEnd == effectiveLength)
+                {
+                    const AuthoredDomainView domainView{
+                        .domainBegin = 0.0,
+                        .domainEnd = effectiveLength,
+                        .pixelBegin = plotBeginX,
+                        .pixelEnd = plotEndX
+                    };
+
+                    // Sample the profile for drawing.
+                    std::vector<ImVec2> points;
+                    points.reserve(profileSampleCount + deviceProfileEditBuffer_.segments.size());
+                    for (std::size_t index = 0; index < deviceProfileEditBuffer_.segments.size(); ++index)
+                    {
+                        const auto& transition = deviceProfileEditBuffer_.segments[index].transition;
+                        const double fraction = (transition.domainEnd - transition.domainBegin) / effectiveLength;
+                        const std::size_t sampleCount = std::max<std::size_t>(
+                            2, static_cast<std::size_t>(
+                                std::llround(fraction * profileSampleCount)));
+                        for (std::size_t sample = 0; sample < sampleCount; ++sample)
+                        {
+                            const double progress = static_cast<double>(sample)
+                                / static_cast<double>(sampleCount - 1);
+                            const double domainValue = normalizedToGraphDistance(
+                                progress, transition.domainBegin, transition.domainEnd);
+                            const double value = quantum::math::evaluateScalarTransition(
+                                transition, domainValue);
+                            const float x = domainView.toPixel(domainValue);
+                            const float normalizedValue = static_cast<float>(
+                                graphValueToNormalized(value, deviceProfileGraphRange_));
+                            const float y = plotEndY - normalizedValue * (plotEndY - plotBeginY);
+                            points.push_back({x, y});
+                        }
+                    }
+
+                    ImDrawList* const drawList = ImGui::GetWindowDrawList();
+                    drawList->PushClipRect(canvasBegin, canvasEnd, true);
+
+                    // Background.
+                    drawList->AddRectFilled(
+                        ImVec2(plotBeginX, canvasBegin.y),
+                        ImVec2(canvasEnd.x, canvasBegin.y + rulerHeight),
+                        transitionCanvasColor);
+                    drawList->AddRectFilled(
+                        ImVec2(plotBeginX, plotBeginY - 8.0F),
+                        ImVec2(canvasEnd.x, canvasEnd.y),
+                        transitionCanvasColor);
+
+                    // Ruler.
+                    drawAuthoredDomainRuler(drawList, domainView, canvasBegin,
+                        canvasBegin.y + 2.0F * ImGui::GetTextLineHeight() + 4.0F);
+
+                    // Grid.
+                    drawScalarDotGrid(drawList, {
+                        domainView,
+                        deviceProfileGraphRange_,
+                        plotBeginY - 8.0F, plotEndY
+                    });
+
+                    // Draw the profile curve.
+                    const ImU32 curveColor = ImGui::ColorConvertFloat4ToU32(palette::rollChannelRed);
+                    if (points.size() >= 2)
+                    {
+                        drawList->AddPolyline(points.data(), static_cast<int>(points.size()),
+                            curveColor, ImDrawFlags_None, 2.75F);
+                    }
+
+                    // Selected segment highlight.
+                    if (focusedSegment != nullptr)
+                    {
+                        // Re-sample just the selected segment for highlighting.
+                        std::vector<ImVec2> selectedPoints;
+                        const double frac = (focusedSegment->transition.domainEnd - focusedSegment->transition.domainBegin) / effectiveLength;
+                        const std::size_t selSamples = std::max<std::size_t>(2, static_cast<std::size_t>(std::llround(frac * profileSampleCount)));
+                        for (std::size_t s = 0; s < selSamples; ++s)
+                        {
+                            const double prog = static_cast<double>(s) / static_cast<double>(selSamples - 1);
+                            const double dom = normalizedToGraphDistance(prog,
+                                focusedSegment->transition.domainBegin, focusedSegment->transition.domainEnd);
+                            const double val = quantum::math::evaluateScalarTransition(focusedSegment->transition, dom);
+                            selectedPoints.push_back({
+                                domainView.toPixel(dom),
+                                plotEndY - static_cast<float>(graphValueToNormalized(val, deviceProfileGraphRange_)) * (plotEndY - plotBeginY)
+                            });
+                        }
+                        if (selectedPoints.size() >= 2)
+                        {
+                            drawList->AddPolyline(selectedPoints.data(), static_cast<int>(selectedPoints.size()),
+                                curveColor, ImDrawFlags_None, 4.0F);
+                        }
+
+                        // Segment boundary markers.
+                        const float beginX = domainView.toPixel(focusedSegment->transition.domainBegin);
+                        const float endX = domainView.toPixel(focusedSegment->transition.domainEnd);
+                        const ImU32 boundaryColor = (curveColor & ~IM_COL32_A_MASK) | (static_cast<ImU32>(150) << IM_COL32_A_SHIFT);
+                        for (const float bx : {beginX, endX})
+                        {
+                            if (bx > plotBeginX && bx < plotEndX)
+                            {
+                                drawList->AddLine(ImVec2(bx, plotBeginY - 8.0F), ImVec2(bx, plotEndY), boundaryColor, 1.5F);
+                                drawList->AddTriangleFilled(ImVec2(bx - 4.0F, plotBeginY - 8.0F),
+                                    ImVec2(bx + 4.0F, plotBeginY - 8.0F), ImVec2(bx, plotBeginY - 2.0F), curveColor);
+                            }
+                        }
+                    }
+
+                    // Interior segment boundaries.
+                    for (std::size_t i = 1; i < deviceProfileEditBuffer_.segments.size(); ++i)
+                    {
+                        const float jointX = domainView.toPixel(deviceProfileEditBuffer_.segments[i].transition.domainBegin);
+                        drawList->AddLine(ImVec2(jointX, plotBeginY - 8.0F), ImVec2(jointX, plotEndY),
+                            ImGui::GetColorU32(ImGuiCol_TextDisabled), 1.0F);
+                    }
+
+                    // Handles (markers).
+                    const auto markers = extractSemanticProfileMarkers(deviceProfileEditBuffer_);
+                    for (const auto& marker : markers)
+                    {
+                        const float x = domainView.toPixel(marker.distance);
+                        const float normalizedVal = static_cast<float>(graphValueToNormalized(marker.value, deviceProfileGraphRange_));
+                        const float y = plotEndY - normalizedVal * (plotEndY - plotBeginY);
+                        const bool isSelected = marker.segmentId == deviceProfileSelectedSegmentId_
+                            && ((marker.endpoint == ScalarProfileEndpoint::Begin && deviceProfileSelectedEndpoint_ == ScalarProfileEndpoint::Begin)
+                                || (marker.endpoint == ScalarProfileEndpoint::End && deviceProfileSelectedEndpoint_ == ScalarProfileEndpoint::End));
+                        const float radius = marker.regionBoundary ? (isSelected ? 6.0F : 5.0F) : (isSelected ? 4.0F : 2.5F);
+                        drawList->AddCircleFilled(ImVec2(x, y), radius, curveColor);
+                        if (isSelected)
+                        {
+                            drawList->AddCircle(ImVec2(x, y), radius + 3.0F,
+                                ImGui::GetColorU32(ImGuiCol_Text), 0, 2.0F);
+                        }
+                    }
+
+                    drawList->PopClipRect();
+
+                    // Interaction - mouse hover and drag.
+                    const ImVec2 mousePos = ImGui::GetIO().MousePos;
+                    const bool mouseInPlot = ImGui::IsWindowHovered()
+                        && mousePos.x >= plotBeginX && mousePos.x <= plotEndX
+                        && mousePos.y >= plotBeginY - 8.0F && mousePos.y <= plotEndY;
+
+                    if (mouseInPlot && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    {
+                        // Find nearest handle.
+                        double bestDistSq = endpointHoverRadius * endpointHoverRadius;
+                        for (const auto& marker : markers)
+                        {
+                            const float x = domainView.toPixel(marker.distance);
+                            const float normalizedVal = static_cast<float>(graphValueToNormalized(marker.value, deviceProfileGraphRange_));
+                            const float y = plotEndY - normalizedVal * (plotEndY - plotBeginY);
+                            const float dx = mousePos.x - x;
+                            const float dy = mousePos.y - y;
+                            const double distSq = dx * dx + dy * dy;
+                            if (distSq <= bestDistSq)
+                            {
+                                bestDistSq = distSq;
+                                deviceProfileSelectedSegmentId_ = marker.segmentId;
+                                deviceProfileDragSegmentId_ = marker.segmentId;
+                                deviceProfileSelectedEndpoint_ = marker.endpoint;
+                                deviceProfileDragEndpoint_ = marker.endpoint;
+                                deviceProfileValueEditBuffer_ = marker.value;
+                                deviceProfileDragAxisLock_ = DragAxisLock::None;
+                                deviceProfileDragAxisTravelX_ = 0.0;
+                                deviceProfileDragAxisTravelY_ = 0.0;
+                                 deviceProfileDragAnchor_ = ScalarDragAnchor{
+                                    static_cast<double>(mousePos.x),
+                                    static_cast<double>(mousePos.y),
+                                    marker.value,
+                                    marker.distance
+                                };
+                                break;
+                            }
+                        }
+                    }
+
+                    if (mouseInPlot && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+                    {
+                        // Context menu at cursor position.
+                        const double normalizedDistance = static_cast<double>(
+                            (mousePos.x - plotBeginX) / (plotEndX - plotBeginX));
+                        deviceProfileContextMenuSplitDistance_ = normalizedToGraphDistance(
+                            normalizedDistance, domainView.domainBegin, domainView.domainEnd);
+                        ImGui::OpenPopup("##DeviceProfileSegmentMenu");
+                    }
+
+                    // Context menu for split/remove.
+                    if (ImGui::BeginPopup("##DeviceProfileSegmentMenu"))
+                    {
+                        if (focusedSegment != nullptr)
+                        {
+                            const auto* preset = quantum::editor::findTransitionTypePreset(
+                                focusedSegment->transition.transitionType);
+                            ImGui::Text("Segment %u [%.6g, %.6g]", focusedSegment->id,
+                                focusedSegment->transition.domainBegin, focusedSegment->transition.domainEnd);
+                            ImGui::TextDisabled("%s",
+                                preset ? preset->displayName.data() : "Unsupported");
+                            ImGui::Separator();
+                        }
+
+                        double targetDist = deviceProfileContextMenuSplitDistance_;
+                        if (transitionEditorInputSettings_.distanceSnapEnabled
+                            && transitionEditorInputSettings_.distanceSnapIncrement > 0.0)
+                        {
+                            targetDist = snapToIncrement(targetDist, transitionEditorInputSettings_.distanceSnapIncrement);
+                        }
+
+                        const bool splitAllowed = focusedSegment != nullptr
+                            && focusedSegment->transition.domainBegin < targetDist
+                            && targetDist < focusedSegment->transition.domainEnd;
+
+                        char splitLabel[48];
+                        std::snprintf(splitLabel, sizeof(splitLabel), "Split here (%.6g)", targetDist);
+                        if (ImGui::Selectable(splitLabel, false,
+                            splitAllowed ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled))
+                        {
+                            // splitChannelSegment keeps nextSegmentId ahead of
+                            // the new segment, so the buffer stays committable.
+                            const coaster::SegmentId rightId = coaster::splitChannelSegment(
+                                deviceProfileEditBuffer_, deviceProfileSelectedSegmentId_, targetDist);
+                            deviceProfileSelectedSegmentId_ = rightId;
+                            deviceProfileDragSegmentId_ = rightId;
+                            commit = true;
+                        }
+
+                        if (deviceProfileEditBuffer_.segments.size() > 1 && focusedSegment != nullptr)
+                        {
+                            quantum::editor::pushDestructiveStyle();
+                            if (ImGui::Selectable("Remove Segment"))
+                            {
+                                const coaster::SegmentId survivorId = coaster::removeChannelSegment(
+                                    deviceProfileEditBuffer_, deviceProfileSelectedSegmentId_);
+                                deviceProfileSelectedSegmentId_ = survivorId;
+                                deviceProfileDragSegmentId_ = survivorId;
+                                commit = true;
+                            }
+                            quantum::editor::popDestructiveStyle();
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    // Drag handling.
+                    if (deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None
+                        && deviceProfileDragAnchor_.has_value())
+                    {
+                        const ImGuiIO& io = ImGui::GetIO();
+                        const float gainMult = io.KeyShift
+                            ? transitionEditorInputSettings_.fineDragGain
+                            : transitionEditorInputSettings_.normalDragGain;
+
+                        auto& anchor = *deviceProfileDragAnchor_;
+                        const double currentPixelX = static_cast<double>(io.MousePos.x);
+                        const double currentPixelY = static_cast<double>(io.MousePos.y);
+
+                        double deltaX = currentPixelX - anchor.pixelX;
+                        if (std::abs(deltaX) > maxPlausiblePixelDeltaPerFrame)
+                            deltaX = 0.0;
+                        anchor.pixelX = currentPixelX;
+
+                        double deltaY = currentPixelY - anchor.pixelY;
+                        if (std::abs(deltaY) > maxPlausiblePixelDeltaPerFrame)
+                            deltaY = 0.0;
+                        anchor.pixelY = currentPixelY;
+
+                        if (deviceProfileDragAxisLock_ == DragAxisLock::None)
+                        {
+                            deviceProfileDragAxisTravelX_ += std::abs(deltaX);
+                            deviceProfileDragAxisTravelY_ += std::abs(deltaY);
+                            if (std::max(deviceProfileDragAxisTravelX_, deviceProfileDragAxisTravelY_)
+                                > dragAxisLockPixelThreshold)
+                            {
+                                const bool horizontalIntent = deviceProfileDragAxisTravelX_ > deviceProfileDragAxisTravelY_;
+                                const bool boundaryMovable = horizontalIntent
+                                    && focusedSegment != nullptr
+                                    && profileBoundaryMoveBounds(
+                                        deviceProfileEditBuffer_, deviceProfileDragSegmentId_,
+                                        deviceProfileDragEndpoint_).has_value();
+                                deviceProfileDragAxisLock_ = boundaryMovable
+                                    ? DragAxisLock::Horizontal
+                                    : DragAxisLock::Vertical;
+                            }
+                        }
+
+                        if (deviceProfileDragAxisLock_ == DragAxisLock::Horizontal)
+                        {
+                            // Move boundary horizontally.
+                            const auto bounds = focusedSegment
+                                ? quantum::editor::profileBoundaryMoveBounds(
+                                    deviceProfileEditBuffer_, deviceProfileDragSegmentId_,
+                                    deviceProfileDragEndpoint_)
+                                : std::nullopt;
+                            if (bounds.has_value())
+                            {
+                                const double distanceUnitsPerPixel = (domainView.domainEnd - domainView.domainBegin)
+                                    / std::max(1.0, static_cast<double>(plotEndX - plotBeginX));
+                                const std::optional<double> snapInc = transitionEditorInputSettings_.distanceSnapEnabled
+                                    && transitionEditorInputSettings_.distanceSnapIncrement > 0.0
+                                    ? std::optional<double>(transitionEditorInputSettings_.distanceSnapIncrement)
+                                    : std::nullopt;
+                                const double newDist = quantum::editor::proposeBoundaryDistanceDrag(
+                                    anchor.distance, deltaX, distanceUnitsPerPixel,
+                                    static_cast<double>(gainMult), *bounds, snapInc);
+
+                                if (newDist != anchor.distance)
+                                {
+                                    coaster::moveChannelSegmentBoundary(
+                                        deviceProfileEditBuffer_, deviceProfileDragSegmentId_,
+                                        deviceProfileDragEndpoint_ == ScalarProfileEndpoint::Begin
+                                            ? coaster::ProfileBoundary::Begin
+                                            : coaster::ProfileBoundary::End,
+                                        newDist);
+                                    anchor.distance = newDist;
+                                    commit = true;
+                                }
+                            }
+                        }
+                        if (deviceProfileDragAxisLock_ == DragAxisLock::Vertical)
+                        {
+                            // Edit value vertically.
+                            const double valueUnitsPerPixel = deviceProfileGraphRange_.valid()
+                                ? (deviceProfileGraphRange_.maximum - deviceProfileGraphRange_.minimum)
+                                    / std::max(1.0, static_cast<double>(plotEndY - plotBeginY + 8.0F))
+                                : 0.0;
+                            const std::optional<double> snapInc = transitionEditorInputSettings_.snapEnabled
+                                && transitionEditorInputSettings_.snapIncrement > 0.0
+                                ? std::optional<double>(transitionEditorInputSettings_.snapIncrement)
+                                : std::nullopt;
+                            const double newValue = proposeMarkerValueDrag(
+                                anchor.value, deltaY, valueUnitsPerPixel,
+                                static_cast<double>(gainMult), snapInc);
+
+                            if (newValue >= 0.0) // Acceleration must be non-negative
+                            {
+                                anchor.value = newValue;
+                                // Apply to the focused segment.
+                                if (focusedSegment != nullptr)
+                                {
+                                    if (deviceProfileDragEndpoint_ == ScalarProfileEndpoint::Begin)
+                                    {
+                                        focusedSegment->transition.valueBegin = newValue;
+                                        // Propagate to previous.
+                                        for (std::size_t i = 0; i < deviceProfileEditBuffer_.segments.size(); ++i)
+                                        {
+                                            if (deviceProfileEditBuffer_.segments[i].id == deviceProfileSelectedSegmentId_)
+                                            {
+                                                if (i > 0)
+                                                    deviceProfileEditBuffer_.segments[i - 1].transition.valueEnd = newValue;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        focusedSegment->transition.valueEnd = newValue;
+                                        // Propagate to next.
+                                        for (std::size_t i = 0; i < deviceProfileEditBuffer_.segments.size(); ++i)
+                                        {
+                                            if (deviceProfileEditBuffer_.segments[i].id == deviceProfileSelectedSegmentId_)
+                                            {
+                                                if (i + 1 < deviceProfileEditBuffer_.segments.size())
+                                                    deviceProfileEditBuffer_.segments[i + 1].transition.valueBegin = newValue;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                deviceProfileValueEditBuffer_ = newValue;
+                                deviceProfileGraphRange_ = expandGraphRangeToInclude(
+                                    deviceProfileGraphRange_, newValue, 0.15);
+                                commit = true;
+                            }
+                        }
+                    }
+
+                    // Release handling.
+                    if (deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None
+                        && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                    {
+                        deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
+                        deviceProfileDragAxisLock_ = DragAxisLock::None;
+                        deviceProfileDragAxisTravelX_ = 0.0;
+                        deviceProfileDragAxisTravelY_ = 0.0;
+                        deviceProfileDragAnchor_.reset();
+                    }
+                }
+            }
+
+            ImGui::Dummy(canvasSize);
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+
+        // Segment management buttons.
+        ImGui::Spacing();
+        if (ImGui::Button("Add Segment"))
+        {
+            // Split the last segment at its midpoint.
+            if (!deviceProfileEditBuffer_.segments.empty())
+            {
+                // Copy the ID out first: the split inserts into the vector
+                // this reference points into.
+                const coaster::SegmentId lastId =
+                    deviceProfileEditBuffer_.segments.back().id;
+                const auto& lastTransition =
+                    deviceProfileEditBuffer_.segments.back().transition;
+                const double mid = (lastTransition.domainBegin
+                    + lastTransition.domainEnd) * 0.5;
+                const coaster::SegmentId rightId = coaster::splitChannelSegment(
+                    deviceProfileEditBuffer_, lastId, mid);
+                deviceProfileSelectedSegmentId_ = rightId;
+                deviceProfileDragSegmentId_ = rightId;
+                commit = true;
+            }
+        }
+        ImGui::SameLine();
+        if (deviceProfileEditBuffer_.segments.size() > 1)
+        {
+            if (ImGui::Button("Remove Selected"))
+            {
+                const coaster::SegmentId survivorId = coaster::removeChannelSegment(
+                    deviceProfileEditBuffer_, deviceProfileSelectedSegmentId_);
+                deviceProfileSelectedSegmentId_ = survivorId;
+                deviceProfileDragSegmentId_ = survivorId;
+                commit = true;
+            }
+        }
+        else
+        {
+            ImGui::BeginDisabled();
+            ImGui::Button("Remove Selected");
+            ImGui::EndDisabled();
+        }
+    }
+
     void EditorUi::drawTrackDevices()
     {
         if (authoredTrack_ == nullptr)
@@ -4866,7 +5511,7 @@ namespace quantum::editor
         }
         ImGui::SetNextWindowSizeConstraints(ImVec2(300.0F, 360.0F),
             ImVec2(FLT_MAX, FLT_MAX));
-        ImGui::SetNextWindowSize(ImVec2(340.0F, 430.0F),
+        ImGui::SetNextWindowSize(ImVec2(340.0F, 520.0F),
             ImGuiCond_FirstUseEver);
         ImGui::Begin("Track Devices");
         ImGui::TextUnformatted("Launch and brake forces");
@@ -4902,6 +5547,27 @@ namespace quantum::editor
                 std::snprintf(deviceNameBuffer_.data(),
                     deviceNameBuffer_.size(), "%s", selected->name.c_str());
                 deviceBufferId_ = selected->id;
+
+                // Initialize profile editor state from the selected device.
+                deviceProfileMode_ = deviceEditBuffer_.accelerationProfile.has_value();
+                if (deviceProfileMode_)
+                    deviceProfileEditBuffer_ = deviceEditBuffer_.accelerationProfile.value();
+                else
+                    seedDeviceProfileBuffer(deviceEditBuffer_,
+                        deviceEditBuffer_.targetAccelerationMetersPerSecondSquared);
+                deviceProfileSelectedSegmentId_ = deviceProfileEditBuffer_.segments.empty()
+                    ? coaster::invalidSegmentId : deviceProfileEditBuffer_.segments.front().id;
+                deviceProfileDragSegmentId_ = deviceProfileSelectedSegmentId_;
+                deviceProfileGraphRange_ = {};
+                // The numeric field re-seeds itself from the focused segment
+                // once the editor runs, so only the identity is reset here.
+                deviceProfileValueEditSegmentId_ = coaster::invalidSegmentId;
+                deviceProfileValueEditEndpoint_ = ScalarProfileEndpoint::None;
+                deviceProfileDragAxisLock_ = DragAxisLock::None;
+                deviceProfileDragAxisTravelX_ = 0.0;
+                deviceProfileDragAxisTravelY_ = 0.0;
+                deviceProfileDragAnchor_.reset();
+                deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
             }
             ImGui::Separator();
             ImGui::Text("%s #%llu",
@@ -4924,20 +5590,60 @@ namespace quantum::editor
             ImGui::InputDouble("End (m)",
                 &deviceEditBuffer_.endStationMeters, 0.0, 0.0, "%.3f");
             commit |= ImGui::IsItemDeactivatedAfterEdit();
-            ImGui::InputDouble("Acceleration (m/s^2)",
-                &deviceEditBuffer_.targetAccelerationMetersPerSecondSquared,
-                0.0, 0.0, "%.3f");
-            commit |= ImGui::IsItemDeactivatedAfterEdit();
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Acceleration");
+
+            const char* modeNames[] = {"Constant", "Custom Profile"};
+            int modeIndex = deviceProfileMode_ ? 1 : 0;
+            if (ImGui::Combo("Mode", &modeIndex, modeNames, 2))
+            {
+                deviceProfileMode_ = (modeIndex == 1);
+                if (deviceProfileMode_)
+                {
+                    // Switching to custom profile: initialize from constant value.
+                    seedDeviceProfileBuffer(deviceEditBuffer_,
+                        deviceEditBuffer_.targetAccelerationMetersPerSecondSquared);
+                    deviceProfileSelectedSegmentId_ = deviceProfileEditBuffer_.segments.front().id;
+                    deviceProfileDragSegmentId_ = deviceProfileSelectedSegmentId_;
+                    deviceProfileGraphRange_ = {};
+                }
+                commit = true;
+            }
+
+            if (!deviceProfileMode_)
+            {
+                // Constant acceleration mode.
+                ImGui::InputDouble("Acceleration (m/s^2)",
+                    &deviceEditBuffer_.targetAccelerationMetersPerSecondSquared,
+                    0.0, 0.0, "%.3f");
+                commit |= ImGui::IsItemDeactivatedAfterEdit();
+            }
+            else
+            {
+                // Custom acceleration profile editor.
+                drawDeviceAccelerationProfileEditor(deviceEditBuffer_, commit);
+            }
+
             ImGui::InputDouble("Max force (N)",
                 &deviceEditBuffer_.maximumForceNewtons,
                 0.0, 0.0, "%.0f");
             commit |= ImGui::IsItemDeactivatedAfterEdit();
             if (commit)
+            {
+                // The constant field stays exactly as the user left it. A
+                // present profile fully replaces it during force evaluation,
+                // so mirroring the profile peak here would only rewrite
+                // authored data the moment the profile is switched off again.
+                if (deviceProfileMode_)
+                    deviceEditBuffer_.accelerationProfile = deviceProfileEditBuffer_;
+                else
+                    deviceEditBuffer_.accelerationProfile.reset();
                 trackDeviceCommand_ = {TrackDeviceCommandType::Update,
                     deviceEditBuffer_};
+            }
             if (ImGui::Button("Delete Device"))
-                trackDeviceCommand_ = {TrackDeviceCommandType::Delete,
-                    *selected};
+                trackDeviceCommand_ = {TrackDeviceCommandType::Delete, *selected};
         }
         if (!deviceEditError_.empty())
             ImGui::TextWrapped("%s", deviceEditError_.c_str());
@@ -10601,6 +11307,23 @@ std::optional<coaster::LayoutMode>
         pendingCoasterSetupEdit_.reset();
         pendingPhysicalSettingsEdit_.reset();
         pendingSimulationControl_.reset();
+
+        // Device acceleration profile editor state.
+        deviceProfileMode_ = false;
+        deviceProfileEditBuffer_ = coaster::ChannelProfile{};
+        deviceProfileSelectedSegmentId_ = coaster::invalidSegmentId;
+        deviceProfileDragSegmentId_ = coaster::invalidSegmentId;
+        deviceProfileSelectedEndpoint_ = ScalarProfileEndpoint::None;
+        deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
+        deviceProfileDragAxisLock_ = DragAxisLock::None;
+        deviceProfileDragAxisTravelX_ = 0.0;
+        deviceProfileDragAxisTravelY_ = 0.0;
+        deviceProfileDragAnchor_.reset();
+        deviceProfileContextMenuSplitDistance_ = 0.0;
+        deviceProfileGraphRange_ = {};
+        deviceProfileValueEditBuffer_ = 0.0;
+        deviceProfileValueEditSegmentId_ = coaster::invalidSegmentId;
+        deviceProfileValueEditEndpoint_ = ScalarProfileEndpoint::None;
     }
 
     void EditorUi::updateWindowTitle(const std::string& title)
