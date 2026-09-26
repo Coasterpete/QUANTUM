@@ -5,6 +5,28 @@ if(QUANTUM_ENABLE_ENGINE)
     )
 endif()
 
+if(QUANTUM_ENABLE_ENGINE)
+    add_executable(QuantumEngineEnvironmentAssetTests EnvironmentAssetTests.cpp)
+    target_link_libraries(QuantumEngineEnvironmentAssetTests PRIVATE Quantum::Engine)
+    target_compile_features(QuantumEngineEnvironmentAssetTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineEnvironmentAssetTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEngine.EnvironmentAssets
+        COMMAND QuantumEngineEnvironmentAssetTests "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEngine.EnvironmentAssets PROPERTIES
+        LABELS "engine;renderer;environment;hdri;ibl")
+endif()
+
+if(QUANTUM_ENABLE_ENGINE)
+    add_executable(QuantumEngineGroundSurfaceTests GroundSurfaceTests.cpp)
+    target_link_libraries(QuantumEngineGroundSurfaceTests PRIVATE Quantum::Engine)
+    target_compile_features(QuantumEngineGroundSurfaceTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineGroundSurfaceTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEngine.GroundSurface COMMAND QuantumEngineGroundSurfaceTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEngine.GroundSurface PROPERTIES
+        LABELS "engine;renderer;ground;textures")
+endif()
+
 if(QUANTUM_ENABLE_EDITOR)
     add_executable(
         QuantumEditorPreviewSmokeTests
@@ -215,7 +237,7 @@ if(QUANTUM_ENABLE_EDITOR)
         ${PROJECT_SOURCE_DIR}/editor/src/ReadmeCapture.cpp
     )
     target_include_directories(QuantumEditorReadmeCaptureTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
-    target_link_libraries(QuantumEditorReadmeCaptureTests PRIVATE Quantum::Core)
+    target_link_libraries(QuantumEditorReadmeCaptureTests PRIVATE Quantum::Core Quantum::Engine)
     target_compile_features(QuantumEditorReadmeCaptureTests PRIVATE cxx_std_23)
     set_target_properties(QuantumEditorReadmeCaptureTests PROPERTIES CXX_EXTENSIONS OFF)
     add_test(NAME QuantumEditor.ReadmeCapture COMMAND QuantumEditorReadmeCaptureTests)

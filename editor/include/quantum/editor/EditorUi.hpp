@@ -13,6 +13,7 @@
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
+#include <quantum/renderer/EnvironmentAssets.hpp>
 
 #include <SDL3/SDL_events.h>
 #include <vulkan/vulkan.h>
@@ -398,7 +399,14 @@ namespace quantum::editor
         float sunElevationDegrees = 55.0F;
         float sunIntensity = 3.0F;
         float exposure = 1.0F;
-        bool environmentEnabled = true;
+        // Package-relative identity of the selected bundled HDR sky. Empty
+        // means "None": no sky is drawn and the renderer keeps its constant
+        // ambient term. It defaults to the first registered sky so a fresh
+        // session still has a sky and image-based lighting. Rotation,
+        // intensity, and sky visibility are push constants, so only a changed
+        // identity touches GPU images.
+        std::string environmentAsset =
+            renderer::environmentAssetRegistry().front().identifier;
         float environmentRotationDegrees = 0.0F;
         float environmentIntensity = 0.35F;
         bool skyVisible = true;
@@ -411,6 +419,15 @@ namespace quantum::editor
         bool rightRailVisible = true;
         bool heartlineVisible = true;
         renderer::TrackPresentationState trackPresentation;
+
+        // Ground Surface M0 belongs to viewport/scene presentation, not to the
+        // saved authored document: it is a scene element with no relationship
+        // to coaster geometry or physics, and keeping it out of the document
+        // avoids dragging Core serialization, validation, and Undo/Redo along
+        // with a scene-appearance control. The same value drives the Editor and
+        // the Simulator because both push it through applyViewportSettings().
+        // Persisting it with the document is deferred to a later milestone.
+        renderer::GroundSurfaceSettings groundSurface{};
 
         void applyCameraSettings(ViewportCamera& camera) const
         {

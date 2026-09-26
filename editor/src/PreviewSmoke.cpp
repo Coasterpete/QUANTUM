@@ -542,9 +542,11 @@ namespace quantum::editor
                 return arguments[++index];
             };
 
-            if (argument == "--duration" || argument == "--spike-frame-ms"
-                || argument == "--spike-steps" || argument == "--output"
-                || argument == "--region-style-edit")
+                if (argument == "--duration" || argument == "--spike-frame-ms"
+                    || argument == "--spike-steps" || argument == "--output"
+                    || argument == "--region-style-edit"
+                    || argument == "--capture-images"
+                    || argument == "--capture-workspace")
             {
                 const auto value = requireValue(argument);
                 if (!value) return std::unexpected(value.error());
@@ -577,6 +579,23 @@ namespace quantum::editor
                     if (value->empty())
                         return std::unexpected("--output requires a non-empty path.");
                     options.outputBasePath = *value;
+                }
+                else if (argument == "--capture-images")
+                {
+                    if (value->empty())
+                        return std::unexpected(
+                            "--capture-images requires a non-empty directory.");
+                    options.captureDirectory = *value;
+                }
+                else if (argument == "--capture-workspace")
+                {
+                    if (value == "editor")
+                        options.captureSimulator = false;
+                    else if (value == "simulator")
+                        options.captureSimulator = true;
+                    else
+                        return std::unexpected(
+                            "--capture-workspace requires editor or simulator.");
                 }
                 else if (argument == "--spike-steps")
                 {

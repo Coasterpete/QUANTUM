@@ -377,11 +377,17 @@ namespace quantum::engine
                 quantum::renderer::VulkanContext vulkan;
                 quantum::renderer::Renderer& renderer = vulkan;
                 std::optional<quantum::physics::gpu::GpuPhysicsContext> gpuContext;
+                // Screenshot capture is opt-in through the developer smoke
+                // harness, so the normal render path never allocates a
+                // readback buffer or adds a swapchain copy.
+                const bool captureImages = previewSmokeOptions != nullptr
+                    && !previewSmokeOptions->captureDirectory.empty();
                 renderer.initialize(
                     window,
                     centerline.vertices,
                     centerline.verticesPerCurve,
-                    centerline.renderableTrack
+                    centerline.renderableTrack,
+                    captureImages
                 );
                 renderer.updateSupportVertices(
                     supportVisualization.memberVertices);
@@ -405,6 +411,12 @@ namespace quantum::engine
                     editorUi.setViewportMsaaEnabled(false);
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->environmentOff)
                     editorUi.setViewportEnvironmentEnabled(false);
+                if (previewSmokeOptions != nullptr
+                    && previewSmokeOptions->captureSimulator)
+                {
+                    // Photographing the Simulator implies running in it.
+                    editorUi.enterSimulatorForPreviewSmoke();
+                }
                 if (previewSmokeOptions != nullptr && previewSmokeOptions->simulator)
                     editorUi.enterSimulatorForPreviewSmoke();
                 editorUi.setCenterlineSections(centerline.sectionSlices);
@@ -507,6 +519,13 @@ namespace quantum::engine
                 bool previewSmokeDurationCompleted = false;
                 bool previewSmokeFailure = false;
                 std::string previewSmokeFailureMessage;
+
+                // Screenshot capture state. A capture is requested once the
+                // workspace has settled, so the image shows the steady state
+                // rather than a transitional frame.
+                int capturedImageCount = 0;
+                bool captureFramePending = false;
+                int framesSinceStart = 0;
                 if (previewSmokeOptions != nullptr)
                 {
                     previewSmokeCollector.emplace(*previewSmokeOptions);
@@ -3658,7 +3677,72 @@ editorUi.selectSection(restoredSelection, true);
                                 simulationPreview.vertexGeneration();
                         }
 
-                        renderer.drawFrame();
+                        // Screenshot capture. One image is taken after the
+                        // layout, camera, and (in the Simulator) playback have
+                        // settled, so the file shows the steady state.
+                        ++framesSinceStart;
+                        if (captureImages && capturedImageCount == 0
+                            && !captureFramePending
+                            && framesSinceStart >= 90)
+                        {
+                            captureFramePending = true;
+                        }
+
+                        // Developer-only screenshot capture. The Simulator owns
+                        // the SimulationPreview, so this is the only path that
+                        // can photograph it.
+                        quantum::renderer::FrameImage captureImage;
+                        if (captureImages && captureFramePending)
+                        {
+                            renderer.drawFrame(&captureImage);
+                        }
+                        else
+                        {
+                            renderer.drawFrame();
+                        }
+                        if (captureImages && !captureImage.pixels.empty())
+                        {
+                            captureFramePending = false;
+                            const std::string name =
+                                std::string(
+                                    previewSmokeOptions->captureSimulator
+                                        ? "simulator" : "editor")
+                                + "-" + std::to_string(capturedImageCount)
+                                + ".png";
+                            const std::filesystem::path target =
+                                previewSmokeOptions->captureDirectory / name;
+                            std::error_code directoryError;
+                            std::filesystem::create_directories(
+                                target.parent_path(), directoryError);
+                            std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>
+                                surface(
+                                    SDL_CreateSurfaceFrom(
+                                        static_cast<int>(captureImage.width),
+                                        static_cast<int>(captureImage.height),
+                                        SDL_PIXELFORMAT_RGBA32,
+                                        captureImage.pixels.data(),
+                                        static_cast<int>(
+                                            captureImage.width * 4)),
+                                    SDL_DestroySurface);
+                            const auto utf8Target = target.u8string();
+                            if (surface
+                                && SDL_SavePNG(surface.get(),
+                                    reinterpret_cast<const char*>(
+                                        utf8Target.c_str())))
+                            {
+                                ++capturedImageCount;
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info, "SMOKE",
+                                    "Captured %s", target.string().c_str());
+                            }
+                            else
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage =
+                                    std::string("Screenshot write failed: ")
+                                    + SDL_GetError();
+                            }
+                        }
 
                         const quantum::editor::
                             SimulationPreviewFrameTelemetry& preview =

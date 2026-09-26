@@ -56,15 +56,52 @@ capture composition remain backend-specific. A second backend would need its
 own UI integration and platform window/surface path before it could run the
 Editor; the interface alone does not make macOS builds functional.
 
-The capability report currently answers only whether 4x viewport MSAA is
-available. A future backend can report its own supported features without
-assuming parity. Rendering M2 can add environment resources and their upload
-and pass operations when their concrete data and lifetime requirements are
-designed; no cubemap, irradiance, reflection, or shadow API is reserved now.
-Shader translation/compilation and platform device selection likewise belong
-to later backend work. `QuantumCore` needs no graphics-backend change.
-The M0 audit, validation, and performance measurements are recorded in
+The capability report currently answers whether 4x viewport MSAA is available
+and whether the HDR/IBL pipeline is available. A future backend can report its
+own supported features without assuming parity. Shader translation/compilation
+and platform device selection likewise belong to later backend work.
+`QuantumCore` needs no graphics-backend change. The M0 audit, validation, and
+performance measurements are recorded in
 [`rendering-rhi-m0.md`](rendering-rhi-m0.md).
+
+### Ground surface and selectable HDR environments
+
+Ground Surface M0 adds two renderer-neutral scene elements that are independent
+of coaster geometry, physics, and authored document state.
+`engine/include/quantum/renderer/GroundSurface.hpp` owns
+`GroundSurfaceSettings`, the flat-quad CPU mesh generator, the ground texture
+identifier grammar, and the PNG texture loader. `EnvironmentAssets.hpp` owns
+the registry of bundled HDR skies. Both are pushed into the backend through one
+coarse `Renderer` call each, in the same style as the existing environment and
+lighting controls, and `VulkanContext` owns their GPU textures, descriptors,
+samplers, pipelines, and buffers.
+
+Ground settings deliberately live in viewport/scene settings rather than the
+saved authored document. The ground is scene presentation, and keeping it out
+of `AuthoredTrack` avoids coupling a scene-appearance control to Core
+serialization, validation, and Undo/Redo. Both the Editor viewport and the
+Simulator push the same value through `EditorUi::applyViewportSettings`, so the
+surface is consistent across workspace transitions. Persisting ground settings
+with a document is scoped and tracked as the **Ground Surface M1 — persisted
+ground appearance** follow-up milestone in
+[`ground-surface-m0.md`](ground-surface-m0.md).
+
+`Renderer::setEnvironment` takes a package-relative sky identifier instead of a
+boolean, and `Renderer::environmentStatus` reports what is actually sampled.
+The decoder is unchanged: the pipeline still reads Radiance RGBE panoramas, and
+`VulkanContext` keeps one descriptor set plus a cache of prepared image sets so
+switching back to a sky does not repeat preprocessing. Rotation, lighting
+intensity, and sky visibility remain push constants. The ground and the track
+share the same 128-byte push-constant block and the same PBR/exposure/tone-map
+path, and the ground pipeline uses the viewport depth attachment with depth
+test and write so track, hardware, and supports occlude it.
+
+The ambientCG DaySky HDRI is bundled as a Radiance file produced by a
+documented offline conversion, because ambientCG publishes that asset only as
+OpenEXR. That decision, the reasons, and the deferred runtime EXR work are
+recorded in [`ground-surface-m0.md`](ground-surface-m0.md), along with the two
+Vulkan defects found and fixed during the milestone.
+
 
 The deliberately small Blender/GLB contract and asset lifetime boundary are
 documented in [`static-mesh-assets.md`](static-mesh-assets.md).

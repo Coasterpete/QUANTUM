@@ -1308,6 +1308,8 @@ namespace quantum::renderer
         createGraphicsPipeline();
         createTrackPipelines();
         createSkyPipeline();
+        createGroundSurfaceResources();
+        createGroundSurfacePipeline();
         createSynchronizationResources();
 
         quantum::logging::logMessagef(
@@ -2371,6 +2373,175 @@ namespace quantum::renderer
         vkDestroyShaderModule(device_, vertex, nullptr);
     }
 
+    void VulkanContext::createGroundSurfacePipeline()
+    {
+        if (groundPipelineLayout_ == VK_NULL_HANDLE)
+        {
+            // The ground uses the HDR environment's descriptor set unchanged
+            // and adds one set for its own three maps.
+            const std::array setLayouts{
+                environmentDescriptorLayout_,
+                groundTextureDescriptorLayout_};
+            VkPushConstantRange pushConstantRange{};
+            pushConstantRange.stageFlags =
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+            pushConstantRange.offset = 0;
+            pushConstantRange.size = sizeof(viewportViewProjection_)
+                + 16 * sizeof(float);
+            VkPipelineLayoutCreateInfo layoutInfo{};
+            layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            layoutInfo.setLayoutCount =
+                static_cast<std::uint32_t>(setLayouts.size());
+            layoutInfo.pSetLayouts = setLayouts.data();
+            layoutInfo.pushConstantRangeCount = 1;
+            layoutInfo.pPushConstantRanges = &pushConstantRange;
+            const VkResult result = vkCreatePipelineLayout(device_,
+                &layoutInfo, nullptr, &groundPipelineLayout_);
+            if (result != VK_SUCCESS)
+            {
+                throwVulkanError(
+                    "vkCreatePipelineLayout for the ground surface", result);
+            }
+        }
+
+        const VkShaderModule vertex = createShaderModule(device_,
+            readSpirv(shaderPath("ground.vert.spv")));
+        VkShaderModule fragment = VK_NULL_HANDLE;
+        try
+        {
+            fragment = createShaderModule(device_,
+                readSpirv(shaderPath("ground.frag.spv")));
+            const std::array stages{
+                VkPipelineShaderStageCreateInfo{
+                    VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                    nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT,
+                    vertex, "main", nullptr},
+                VkPipelineShaderStageCreateInfo{
+                    VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                    nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT,
+                    fragment, "main", nullptr}
+            };
+
+            const std::array bindings{
+                VkVertexInputBindingDescription{
+                    0, sizeof(GroundSurfaceVertex),
+                    VK_VERTEX_INPUT_RATE_VERTEX}};
+            const std::array attributes{
+                VkVertexInputAttributeDescription{
+                    0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(GroundSurfaceVertex, position))},
+                VkVertexInputAttributeDescription{
+                    1, 0, VK_FORMAT_R32G32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(GroundSurfaceVertex, uv))}
+            };
+            VkPipelineVertexInputStateCreateInfo vertexInput{};
+            vertexInput.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+            vertexInput.vertexBindingDescriptionCount =
+                static_cast<std::uint32_t>(bindings.size());
+            vertexInput.pVertexBindingDescriptions = bindings.data();
+            vertexInput.vertexAttributeDescriptionCount =
+                static_cast<std::uint32_t>(attributes.size());
+            vertexInput.pVertexAttributeDescriptions = attributes.data();
+
+            VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+            inputAssembly.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+            VkPipelineViewportStateCreateInfo viewportState{};
+            viewportState.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+            viewportState.viewportCount = 1;
+            viewportState.scissorCount = 1;
+
+            VkPipelineRasterizationStateCreateInfo rasterization{};
+            rasterization.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+            rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+            // The quad is viewed from both sides whenever the camera drops
+            // below its elevation, so it is never culled.
+            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            rasterization.lineWidth = 1.0F;
+
+            VkPipelineMultisampleStateCreateInfo multisampling{};
+            multisampling.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+            multisampling.rasterizationSamples = viewportSamples_;
+
+            // Depth test and write match the track and reference pipelines, so
+            // rails, hardware, and supports occlude the ground and the ground
+            // occludes the sky wherever it is in front of it.
+            VkPipelineDepthStencilStateCreateInfo depthStencil{};
+            depthStencil.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+            depthStencil.depthTestEnable = VK_TRUE;
+            depthStencil.depthWriteEnable = VK_TRUE;
+            depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+            VkPipelineColorBlendAttachmentState blendAttachment{};
+            blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
+                | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT
+                | VK_COLOR_COMPONENT_A_BIT;
+            VkPipelineColorBlendStateCreateInfo blend{};
+            blend.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            blend.attachmentCount = 1;
+            blend.pAttachments = &blendAttachment;
+
+            constexpr std::array dynamicStates{
+                VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+            VkPipelineDynamicStateCreateInfo dynamic{};
+            dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            dynamic.dynamicStateCount =
+                static_cast<std::uint32_t>(dynamicStates.size());
+            dynamic.pDynamicStates = dynamicStates.data();
+
+            VkPipelineRenderingCreateInfo rendering{};
+            rendering.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+            rendering.colorAttachmentCount = 1;
+            rendering.pColorAttachmentFormats = &viewportColorFormat;
+            rendering.depthAttachmentFormat = viewportDepthFormat;
+
+            VkGraphicsPipelineCreateInfo pipelineInfo{};
+            pipelineInfo.sType =
+                VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+            pipelineInfo.pNext = &rendering;
+            pipelineInfo.stageCount =
+                static_cast<std::uint32_t>(stages.size());
+            pipelineInfo.pStages = stages.data();
+            pipelineInfo.pVertexInputState = &vertexInput;
+            pipelineInfo.pInputAssemblyState = &inputAssembly;
+            pipelineInfo.pViewportState = &viewportState;
+            pipelineInfo.pRasterizationState = &rasterization;
+            pipelineInfo.pMultisampleState = &multisampling;
+            pipelineInfo.pDepthStencilState = &depthStencil;
+            pipelineInfo.pColorBlendState = &blend;
+            pipelineInfo.pDynamicState = &dynamic;
+            pipelineInfo.layout = groundPipelineLayout_;
+            const VkResult result = vkCreateGraphicsPipelines(device_,
+                VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &groundPipeline_);
+            if (result != VK_SUCCESS)
+            {
+                throwVulkanError(
+                    "vkCreateGraphicsPipelines for the ground surface", result);
+            }
+        }
+        catch (...)
+        {
+            if (fragment != VK_NULL_HANDLE)
+                vkDestroyShaderModule(device_, fragment, nullptr);
+            vkDestroyShaderModule(device_, vertex, nullptr);
+            throw;
+        }
+        vkDestroyShaderModule(device_, fragment, nullptr);
+        vkDestroyShaderModule(device_, vertex, nullptr);
+    }
+
     void VulkanContext::createViewportTarget(
         const std::uint32_t width,
         const std::uint32_t height)
@@ -2843,7 +3014,7 @@ namespace quantum::renderer
             for (VkPipeline* const pipeline : {
                 &graphicsPipeline_, &trackShadedPipeline_, &trackEdgePipeline_,
                 &hardwareShadedPipeline_, &hardwareEdgePipeline_,
-                &skyPipeline_})
+                &skyPipeline_, &groundPipeline_})
             {
                 if (*pipeline != VK_NULL_HANDLE)
                 {
@@ -2859,6 +3030,7 @@ namespace quantum::renderer
             createGraphicsPipeline();
             createTrackPipelines();
             createSkyPipeline();
+            createGroundSurfacePipeline();
         }
 
         if (width != 0 && height != 0)
@@ -2919,19 +3091,8 @@ namespace quantum::renderer
         exposure_ = exposure;
     }
 
-    void VulkanContext::setEnvironment(const bool enabled,
-        const float rotationDegrees, const float lightingIntensity,
-        const bool skyVisible)
-    {
-        if (!std::isfinite(rotationDegrees) || !std::isfinite(lightingIntensity)
-            || lightingIntensity < 0.0F)
-            throw std::invalid_argument("Invalid HDR environment settings.");
-        environmentEnabled_ = enabled;
-        environmentRotationRadians_ = glm::radians(
-            std::fmod(std::fmod(rotationDegrees, 360.0F) + 360.0F, 360.0F));
-        environmentIntensity_ = lightingIntensity;
-        skyVisible_ = skyVisible;
-    }
+    // setEnvironment and environmentStatus live in EnvironmentVulkan.cpp
+    // beside the image cache and descriptor publication they depend on.
 
     void VulkanContext::updateTrackCurveVertices(
         const std::span<const LineVertex> trackCurveVertices,
@@ -3807,7 +3968,10 @@ namespace quantum::renderer
             scissor.extent = viewportExtent_;
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-            if (environmentAvailable_ && environmentEnabled_ && skyVisible_)
+            // environmentAvailable_ is only true while a selected sky is
+            // actually sampled, so it also covers the "None" selection and a
+            // bundled asset that failed to load.
+            if (environmentAvailable_ && skyVisible_)
             {
                 const glm::mat4 matrix = glm::make_mat4(
                     viewportViewProjection_.data());
@@ -3855,7 +4019,7 @@ namespace quantum::renderer
                     material.metallic, material.roughness,
                     environmentIntensity_,
                     unlit ? -2.0F
-                        : (environmentAvailable_ && environmentEnabled_
+                        : (environmentAvailable_
                             ? environmentRotationRadians_ : -1.0F)};
                 vkCmdPushConstants(
                     commandBuffer, trackPipelineLayout_,
@@ -3884,6 +4048,64 @@ namespace quantum::renderer
             };
 
             constexpr VkDeviceSize vertexOffset = 0;
+
+            // The physical ground is drawn after the sky and before the track
+            // so it replaces the HDR image's lower half wherever it is closer
+            // than the sky's infinite ray, while track, hardware, and support
+            // geometry still occlude it through the shared depth attachment.
+            if (groundSurface_.enabled && groundIndexCount_ > 0)
+            {
+                const std::array<float, 4> baseColor{
+                    groundSurface_.baseColor.r, groundSurface_.baseColor.g,
+                    groundSurface_.baseColor.b, groundSurface_.baseColor.a};
+                const std::array<float, 4> cameraExposure{
+                    viewportCameraPosition_.x, viewportCameraPosition_.y,
+                    viewportCameraPosition_.z, exposure_};
+                const std::array<float, 4> sun{
+                    sunlightDirection_.x, sunlightDirection_.y,
+                    sunlightDirection_.z, sunlightIntensity_};
+                const std::array<float, 4> surface{
+                    groundSurface_.metallic, groundSurface_.roughness,
+                    environmentIntensity_,
+                    environmentAvailable_
+                        ? environmentRotationRadians_ : -1.0F};
+                constexpr VkShaderStageFlags groundStages =
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+                vkCmdPushConstants(commandBuffer, groundPipelineLayout_,
+                    groundStages, 0, sizeof(viewportViewProjection_),
+                    viewportViewProjection_.data());
+                vkCmdPushConstants(commandBuffer, groundPipelineLayout_,
+                    groundStages, sizeof(viewportViewProjection_),
+                    sizeof(baseColor), baseColor.data());
+                vkCmdPushConstants(commandBuffer, groundPipelineLayout_,
+                    groundStages, sizeof(viewportViewProjection_)
+                        + sizeof(baseColor),
+                    sizeof(cameraExposure), cameraExposure.data());
+                vkCmdPushConstants(commandBuffer, groundPipelineLayout_,
+                    groundStages, sizeof(viewportViewProjection_)
+                        + sizeof(baseColor) + sizeof(cameraExposure),
+                    sizeof(sun), sun.data());
+                vkCmdPushConstants(commandBuffer, groundPipelineLayout_,
+                    groundStages, sizeof(viewportViewProjection_)
+                        + sizeof(baseColor) + sizeof(cameraExposure)
+                        + sizeof(sun),
+                    sizeof(surface), surface.data());
+
+                vkCmdBindPipeline(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, groundPipeline_);
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, groundPipelineLayout_,
+                    0, 1, &environmentDescriptorSet_, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS, groundPipelineLayout_,
+                    1, 1, &groundTextureDescriptorSet_, 0, nullptr);
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1,
+                    &groundVertexBuffer_, &vertexOffset);
+                vkCmdBindIndexBuffer(commandBuffer, groundIndexBuffer_, 0,
+                    VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(commandBuffer, groundIndexCount_, 1, 0, 0, 0);
+            }
+
             if (drawShadedTrack && trackTriangleIndexCount_ > 0)
             {
                 vkCmdBindDescriptorSets(commandBuffer,
@@ -4364,8 +4586,11 @@ namespace quantum::renderer
 
     RendererCapabilities VulkanContext::capabilities() const noexcept
     {
+        // The capability answers "is the HDR/IBL pipeline available", not "did
+        // the selected sky load". A bundled asset that fails to read must still
+        // leave the selection usable so the developer can pick another one.
         return {.viewportMsaa4 = supportsViewportMsaa4(),
-            .hdrEnvironment = environmentAvailable_};
+            .hdrEnvironment = environmentDescriptorSet_ != VK_NULL_HANDLE};
     }
 
     void VulkanContext::drawFrame(FrameImage* const readback)
@@ -4846,7 +5071,8 @@ namespace quantum::renderer
 
             for (VkPipeline* const pipeline : {
                 &trackShadedPipeline_, &trackEdgePipeline_,
-                &hardwareShadedPipeline_, &hardwareEdgePipeline_})
+                &hardwareShadedPipeline_, &hardwareEdgePipeline_,
+                &groundPipeline_})
             {
                 if (*pipeline != VK_NULL_HANDLE)
                 {
@@ -4876,7 +5102,16 @@ namespace quantum::renderer
                 vkDestroyPipelineLayout(device_, skyPipelineLayout_, nullptr);
                 skyPipelineLayout_ = VK_NULL_HANDLE;
             }
+            if (groundPipelineLayout_ != VK_NULL_HANDLE)
+            {
+                vkDestroyPipelineLayout(device_, groundPipelineLayout_,
+                    nullptr);
+                groundPipelineLayout_ = VK_NULL_HANDLE;
+            }
             destroyEnvironmentResources();
+            // The ground images, descriptors, and quad buffers hold VMA
+            // allocations, so they are released before the allocator below.
+            destroyGroundSurfaceResources();
 
             const auto destroyAllocatedBuffer = [this](
                 VkBuffer& buffer, VmaAllocation& allocation)

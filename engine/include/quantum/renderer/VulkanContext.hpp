@@ -1,5 +1,7 @@
 #pragma once
 
+#include <quantum/renderer/EnvironmentMap.hpp>
+#include <quantum/renderer/GroundSurface.hpp>
 #include <quantum/renderer/Renderer.hpp>
 
 #include <SDL3/SDL.h>
@@ -9,8 +11,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -27,6 +31,16 @@ namespace quantum::renderer
     {
     public:
         using FrameRenderCallback = void (*)(VkCommandBuffer, void*);
+
+        struct EnvironmentImage
+        {
+            VkImage image = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkImageView view = VK_NULL_HANDLE;
+        };
+        // irradiance, prefiltered specular, BRDF LUT, sky - the bindings of the
+        // environment descriptor set, in descriptor order.
+        using EnvironmentImageSet = std::array<EnvironmentImage, 4>;
 
         VulkanContext() = default;
         ~VulkanContext() override;
@@ -68,8 +82,19 @@ namespace quantum::renderer
         // Direction points from the surface toward the sun in world space.
         void setSunlight(const glm::vec3& direction, float intensity);
         void setExposure(float exposure);
-        void setEnvironment(bool enabled, float rotationDegrees,
-            float lightingIntensity, bool skyVisible) override;
+        void setEnvironment(std::string_view identifier,
+            float rotationDegrees, float lightingIntensity,
+            bool skyVisible) override;
+        [[nodiscard]] EnvironmentStatus environmentStatus() const override;        // Scene presentation only: this never touches coaster geometry,
+        // physics, or authored document state. Called once per frame by the
+        // Editor; the implementation applies GPU work only when the quad
+        // geometry or a texture identity actually changed.
+        void setGroundSurface(
+            const GroundSurfaceSettings& settings) override;
+        // Load outcome for the most recent set of the three ground maps. Empty
+        // for an identifier that is not currently selected.
+        [[nodiscard]] std::optional<GroundTextureLoadStatus>
+            groundTextureLoadStatus(std::string_view identifier) const override;
         void updateTrackCurveVertices(
             std::span<const LineVertex> trackCurveVertices,
             std::uint32_t trackVerticesPerCurve
@@ -168,8 +193,28 @@ namespace quantum::renderer
         void createGraphicsPipeline();
         void createTrackPipelines();
         void createSkyPipeline();
+        void createGroundSurfacePipeline();
         void createEnvironmentResources();
         void destroyEnvironmentResources() noexcept;
+        // One uploaded IBL set for one bundled sky. Vulkan owns the images;
+        // the cache exists so switching back to a sky does not repeat the
+        // one-time panorama preprocess and upload.
+        struct PreparedEnvironment
+        {
+            EnvironmentImageSet images{};
+        };
+        [[nodiscard]] const PreparedEnvironment& loadEnvironmentImages(
+            const std::string& identifier);
+        [[nodiscard]] std::filesystem::path environmentFilePath(
+            const std::string& identifier) const;
+        void setEnvironmentImages(const EnvironmentImageSet& images);
+        void uploadEnvironmentImageSet(
+            const ProcessedEnvironment& processed,
+            EnvironmentImageSet& destination);
+        void destroyEnvironmentImage(EnvironmentImage& image) noexcept;
+        void destroyEnvironmentImageSet(EnvironmentImageSet& images) noexcept;
+        void createGroundSurfaceResources();
+        void destroyGroundSurfaceResources() noexcept;
         void createViewportTarget(std::uint32_t width, std::uint32_t height);
         void createCommandResources();
         void createSynchronizationResources();
@@ -206,6 +251,37 @@ namespace quantum::renderer
         void destroySwapchain() noexcept;
         [[nodiscard]] StaticMeshGpuHandle uploadStaticMeshOnce(
             const StaticMeshAsset& asset);
+
+        // Ground Surface M0 owns its textures, descriptors, pipeline, and
+        // quad buffers here. Vulkan owns their lifetime; the renderer-neutral
+        // settings and CPU mesh generator stay in GroundSurface.hpp.
+        struct GroundTextureImageResource
+        {
+            VkImage image = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkImageView view = VK_NULL_HANDLE;
+        };
+        // Both take a caller-owned resource, never a slot's published one.
+        // uploadGroundTextureImage releases only what it created, and
+        // replaceGroundTexture is candidate-then-publish: it builds a local
+        // image, drains in-flight frames, repoints the descriptor, and only
+        // then destroys the displaced image and view.
+        void uploadGroundTextureImage(
+            const GroundTextureImage& source,
+            VkFormat format,
+            GroundTextureImageResource& destination);
+        void destroyGroundTextureImage(
+            GroundTextureImageResource& image) noexcept;
+        void replaceGroundTexture(
+            std::uint32_t slot,
+            const GroundTextureImage& image,
+            VkFormat format);
+        void createGroundVertexBuffer(
+            std::span<const GroundSurfaceVertex> vertices);
+        void createGroundIndexBuffer(std::span<const std::uint32_t> indices);
+        void writeGroundVertexBuffer(
+            std::span<const GroundSurfaceVertex> vertices);
+        void writeGroundIndexBuffer(std::span<const std::uint32_t> indices);
 
         // Regenerates the grid/axes vertices in place through the retained
         // persistent mapping of the static viewport-aid buffer.
@@ -250,19 +326,38 @@ namespace quantum::renderer
         VkPipeline hardwareEdgePipeline_ = VK_NULL_HANDLE;
         VkPipelineLayout skyPipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline skyPipeline_ = VK_NULL_HANDLE;
+        VkPipelineLayout groundPipelineLayout_ = VK_NULL_HANDLE;
+        VkPipeline groundPipeline_ = VK_NULL_HANDLE;
+        VkDescriptorSetLayout groundTextureDescriptorLayout_ = VK_NULL_HANDLE;
+        VkDescriptorPool groundTextureDescriptorPool_ = VK_NULL_HANDLE;
+        VkDescriptorSet groundTextureDescriptorSet_ = VK_NULL_HANDLE;
+        VkSampler groundTextureSampler_ = VK_NULL_HANDLE;
+        std::array<GroundTextureImageResource, 3> groundTextureImages_{};
+        std::array<std::string, 3> groundTextureIdentifiers_{};
+        std::array<GroundTextureLoadStatus, 3> groundTextureLoadStatuses_{};
+        GroundSurfaceSettings groundSurface_{};
+        VkBuffer groundVertexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation groundVertexAllocation_ = VK_NULL_HANDLE;
+        void* groundVertexMappedData_ = nullptr;
+        VkDeviceSize groundVertexCapacity_ = 0;
+        std::uint32_t groundVertexCount_ = 0;
+        VkBuffer groundIndexBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation groundIndexAllocation_ = VK_NULL_HANDLE;
+        void* groundIndexMappedData_ = nullptr;
+        VkDeviceSize groundIndexCapacity_ = 0;
+        std::uint32_t groundIndexCount_ = 0;
         VkDescriptorSetLayout environmentDescriptorLayout_ = VK_NULL_HANDLE;
         VkDescriptorPool environmentDescriptorPool_ = VK_NULL_HANDLE;
         VkDescriptorSet environmentDescriptorSet_ = VK_NULL_HANDLE;
         VkSampler environmentSampler_ = VK_NULL_HANDLE;
-        struct EnvironmentImage
-        {
-            VkImage image = VK_NULL_HANDLE;
-            VmaAllocation allocation = VK_NULL_HANDLE;
-            VkImageView view = VK_NULL_HANDLE;
-        };
-        std::array<EnvironmentImage, 4> environmentImages_{};
+        // Points at the published entry of environmentCache_. The cache is the
+        // sole owner of the images; this only records which set is sampled, so
+        // it must never be destroyed independently.
+        const EnvironmentImageSet* environmentImages_ = nullptr;
+        std::map<std::string, PreparedEnvironment> environmentCache_;
+        std::string environmentAsset_;
+        std::string environmentDetail_;
         bool environmentAvailable_ = false;
-        bool environmentEnabled_ = true;
         bool skyVisible_ = true;
         float environmentRotationRadians_ = 0.0F;
         float environmentIntensity_ = 0.35F;

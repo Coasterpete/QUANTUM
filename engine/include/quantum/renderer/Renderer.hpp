@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/renderer/FrameSynchronizationTelemetry.hpp>
+#include <quantum/renderer/GroundSurface.hpp>
 #include <quantum/renderer/StaticMeshAssets.hpp>
 #include <quantum/renderer/ViewportTrackPresentation.hpp>
 
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -67,6 +69,9 @@ namespace quantum::renderer
     struct RendererCapabilities
     {
         bool viewportMsaa4 = false;
+        // The HDR/IBL pipeline is compiled in and the bundled sky registry is
+        // available. Whether the currently selected sky actually loaded is
+        // reported by environmentStatus().
         bool hdrEnvironment = false;
     };
 
@@ -76,6 +81,18 @@ namespace quantum::renderer
     {
     public:
         using ViewportTargetRetirementCallback = void (*)(void*) noexcept;
+
+        // What the HDR environment pipeline is actually doing. The requested
+        // identifier is what the application selected (empty means "no
+        // environment"); available is false when nothing is sampled, so the
+        // caller can report constant ambient instead of a sky.
+        struct EnvironmentStatus
+        {
+            std::string identifier;
+            bool available = false;
+            std::string detail;
+        };
+
         virtual ~Renderer() = default;
 
         virtual void initialize(SDL_Window* window,
@@ -99,8 +116,26 @@ namespace quantum::renderer
         virtual void setViewportCameraPosition(const glm::vec3& position) = 0;
         virtual void setSunlight(const glm::vec3& direction, float intensity) = 0;
         virtual void setExposure(float exposure) = 0;
-        virtual void setEnvironment(bool enabled, float rotationDegrees,
-            float lightingIntensity, bool skyVisible) = 0;
+        // Selects a bundled HDR sky by package-relative identifier, or the
+        // empty string for "no environment" (constant ambient, no sky). An
+        // unknown identifier is rejected; a bundled one that cannot be read is
+        // reported through environmentStatus() rather than silently replaced.
+        // Rotation, lighting intensity, and sky visibility travel through push
+        // constants, so they never retire or recreate GPU images.
+        virtual void setEnvironment(std::string_view identifier,
+            float rotationDegrees, float lightingIntensity,
+            bool skyVisible) = 0;
+        [[nodiscard]] virtual EnvironmentStatus environmentStatus() const = 0;
+        // Scene presentation only. This is renderer-neutral and has no
+        // relationship to authored track geometry, physics, or document state.
+        // The backend owns the ground's textures, descriptors, pipeline, and
+        // buffers, and applies GPU work only when the settings change.
+        virtual void setGroundSurface(
+            const GroundSurfaceSettings& settings) = 0;
+        // Load outcome for a currently selected ground map identifier. Empty
+        // when that identifier is not part of the current ground settings.
+        [[nodiscard]] virtual std::optional<GroundTextureLoadStatus>
+            groundTextureLoadStatus(std::string_view identifier) const = 0;
         virtual void updateTrackCurveVertices(std::span<const LineVertex> vertices,
             std::uint32_t verticesPerCurve) = 0;
         virtual void updateRenderableTrack(

@@ -22,11 +22,23 @@ namespace quantum::editor
     [[nodiscard]] std::optional<std::filesystem::path>
     openTrackHardwareFileDialog(SDL_Window* window);
 
-    // Converts a transient picker result below <runtimeRoot>/assets/track to
+    // Ground Surface M0 decodes PNG only, matching the accepted ground
+    // identifier grammar.
+    [[nodiscard]] std::optional<std::filesystem::path>
+    openGroundTextureFileDialog(SDL_Window* window);
+
+    // Converts a transient picker result below <runtimeRoot>/assets to
     // its package-relative authored identity. Absolute paths never escape
     // this boundary into the document.
     [[nodiscard]] std::expected<std::string, std::string>
     trackHardwareAssetIdFromPath(
+        const std::filesystem::path& selectedPath,
+        const std::filesystem::path& runtimeRoot);
+
+    // Same conversion for a ground map, additionally pinned to the
+    // assets://ground/ package root.
+    [[nodiscard]] std::expected<std::string, std::string>
+    groundTextureAssetIdFromPath(
         const std::filesystem::path& selectedPath,
         const std::filesystem::path& runtimeRoot);
 }
