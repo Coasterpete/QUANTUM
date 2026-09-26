@@ -82,7 +82,9 @@ of `AuthoredTrack` avoids coupling a scene-appearance control to Core
 serialization, validation, and Undo/Redo. Both the Editor viewport and the
 Simulator push the same value through `EditorUi::applyViewportSettings`, so the
 surface is consistent across workspace transitions. Persisting ground settings
-with a document is deferred.
+with a document is scoped and tracked as the **Ground Surface M1 — persisted
+ground appearance** follow-up milestone in
+[`ground-surface-m0.md`](ground-surface-m0.md).
 
 `Renderer::setEnvironment` takes a package-relative sky identifier instead of a
 boolean, and `Renderer::environmentStatus` reports what is actually sampled.

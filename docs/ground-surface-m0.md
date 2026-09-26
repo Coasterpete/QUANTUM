@@ -388,6 +388,48 @@ harness addition in this milestone: `--capture-images <dir>` and
 `--capture-workspace editor|simulator` opt into swapchain readback and PNG
 output. The normal render path is unchanged unless they are passed.
 
+## Follow-up milestone: Ground Surface M1 — persisted ground appearance
+
+Recorded here as an explicit, scoped follow-up. It is **not** implemented by
+this milestone.
+
+**Goal.** Ground appearance and custom texture selections survive saving,
+closing, and reopening a `.quantum` document, so a shared coaster file carries
+its own ground material instead of resetting to defaults.
+
+**Why it is not in M0.** Persisting the ground requires touching authored
+document state, which M0 deliberately avoided: the ground is scene
+presentation, and M0's scope was to establish the renderer-neutral surface and
+its GPU lifetime rules. M0 documented and enforced the decision rather than
+half-implementing a document format change.
+
+**Scope.**
+
+- One additive, optional `ground` object on the authored document root, at the
+  existing format version, with unknown and malformed fields rejected rather
+  than repaired — the same additive policy the document already uses for
+  `physicalSettings`, `supports`, and the start pose.
+- Persist the enabled flag, elevation, extent, base color, metallic, roughness,
+  UV tiling, and the three package-relative texture identifiers. Nothing else:
+  the ground stays renderer-neutral data, and no GPU handle, decoded image, or
+  derived mesh is serialized.
+- A document without the object loads with the M0 defaults, so documents
+  authored before this milestone are unaffected.
+- Missing or unreadable texture files must be reported, not silently dropped,
+  and must not prevent the document from loading — the same
+  report-and-fall-back policy `setEnvironment` and `setGroundSurface` already
+  use at runtime.
+- Follow the established edit path: the settings enter through
+  `AuthoredTrackEditTransaction`, so they participate in the existing
+  acceptance and publication invariant and in whole-document Undo/Redo, which
+  already snapshots the complete authored track.
+- Reset ground to defaults should be available the way track-style reset
+  already is, so a document can return to the inherited look.
+
+**Explicitly still out of scope at M1:** non-flat terrain, shadow reception,
+metallic/ambient-occlusion maps, and any editor-side ground placement tools
+such as a terrain or foundation-projection workflow.
+
 ## Remaining limits
 
 - **No shadows.** The ground does not receive cast shadows, and nothing in this
@@ -409,7 +451,9 @@ output. The normal render path is unchanged unless they are passed.
   view; increase **Ground Size** to push it out. The default 1200 units
   extends well past the viewport far plane for typical track framing.
 - **Ground settings are not saved with the document.** They reset to defaults
-  when the document is reopened.
+  when the document is reopened. This is scoped and tracked as the
+  **Ground Surface M1 — persisted ground appearance** follow-up milestone
+  above.
 - **The ground is horizontal and axis-aligned.** Elevation moves it along `Z`
   only; there is no rotation or offset control.
 - **The PBR block is duplicated** between `track.frag` and `ground.frag`
