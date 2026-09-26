@@ -50,19 +50,13 @@ namespace quantum::coaster
             // Validate optional acceleration profile.
             if (device.accelerationProfile.has_value())
             {
-                const double deviceLength = device.endStationMeters - device.startStationMeters;
-                if (!circuit && device.startStationMeters > device.endStationMeters)
-                {
-                    // Wrapping device on circuit track - length computed differently.
-                    // For validation we just need a positive device length.
-                }
-                const double effectiveDeviceLength = circuit && device.startStationMeters > device.endStationMeters
-                    ? trackLengthMeters - device.startStationMeters + device.endStationMeters
-                    : device.endStationMeters - device.startStationMeters;
-                if (effectiveDeviceLength <= 0.0)
+                const double deviceLength = trackDeviceLengthMeters(device,
+                    trackLengthMeters, circuit);
+                if (deviceLength <= 0.0)
                     throw std::invalid_argument("Track device with acceleration profile must have positive length.");
-                validateChannelProfile(device.accelerationProfile.value(), effectiveDeviceLength);
-                // Profile values must be non-negative (commanded acceleration magnitude).
+                validateChannelProfile(device.accelerationProfile.value(), deviceLength);
+                // Profile values are commanded acceleration magnitudes, so a
+                // negative value would reverse the device's own semantics.
                 for (const ProfileSegment& segment : device.accelerationProfile->segments)
                 {
                     if (segment.transition.valueBegin < 0.0
@@ -70,11 +64,26 @@ namespace quantum::coaster
                     {
                         throw std::invalid_argument("Acceleration profile values must be non-negative.");
                     }
+                    // Ids are never reused, so the allocator must stay ahead
+                    // of every authored segment.
+                    if (device.accelerationProfile->nextSegmentId <= segment.id)
+                    {
+                        throw std::invalid_argument("Acceleration profile nextSegmentId must exceed every segment ID.");
+                    }
                 }
             }
         }
         if (collection.nextId <= greatestId)
             throw std::invalid_argument("Track device next ID must exceed every allocated ID.");
+    }
+
+    double trackDeviceLengthMeters(const TrackDevice& device,
+        const double trackLengthMeters, const bool circuit) noexcept
+    {
+        if (circuit && device.startStationMeters > device.endStationMeters)
+            return trackLengthMeters - device.startStationMeters
+                + device.endStationMeters;
+        return device.endStationMeters - device.startStationMeters;
     }
 
     bool trackDeviceContainsStation(const TrackDevice& device,

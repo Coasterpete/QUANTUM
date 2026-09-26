@@ -1628,35 +1628,6 @@ add_executable(
     SupportSerializationTests.cpp
 )
 
-target_link_libraries(
-    QuantumCoreSupportSerializationTests
-    PRIVATE
-        Quantum::Core
-)
-
-target_compile_features(
-    QuantumCoreSupportSerializationTests
-    PRIVATE
-        cxx_std_23
-)
-
-set_target_properties(
-    QuantumCoreSupportSerializationTests
-    PROPERTIES
-        CXX_EXTENSIONS OFF
-)
-
-add_test(
-    NAME QuantumCore.SupportSerialization
-    COMMAND QuantumCoreSupportSerializationTests
-)
-
-set_tests_properties(
-    QuantumCore.SupportSerialization
-    PROPERTIES
-        LABELS "core;coaster;supports;serialization"
-)
-
 add_executable(
     QuantumCoreSupportAttachmentTests
     SupportAttachmentTests.cpp
@@ -1723,6 +1694,35 @@ set_tests_properties(
     QuantumCore.SupportConnection
     PROPERTIES
         LABELS "core;coaster;supports;connection"
+)
+
+target_link_libraries(
+    QuantumCoreSupportSerializationTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreSupportSerializationTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreSupportSerializationTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.SupportSerialization
+    COMMAND QuantumCoreSupportSerializationTests
+)
+
+set_tests_properties(
+    QuantumCore.SupportSerialization
+    PROPERTIES
+        LABELS "core;coaster;supports;serialization"
 )
 
 if(QUANTUM_ENABLE_EDITOR)

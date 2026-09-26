@@ -74,11 +74,16 @@ namespace quantum::physics
                 const BogiePose* pose;
                 glm::dvec3 localPoint;
                 double requestedForce;
-                double commandedAcceleration;
             };
             std::vector<OccupiedBogie> occupied;
             double requestedTotal = 0.0;
-            double maxCommandedAcceleration = 0.0;
+            // A custom profile commands a different acceleration at every
+            // bogie, so telemetry reports the mean command in effect across
+            // the occupied bogies. Requested force is proportional to the sum
+            // of those commands, so the mean is the value that explains the
+            // applied force. For a constant command the mean is exactly the
+            // authored value.
+            double commandedAccelerationTotal = 0.0;
             for (std::size_t carIndex = 0; carIndex < pose.carCount(); ++carIndex)
             {
                 const TrainCarPose& car = pose.cars()[carIndex];
@@ -98,14 +103,14 @@ namespace quantum::physics
                         const double localDist = deviceLocalDistance(device,
                             bogie->location().stationMeters,
                             track.lengthMeters(), circuit);
-                        // Profile is defined over [0, deviceLength]. Clamp to domain.
-                        const double deviceLength = circuit && device.startStationMeters > device.endStationMeters
-                            ? track.lengthMeters() - device.startStationMeters + device.endStationMeters
-                            : device.endStationMeters - device.startStationMeters;
+                        // Validation guarantees the profile covers the device
+                        // length exactly, so clamping keeps the query inside
+                        // the authored domain.
+                        const double deviceLength = coaster::trackDeviceLengthMeters(
+                            device, track.lengthMeters(), circuit);
                         const double clampedDist = std::clamp(localDist, 0.0, deviceLength);
                         commandedAccel = coaster::evaluateChannelProfile(
                             device.accelerationProfile.value(), clampedDist);
-                        // Profile values are non-negative acceleration magnitudes.
                     }
 
                     const double requested = 0.5
@@ -114,10 +119,9 @@ namespace quantum::physics
                     occupied.push_back({carIndex, bogie,
                         definition.bogies[bogie->definitionIndex()]
                             .referencePositionMeters,
-                        requested, commandedAccel});
+                        requested});
                     requestedTotal += requested;
-                    if (commandedAccel > maxCommandedAcceleration)
-                        maxCommandedAcceleration = commandedAccel;
+                    commandedAccelerationTotal += commandedAccel;
                 }
             }
             telemetry.occupiedBogieCount = occupied.size();
@@ -140,7 +144,7 @@ namespace quantum::physics
                         * bogie.pose->trackFrame().tangent});
             }
             telemetry.commandedAccelerationMetersPerSecondSquared =
-                maxCommandedAcceleration;
+                commandedAccelerationTotal / static_cast<double>(occupied.size());
             telemetry.appliedForceNewtons = direction * applied;
             result.devices.push_back(telemetry);
         }

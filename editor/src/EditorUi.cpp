@@ -4849,10 +4849,6 @@ namespace quantum::editor
         ImGui::End();
     }
 
-} // namespace
-
-namespace quantum::editor
-{
     // Helper for the device acceleration profile editor: finds a segment by ID.
     [[nodiscard]] coaster::ProfileSegment* EditorUi::findDeviceProfileSegment(
         coaster::ChannelProfile& profile,
@@ -4866,37 +4862,56 @@ namespace quantum::editor
         return nullptr;
     }
 
+    // Replaces the profile edit buffer with one constant segment spanning the
+    // whole device. Ids come from the buffer's own allocator so a later split
+    // can never reuse an authored segment ID.
+    void EditorUi::seedDeviceProfileBuffer(const coaster::TrackDevice& device,
+        const double accelerationMetersPerSecondSquared)
+    {
+        const double deviceLength = coaster::trackDeviceLengthMeters(device,
+            authoredTrack_->trackLengthMeters(),
+            authoredTrack_->layoutMode() == coaster::LayoutMode::Circuit);
+        deviceProfileEditBuffer_ = coaster::ChannelProfile{};
+        deviceProfileEditBuffer_.segments.push_back(coaster::ProfileSegment{
+            deviceProfileEditBuffer_.nextSegmentId++,
+            quantum::math::ScalarTransition{
+                .domainBegin = 0.0,
+                // A degenerate length is not representable, but the buffer
+                // must stay non-empty so the graph has something to draw. The
+                // core rejects the device until its interval is authored.
+                .domainEnd = deviceLength > 0.0 ? deviceLength : 1.0,
+                .valueBegin = accelerationMetersPerSecondSquared,
+                .valueEnd = accelerationMetersPerSecondSquared,
+                .transitionType = quantum::math::TransitionType::Linear
+            }
+        });
+    }
+
     // Draws the custom acceleration profile editor for the selected track device.
     // Mirrors the Transition Editor's single-channel interaction model.
     void EditorUi::drawDeviceAccelerationProfileEditor(
         coaster::TrackDevice& device, bool& commit)
     {
-        const double deviceLength = device.endStationMeters - device.startStationMeters;
+        // The profile domain must match the length the core validates and
+        // evaluates against, including a circuit device that wraps past
+        // station zero.
+        const double deviceLength = coaster::trackDeviceLengthMeters(device,
+            authoredTrack_->trackLengthMeters(),
+            authoredTrack_->layoutMode() == coaster::LayoutMode::Circuit);
         const double effectiveLength = deviceLength > 0.0 ? deviceLength : 1.0;
 
-        // Ensure profile covers the device length.
         if (deviceProfileEditBuffer_.segments.empty())
         {
-            deviceProfileEditBuffer_.segments.push_back(coaster::ProfileSegment{
-                deviceProfileNextSegmentId_++,
-                quantum::math::ScalarTransition{
-                    .domainBegin = 0.0,
-                    .domainEnd = effectiveLength,
-                    .valueBegin = device.targetAccelerationMetersPerSecondSquared,
-                    .valueEnd = device.targetAccelerationMetersPerSecondSquared,
-                    .transitionType = quantum::math::TransitionType::Linear
-                }
-            });
+            seedDeviceProfileBuffer(device,
+                device.targetAccelerationMetersPerSecondSquared);
             deviceProfileSelectedSegmentId_ = deviceProfileEditBuffer_.segments.front().id;
             deviceProfileDragSegmentId_ = deviceProfileSelectedSegmentId_;
         }
 
-        // Update domain ends if device length changed.
-        if (!deviceProfileEditBuffer_.segments.empty())
-        {
-            deviceProfileEditBuffer_.segments.front().transition.domainBegin = 0.0;
-            deviceProfileEditBuffer_.segments.back().transition.domainEnd = effectiveLength;
-        }
+        // Resizing the device interval stretches the outermost boundaries so
+        // the chain stays gap-free and still covers the new device length.
+        deviceProfileEditBuffer_.segments.front().transition.domainBegin = 0.0;
+        deviceProfileEditBuffer_.segments.back().transition.domainEnd = effectiveLength;
 
         // Initialize graph range on first draw.
         if (!deviceProfileGraphRange_.valid())
@@ -4928,6 +4943,20 @@ namespace quantum::editor
                 deviceProfileSelectedEndpoint_ == ScalarProfileEndpoint::Begin
                     ? ScalarProfileEndpoint::Begin
                     : ScalarProfileEndpoint::End;
+
+            // The field mirrors exactly one endpoint. Re-seed it whenever the
+            // selection moves elsewhere, otherwise the number can disagree
+            // with the curve the graph is drawing.
+            if (deviceProfileValueEditSegmentId_ != focusedSegment->id
+                || deviceProfileValueEditEndpoint_ != numericEndpoint)
+            {
+                deviceProfileValueEditSegmentId_ = focusedSegment->id;
+                deviceProfileValueEditEndpoint_ = numericEndpoint;
+                deviceProfileValueEditBuffer_ =
+                    numericEndpoint == ScalarProfileEndpoint::Begin
+                        ? focusedSegment->transition.valueBegin
+                        : focusedSegment->transition.valueEnd;
+            }
 
             ImGui::TextDisabled("%s",
                 numericEndpoint == ScalarProfileEndpoint::Begin
@@ -5193,9 +5222,9 @@ namespace quantum::editor
                                 deviceProfileSelectedEndpoint_ = marker.endpoint;
                                 deviceProfileDragEndpoint_ = marker.endpoint;
                                 deviceProfileValueEditBuffer_ = marker.value;
-deviceProfileDragAxisLock_ = DragAxisLock::None;
-                                 deviceProfileDragAxisTravelX_ = 0.0;
-                                 deviceProfileDragAxisTravelY_ = 0.0;
+                                deviceProfileDragAxisLock_ = DragAxisLock::None;
+                                deviceProfileDragAxisTravelX_ = 0.0;
+                                deviceProfileDragAxisTravelY_ = 0.0;
                                  deviceProfileDragAnchor_ = ScalarDragAnchor{
                                     static_cast<double>(mousePos.x),
                                     static_cast<double>(mousePos.y),
@@ -5247,10 +5276,10 @@ deviceProfileDragAxisLock_ = DragAxisLock::None;
                         if (ImGui::Selectable(splitLabel, false,
                             splitAllowed ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled))
                         {
-                            // Split the segment.
+                            // splitChannelSegment keeps nextSegmentId ahead of
+                            // the new segment, so the buffer stays committable.
                             const coaster::SegmentId rightId = coaster::splitChannelSegment(
                                 deviceProfileEditBuffer_, deviceProfileSelectedSegmentId_, targetDist);
-                            deviceProfileNextSegmentId_ = deviceProfileEditBuffer_.nextSegmentId;
                             deviceProfileSelectedSegmentId_ = rightId;
                             deviceProfileDragSegmentId_ = rightId;
                             commit = true;
@@ -5430,11 +5459,16 @@ deviceProfileDragAxisLock_ = DragAxisLock::None;
             // Split the last segment at its midpoint.
             if (!deviceProfileEditBuffer_.segments.empty())
             {
-                const auto& lastSeg = deviceProfileEditBuffer_.segments.back();
-                const double mid = (lastSeg.transition.domainBegin + lastSeg.transition.domainEnd) * 0.5;
+                // Copy the ID out first: the split inserts into the vector
+                // this reference points into.
+                const coaster::SegmentId lastId =
+                    deviceProfileEditBuffer_.segments.back().id;
+                const auto& lastTransition =
+                    deviceProfileEditBuffer_.segments.back().transition;
+                const double mid = (lastTransition.domainBegin
+                    + lastTransition.domainEnd) * 0.5;
                 const coaster::SegmentId rightId = coaster::splitChannelSegment(
-                    deviceProfileEditBuffer_, lastSeg.id, mid);
-                deviceProfileNextSegmentId_ = deviceProfileEditBuffer_.nextSegmentId;
+                    deviceProfileEditBuffer_, lastId, mid);
                 deviceProfileSelectedSegmentId_ = rightId;
                 deviceProfileDragSegmentId_ = rightId;
                 commit = true;
@@ -5517,42 +5551,23 @@ deviceProfileDragAxisLock_ = DragAxisLock::None;
                 // Initialize profile editor state from the selected device.
                 deviceProfileMode_ = deviceEditBuffer_.accelerationProfile.has_value();
                 if (deviceProfileMode_)
-                {
                     deviceProfileEditBuffer_ = deviceEditBuffer_.accelerationProfile.value();
-                    deviceProfileNextSegmentId_ = deviceProfileEditBuffer_.nextSegmentId;
-                }
                 else
-                {
-                    // Create a default single-segment profile matching the constant acceleration.
-                    deviceProfileEditBuffer_ = coaster::ChannelProfile{};
-                    const double deviceLength = selected->endStationMeters - selected->startStationMeters;
-                    const double effectiveLength = deviceLength > 0.0 ? deviceLength : 1.0;
-                    deviceProfileEditBuffer_.segments.push_back(coaster::ProfileSegment{
-                        deviceProfileNextSegmentId_++,
-                        quantum::math::ScalarTransition{
-                            .domainBegin = 0.0,
-                            .domainEnd = effectiveLength,
-                            .valueBegin = selected->targetAccelerationMetersPerSecondSquared,
-                            .valueEnd = selected->targetAccelerationMetersPerSecondSquared,
-                            .transitionType = quantum::math::TransitionType::Linear
-                        }
-                    });
-                }
+                    seedDeviceProfileBuffer(deviceEditBuffer_,
+                        deviceEditBuffer_.targetAccelerationMetersPerSecondSquared);
                 deviceProfileSelectedSegmentId_ = deviceProfileEditBuffer_.segments.empty()
                     ? coaster::invalidSegmentId : deviceProfileEditBuffer_.segments.front().id;
                 deviceProfileDragSegmentId_ = deviceProfileSelectedSegmentId_;
                 deviceProfileGraphRange_ = {};
-                deviceProfileValueEditBuffer_ = deviceEditBuffer_.targetAccelerationMetersPerSecondSquared;
-                deviceProfileEndpointValueEdit_.reset();
-                deviceProfileTransitionTypeEdit_.reset();
-                deviceProfileSegmentCommand_.reset();
-                deviceProfileSegmentDistanceEdit_.reset();
-deviceProfileDragAxisLock_ = DragAxisLock::None;
+                // The numeric field re-seeds itself from the focused segment
+                // once the editor runs, so only the identity is reset here.
+                deviceProfileValueEditSegmentId_ = coaster::invalidSegmentId;
+                deviceProfileValueEditEndpoint_ = ScalarProfileEndpoint::None;
+                deviceProfileDragAxisLock_ = DragAxisLock::None;
                 deviceProfileDragAxisTravelX_ = 0.0;
                 deviceProfileDragAxisTravelY_ = 0.0;
-                deviceProfileDragLastValue_.reset();
                 deviceProfileDragAnchor_.reset();
-deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
+                deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
             }
             ImGui::Separator();
             ImGui::Text("%s #%llu",
@@ -5587,21 +5602,11 @@ deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
                 if (deviceProfileMode_)
                 {
                     // Switching to custom profile: initialize from constant value.
-                    const double deviceLength = selected->endStationMeters - selected->startStationMeters;
-                    const double effectiveLength = deviceLength > 0.0 ? deviceLength : 1.0;
-                    deviceProfileEditBuffer_ = coaster::ChannelProfile{};
-                    deviceProfileEditBuffer_.segments.push_back(coaster::ProfileSegment{
-                        deviceProfileNextSegmentId_++,
-                        quantum::math::ScalarTransition{
-                            .domainBegin = 0.0,
-                            .domainEnd = effectiveLength,
-                            .valueBegin = deviceEditBuffer_.targetAccelerationMetersPerSecondSquared,
-                            .valueEnd = deviceEditBuffer_.targetAccelerationMetersPerSecondSquared,
-                            .transitionType = quantum::math::TransitionType::Linear
-                        }
-                    });
+                    seedDeviceProfileBuffer(deviceEditBuffer_,
+                        deviceEditBuffer_.targetAccelerationMetersPerSecondSquared);
                     deviceProfileSelectedSegmentId_ = deviceProfileEditBuffer_.segments.front().id;
                     deviceProfileDragSegmentId_ = deviceProfileSelectedSegmentId_;
+                    deviceProfileGraphRange_ = {};
                 }
                 commit = true;
             }
@@ -5626,23 +5631,16 @@ deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
             commit |= ImGui::IsItemDeactivatedAfterEdit();
             if (commit)
             {
-                // Sync profile mode to device buffer.
+                // The constant field stays exactly as the user left it. A
+                // present profile fully replaces it during force evaluation,
+                // so mirroring the profile peak here would only rewrite
+                // authored data the moment the profile is switched off again.
                 if (deviceProfileMode_)
-                {
                     deviceEditBuffer_.accelerationProfile = deviceProfileEditBuffer_;
-                    // Keep constant acceleration as fallback (max of profile for UI).
-                    double maxAccel = 0.0;
-                    for (const auto& seg : deviceProfileEditBuffer_.segments)
-                    {
-                        maxAccel = std::max(maxAccel, std::max(seg.transition.valueBegin, seg.transition.valueEnd));
-                    }
-                    deviceEditBuffer_.targetAccelerationMetersPerSecondSquared = maxAccel > 0.0 ? maxAccel : 1.0;
-                }
                 else
-                {
                     deviceEditBuffer_.accelerationProfile.reset();
-                }
-                trackDeviceCommand_ = {TrackDeviceCommandType::Update, deviceEditBuffer_};
+                trackDeviceCommand_ = {TrackDeviceCommandType::Update,
+                    deviceEditBuffer_};
             }
             if (ImGui::Button("Delete Device"))
                 trackDeviceCommand_ = {TrackDeviceCommandType::Delete, *selected};
@@ -11313,7 +11311,6 @@ std::optional<coaster::LayoutMode>
         // Device acceleration profile editor state.
         deviceProfileMode_ = false;
         deviceProfileEditBuffer_ = coaster::ChannelProfile{};
-        deviceProfileNextSegmentId_ = 1;
         deviceProfileSelectedSegmentId_ = coaster::invalidSegmentId;
         deviceProfileDragSegmentId_ = coaster::invalidSegmentId;
         deviceProfileSelectedEndpoint_ = ScalarProfileEndpoint::None;
@@ -11321,15 +11318,12 @@ std::optional<coaster::LayoutMode>
         deviceProfileDragAxisLock_ = DragAxisLock::None;
         deviceProfileDragAxisTravelX_ = 0.0;
         deviceProfileDragAxisTravelY_ = 0.0;
-        deviceProfileDragLastValue_.reset();
         deviceProfileDragAnchor_.reset();
         deviceProfileContextMenuSplitDistance_ = 0.0;
         deviceProfileGraphRange_ = {};
         deviceProfileValueEditBuffer_ = 0.0;
-        deviceProfileEndpointValueEdit_.reset();
-        deviceProfileTransitionTypeEdit_.reset();
-        deviceProfileSegmentCommand_.reset();
-        deviceProfileSegmentDistanceEdit_.reset();
+        deviceProfileValueEditSegmentId_ = coaster::invalidSegmentId;
+        deviceProfileValueEditEndpoint_ = ScalarProfileEndpoint::None;
     }
 
     void EditorUi::updateWindowTitle(const std::string& title)

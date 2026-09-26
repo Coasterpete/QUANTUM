@@ -745,6 +745,8 @@ void drawSimulationTelemetry();
         void drawTrackDevices();
         void drawDeviceAccelerationProfileEditor(
             coaster::TrackDevice& device, bool& commit);
+        void seedDeviceProfileBuffer(const coaster::TrackDevice& device,
+            double accelerationMetersPerSecondSquared);
         [[nodiscard]] coaster::ProfileSegment* findDeviceProfileSegment(
             coaster::ChannelProfile& profile,
             coaster::SegmentId id) noexcept;
@@ -925,26 +927,25 @@ void drawSimulationTelemetry();
 
         // Acceleration profile editor state for the selected track device.
         // Mirrors the Transition Editor's per-channel state but for a single
-        // scalar channel (commanded acceleration magnitude).
+        // scalar channel (commanded acceleration magnitude). The buffer owns
+        // segment ID allocation, so no parallel next-ID counter is kept here.
         bool deviceProfileMode_ = false; // false = constant, true = custom profile
         coaster::ChannelProfile deviceProfileEditBuffer_;
-        coaster::SegmentId deviceProfileNextSegmentId_ = 1;
-        std::uint32_t deviceProfileSelectedSegmentId_ = coaster::invalidSegmentId;
+        coaster::SegmentId deviceProfileSelectedSegmentId_ = coaster::invalidSegmentId;
         coaster::SegmentId deviceProfileDragSegmentId_ = coaster::invalidSegmentId;
         ScalarProfileEndpoint deviceProfileSelectedEndpoint_ = ScalarProfileEndpoint::None;
         ScalarProfileEndpoint deviceProfileDragEndpoint_ = ScalarProfileEndpoint::None;
         DragAxisLock deviceProfileDragAxisLock_ = DragAxisLock::None;
         double deviceProfileDragAxisTravelX_ = 0.0;
         double deviceProfileDragAxisTravelY_ = 0.0;
-        std::optional<double> deviceProfileDragLastValue_;
         std::optional<ScalarDragAnchor> deviceProfileDragAnchor_;
         double deviceProfileContextMenuSplitDistance_ = 0.0;
         GraphValueRange deviceProfileGraphRange_{};
-        double deviceProfileValueEditBuffer_ = 0.0; // degrees per meter equivalent (m/s^2)
-        std::optional<ScalarProfileEndpointValueEdit> deviceProfileEndpointValueEdit_;
-        std::optional<ProfileTransitionTypeEdit> deviceProfileTransitionTypeEdit_;
-        std::optional<ProfileSegmentCommand> deviceProfileSegmentCommand_;
-        std::optional<ProfileSegmentDistanceEdit> deviceProfileSegmentDistanceEdit_;
+        double deviceProfileValueEditBuffer_ = 0.0; // m/s^2
+        coaster::SegmentId deviceProfileValueEditSegmentId_ =
+            coaster::invalidSegmentId;
+        ScalarProfileEndpoint deviceProfileValueEditEndpoint_ =
+            ScalarProfileEndpoint::None;
         physics::TrackDeviceForceResult simulationDeviceForces_;
         double simulationRealizedAcceleration_ = 0.0;
         std::optional<SectionLengthEdit> sectionLengthEdit_;
