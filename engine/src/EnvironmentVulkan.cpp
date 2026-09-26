@@ -1,9 +1,13 @@
 #include <quantum/engine/Logging.hpp>
+#include <quantum/renderer/EnvironmentAssets.hpp>
 #include <quantum/renderer/EnvironmentMap.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
-#include <array>
+#include <glm/trigonometric.hpp>
+
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -12,40 +16,35 @@
 
 namespace
 {
-    void check(const VkResult result, const char* operation)
+    void check(const VkResult result, const char* const operation)
     {
         if (result != VK_SUCCESS)
+        {
             throw std::runtime_error(std::string(operation)
                 + " failed with VkResult " + std::to_string(result));
+        }
     }
 }
 
 namespace quantum::renderer
 {
-    void VulkanContext::createEnvironmentResources()
+    void VulkanContext::uploadEnvironmentImageSet(
+        const ProcessedEnvironment& processed,
+        EnvironmentImageSet& destination)
     {
-        ProcessedEnvironment processed;
-        try
+        // The caller always supplies an empty set, so a failure here can only
+        // release what this call created.
+        for (const EnvironmentImage& image : destination)
         {
-            processed = preprocessEnvironment(runtimeAssetRoot()
-                / "assets/environment/rooitou_park_1k.hdr");
-            environmentAvailable_ = true;
-        }
-        catch (const std::exception& error)
-        {
-            quantum::logging::logMessagef(logging::LogLevel::Warning, "VK",
-                "HDR environment unavailable: %s. Using constant ambient.",
-                error.what());
-            const EnvironmentPixels black{1, 1, 6, 1,
-                std::vector<float>(6 * 4, 0.0F)};
-            processed.sky = black;
-            processed.irradiance = black;
-            processed.specular = black;
-            processed.brdf = {1, 1, 1, 1, {0.0F, 0.0F, 0.0F, 1.0F}};
+            if (image.image != VK_NULL_HANDLE)
+            {
+                throw std::logic_error(
+                    "The HDR environment upload target is already populated.");
+            }
         }
 
         const auto upload = [this](const EnvironmentPixels& pixels,
-            EnvironmentImage& destination)
+            EnvironmentImage& target)
         {
             VkImageCreateInfo imageInfo{};
             imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -65,20 +64,20 @@ namespace quantum::renderer
             VmaAllocationCreateInfo allocationInfo{};
             allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
             check(vmaCreateImage(allocator_, &imageInfo, &allocationInfo,
-                &destination.image, &destination.allocation, nullptr),
+                &target.image, &target.allocation, nullptr),
                 "vmaCreateImage for HDR environment");
 
             VkImageViewCreateInfo viewInfo{};
             viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            viewInfo.image = destination.image;
+            viewInfo.image = target.image;
             viewInfo.viewType = pixels.layers == 6
                 ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
             viewInfo.format = imageInfo.format;
             viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             viewInfo.subresourceRange.levelCount = pixels.mipLevels;
             viewInfo.subresourceRange.layerCount = pixels.layers;
-            check(vkCreateImageView(device_, &viewInfo, nullptr,
-                &destination.view), "vkCreateImageView for HDR environment");
+            check(vkCreateImageView(device_, &viewInfo, nullptr, &target.view),
+                "vkCreateImageView for HDR environment");
 
             const VkDeviceSize bytes = pixels.rgba.size() * sizeof(float);
             VkBufferCreateInfo stagingInfo{};
@@ -94,14 +93,17 @@ namespace quantum::renderer
             VkBuffer staging = VK_NULL_HANDLE;
             VmaAllocation stagingAllocation = VK_NULL_HANDLE;
             VmaAllocationInfo mappedInfo{};
-            check(vmaCreateBuffer(allocator_, &stagingInfo,
-                &stagingAllocationInfo, &staging, &stagingAllocation,
-                &mappedInfo), "vmaCreateBuffer for HDR upload");
             VkCommandBuffer command = VK_NULL_HANDLE;
             try
             {
+                check(vmaCreateBuffer(allocator_, &stagingInfo,
+                    &stagingAllocationInfo, &staging, &stagingAllocation,
+                    &mappedInfo), "vmaCreateBuffer for HDR upload");
                 if (mappedInfo.pMappedData == nullptr)
-                    throw std::runtime_error("HDR staging buffer is unmapped");
+                {
+                    throw std::runtime_error(
+                        "HDR staging buffer is unmapped.");
+                }
                 std::memcpy(mappedInfo.pMappedData, pixels.rgba.data(),
                     static_cast<std::size_t>(bytes));
                 check(vmaFlushAllocation(allocator_, stagingAllocation,
@@ -128,9 +130,10 @@ namespace quantum::renderer
                 barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
                 barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                barrier.image = destination.image;
+                barrier.image = target.image;
                 barrier.subresourceRange = viewInfo.subresourceRange;
-                vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                vkCmdPipelineBarrier(command,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
                     1, &barrier);
 
@@ -157,8 +160,10 @@ namespace quantum::renderer
                             * 4 * sizeof(float);
                     }
                 if (offset != bytes)
+                {
                     throw std::runtime_error("HDR mip upload size mismatch");
-                vkCmdCopyBufferToImage(command, staging, destination.image,
+                }
+                vkCmdCopyBufferToImage(command, staging, target.image,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     static_cast<std::uint32_t>(regions.size()),
                     regions.data());
@@ -184,14 +189,58 @@ namespace quantum::renderer
             catch (...)
             {
                 if (command != VK_NULL_HANDLE)
+                {
                     vkFreeCommandBuffers(device_, commandPool_, 1, &command);
+                }
                 vmaDestroyBuffer(allocator_, staging, stagingAllocation);
+                destroyEnvironmentImage(target);
                 throw;
             }
             vkFreeCommandBuffers(device_, commandPool_, 1, &command);
             vmaDestroyBuffer(allocator_, staging, stagingAllocation);
         };
 
+        try
+        {
+            upload(processed.irradiance, destination[0]);
+            upload(processed.specular, destination[1]);
+            upload(processed.brdf, destination[2]);
+            upload(processed.sky, destination[3]);
+        }
+        catch (...)
+        {
+            destroyEnvironmentImageSet(destination);
+            throw;
+        }
+    }
+
+    void VulkanContext::destroyEnvironmentImage(
+        EnvironmentImage& image) noexcept
+    {
+        if (image.view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(device_, image.view, nullptr);
+            image.view = VK_NULL_HANDLE;
+        }
+        if (image.image != VK_NULL_HANDLE)
+        {
+            vmaDestroyImage(allocator_, image.image, image.allocation);
+            image.image = VK_NULL_HANDLE;
+            image.allocation = VK_NULL_HANDLE;
+        }
+    }
+
+    void VulkanContext::destroyEnvironmentImageSet(
+        EnvironmentImageSet& images) noexcept
+    {
+        for (EnvironmentImage& image : images)
+        {
+            destroyEnvironmentImage(image);
+        }
+    }
+
+    void VulkanContext::createEnvironmentResources()
+    {
         try
         {
             std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
@@ -206,7 +255,8 @@ namespace quantum::renderer
             VkDescriptorSetLayoutCreateInfo layoutInfo{};
             layoutInfo.sType =
                 VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-            layoutInfo.bindingCount = static_cast<std::uint32_t>(bindings.size());
+            layoutInfo.bindingCount =
+                static_cast<std::uint32_t>(bindings.size());
             layoutInfo.pBindings = bindings.data();
             check(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr,
                 &environmentDescriptorLayout_),
@@ -243,30 +293,28 @@ namespace quantum::renderer
             check(vkCreateSampler(device_, &samplerInfo, nullptr,
                 &environmentSampler_), "vkCreateSampler for HDR environment");
 
-            upload(processed.irradiance, environmentImages_[0]);
-            upload(processed.specular, environmentImages_[1]);
-            upload(processed.brdf, environmentImages_[2]);
-            upload(processed.sky, environmentImages_[3]);
-
-            std::array<VkDescriptorImageInfo, 4> images{};
-            std::array<VkWriteDescriptorSet, 4> writes{};
-            for (std::uint32_t index = 0; index < images.size(); ++index)
+            // IBL preprocessing and upload are expensive, so the first
+            // environment is prepared here, which keeps startup behavior
+            // identical to Rendering M2. Later selections are prepared once on
+            // demand and then retained by the cache.
+            const std::string initial = environmentAsset_.empty()
+                ? std::string(bundledEnvironmentAssets().front().identifier)
+                : environmentAsset_;
+            environmentDetail_.clear();
+            try
             {
-                images[index].sampler = environmentSampler_;
-                images[index].imageView = environmentImages_[index].view;
-                images[index].imageLayout =
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writes[index].dstSet = environmentDescriptorSet_;
-                writes[index].dstBinding = index;
-                writes[index].descriptorCount = 1;
-                writes[index].descriptorType =
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                writes[index].pImageInfo = &images[index];
+                setEnvironmentImages(loadEnvironmentImages(initial).images);
             }
-            vkUpdateDescriptorSets(device_,
-                static_cast<std::uint32_t>(writes.size()), writes.data(),
-                0, nullptr);
+            catch (const std::exception& error)
+            {
+                environmentDetail_ = error.what();
+                quantum::logging::logMessagef(
+                    quantum::logging::LogLevel::Warning, "VK",
+                    "HDR environment '%s' unavailable: %s. Using constant "
+                    "ambient.", initial.c_str(), error.what());
+                environmentAvailable_ = false;
+            }
+            environmentAsset_ = initial;
         }
         catch (...)
         {
@@ -288,20 +336,17 @@ namespace quantum::renderer
             vkDestroySampler(device_, environmentSampler_, nullptr);
             environmentSampler_ = VK_NULL_HANDLE;
         }
-        for (EnvironmentImage& image : environmentImages_)
+        // The cache is the sole owner of the images; environmentImages_ only
+        // points at the published entry, so it must not be destroyed here.
+        environmentImages_ = nullptr;
+        for (auto& entry : environmentCache_)
         {
-            if (image.view != VK_NULL_HANDLE)
+            if (entry.second.images[0].image != VK_NULL_HANDLE)
             {
-                vkDestroyImageView(device_, image.view, nullptr);
-                image.view = VK_NULL_HANDLE;
-            }
-            if (image.image != VK_NULL_HANDLE)
-            {
-                vmaDestroyImage(allocator_, image.image, image.allocation);
-                image.image = VK_NULL_HANDLE;
-                image.allocation = VK_NULL_HANDLE;
+                destroyEnvironmentImageSet(entry.second.images);
             }
         }
+        environmentCache_.clear();
         if (environmentDescriptorLayout_ != VK_NULL_HANDLE)
         {
             vkDestroyDescriptorSetLayout(device_, environmentDescriptorLayout_,
@@ -309,5 +354,136 @@ namespace quantum::renderer
             environmentDescriptorLayout_ = VK_NULL_HANDLE;
         }
         environmentAvailable_ = false;
+    }
+
+    void VulkanContext::setEnvironment(const std::string_view identifier,
+        const float rotationDegrees, const float lightingIntensity,
+        const bool skyVisible)
+    {
+        if (!std::isfinite(rotationDegrees) || !std::isfinite(lightingIntensity)
+            || lightingIntensity < 0.0F)
+        {
+            throw std::invalid_argument("Invalid HDR environment settings.");
+        }
+        const std::string accepted = validateEnvironmentAssetIdentifier(
+            identifier);
+        if (accepted != environmentAsset_)
+        {
+            environmentDetail_.clear();
+            if (accepted.empty())
+            {
+                // "None" keeps the renderer's constant ambient term.
+                environmentImages_ = nullptr;
+                environmentAvailable_ = false;
+            }
+            else
+            {
+                try
+                {
+                    setEnvironmentImages(loadEnvironmentImages(accepted).images);
+                }
+                catch (const std::exception& error)
+                {
+                    // The failure is reported and the environment is treated as
+                    // unavailable. A previously prepared sky stays cached and is
+                    // never silently presented as the requested one.
+                    environmentDetail_ = error.what();
+                    environmentAvailable_ = false;
+                    quantum::logging::logMessagef(
+                        quantum::logging::LogLevel::Warning, "VK",
+                        "HDR environment '%s' unavailable: %s. Using constant "
+                        "ambient.", accepted.c_str(), error.what());
+                }
+            }
+            environmentAsset_ = accepted;
+        }
+        environmentRotationRadians_ = glm::radians(
+            std::fmod(std::fmod(rotationDegrees, 360.0F) + 360.0F, 360.0F));
+        environmentIntensity_ = lightingIntensity;
+        skyVisible_ = skyVisible;
+    }
+
+    Renderer::EnvironmentStatus VulkanContext::environmentStatus() const
+    {
+        return {environmentAsset_, environmentAvailable_, environmentDetail_};
+    }
+
+    const VulkanContext::PreparedEnvironment& VulkanContext::
+        loadEnvironmentImages(const std::string& identifier)
+    {
+        if (const auto found = environmentCache_.find(identifier);
+            found != environmentCache_.end())
+        {
+            return found->second;
+        }
+        const EnvironmentAsset* asset = findBundledEnvironmentAsset(identifier);
+        if (asset == nullptr)
+        {
+            throw std::invalid_argument(
+                "Unknown bundled HDR environment identifier: " + identifier);
+        }
+
+        PreparedEnvironment prepared;
+        // Throws for a missing or malformed file; the caller decides whether
+        // that is reported or falls back to constant ambient.
+        uploadEnvironmentImageSet(
+            preprocessEnvironment(environmentFilePath(asset->identifier)),
+            prepared.images);
+        quantum::logging::logMessagef(quantum::logging::LogLevel::Info, "VK",
+            "Prepared HDR environment '%s'.", identifier.c_str());
+        return environmentCache_.emplace(
+            identifier, std::move(prepared)).first->second;
+    }
+
+    std::filesystem::path VulkanContext::environmentFilePath(
+        const std::string& identifier) const
+    {
+        constexpr std::string_view assetsScheme = "assets://";
+        if (!identifier.starts_with(assetsScheme))
+        {
+            throw std::invalid_argument(
+                "Bundled HDR environments use package-relative identities: "
+                + identifier);
+        }
+        return runtimeAssetRoot() / "assets"
+            / std::filesystem::path(identifier.substr(assetsScheme.size()));
+    }
+
+    void VulkanContext::setEnvironmentImages(
+        const EnvironmentImageSet& images)
+    {
+        if (images[0].image == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "Refusing to publish an empty HDR environment image set.");
+        }
+        // Candidate-then-publish, matching the ground-surface path: after the
+        // descriptor set is repointed, no recorded or in-flight command buffer
+        // may still reference the images it previously sampled. The set being
+        // published is owned by the cache, which outlives every submission.
+        waitForFrameCompletion();
+        environmentImages_ = &images;
+
+        // The image infos must outlive the batch they are passed in.
+        std::array<VkDescriptorImageInfo, 4> imageInfos{};
+        std::array<VkWriteDescriptorSet, 4> writes{};
+        for (std::uint32_t index = 0; index < writes.size(); ++index)
+        {
+            imageInfos[index].sampler = environmentSampler_;
+            imageInfos[index].imageView = environmentImages_->at(index).view;
+            imageInfos[index].imageLayout =
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[index].dstSet = environmentDescriptorSet_;
+            writes[index].dstBinding = index;
+            writes[index].descriptorCount = 1;
+            writes[index].descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[index].pImageInfo = &imageInfos[index];
+        }
+        vkUpdateDescriptorSets(device_,
+            static_cast<std::uint32_t>(writes.size()), writes.data(),
+            0, nullptr);
+        environmentAvailable_ = true;
     }
 }

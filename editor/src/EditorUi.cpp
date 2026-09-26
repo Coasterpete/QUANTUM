@@ -13,6 +13,7 @@
 #include <quantum/editor/ViewportPicking.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/engine/Logging.hpp>
+#include <quantum/renderer/EnvironmentAssets.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
 #include <SDL3/SDL_filesystem.h>
@@ -1916,11 +1917,55 @@ namespace
         return changed;
     }
 
+    // The environment combo is built from the renderer's bundled-sky registry,
+    // so adding a sky is a data change rather than an editor code change. Index
+    // 0 is always "None".
+    std::string environmentComboNames()
+    {
+        std::string names = "None";
+        for (const quantum::renderer::EnvironmentAsset& asset :
+            quantum::renderer::bundledEnvironmentAssets())
+        {
+            names.push_back('\0');
+            names.append(asset.displayName);
+        }
+        return names;
+    }
+
+    int environmentIndexFor(const std::string& identifier)
+    {
+        int index = 0;
+        for (const quantum::renderer::EnvironmentAsset& asset :
+            quantum::renderer::bundledEnvironmentAssets())
+        {
+            ++index;
+            if (asset.identifier == identifier)
+            {
+                return index;
+            }
+        }
+        return 0;
+    }
+
+    std::string environmentIdentifierForIndex(const int index)
+    {
+        if (index <= 0)
+        {
+            return {};
+        }
+        const auto assets = quantum::renderer::bundledEnvironmentAssets();
+        const std::size_t position = static_cast<std::size_t>(index - 1);
+        return position < assets.size() ? assets[position].identifier
+            : std::string{};
+    }
+
     void showViewportSettingsWindow(
         quantum::editor::ViewportSettings& settings,
         bool* const open,
         const bool msaaAvailable,
-        const bool environmentAvailable)
+        const bool environmentAvailable,
+        SDL_Window* const window,
+        quantum::renderer::Renderer& vulkan)
     {
         // ImGui's p_open parameter is only written by the title bar close
         // button; it does not hide the window. The flag must gate whether
@@ -2050,12 +2095,17 @@ namespace
         committed = ImGui::SliderFloat("Exposure",
             &settings.exposure, 0.1F, 3.0F, "%.2f")
             || committed;
-        int environmentIndex = settings.environmentEnabled ? 1 : 0;
+        int environmentIndex = environmentIndexFor(settings.environmentAsset);
         ImGui::BeginDisabled(!environmentAvailable);
+        // The combo buffer must outlive the call, so it is bound before use.
+        const std::string environmentNames = environmentComboNames();
+        const auto environmentCount = 1
+            + quantum::renderer::bundledEnvironmentAssets().size();
         if (ImGui::Combo("Environment", &environmentIndex,
-            "None\0Rooitou Park (CC0)\0"))
+            environmentNames.c_str(), static_cast<int>(environmentCount)))
         {
-            settings.environmentEnabled = environmentIndex == 1;
+            settings.environmentAsset = environmentIdentifierForIndex(
+                environmentIndex);
             committed = true;
         }
         committed = ImGui::SliderFloat("Environment Rotation",
@@ -2068,7 +2118,110 @@ namespace
             || committed;
         ImGui::EndDisabled();
         if (!environmentAvailable)
-            ImGui::TextDisabled("HDR asset unavailable; constant ambient is active.");
+            ImGui::TextDisabled("HDR pipeline unavailable; constant ambient is active.");
+        else if (const auto status = vulkan.environmentStatus();
+            !status.available && !status.identifier.empty())
+        {
+            ImGui::TextColored(quantum::editor::palette::error,
+                "Selected sky unavailable: %s", status.detail.c_str());
+        }
+
+        ImGui::SeparatorText("Ground Surface");
+
+        quantum::renderer::GroundSurfaceSettings& ground =
+            settings.groundSurface;
+        committed = ImGui::Checkbox("Show Ground", &ground.enabled)
+            || committed;
+
+        ImGui::BeginDisabled(!ground.enabled);
+        committed = ImGui::SliderFloat("Ground Elevation",
+            &ground.elevation, -500.0F, 500.0F, "%.1f units")
+            || committed;
+        committed = ImGui::DragFloat("Ground Size",
+            &ground.sizeX, 1.0F, 1.0F, 100000.0F, "%.0f units")
+            || committed;
+        // One control keeps X and Y equal, which is the only shape M0 needs and
+        // avoids a second slider in an already long window.
+        ground.sizeY = ground.sizeX;
+        committed = ImGui::ColorEdit4("Ground Base Color",
+            &ground.baseColor.r, ImGuiColorEditFlags_AlphaBar
+                | ImGuiColorEditFlags_NoInputs) || committed;
+        committed = ImGui::SliderFloat("Ground Roughness",
+            &ground.roughness, 0.0F, 1.0F, "%.2f") || committed;
+        committed = ImGui::SliderFloat("Ground UV Tiling",
+            &ground.uvTiling.x, 1.0F, 512.0F, "%.0fx")
+            || committed;
+        ground.uvTiling.y = ground.uvTiling.x;
+        ImGui::EndDisabled();
+
+        // A custom map replaces the built-in fallback. Failure is reported and
+        // then falls back rather than removing the surface from the viewport.
+        static constexpr std::array<const char*, 3> groundMapLabels{
+            "Albedo", "Normal", "Roughness"};
+        for (std::size_t slot = 0; slot < groundMapLabels.size(); ++slot)
+        {
+            std::string* const identifier = slot == 0
+                ? &ground.albedoTexture
+                : (slot == 1 ? &ground.normalTexture
+                    : &ground.roughnessTexture);
+            const std::string browseLabel = std::string("Choose PNG...##Ground")
+                + groundMapLabels[slot];
+            const std::string clearLabel = std::string("Clear##Ground")
+                + groundMapLabels[slot];
+
+            ImGui::BeginDisabled(!ground.enabled);
+            const bool browse = ImGui::SmallButton(browseLabel.c_str());
+            itemTooltip("Select a PNG below the runtime assets/ground folder.");
+            sameLineIfFits(buttonWidth(clearLabel.c_str()));
+            const bool clear = ImGui::SmallButton(clearLabel.c_str());
+            itemTooltip("Use the built-in neutral map for this slot.");
+            ImGui::EndDisabled();
+
+            if (browse)
+            {
+                if (const auto selected =
+                        quantum::editor::openGroundTextureFileDialog(window))
+                {
+                    const auto logicalId = quantum::editor::
+                        groundTextureAssetIdFromPath(
+                            *selected, vulkan.runtimeAssetRoot());
+                    if (logicalId)
+                    {
+                        *identifier = *logicalId;
+                    }
+                }
+            }
+            else if (clear)
+            {
+                identifier->clear();
+            }
+
+            const std::string display = identifier->empty()
+                ? "built-in fallback"
+                : "assets/" + identifier->substr(9);
+            quantum::editor::editorSecondaryText(
+                "Ground %s: %s", groundMapLabels[slot], display.c_str());
+            if (const auto status = vulkan.groundTextureLoadStatus(
+                    *identifier))
+            {
+                const bool loaded = status->state
+                    == quantum::renderer::GroundTextureLoadState::Loaded;
+                ImGui::SameLine();
+                ImGui::TextColored(loaded
+                        ? quantum::editor::palette::success
+                        : quantum::editor::palette::error,
+                    "%s", quantum::renderer::groundTextureLoadStateName(
+                        status->state));
+                if (!status->detail.empty()
+                    && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                {
+                    ImGui::SetTooltip("%s", status->detail.c_str());
+                }
+            }
+        }
+        if (!ground.enabled)
+            ImGui::TextDisabled(
+                "Ground is hidden; its settings apply when re-enabled.");
 
         ImGui::SeparatorText("Reference Elements");
 
@@ -6048,7 +6201,11 @@ namespace quantum::editor
 
     void EditorUi::setViewportEnvironmentEnabled(const bool enabled) noexcept
     {
-        viewportSettings_.environmentEnabled = enabled;
+        // Coarse control used by preview smoke: "no environment" versus the
+        // first bundled sky. Choosing a specific sky is the Editor combo's job.
+        const auto assets = quantum::renderer::bundledEnvironmentAssets();
+        viewportSettings_.environmentAsset = enabled && !assets.empty()
+            ? assets.front().identifier : std::string{};
     }
 
     void EditorUi::enterSimulatorForPreviewSmoke() noexcept
@@ -7132,7 +7289,7 @@ namespace quantum::editor
             std::cos(sunElevation) * std::sin(sunAzimuth),
             std::sin(sunElevation)}, viewportSettings_.sunIntensity);
         vulkan.setExposure(viewportSettings_.exposure);
-        vulkan.setEnvironment(viewportSettings_.environmentEnabled,
+        vulkan.setEnvironment(viewportSettings_.environmentAsset,
             viewportSettings_.environmentRotationDegrees,
             viewportSettings_.environmentIntensity,
             viewportSettings_.skyVisible);
@@ -8479,6 +8636,11 @@ ImGui::MenuItem(
                 static_cast<float>(viewportCamera_.boundsRadius())
             );
         }
+
+        // Scene presentation, not document state, and identical in the Editor
+        // and the Simulator. The renderer only does GPU work when the quad
+        // geometry or a texture identity actually changed.
+        vulkan.setGroundSurface(viewportSettings_.groundSurface);
     }
 
     void EditorUi::drawSimulator(renderer::VulkanContext& vulkan)
@@ -8650,8 +8812,13 @@ ImGui::MenuItem(
             viewportSettings_ = {};
             viewportSettings_.msaaEnabled = captureScenario_->msaaEnabled
                 && vulkan.capabilities().viewportMsaa4;
-            viewportSettings_.environmentEnabled =
-                captureScenario_->environmentEnabled;
+            viewportSettings_.environmentAsset = captureScenario_->environmentEnabled
+                ? (captureScenario_->environmentAsset.empty()
+                    ? std::string(
+                        quantum::renderer::bundledEnvironmentAssets()
+                            .front().identifier)
+                    : captureScenario_->environmentAsset)
+                : std::string{};
             viewportSettings_.environmentRotationDegrees =
                 captureScenario_->environmentRotationDegrees;
             viewportSettings_.environmentIntensity =
@@ -8660,6 +8827,32 @@ ImGui::MenuItem(
             viewportSettings_.sunIntensity = captureScenario_->sunIntensity;
             viewportSettings_.anchorsVisible =
                 captureScenario_->kind == ReadmeCaptureKind::TrackStartGizmo;
+            viewportSettings_.groundSurface.enabled =
+                captureScenario_->groundEnabled;
+            viewportSettings_.groundSurface.elevation =
+                captureScenario_->groundElevation;
+            viewportSettings_.groundSurface.sizeX =
+                captureScenario_->groundSize;
+            viewportSettings_.groundSurface.sizeY =
+                captureScenario_->groundSize;
+            viewportSettings_.groundSurface.roughness =
+                captureScenario_->groundRoughness;
+            viewportSettings_.groundSurface.metallic =
+                captureScenario_->groundMetallic;
+            viewportSettings_.groundSurface.uvTiling = glm::vec2{
+                captureScenario_->groundUvTiling,
+                captureScenario_->groundUvTiling};
+            viewportSettings_.groundSurface.baseColor = glm::vec4{
+                captureScenario_->groundBaseColor[0],
+                captureScenario_->groundBaseColor[1],
+                captureScenario_->groundBaseColor[2],
+                1.0F};
+            viewportSettings_.groundSurface.albedoTexture =
+                captureScenario_->groundAlbedoTexture;
+            viewportSettings_.groundSurface.normalTexture =
+                captureScenario_->groundNormalTexture;
+            viewportSettings_.groundSurface.roughnessTexture =
+                captureScenario_->groundRoughnessTexture;
             startPoseTransformMode_ = captureScenario_->rotateGizmo
                 ? StartPoseTransformMode::Rotate : StartPoseTransformMode::Move;
             if (viewportSettings_.anchorsVisible)
@@ -8699,7 +8892,9 @@ ImGui::MenuItem(
             viewportSettings_,
             &viewportSettingsWindowOpen_,
             vulkan.capabilities().viewportMsaa4,
-            vulkan.capabilities().hdrEnvironment
+            vulkan.capabilities().hdrEnvironment,
+            window_,
+            vulkan
         );
 
         drawPerformanceTelemetry();

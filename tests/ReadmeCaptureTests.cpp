@@ -165,6 +165,72 @@ namespace
         gizmo["scenarios"][0]["region"] = 1;
         rejects([&] { (void)load(gizmo); }, "Inconsistent Track Start selection accepted.");
 
+        // Ground Surface M0 presentation: defaults match the interactive
+        // editor, and every ground override is validated before any window is
+        // opened.
+        const auto groundDefaults = manifest.scenarios.front();
+        require(groundDefaults.groundEnabled && groundDefaults.groundSize == 1200.0F
+            && groundDefaults.groundElevation == 0.0F
+            && groundDefaults.groundUvTiling == 48.0F
+            && groundDefaults.groundRoughness == 0.85F
+            && groundDefaults.groundMetallic == 0.0F
+            && groundDefaults.groundAlbedoTexture.empty()
+            && groundDefaults.groundNormalTexture.empty()
+            && groundDefaults.groundRoughnessTexture.empty(),
+            "Ground capture defaults changed.");
+        auto ground = base;
+        ground["scenarios"][0]["ground"] = false;
+        ground["scenarios"][0]["ground_elevation"] = -12.5;
+        ground["scenarios"][0]["ground_size"] = 640.0;
+        ground["scenarios"][0]["ground_tiling"] = 12.0;
+        ground["scenarios"][0]["ground_roughness"] = 0.4;
+        ground["scenarios"][0]["ground_metallic"] = 0.25;
+        ground["scenarios"][0]["ground_base_color"] = json::array({0.4, 0.5, 0.6});
+        ground["scenarios"][0]["ground_albedo"] =
+            "assets://ground/test-ground-albedo.png";
+        ground["scenarios"][0]["ground_normal"] =
+            "assets://ground/test-ground-normal.png";
+        ground["scenarios"][0]["ground_roughness_map"] =
+            "assets://ground/test-ground-roughness.png";
+        const auto groundScenario = load(ground).scenarios.front();
+        require(!groundScenario.groundEnabled
+            && groundScenario.groundElevation == -12.5F
+            && groundScenario.groundSize == 640.0F
+            && groundScenario.groundUvTiling == 12.0F
+            && groundScenario.groundRoughness == 0.4F
+            && groundScenario.groundMetallic == 0.25F
+            && groundScenario.groundBaseColor[1] == 0.5F
+            && groundScenario.groundAlbedoTexture
+                == "assets://ground/test-ground-albedo.png"
+            && groundScenario.groundNormalTexture
+                == "assets://ground/test-ground-normal.png"
+            && groundScenario.groundRoughnessTexture
+                == "assets://ground/test-ground-roughness.png",
+            "Ground capture overrides were ignored.");
+        for (const auto& [field, value] : std::vector<std::pair<std::string, json>>{
+            {"ground", "on"},
+            {"ground_elevation", "flat"},
+            {"ground_elevation", 200000.0},
+            {"ground_size", 0.0},
+            {"ground_size", 200000.0},
+            {"ground_tiling", 0.0},
+            {"ground_tiling", 5000.0},
+            {"ground_roughness", 1.5},
+            {"ground_metallic", -0.5},
+            {"ground_base_color", json::array({0.4, 0.5})},
+            {"ground_base_color", json::array({0.4, 0.5, 2.0})},
+            {"ground_base_color", 0.5},
+            {"ground_albedo", 7},
+            {"ground_albedo", "C:/textures/grass.png"},
+            {"ground_albedo", "assets://track/crosstie.png"},
+            {"ground_albedo", "assets://ground/grass.tga"},
+            {"ground_normal", "assets://ground/../escape.png"}})
+        {
+            auto invalid = base;
+            invalid["scenarios"][0][field] = value;
+            rejects([&] { (void)load(invalid); }, "Invalid ground scenario field accepted.");
+        }
+
         auto scenario = manifest.scenarios.front();
         scenario.region = track.sectionCount();
         rejects([&] { validateReadmeCaptureDocument(scenario, track); }, "Out-of-range region accepted.");

@@ -1,0 +1,23 @@
+{
+  "width": 1600,
+  "height": 900,
+  "settle_frames": 16,
+  "output_directory": "ground-surface-m0/textured",
+  "overwrite": true,
+  "scenarios": [
+    {
+      "name": "modern-steel",
+      "document": "../smoke-tests/modern-steel-validation.quantum",
+      "region": 3,
+      "framing": "selected",
+      "msaa": true,
+      "environment": true,
+      "ground": true,
+      "ground_tiling": 60,
+      "ground_base_color": [0.78, 0.76, 0.72],
+      "ground_albedo": "assets://ground/test-ground-albedo.png",
+      "ground_normal": "assets://ground/test-ground-normal.png",
+      "ground_roughness_map": "assets://ground/test-ground-roughness.png"
+    }
+  ]
+}

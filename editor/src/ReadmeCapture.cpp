@@ -1,4 +1,6 @@
 #include <quantum/editor/ReadmeCapture.hpp>
+#include <quantum/renderer/EnvironmentAssets.hpp>
+#include <quantum/renderer/GroundSurface.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -48,6 +50,43 @@ namespace quantum::editor
             if (text.empty() || text.find('\0') != std::string::npos)
                 throw std::invalid_argument("Capture paths must be nonempty and contain no NUL.");
             return std::filesystem::weakly_canonical(base / std::filesystem::u8path(text));
+        }
+
+        float groundFactor(const nlohmann::json& entry, const char* field,
+            const float fallback, const float minimum, const float maximum)
+        {
+            if (!entry.contains(field))
+                return fallback;
+            if (!entry[field].is_number())
+                throw std::invalid_argument(std::string("Capture ") + field
+                    + " must be a number.");
+            const float value = entry[field].get<float>();
+            if (!(value >= minimum && value <= maximum))
+                throw std::invalid_argument(std::string("Capture ") + field
+                    + " is out of range.");
+            return value;
+        }
+
+        std::string groundTexture(const nlohmann::json& entry,
+            const char* field)
+        {
+            if (!entry.contains(field))
+                return {};
+            if (!entry[field].is_string())
+                throw std::invalid_argument(std::string("Capture ") + field
+                    + " must be a package-relative ground asset ID.");
+            const std::string value = entry[field].get<std::string>();
+            if (value.empty())
+                return {};
+            try
+            {
+                return renderer::normalizeGroundTextureAssetIdentifier(value);
+            }
+            catch (const std::exception& exception)
+            {
+                throw std::invalid_argument(std::string("Capture ") + field
+                    + ": " + exception.what());
+            }
         }
     }
 
@@ -121,8 +160,11 @@ namespace quantum::editor
         for (const auto& entry : scenarios)
         {
             requireKeys(entry, {"name", "document", "region", "framing", "tool", "msaa", "zoom",
-                "environment", "environment_rotation", "environment_intensity", "sky_visible",
-                "sun_intensity"});
+                "environment", "environment_asset", "environment_rotation", "environment_intensity", "sky_visible",
+                "sun_intensity", "ground", "ground_elevation", "ground_size",
+                "ground_roughness", "ground_metallic", "ground_tiling",
+                "ground_base_color", "ground_albedo", "ground_normal",
+                "ground_roughness_map"});
             const auto name = entry.at("name").get<std::string>();
             const auto found = std::find(names.begin(), names.end(), name);
             if (found == names.end())
@@ -141,6 +183,25 @@ namespace quantum::editor
                     throw std::invalid_argument(std::string("Capture ") + field
                         + " must be a number.");
             scenario.environmentEnabled = entry.value("environment", true);
+            if (entry.contains("environment_asset"))
+            {
+                if (!entry["environment_asset"].is_string())
+                    throw std::invalid_argument(
+                        "Capture environment_asset must be a bundled sky ID.");
+                scenario.environmentAsset = entry["environment_asset"].get<std::string>();
+                try
+                {
+                    scenario.environmentAsset =
+                        renderer::validateEnvironmentAssetIdentifier(
+                            scenario.environmentAsset);
+                }
+                catch (const std::exception& exception)
+                {
+                    throw std::invalid_argument(
+                        std::string("Capture environment_asset: ")
+                        + exception.what());
+                }
+            }
             scenario.skyVisible = entry.value("sky_visible", true);
             scenario.environmentRotationDegrees = entry.value(
                 "environment_rotation", 0.0F);
@@ -162,6 +223,43 @@ namespace quantum::editor
                         "Capture zoom must be a number in [0.2, 1.0].");
                 scenario.zoom = entry["zoom"].get<double>();
             }
+            if (entry.contains("ground") && !entry["ground"].is_boolean())
+                throw std::invalid_argument("Capture ground must be a boolean.");
+            scenario.groundEnabled = entry.value("ground", true);
+            scenario.groundElevation = groundFactor(entry,
+                "ground_elevation", 0.0F, -100000.0F, 100000.0F);
+            scenario.groundSize = groundFactor(entry,
+                "ground_size", 1200.0F, 1.0F, 100000.0F);
+            scenario.groundRoughness = groundFactor(entry,
+                "ground_roughness", 0.85F, 0.0F, 1.0F);
+            scenario.groundMetallic = groundFactor(entry,
+                "ground_metallic", 0.0F, 0.0F, 1.0F);
+            scenario.groundUvTiling = groundFactor(entry,
+                "ground_tiling", 48.0F, 1.0F, 4096.0F);
+            if (entry.contains("ground_base_color"))
+            {
+                const auto& color = entry.at("ground_base_color");
+                if (!color.is_array() || color.size() != 3)
+                    throw std::invalid_argument(
+                        "Capture ground_base_color must be three numbers in [0, 1].");
+                for (std::size_t channel = 0; channel < 3; ++channel)
+                {
+                    if (!color[channel].is_number())
+                        throw std::invalid_argument(
+                            "Capture ground_base_color must be three numbers in [0, 1].");
+                    const float value = color[channel].get<float>();
+                    if (!(value >= 0.0F && value <= 1.0F))
+                        throw std::invalid_argument(
+                            "Capture ground_base_color must be three numbers in [0, 1].");
+                    scenario.groundBaseColor[channel] = value;
+                }
+            }
+            scenario.groundAlbedoTexture =
+                groundTexture(entry, "ground_albedo");
+            scenario.groundNormalTexture =
+                groundTexture(entry, "ground_normal");
+            scenario.groundRoughnessTexture =
+                groundTexture(entry, "ground_roughness_map");
             if (!used.insert(scenario.kind).second)
                 throw std::invalid_argument("Duplicate capture scenario: " + name);
             scenario.document = resolvePath(base, entry.at("document"));

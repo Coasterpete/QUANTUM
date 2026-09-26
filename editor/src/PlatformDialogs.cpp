@@ -1,6 +1,7 @@
 #include <quantum/editor/PlatformDialogs.hpp>
 #include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/engine/Logging.hpp>
+#include <quantum/renderer/GroundSurface.hpp>
 
 #include <system_error>
 
@@ -18,7 +19,8 @@ namespace
     {
         OpenDocument,
         SaveDocument,
-        OpenTrackHardware
+        OpenTrackHardware,
+        OpenGroundTexture
     };
 
     [[nodiscard]] std::optional<std::filesystem::path> showFileDialog(
@@ -63,12 +65,15 @@ namespace
         }
 
         const COMDLG_FILTERSPEC filter = kind
-            == FileDialogKind::OpenTrackHardware
+                == FileDialogKind::OpenTrackHardware
             ? COMDLG_FILTERSPEC{L"glTF Binary Mesh", L"*.glb"}
-            : COMDLG_FILTERSPEC{L"QUANTUM Coaster Files", L"*.quantum"};
+            : kind == FileDialogKind::OpenGroundTexture
+                ? COMDLG_FILTERSPEC{L"PNG Image", L"*.png"}
+                : COMDLG_FILTERSPEC{L"QUANTUM Coaster Files", L"*.quantum"};
         dialog->SetFileTypes(1, &filter);
         dialog->SetDefaultExtension(kind == FileDialogKind::OpenTrackHardware
-            ? L"glb" : L"quantum");
+            ? L"glb"
+            : kind == FileDialogKind::OpenGroundTexture ? L"png" : L"quantum");
 
         if (!isOpen)
         {
@@ -148,6 +153,13 @@ namespace quantum::editor
         (void)window;
         return showFileDialog(FileDialogKind::OpenTrackHardware);
     }
+
+    std::optional<std::filesystem::path>
+    openGroundTextureFileDialog(SDL_Window* window)
+    {
+        (void)window;
+        return showFileDialog(FileDialogKind::OpenGroundTexture);
+    }
 }
 
 #else
@@ -168,6 +180,13 @@ namespace quantum::editor
 
     std::optional<std::filesystem::path>
     openTrackHardwareFileDialog(SDL_Window* window)
+    {
+        (void)window;
+        return std::nullopt;
+    }
+
+    std::optional<std::filesystem::path>
+    openGroundTextureFileDialog(SDL_Window* window)
     {
         (void)window;
         return std::nullopt;
@@ -207,6 +226,66 @@ namespace quantum::editor
         {
             return coaster::normalizeTrackHardwareAssetIdentifier(
                 "assets://" + relative.generic_string());
+        }
+        catch (const std::exception& exception)
+        {
+            return std::unexpected(exception.what());
+        }
+    }
+
+    std::expected<std::string, std::string> groundTextureAssetIdFromPath(
+        const std::filesystem::path& selectedPath,
+        const std::filesystem::path& runtimeRoot)
+    {
+        const auto relativeToAssets = [&selectedPath, &runtimeRoot]()
+            -> std::expected<std::filesystem::path, std::string>
+        {
+            std::error_code error;
+            const std::filesystem::path assetRoot =
+                std::filesystem::weakly_canonical(
+                    runtimeRoot / "assets", error);
+            if (error)
+            {
+                return std::unexpected(
+                    "Could not resolve the runtime asset root.");
+            }
+            const std::filesystem::path selected =
+                std::filesystem::weakly_canonical(selectedPath, error);
+            if (error)
+            {
+                return std::unexpected(
+                    "Could not resolve the selected ground texture path.");
+            }
+
+            const std::filesystem::path relative =
+                selected.lexically_relative(assetRoot);
+            if (relative.empty() || relative.is_absolute())
+            {
+                return std::unexpected(
+                    "Select a ground texture below the runtime assets folder.");
+            }
+            for (const std::filesystem::path& part : relative)
+            {
+                if (part == "..")
+                {
+                    return std::unexpected(
+                        "Select a ground texture below the assets/ground "
+                        "folder.");
+                }
+            }
+            return relative;
+        };
+
+        const auto relative = relativeToAssets();
+        if (!relative)
+        {
+            return std::unexpected(relative.error());
+        }
+        try
+        {
+            return quantum::renderer::
+                normalizeGroundTextureAssetIdentifier(
+                    "assets://" + relative->generic_string());
         }
         catch (const std::exception& exception)
         {

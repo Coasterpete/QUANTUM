@@ -42,6 +42,13 @@ namespace quantum::editor
         bool enableGpuValidation = false;
         bool captureFrameTrace = false;
         std::optional<PreviewSmokeRegionStyleEdit> regionStyleEdit;
+        // Developer-only screenshot capture from the real application. The
+        // Editor workspace and the Simulator have separate presentation, and
+        // the Simulator owns the SimulationPreview, so only this harness can
+        // photograph the Simulator. Empty disables readback entirely, which
+        // keeps the normal render path unchanged.
+        std::filesystem::path captureDirectory;
+        bool captureSimulator = false;
     };
 
     [[nodiscard]] std::expected<std::optional<PreviewSmokeOptions>, std::string>

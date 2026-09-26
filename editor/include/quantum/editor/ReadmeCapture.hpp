@@ -2,9 +2,11 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -31,11 +33,28 @@ namespace quantum::editor
         bool rotateGizmo = false;
         bool msaaEnabled = true;
         bool environmentEnabled = true;
+        // Selects a specific bundled sky. Empty means "use the first bundled
+        // sky when environmentEnabled is true", which keeps manifests that
+        // predate selectable HDRIs working unchanged.
+        std::string environmentAsset;
         float environmentRotationDegrees = 0.0F;
         float environmentIntensity = 0.35F;
         bool skyVisible = true;
         float sunIntensity = 3.0F;
         double zoom = 1.0;
+        // Ground Surface M0 presentation. Unspecified fields keep the same
+        // defaults the interactive editor starts with, so an existing manifest
+        // keeps producing the pre-ground appearance only when ground is false.
+        bool groundEnabled = true;
+        float groundElevation = 0.0F;
+        float groundSize = 1200.0F;
+        float groundRoughness = 0.85F;
+        float groundMetallic = 0.0F;
+        float groundUvTiling = 48.0F;
+        std::array<float, 3> groundBaseColor{0.30F, 0.32F, 0.26F};
+        std::string groundAlbedoTexture;
+        std::string groundNormalTexture;
+        std::string groundRoughnessTexture;
     };
 
     struct ReadmeCaptureManifest
