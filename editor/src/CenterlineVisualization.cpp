@@ -434,10 +434,9 @@ namespace quantum::editor
                 return state.position;
             });
 
-        // Coaster Setup stores SI metres while solved positions use document
-        // coordinate units. This affects only the viewport reference curve;
-        // centerline integration, rail meshing, and TrainPhysics retain their
-        // existing authoritative inputs.
+        // Coaster Setup stores SI metres while solved construction-reference
+        // positions use document coordinate units. Core uses the same C+hU
+        // definition for force targets and rider-load diagnostics.
         const coaster::HeartlineSettings& heartline =
             track.coasterSetup().heartline;
         const double heartlineOffsetCoordinateUnits = heartline.enabled

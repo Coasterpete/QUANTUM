@@ -140,9 +140,10 @@ namespace quantum::coaster
     applicableOptionsForStyle(const CoasterStyleDefinition& style);
 
     // Heartline settings are authored document configuration. offsetMeters is
-    // a non-negative distance from the solved track centerline along the
-    // sample frame's local +up axis. The broad upper bound catches corrupt
-    // input without asserting a final product-specific engineering limit.
+    // a non-negative distance from the geometric construction reference along
+    // the rider frame's local +up axis. The resulting C+hU point is the
+    // authored rider reference used by force targets and rider-load
+    // diagnostics; rails, supports, and bogies continue to use C.
     inline constexpr double minimumHeartlineOffsetMeters = 0.0;
     inline constexpr double maximumHeartlineOffsetMeters = 10.0;
 

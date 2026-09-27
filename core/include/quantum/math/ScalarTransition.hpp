@@ -24,6 +24,13 @@ namespace quantum::math
         double independentValue
     );
 
+    // Derivative with respect to the transition's authored independent
+    // variable. Queries and validation follow evaluateScalarTransition().
+    [[nodiscard]] double evaluateScalarTransitionDerivative(
+        const ScalarTransition& transition,
+        double independentValue
+    );
+
     // Analytically integrates an authored scalar transition over an ordered
     // subinterval of its inclusive domain. The result has scalar-value times
     // independent-domain units. Equal integration bounds return exactly zero.

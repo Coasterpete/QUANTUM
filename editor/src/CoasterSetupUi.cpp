@@ -289,9 +289,9 @@ namespace quantum::editor
             "four-car physics definition.");
 
         ImGui::Separator();
-        editorHeading("Heartline reference", fonts);
+        editorHeading("Authored rider reference", fonts);
         if (ImGui::Checkbox(
-                "Apply reference-line offset",
+                "Use heartline offset",
                 &draft.heartline.enabled))
         {
             changed = true;
@@ -311,8 +311,10 @@ namespace quantum::editor
             changed = true;
         }
         editorSecondaryTextWrapped(
-            "Affects the viewport reference curve only; authored track "
-            "geometry and physics are unchanged.");
+            "Measured from the track construction reference along local +up. "
+            "Force-Based targets and rider-load diagnostics use this point; "
+            "rails, supports, bogies, and train poses stay on the construction "
+            "reference.");
 
         ImGui::Separator();
         editorHeading("Physical settings", fonts);

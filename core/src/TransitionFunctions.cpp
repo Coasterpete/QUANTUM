@@ -315,6 +315,81 @@ namespace quantum::math
         throw std::invalid_argument("Unsupported transition type.");
     }
 
+    double evaluateTransitionDerivative(
+        const TransitionType type,
+        const double normalizedProgress)
+    {
+        if (!std::isfinite(normalizedProgress))
+        {
+            throw std::invalid_argument(
+                "Normalized transition progress must be finite.");
+        }
+        if (normalizedProgress < 0.0 || normalizedProgress > 1.0)
+        {
+            throw std::out_of_range(
+                "Normalized transition progress must be in the inclusive range [0, 1].");
+        }
+
+        const double x = normalizedProgress;
+        const double oneMinusX = 1.0 - x;
+        switch (type)
+        {
+        case TransitionType::Linear:
+            return 1.0;
+        case TransitionType::Smoothstep:
+            return 6.0 * x * oneMinusX;
+        case TransitionType::Smootherstep:
+            return 30.0 * x * x * oneMinusX * oneMinusX;
+        case TransitionType::SeventhOrderSmoothstep:
+            return 140.0 * x * x * x
+                * oneMinusX * oneMinusX * oneMinusX;
+        case TransitionType::CosineEaseInOut:
+            return 0.5 * std::numbers::pi_v<double>
+                * std::sin(std::numbers::pi_v<double> * x);
+        case TransitionType::SineEaseIn:
+            return 0.5 * std::numbers::pi_v<double>
+                * std::sin(0.5 * std::numbers::pi_v<double> * x);
+        case TransitionType::SineEaseOut:
+            return 0.5 * std::numbers::pi_v<double>
+                * std::cos(0.5 * std::numbers::pi_v<double> * x);
+        case TransitionType::QuadraticEaseIn:
+            return 2.0 * x;
+        case TransitionType::QuadraticEaseOut:
+            return 2.0 * oneMinusX;
+        case TransitionType::QuadraticEaseInOut:
+            return x < 0.5 ? 4.0 * x : 4.0 * oneMinusX;
+        case TransitionType::CubicEaseIn:
+            return 3.0 * x * x;
+        case TransitionType::CubicEaseOut:
+            return 3.0 * oneMinusX * oneMinusX;
+        case TransitionType::CubicEaseInOut:
+        {
+            const double side = x < 0.5 ? x : oneMinusX;
+            return 12.0 * side * side;
+        }
+        case TransitionType::QuarticEaseIn:
+            return 4.0 * x * x * x;
+        case TransitionType::QuarticEaseOut:
+            return 4.0 * oneMinusX * oneMinusX * oneMinusX;
+        case TransitionType::QuarticEaseInOut:
+        {
+            const double side = x < 0.5 ? x : oneMinusX;
+            return 32.0 * side * side * side;
+        }
+        case TransitionType::QuinticEaseIn:
+            return 5.0 * x * x * x * x;
+        case TransitionType::QuinticEaseOut:
+            return 5.0 * oneMinusX * oneMinusX * oneMinusX * oneMinusX;
+        case TransitionType::QuinticEaseInOut:
+        {
+            const double side = x < 0.5 ? x : oneMinusX;
+            return 80.0 * side * side * side * side;
+        }
+        }
+
+        throw std::invalid_argument("Unsupported transition type.");
+    }
+
     double evaluateTransitionIntegral(
         const TransitionType type,
         const double normalizedProgress

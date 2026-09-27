@@ -1319,6 +1319,40 @@ add_executable(
     RiderLoadTests.cpp
 )
 
+add_executable(
+    QuantumCoreFunctionalHeartlineTests
+    FunctionalHeartlineTests.cpp
+)
+
+target_link_libraries(
+    QuantumCoreFunctionalHeartlineTests
+    PRIVATE
+        Quantum::Core
+)
+
+target_compile_features(
+    QuantumCoreFunctionalHeartlineTests
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(
+    QuantumCoreFunctionalHeartlineTests
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+)
+
+add_test(
+    NAME QuantumCore.FunctionalHeartline
+    COMMAND QuantumCoreFunctionalHeartlineTests
+)
+
+set_tests_properties(
+    QuantumCore.FunctionalHeartline
+    PROPERTIES
+        LABELS "core;coaster;geometry;physics"
+)
+
 target_link_libraries(
     QuantumCoreRiderLoadTests
     PRIVATE

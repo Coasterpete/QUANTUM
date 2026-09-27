@@ -494,16 +494,20 @@ zero lateral G and roll). Conversion to Planar Arc replaces the construction
 while preserving length; conversion to state-independent rate profiles is
 rejected because it cannot preserve the state-dependent solve.
 
-At every integration stage, using the provisional world position `P` and
-right-handed rider frame `(T,L,U)`, Core evaluates:
+At every integration stage, using construction-reference world position `C`,
+right-handed rider frame `(T,L,U)`, and the authored rider-reference offset
+`H=C+hU`, Core evaluates offset-aware force targets while preserving the
+construction-reference energy and station domain. See
+[`geometry-functional-heartline-m1.md`](geometry-functional-heartline-m1.md)
+for the full equations. At zero offset the equations reduce exactly to:
 
 ```text
 g = (0, 0, -gravityAcceleration), g0 = standardGravityAcceleration
-w = initialSpeed² + 2 dot(g, mu * (P - wholeTrackStartPosition))
+w = initialSpeed² + 2 dot(g, mu * (C - wholeTrackStartPosition))
 yawRate   =  mu * (g0 * targetLateralG(s) + dot(g,L)) / w
 pitchRate = -mu * (g0 * targetNormalG(s)  + dot(g,U)) / w
 rollRate  = authored rollRate(s)
-P' = T; T' = yawRate L - pitchRate U
+C' = T; T' = yawRate L - pitchRate U
 L' = -yawRate T + rollRate U; U' = pitchRate T - rollRate L
 ```
 
@@ -536,11 +540,11 @@ for force solve failures. This is separate from `RiderLoadUnreachableState`.
 Targets are authored intent; `RiderLoadHistory` is evaluated truth. Generated
 rates, geometry, speed samples, and loads are never stored in the construction
 or document. Force output uses the same `TrackKinematicState` and right-owned
-boundary curvature as other constructions. The unchanged universal evaluator
-then computes actual speed and Normal/Lateral/Longitudinal G. Longitudinal
-targets are deferred until propulsion, braking, and losses are modeled; the
-current gravity-only point mass has zero longitudinal specific force apart
-from numerical error.
+boundary curvature as other constructions. The universal evaluator computes
+actual rider-reference speed and Normal/Lateral/Longitudinal G from the
+construction kinematics and offset frame motion. Longitudinal targets are
+deferred until propulsion, braking, and losses are modeled; a nonzero offset
+can produce longitudinal specific force during coupled frame rotation.
 
 Format version 1 is extended additively with root `physicalSettings`. A
 `kind: "Geometry"` section requires exactly one `planarArc` or `forceDriven`
@@ -676,9 +680,11 @@ chains every section's authored channels through that solver.
 ## Universal track kinematics and rider loads
 
 `TrackKinematicState` is the construction-independent generated state used by
-physics and diagnostics. It adds world-space centerline curvature `dT/ds` to
-the cumulative coordinate-unit distance, position, and rider frame. Rate/Profile
-regions produce curvature from `yL - pU`; Planar Arc regions use their analytic
+physics and diagnostics. Its distance, position, tangent, and curvature retain
+their geometric construction-reference meaning. It also carries local frame
+rates and the roll/pitch rate derivatives required to derive the authored rider
+reference `H=C+hU`. Rate/Profile regions produce curvature from `yL - pU`;
+Planar Arc regions use their analytic
 fixed-plane circular curvature. Authored bank rotates the rider frame without
 changing the Planar Arc curvature vector.
 
@@ -687,7 +693,9 @@ track. An internal shared section boundary is represented once and belongs to
 the following section for curvature; the final endpoint belongs to the final
 section. Position and frame stay continuous even when curvature jumps.
 
-`evaluateRiderLoads` consumes only canonical kinematics. Core coordinates stay
+`evaluateRiderLoads` consumes only canonical kinematics. It evaluates specific
+force at `H` while construction-reference gravity energy and station motion
+remain authoritative. Core coordinates stay
 unit-neutral, while `RiderLoadEvaluationSettings::metersPerCoordinateUnit`
 provides the explicit conversion to SI. The first speed model is point-mass,
 gravity-only energy propagation from one initial speed at track distance zero.
@@ -799,9 +807,10 @@ the current 0.75-unit viewport sample spacing and retains the resulting
 cumulative-distance, position, and frame states. The sample count therefore
 depends on the authored lengths and profile breakpoints rather than being a
 fixed fixture count. It derives four continuous line-list reference curves from
-those states: left rail, right rail, centerline, and heartline. The rail gauge
-and heartline offset are temporary visualization constants; these lines are not
-final rail meshes or authored track-style geometry.
+those states: left rail, right rail, construction reference, and authored
+heartline. Rail offsets come from resolved track style. The heartline comes from
+the persisted Coaster Setup value and uses the same `C+hU` convention as Core
+rider-load and Force-Based calculations; it is not a second rail mesh.
 
 The visualization also derives one `CenterlineSectionSlice` per authored region
 from cumulative section boundaries. Each slice records its range inside every

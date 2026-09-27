@@ -64,6 +64,12 @@ namespace quantum::coaster
             settings.initialSpeed, settings.metersPerCoordinateUnit,
             settings.gravityAcceleration};
         validateTrackPhysicalSettings(physicalSettings);
+        if (!std::isfinite(settings.riderReferenceOffsetMeters)
+            || settings.riderReferenceOffsetMeters < 0.0)
+        {
+            throw std::invalid_argument(
+                "Rider-reference offset must be finite and non-negative.");
+        }
 
         validateKinematics(kinematics);
 
@@ -72,6 +78,8 @@ namespace quantum::coaster
 
         const glm::dvec3 gravity{
             0.0, 0.0, -settings.gravityAcceleration};
+        const double riderOffset = settings.riderReferenceOffsetMeters
+            / settings.metersPerCoordinateUnit;
         for (const TrackKinematicState& kinematic : kinematics)
         {
             const detail::TrackEnergy energy = detail::trackEnergyAtPosition(
@@ -93,25 +101,52 @@ namespace quantum::coaster
                 speedSquared = 0.0;
             }
 
-            const double longitudinalAcceleration =
+            const double constructionLongitudinalAcceleration =
                 glm::dot(gravity, kinematic.frame.tangent);
-            const glm::dvec3 physicalCurvature =
-                kinematic.centerlineCurvature
-                / settings.metersPerCoordinateUnit;
+            const double rollRate = kinematic.localFrameRates.x;
+            const double pitchRate = kinematic.localFrameRates.y;
+            const double yawRate = kinematic.localFrameRates.z;
+            const double rollRateDerivative =
+                kinematic.rollRateDerivative;
+            const double pitchRateDerivative =
+                kinematic.pitchRateDerivative;
+
+            // H(s)=C(s)+hU(s), with s the construction-reference station.
+            // The derivatives retain roll-induced lateral motion and the
+            // centripetal acceleration of a rider away from the roll axis.
+            const glm::dvec3 riderPositionDerivative = riderOffset == 0.0
+                ? kinematic.frame.tangent
+                : (1.0 + riderOffset * pitchRate)
+                    * kinematic.frame.tangent
+                    - riderOffset * rollRate * kinematic.frame.lateral;
+            const glm::dvec3 riderPositionSecondDerivative = riderOffset == 0.0
+                ? kinematic.centerlineCurvature
+                : riderOffset * (pitchRateDerivative
+                        + rollRate * yawRate) * kinematic.frame.tangent
+                    + ((1.0 + riderOffset * pitchRate) * yawRate
+                        - riderOffset * rollRateDerivative)
+                        * kinematic.frame.lateral
+                    - ((1.0 + riderOffset * pitchRate) * pitchRate
+                        + riderOffset * rollRate * rollRate)
+                        * kinematic.frame.up;
             const glm::dvec3 acceleration =
-                longitudinalAcceleration * kinematic.frame.tangent
-                + speedSquared * physicalCurvature;
+                constructionLongitudinalAcceleration
+                    * riderPositionDerivative
+                + speedSquared * riderPositionSecondDerivative
+                    / settings.metersPerCoordinateUnit;
             const glm::dvec3 specificForce = acceleration - gravity;
 
             history.states.push_back(RiderLoadState{
                 kinematic.distance,
-                std::sqrt(speedSquared),
+                std::sqrt(speedSquared)
+                    * glm::length(riderPositionDerivative),
                 glm::dot(specificForce, kinematic.frame.up)
                     / standardGravityAcceleration,
                 glm::dot(specificForce, kinematic.frame.lateral)
                     / standardGravityAcceleration,
                 glm::dot(specificForce, kinematic.frame.tangent)
-                    / standardGravityAcceleration
+                    / standardGravityAcceleration,
+                riderReferencePosition(kinematic, riderOffset)
             });
         }
 

@@ -1364,6 +1364,9 @@ namespace quantum::coaster
                                 {
                                     return integrateForceDrivenRegion(position, frame, *force,
                                         section.length, track.physicalSettings(), track.startPose().position,
+                                        track.coasterSetup().heartline.enabled
+                                            ? track.coasterSetup().heartline.offsetMeters
+                                            : 0.0,
                                         integrationSpacing, forceSettings);
                                 }
                                 catch (const TrackGenerationError& error)

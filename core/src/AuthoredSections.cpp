@@ -171,6 +171,36 @@ namespace quantum::coaster
         );
     }
 
+    double evaluateChannelProfileDerivative(
+        const ChannelProfile& profile,
+        const double independentValue)
+    {
+        if (!std::isfinite(independentValue))
+        {
+            throw std::invalid_argument(
+                "The queried distance must be finite.");
+        }
+
+        for (std::size_t index = 0; index < profile.segments.size(); ++index)
+        {
+            const math::ScalarTransition& transition =
+                profile.segments[index].transition;
+            const bool ownsQuery = independentValue >= transition.domainBegin
+                && (independentValue < transition.domainEnd
+                    || (index + 1 == profile.segments.size()
+                        && independentValue == transition.domainEnd));
+            if (ownsQuery)
+            {
+                return math::evaluateScalarTransitionDerivative(
+                    transition, independentValue);
+            }
+        }
+
+        throw std::out_of_range(
+            "The queried distance lies outside the authored channel "
+            "profile domain.");
+    }
+
     void validateGeometricSection(
         const GeometricSection& section,
         const double sectionLength
