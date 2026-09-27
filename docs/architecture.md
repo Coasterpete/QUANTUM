@@ -550,8 +550,16 @@ the legacy defaults; malformed settings or ambiguous construction payloads
 are rejected. Older application builds with strict parsers cannot read the
 new fields; existing documents remain readable by this build.
 
-Editable force-target UI and endpoint/anchor inverse solving remain deferred.
-The Geometry Editor safely identifies force regions as read-only. A future
+Editable force-target UI ships as Geometry Authoring M0; see
+[geometry-force-driven-m0.md](geometry-force-driven-m0.md). A Force-Based region
+is selectable in the Append/Prepend/Insert flows, and its three authored
+channels are edited in the Geometry Editor with the same profile graph the
+Transition Editor uses. `TransitionEditorModel` names its three graph rows
+`ProfileChannel` because a row addresses a rider-local axis rather than always a
+rate; `sectionProfileChannel` resolves a row to the right authored channel for
+either authoring model, and `ProfileRowStyle` carries the label, display unit,
+and derived read-out. A planar arc owns scalar parameters, so it has no rows
+and resolves none. Endpoint/anchor inverse solving remains deferred. A future
 endpoint-constrained solver can vary authored targets/length/settings and call
 the result-based forward generator to measure endpoint residuals; no inverse
 solver or constraints are introduced here.
@@ -728,8 +736,9 @@ preference path; the Editor never writes it directly. See
 `EditorUi` owns one selected region index shared by the authored-track views.
 The Section List and viewport picking both update it through the same selection
 path. A Rate/Profile selection makes the Transition Editor operate on that
-region; a Geometry selection presents Planar Arc parameters or read-only Force
-Driven identification. The same selection chooses the section slice highlighted across
+region; a Geometry selection presents Planar Arc parameters in the Geometry
+Editor, or the Force-Driven target graph for a force-driven region. The same
+selection chooses the section slice highlighted across
 all visible viewport reference curves.
 
 Structural commits explicitly transform or replace the selected index so the
@@ -740,8 +749,10 @@ selection change does not regenerate track geometry.
 
 The Track Workspace Section List is therefore an active authored-document view,
 not a placeholder. It displays the ordered region kinds and lengths, exposes
-typed Rate/Profile and Planar Arc creation and conversion, and issues structural
-and length-edit intent. Core remains responsible for accepting the resulting
+typed Rate/Profile, Circular Arc, and Force-Based creation and conversion, and
+issues structural and length-edit intent. It also reports why the last authored
+edit was rejected, so an infeasible force target is visible in the Editor rather
+than only in the log. Core remains responsible for accepting the resulting
 document mutations.
 
 ### Transition Editor

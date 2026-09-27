@@ -18,7 +18,7 @@ namespace
     using quantum::editor::GraphMarkerId;
     using quantum::editor::GraphValueRange;
     using quantum::editor::MarkerHitCandidate;
-    using quantum::editor::RateChannel;
+    using quantum::editor::ProfileChannel;
     using quantum::editor::ScalarProfileEndpoint;
 
     class TestFailure final : public std::runtime_error
@@ -209,13 +209,13 @@ namespace
             (pitch.maximum - pitch.minimum) / 240.0, 1e-18,
             "drag sensitivity follows the active channel range");
 
-        requireNear(defaultGraphMagnitude(RateChannel::Roll),
+        requireNear(defaultGraphMagnitude(ProfileChannel::Roll),
             30.0 * radiansPerDegree, 0.0,
             "flat Roll view supports practical large-rate dragging");
-        requireNear(defaultGraphMagnitude(RateChannel::Pitch),
+        requireNear(defaultGraphMagnitude(ProfileChannel::Pitch),
             2.0 * radiansPerDegree, 0.0,
             "flat Pitch view keeps its independent engineering context");
-        requireNear(defaultGraphMagnitude(RateChannel::Yaw),
+        requireNear(defaultGraphMagnitude(ProfileChannel::Yaw),
             0.5 * radiansPerDegree, 0.0,
             "flat Yaw view keeps its independent engineering context");
     }
@@ -420,46 +420,46 @@ namespace
         using namespace quantum::editor;
 
         const std::array<MarkerHitCandidate, 3> candidates{{
-            {{RateChannel::Roll, 7, ScalarProfileEndpoint::End}, 1.0},
-            {{RateChannel::Pitch, 2, ScalarProfileEndpoint::End}, 16.0},
-            {{RateChannel::Yaw, 4, ScalarProfileEndpoint::Begin}, 4.0}
+            {{ProfileChannel::Roll, 7, ScalarProfileEndpoint::End}, 1.0},
+            {{ProfileChannel::Pitch, 2, ScalarProfileEndpoint::End}, 16.0},
+            {{ProfileChannel::Yaw, 4, ScalarProfileEndpoint::Begin}, 4.0}
         }};
         require(chooseMarkerHit(
-                candidates, 5.0, RateChannel::Pitch, std::nullopt)
+                candidates, 5.0, ProfileChannel::Pitch, std::nullopt)
                 == GraphMarkerId{
-                    RateChannel::Pitch, 2, ScalarProfileEndpoint::End},
+                    ProfileChannel::Pitch, 2, ScalarProfileEndpoint::End},
             "an eligible active-channel marker wins before nearer channels");
 
         const std::array<MarkerHitCandidate, 3> activeOutside{{
-            {{RateChannel::Roll, 7, ScalarProfileEndpoint::End}, 1.0},
-            {{RateChannel::Pitch, 2, ScalarProfileEndpoint::End}, 100.0},
-            {{RateChannel::Yaw, 4, ScalarProfileEndpoint::Begin}, 4.0}
+            {{ProfileChannel::Roll, 7, ScalarProfileEndpoint::End}, 1.0},
+            {{ProfileChannel::Pitch, 2, ScalarProfileEndpoint::End}, 100.0},
+            {{ProfileChannel::Yaw, 4, ScalarProfileEndpoint::Begin}, 4.0}
         }};
         const GraphMarkerId previous{
-            RateChannel::Yaw, 4, ScalarProfileEndpoint::Begin};
+            ProfileChannel::Yaw, 4, ScalarProfileEndpoint::Begin};
         require(chooseMarkerHit(
-                activeOutside, 5.0, RateChannel::Pitch, previous)
+                activeOutside, 5.0, ProfileChannel::Pitch, previous)
                 == previous,
             "the exact previous semantic hover wins when active is absent");
 
         const std::array<MarkerHitCandidate, 2> coincident{{
-            {{RateChannel::Pitch, 8, ScalarProfileEndpoint::End}, 0.0},
-            {{RateChannel::Yaw, 3, ScalarProfileEndpoint::End}, 0.0}
+            {{ProfileChannel::Pitch, 8, ScalarProfileEndpoint::End}, 0.0},
+            {{ProfileChannel::Yaw, 3, ScalarProfileEndpoint::End}, 0.0}
         }};
         require(chooseMarkerHit(
-                coincident, 10.0, RateChannel::Yaw, std::nullopt)
+                coincident, 10.0, ProfileChannel::Yaw, std::nullopt)
                 == GraphMarkerId{
-                    RateChannel::Yaw, 3, ScalarProfileEndpoint::End},
+                    ProfileChannel::Yaw, 3, ScalarProfileEndpoint::End},
             "active Yaw deterministically owns a coincident Pitch/Yaw marker");
 
         const std::array<MarkerHitCandidate, 2> stableTie{{
-            {{RateChannel::Yaw, 9, ScalarProfileEndpoint::End}, 1.0},
-            {{RateChannel::Roll, 12, ScalarProfileEndpoint::Begin}, 1.0}
+            {{ProfileChannel::Yaw, 9, ScalarProfileEndpoint::End}, 1.0},
+            {{ProfileChannel::Roll, 12, ScalarProfileEndpoint::Begin}, 1.0}
         }};
         require(chooseMarkerHit(
-                stableTie, 10.0, RateChannel::Pitch, std::nullopt)
+                stableTie, 10.0, ProfileChannel::Pitch, std::nullopt)
                 == GraphMarkerId{
-                    RateChannel::Roll, 12, ScalarProfileEndpoint::Begin},
+                    ProfileChannel::Roll, 12, ScalarProfileEndpoint::Begin},
             "semantic identity, not candidate or render order, breaks ties");
     }
 
@@ -558,54 +558,54 @@ namespace
         using namespace quantum::editor;
 
         const std::array<CurveHitCandidate, 3> crossing{{
-            {RateChannel::Roll, 4.0},
-            {RateChannel::Pitch, 9.0},
-            {RateChannel::Yaw, 1.0}
+            {ProfileChannel::Roll, 4.0},
+            {ProfileChannel::Pitch, 9.0},
+            {ProfileChannel::Yaw, 1.0}
         }};
 
         require(chooseCurveHit(
-                crossing, 5.0, RateChannel::Pitch, std::nullopt)
-                == RateChannel::Pitch,
+                crossing, 5.0, ProfileChannel::Pitch, std::nullopt)
+                == ProfileChannel::Pitch,
             "active curve wins within the hit radius");
         require(chooseCurveHit(
-                crossing, 5.0, RateChannel::Pitch, RateChannel::Roll)
-                == RateChannel::Pitch,
+                crossing, 5.0, ProfileChannel::Pitch, ProfileChannel::Roll)
+                == ProfileChannel::Pitch,
             "active priority precedes previous hover");
 
         const std::array<CurveHitCandidate, 3> activeOutside{{
-            {RateChannel::Roll, 4.0},
-            {RateChannel::Pitch, 100.0},
-            {RateChannel::Yaw, 1.0}
+            {ProfileChannel::Roll, 4.0},
+            {ProfileChannel::Pitch, 100.0},
+            {ProfileChannel::Yaw, 1.0}
         }};
         require(chooseCurveHit(
-                activeOutside, 5.0, RateChannel::Pitch, RateChannel::Roll)
-                == RateChannel::Roll,
+                activeOutside, 5.0, ProfileChannel::Pitch, ProfileChannel::Roll)
+                == ProfileChannel::Roll,
             "previous hover wins when the active curve is not eligible");
         require(chooseCurveHit(
-                activeOutside, 5.0, RateChannel::Pitch, std::nullopt)
-                == RateChannel::Yaw,
+                activeOutside, 5.0, ProfileChannel::Pitch, std::nullopt)
+                == ProfileChannel::Yaw,
             "nearest eligible curve wins without priority state");
 
         const std::array<CurveHitCandidate, 2> exactTie{{
-            {RateChannel::Yaw, 1.0},
-            {RateChannel::Roll, 1.0}
+            {ProfileChannel::Yaw, 1.0},
+            {ProfileChannel::Roll, 1.0}
         }};
         require(chooseCurveHit(
-                exactTie, 5.0, RateChannel::Pitch, std::nullopt)
-                == RateChannel::Roll,
+                exactTie, 5.0, ProfileChannel::Pitch, std::nullopt)
+                == ProfileChannel::Roll,
             "stable channel order breaks exact ties, not render order");
 
         const std::array<CurveHitCandidate, 2> coincidentZero{{
-            {RateChannel::Pitch, 0.0},
-            {RateChannel::Yaw, 0.0}
+            {ProfileChannel::Pitch, 0.0},
+            {ProfileChannel::Yaw, 0.0}
         }};
         require(chooseCurveHit(
-                coincidentZero, 5.0, RateChannel::Pitch, std::nullopt)
-                == RateChannel::Pitch,
+                coincidentZero, 5.0, ProfileChannel::Pitch, std::nullopt)
+                == ProfileChannel::Pitch,
             "active Pitch owns a coincident zero Pitch/Yaw hit");
         require(chooseCurveHit(
-                coincidentZero, 5.0, RateChannel::Yaw, std::nullopt)
-                == RateChannel::Yaw,
+                coincidentZero, 5.0, ProfileChannel::Yaw, std::nullopt)
+                == ProfileChannel::Yaw,
             "active Yaw owns a coincident zero Pitch/Yaw hit");
 
         requireNear(squaredDistanceToLineSegment(
@@ -629,11 +629,11 @@ namespace
         );
         range = scaleGraphRange(range, 0.8);
         range = scaleGraphRange(range, 1.25);
-        RateChannel activeChannel = RateChannel::Pitch;
-        activeChannel = RateChannel::Yaw;
+        ProfileChannel activeChannel = ProfileChannel::Pitch;
+        activeChannel = ProfileChannel::Yaw;
         const std::array<CurveHitCandidate, 2> candidates{{
-            {RateChannel::Pitch, 0.0},
-            {RateChannel::Yaw, 0.0}
+            {ProfileChannel::Pitch, 0.0},
+            {ProfileChannel::Yaw, 0.0}
         }};
         static_cast<void>(chooseCurveHit(
             candidates,
@@ -646,7 +646,7 @@ namespace
                 track.section(0).rateProfileRegion().rateProfiles.pitch
             );
         const std::array<MarkerHitCandidate, 1> markerCandidates{{
-            {{RateChannel::Pitch,
+            {{ProfileChannel::Pitch,
                 markers.front().segmentId,
                 markers.front().endpoint},
              0.0}
@@ -654,7 +654,7 @@ namespace
         static_cast<void>(chooseMarkerHit(
             markerCandidates,
             10.0,
-            RateChannel::Pitch,
+            ProfileChannel::Pitch,
             std::nullopt
         ));
 

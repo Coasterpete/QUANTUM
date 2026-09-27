@@ -218,6 +218,129 @@ namespace
 
 namespace quantum::engine
 {
+    namespace
+    {
+        // Composes the user-facing summary of a rejected authored edit. Every
+        // field Core reported is kept, so an infeasible force-driven section
+        // states its reason and where it happened instead of a generic
+        // failure. Distances are whole-track coordinate units.
+        [[nodiscard]] std::string describeTrackGenerationFailure(
+            const quantum::coaster::TrackGenerationFailure& failure)
+        {            std::string description =
+                quantum::coaster::trackGenerationFailureReasonToString(
+                    failure.reason);
+            description += ": ";
+            description += failure.message;
+            if (failure.sectionIndex.has_value())
+            {
+                description += " (region "
+                    + std::to_string(*failure.sectionIndex) + ")";
+            }
+            if (failure.localDistance.has_value())
+            {
+                char distance[48]{};
+                std::snprintf(
+                    distance, sizeof(distance), "%.4g", *failure.localDistance);
+                description += " at ";
+                description += distance;
+                description += " into the region";
+            }
+            if (failure.cumulativeDistance.has_value())
+            {
+                char station[48]{};
+                std::snprintf(
+                    station, sizeof(station), "%.4g", *failure.cumulativeDistance);
+                description += " (track station ";
+                description += station;
+                description += ")";
+            }
+            if (failure.speedSquared.has_value())
+            {
+                char speed[48]{};
+                std::snprintf(
+                    speed, sizeof(speed), "%.6g", *failure.speedSquared);
+                description += "; speed squared ";
+                description += speed;
+                description += " m^2/s^2";
+            }
+            return description;
+        }
+
+        // The scripted force-driven authoring sequence, in the order a user
+        // performs it. Developer smoke only; it injects editor intents and
+        // lets the ordinary pipeline do the work.
+        enum class ForceDrivenAuthoringStep
+        {
+            CreateRegion,
+            EditNormalG,
+            EditLateralG,
+            EditRollRate,
+            ChangeShape,
+            SplitSegment,
+            MoveBoundary,
+            RejectTarget,
+            Undo,
+            Redo,
+            Done
+        };
+
+        [[nodiscard]] ForceDrivenAuthoringStep nextForceDrivenStep(
+            const ForceDrivenAuthoringStep step) noexcept
+        {
+            switch (step)
+            {
+            case ForceDrivenAuthoringStep::CreateRegion:
+                return ForceDrivenAuthoringStep::EditNormalG;
+            case ForceDrivenAuthoringStep::EditNormalG:
+                return ForceDrivenAuthoringStep::EditLateralG;
+            case ForceDrivenAuthoringStep::EditLateralG:
+                return ForceDrivenAuthoringStep::EditRollRate;
+            case ForceDrivenAuthoringStep::EditRollRate:
+                return ForceDrivenAuthoringStep::ChangeShape;
+            case ForceDrivenAuthoringStep::ChangeShape:
+                return ForceDrivenAuthoringStep::SplitSegment;
+            case ForceDrivenAuthoringStep::SplitSegment:
+                return ForceDrivenAuthoringStep::MoveBoundary;
+            case ForceDrivenAuthoringStep::MoveBoundary:
+                return ForceDrivenAuthoringStep::RejectTarget;
+            case ForceDrivenAuthoringStep::RejectTarget:
+                return ForceDrivenAuthoringStep::Undo;
+            case ForceDrivenAuthoringStep::Undo:
+                return ForceDrivenAuthoringStep::Redo;
+            case ForceDrivenAuthoringStep::Redo:
+            case ForceDrivenAuthoringStep::Done:
+                return ForceDrivenAuthoringStep::Done;
+            }
+            return ForceDrivenAuthoringStep::Done;
+        }
+
+        [[nodiscard]] std::optional<std::size_t> findForceDrivenRegion(
+            const quantum::coaster::AuthoredTrack& track) noexcept
+        {
+            for (std::size_t index = 0; index < track.sectionCount(); ++index)
+            {
+                if (quantum::coaster::isForceDrivenSection(track.section(index)))
+                {
+                    return index;
+                }
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] quantum::coaster::ChannelProfile* forceDrivenChannel(
+            quantum::coaster::AuthoredTrack& track,
+            const quantum::editor::ProfileChannel channel) noexcept
+        {
+            const auto target = findForceDrivenRegion(track);
+            if (!target.has_value())
+            {
+                return nullptr;
+            }
+            return &quantum::editor::sectionProfileChannel(
+                track.section(*target), channel);
+        }
+    }
+
     int Application::run()
     {
         return runImpl(nullptr);
@@ -395,7 +518,7 @@ namespace quantum::engine
                 gpuContext.emplace(vulkan);
                 if (!gpuContext->gpuAvailable())
                 {
-                    quantum::logging::logMessage(quantum::logging::LogLevel::Info, "SIM", "GPU batched sampling not available – CPU fallback");
+                    quantum::logging::logMessage(quantum::logging::LogLevel::Info, "SIM", "GPU batched sampling not available â€“ CPU fallback");
                 }
 
                 quantum::editor::EditorUi editorUi;
@@ -865,6 +988,15 @@ editorUi.selectSection(restoredSelection, true);
                 std::uint64_t renderedFrameId = 0;
                 std::size_t previewModeCycleActionCount = 0;
                 bool previewRegionStyleEditApplied = false;
+                // One frame per scripted force-driven authoring step, so each
+                // intent is queued and then processed by the same pipeline a
+                // user's click would take.
+                ForceDrivenAuthoringStep previewForceDrivenStep =
+                    ForceDrivenAuthoringStep::CreateRegion;
+                bool previewForceDrivenInjected = false;
+                std::string previewForceDrivenSnapshot;
+                double previewForceDrivenFirstDomainEnd = 0.0;
+                double previewForceDrivenSegmentCount = 0.0;
 
                 while (running)
                 {
@@ -982,8 +1114,27 @@ editorUi.selectSection(restoredSelection, true);
                         quantum::editor::FrameBlockingEvents
                             applicationBlockingEvents;
 
-                        const auto pendingHistoryOperation =
+                        auto pendingHistoryOperation =
                             editorUi.takePendingHistoryOperation();
+
+                        // Undo and Redo of the scripted authoring sequence are
+                        // requested exactly as the toolbar buttons request
+                        // them; the ordinary history restore path runs below.
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->forceDrivenAuthoring
+                            && renderedFrameId >= 60
+                            && (previewForceDrivenStep
+                                    == ForceDrivenAuthoringStep::Undo
+                                || previewForceDrivenStep
+                                    == ForceDrivenAuthoringStep::Redo))
+                        {
+                            pendingHistoryOperation =
+                                previewForceDrivenStep
+                                        == ForceDrivenAuthoringStep::Undo
+                                    ? quantum::editor::HistoryOperationType::Undo
+                                    : quantum::editor::HistoryOperationType::Redo;
+                        }
+
                         if (pendingHistoryOperation.has_value())
                         {
                             using quantum::editor::HistoryOperationType;
@@ -1386,7 +1537,7 @@ editorUi.selectSection(restoredSelection, true);
                             editorUi.takeTrackCommand();
                         const auto requestedLengthEdit =
                             editorUi.takeSectionLengthEdit();
-                        const auto requestedRegionCommand =
+                        auto requestedRegionCommand =
                             editorUi.takeRegionCommand();
                         auto requestedRegionStyleEdit =
                             editorUi.takeRegionTrackStyleEdit();
@@ -1451,16 +1602,340 @@ editorUi.selectSection(restoredSelection, true);
                                     .continuous = renderedFrameId < 89,
                                     .sectionIndex = 4,
                                     .channel = quantum::editor::
-                                        RateChannel::Pitch,
+                                        ProfileChannel::Pitch,
                                     .segmentId = 1
                             };
                         }
-                        const auto requestedTransitionType =
+                        auto requestedTransitionType =
                             editorUi.takeProfileTransitionTypeEdit();
-                        const auto requestedSegmentCommand =
+                        auto requestedSegmentCommand =
                             editorUi.takeProfileSegmentCommand();
-                        const auto requestedDistanceEdit =
+                        auto requestedDistanceEdit =
                             editorUi.takeProfileSegmentDistanceEdit();
+
+                        // Scripted force-driven authoring. Each step injects
+                        // the intent the Geometry Editor emits for one user
+                        // action, so the ordinary transaction, regeneration,
+                        // history, and error paths run unchanged. The previous
+                        // step's committed outcome is checked before the next
+                        // intent is queued.
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->forceDrivenAuthoring
+                            && renderedFrameId >= 60
+                            && previewForceDrivenStep
+                                != ForceDrivenAuthoringStep::Done)
+                        {
+                            // A step is verified on the frame after it was
+                            // injected, because that is when the transaction,
+                            // regeneration, and history paths have run.
+                            const bool verify = previewForceDrivenInjected;
+                            const auto target = findForceDrivenRegion(
+                                authoredTrack);
+                            if (!target.has_value())
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage =
+                                    "force-driven authoring smoke: the "
+                                    "document has no Force-Based region.";
+                            }
+                            else
+                            {
+                                const std::string committed =
+                                    quantum::coaster::serializeCoasterDocument(
+                                        authoredTrack);
+                                auto* const normal = forceDrivenChannel(
+                                    authoredTrack,
+                                    quantum::editor::ProfileChannel::Pitch);
+                                auto* const lateral = forceDrivenChannel(
+                                    authoredTrack,
+                                    quantum::editor::ProfileChannel::Yaw);
+                                auto* const roll = forceDrivenChannel(
+                                    authoredTrack,
+                                    quantum::editor::ProfileChannel::Roll);
+                                // The scripted edits address the region's first
+                                // segment, which is what a click on its first
+                                // marker produces. Distances are fractions of
+                                // that segment's domain as it was before the
+                                // sequence split it, so the sequence works on
+                                // any authored region shape.
+                                const double segmentCount =
+                                    normal != nullptr
+                                        ? static_cast<double>(
+                                            normal->segments.size())
+                                        : 0.0;
+                                const auto note = [this]
+                                    (const std::string& message)
+                                {
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "SMOKE",
+                                        "force-driven authoring: %s",
+                                        message.c_str());
+                                };
+                                const auto fail =
+                                    [&previewSmokeFailure,
+                                        &previewSmokeFailureMessage,
+                                        &note](
+                                        const std::string& message)
+                                {
+                                    note(message);
+                                    previewSmokeFailure = true;
+                                    previewSmokeFailureMessage =
+                                        "force-driven authoring: " + message;
+                                };
+                                const auto commitChanged =
+                                    [committed,
+                                        &previewForceDrivenSnapshot]()
+                                {
+                                    if (committed
+                                        == previewForceDrivenSnapshot)
+                                    {
+                                        return false;
+                                    }
+                                    previewForceDrivenSnapshot = committed;
+                                    return true;
+                                };
+                                const auto endpointEdit =
+                                    [target](
+                                        const double value,
+                                        const quantum::editor::ProfileChannel
+                                            channel)
+                                    -> std::optional<
+                                        quantum::editor::
+                                            ScalarProfileEndpointValueEdit>
+                                {
+                                    return quantum::editor::
+                                        ScalarProfileEndpointValueEdit{
+                                            .endpoint =
+                                                quantum::editor::
+                                                    ScalarProfileEndpoint::End,
+                                            .value = value,
+                                            .continuous = false,
+                                            .sectionIndex = *target,
+                                            .channel = channel,
+                                            .segmentId = 1
+                                    };
+                                };
+
+                                switch (verify
+                                    ? previewForceDrivenStep
+                                    : ForceDrivenAuthoringStep::Done)
+                                {
+                                case ForceDrivenAuthoringStep::CreateRegion:
+                                    if (authoredTrack.sectionCount() != 4
+                                        || !quantum::coaster::
+                                            isForceDrivenSection(
+                                                authoredTrack.section(
+                                                    authoredTrack
+                                                        .sectionCount() - 1))
+                                        || editorUi.selectedSection()
+                                            != authoredTrack.sectionCount() - 1)
+                                    {
+                                        fail("creating a Force-Based region "
+                                             "did not produce a selected, "
+                                             "valid region");
+                                    }
+                                    previewForceDrivenSnapshot = committed;
+                                    break;
+                                case ForceDrivenAuthoringStep::EditNormalG:
+                                    if (normal == nullptr
+                                        || std::abs(normal->segments.front()
+                                            .transition.valueEnd - 1.4)
+                                            > 1.0e-12
+                                        || !commitChanged())
+                                    {
+                                        fail("the Normal G target did not "
+                                             "commit");
+                                    }
+                                    // Remember the un-split domain the later
+                                    // split and boundary move work within.
+                                    previewForceDrivenFirstDomainEnd =
+                                        normal->segments.front()
+                                            .transition.domainEnd;
+                                    previewForceDrivenSegmentCount =
+                                        segmentCount;
+                                    break;
+                                case ForceDrivenAuthoringStep::EditLateralG:
+                                    if (lateral == nullptr
+                                        || std::abs(lateral->segments.front()
+                                            .transition.valueEnd - 0.35)
+                                            > 1.0e-12
+                                        || !commitChanged())
+                                    {
+                                        fail("the Lateral G target did not "
+                                             "commit");
+                                    }
+                                    break;
+                                case ForceDrivenAuthoringStep::EditRollRate:
+                                    if (roll == nullptr
+                                        || std::abs(roll->segments.front()
+                                            .transition.valueEnd - 0.04)
+                                            > 1.0e-12
+                                        || !commitChanged())
+                                    {
+                                        fail("the Roll Rate target did not "
+                                             "commit");
+                                    }
+                                    break;
+                                case ForceDrivenAuthoringStep::ChangeShape:
+                                {
+                                    const auto* const transition =
+                                        normal != nullptr
+                                        ? quantum::coaster::
+                                            findChannelSegmentTransition(
+                                                *normal,
+                                                normal->segments.front().id)
+                                        : nullptr;
+                                    if (transition == nullptr
+                                        || transition->transitionType
+                                            != quantum::math::TransitionType::
+                                                Smootherstep
+                                        || !commitChanged())
+                                    {
+                                        fail("the transition shape did not "
+                                             "commit");
+                                    }
+                                    break;
+                                }
+                                case ForceDrivenAuthoringStep::SplitSegment:
+                                    if (normal == nullptr
+                                        || segmentCount
+                                            != previewForceDrivenSegmentCount
+                                                + 1.0
+                                        || !commitChanged())
+                                    {
+                                        fail("splitting a target segment did "
+                                             "not commit");
+                                    }
+                                    break;
+                                case ForceDrivenAuthoringStep::MoveBoundary:
+                                    if (normal == nullptr
+                                        || std::abs(normal->segments.front()
+                                            .transition.domainEnd
+                                            - 0.25
+                                                * previewForceDrivenFirstDomainEnd)
+                                            > 1.0e-9
+                                        || !commitChanged())
+                                    {
+                                        fail("moving a segment boundary did "
+                                             "not commit");
+                                    }
+                                    break;
+                                case ForceDrivenAuthoringStep::RejectTarget:
+                                    // An infeasible target must be refused and
+                                    // must leave the committed document alone.
+                                    if (committed
+                                        != previewForceDrivenSnapshot)
+                                    {
+                                        fail("a rejected target changed the "
+                                             "committed document");
+                                    }
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "SMOKE",
+                                        "force-driven authoring: infeasible "
+                                        "target rejected, committed region "
+                                        "unchanged");
+                                    break;
+                                case ForceDrivenAuthoringStep::Undo:
+                                case ForceDrivenAuthoringStep::Redo:
+                                    if (committed
+                                        == previewForceDrivenSnapshot)
+                                    {
+                                        fail(previewForceDrivenStep
+                                                == ForceDrivenAuthoringStep::Undo
+                                            ? "undo did not restore the "
+                                              "previous state"
+                                            : "redo did not restore the "
+                                              "edited state");
+                                    }
+                                    previewForceDrivenSnapshot = committed;
+                                    break;
+                                case ForceDrivenAuthoringStep::Done:
+                                    break;
+                                }
+
+                                if (verify)
+                                {
+                                    previewForceDrivenStep =
+                                        nextForceDrivenStep(
+                                            previewForceDrivenStep);
+                                }
+
+                                // Queue the next scripted intent.
+                                switch (previewForceDrivenStep)
+                                {
+                                case ForceDrivenAuthoringStep::CreateRegion:
+                                    requestedRegionCommand =
+                                        quantum::editor::RegionCommand{
+                                            quantum::editor::
+                                                RegionCommandType::
+                                                    AppendForceDriven,
+                                            0, 0.0};
+                                    break;
+                                case ForceDrivenAuthoringStep::EditNormalG:
+                                    requestedValueEdit = endpointEdit(
+                                        1.4, quantum::editor::ProfileChannel::Pitch);
+                                    break;
+                                case ForceDrivenAuthoringStep::EditLateralG:
+                                    requestedValueEdit = endpointEdit(
+                                        0.35, quantum::editor::ProfileChannel::Yaw);
+                                    break;
+                                case ForceDrivenAuthoringStep::EditRollRate:
+                                    requestedValueEdit = endpointEdit(
+                                        0.04, quantum::editor::ProfileChannel::Roll);
+                                    break;
+                                case ForceDrivenAuthoringStep::ChangeShape:
+                                    requestedTransitionType =
+                                        quantum::editor::
+                                            ProfileTransitionTypeEdit{
+                                                .type = quantum::math::
+                                                    TransitionType::Smootherstep,
+                                                .sectionIndex = *target,
+                                                .channel = quantum::editor::
+                                                    ProfileChannel::Pitch,
+                                                .segmentId = 1};
+                                    break;
+                                case ForceDrivenAuthoringStep::SplitSegment:
+                                    requestedSegmentCommand =
+                                        quantum::editor::ProfileSegmentCommand{
+                                            .operation = quantum::editor::
+                                                ProfileSegmentOperation::Split,
+                                            .sectionIndex = *target,
+                                            .channel = quantum::editor::
+                                                ProfileChannel::Pitch,
+                                            .segmentId = 1,
+                                            .splitDistance = 0.5
+                                                * previewForceDrivenFirstDomainEnd};
+                                    break;
+                                case ForceDrivenAuthoringStep::MoveBoundary:
+                                    requestedDistanceEdit =
+                                        quantum::editor::
+                                            ProfileSegmentDistanceEdit{
+                                                .sectionIndex = *target,
+                                                .channel = quantum::editor::
+                                                    ProfileChannel::Pitch,
+                                                .segmentId = 1,
+                                                .endpoint = quantum::editor::
+                                                    ScalarProfileEndpoint::End,
+                                                .distance = 0.25
+                                                    * previewForceDrivenFirstDomainEnd};
+                                    break;
+                                case ForceDrivenAuthoringStep::RejectTarget:
+                                    // A normal G target far beyond what the
+                                    // entry speed can support.
+                                    requestedValueEdit = endpointEdit(
+                                        1.0e9, quantum::editor::ProfileChannel::Pitch);
+                                    break;
+                                case ForceDrivenAuthoringStep::Undo:
+                                case ForceDrivenAuthoringStep::Redo:
+                                case ForceDrivenAuthoringStep::Done:
+                                    break;
+                                }
+
+                                previewForceDrivenInjected = true;
+                            }
+                        }
                         const auto requestedStartPoseEdit =
                             editorUi.takeStartPoseEdit();
                         const auto requestedHardwareEdit =
@@ -2309,6 +2784,31 @@ editorUi.selectSection(restoredSelection, true);
                                     editTransaction.stageSelectionAfterCommit(
                                         0);
                                     break;
+                                case RegionCommandType::AppendForceDriven:
+                                    // Same safe defaults as typed
+                                    // append/prepend; the conversion owns the
+                                    // force-driven default target profiles.
+                                    candidateTrack.appendSection();
+                                    quantum::coaster::
+                                        convertSectionToForceDriven(
+                                            candidateTrack.section(
+                                                candidateTrack
+                                                    .sectionCount()
+                                                - 1)
+                                        );
+                                    editTransaction.stageSelectionAfterCommit(
+                                        candidateTrack.sectionCount() - 1
+                                    );
+                                    break;
+                                case RegionCommandType::PrependForceDriven:
+                                    candidateTrack.prependSection();
+                                    quantum::coaster::
+                                        convertSectionToForceDriven(
+                                            candidateTrack.section(0)
+                                        );
+                                    editTransaction.stageSelectionAfterCommit(
+                                        0);
+                                    break;
                                 case RegionCommandType::
                                     InsertAfterRateProfiles:
                                     candidateTrack.insertSectionAfter(
@@ -2344,6 +2844,28 @@ editorUi.selectSection(restoredSelection, true);
                                             insertedArc
                                         );
                                     }
+                                    editTransaction.stageSelectionAfterCommit(
+                                        command.sectionIndex + 1);
+                                    break;
+                                case RegionCommandType::
+                                    InsertAfterForceDriven:
+                                {
+                                    quantum::coaster::AuthoredTrackSection
+                                        insertedForce =
+                                            quantum::coaster::
+                                                createRateProfileSection(
+                                                    quantum::coaster::
+                                                        defaultNewSectionLength
+                                                );
+                                    quantum::coaster::
+                                        convertSectionToForceDriven(
+                                            insertedForce
+                                        );
+                                    candidateTrack.insertSectionAfter(
+                                        command.sectionIndex,
+                                        insertedForce
+                                    );
+                                }
                                     editTransaction.stageSelectionAfterCommit(
                                         command.sectionIndex + 1);
                                     break;
@@ -2477,7 +2999,7 @@ editorUi.selectSection(restoredSelection, true);
                                     // The Core operation propagates shared
                                     // joint values so C0 continuity holds.
                                     quantum::coaster::setChannelSegmentValue(
-                                        quantum::editor::sectionRateChannel(
+                                        quantum::editor::sectionProfileChannel(
                                             candidateTrack.section(
                                                 requestedValueEdit
                                                     ->sectionIndex),
@@ -2526,7 +3048,7 @@ editorUi.selectSection(restoredSelection, true);
                                     quantum::coaster::
                                         moveChannelSegmentBoundary(
                                             quantum::editor::
-                                                sectionRateChannel(
+                                                sectionProfileChannel(
                                                     candidateTrack.section(
                                                         requestedDistanceEdit
                                                             ->sectionIndex),
@@ -2547,7 +3069,7 @@ editorUi.selectSection(restoredSelection, true);
                                         *requestedSegmentCommand;
                                     quantum::coaster::ChannelProfile&
                                         channelProfile =
-                                        quantum::editor::sectionRateChannel(
+                                        quantum::editor::sectionProfileChannel(
                                             candidateTrack.section(
                                                 command.sectionIndex),
                                             command.channel
@@ -2583,7 +3105,7 @@ editorUi.selectSection(restoredSelection, true);
                                 if (requestedTransitionType.has_value())
                                 {
                                     auto& candidateChannel =
-                                        quantum::editor::sectionRateChannel(
+                                        quantum::editor::sectionProfileChannel(
                                             candidateTrack.section(
                                                 requestedTransitionType
                                                     ->sectionIndex),
@@ -2772,6 +3294,10 @@ editorUi.selectSection(restoredSelection, true);
                                 editorUi.setRiderLoadHistory(
                                     std::move(candidateRiderLoads)
                                 );
+                                // The candidate became the committed
+                                // document, so any earlier rejection notice
+                                // no longer describes the current state.
+                                editorUi.setGeometryEditError({});
                                 synchronizeDirtyState();
                                 fullEditTelemetry = telemetry;
                                 }
@@ -2888,7 +3414,16 @@ editorUi.selectSection(restoredSelection, true);
                                                 PrependPlanarArc
                                         || command.type ==
                                             RegionCommandType::
-                                                InsertAfterPlanarArc;
+                                                InsertAfterPlanarArc
+                                        || command.type ==
+                                            RegionCommandType::
+                                                AppendForceDriven
+                                        || command.type ==
+                                            RegionCommandType::
+                                                PrependForceDriven
+                                        || command.type ==
+                                            RegionCommandType::
+                                                InsertAfterForceDriven;
 
                                     if (isCreate)
                                     {
@@ -2902,14 +3437,20 @@ editorUi.selectSection(restoredSelection, true);
                                                     PrependRateProfiles
                                             || command.type ==
                                                 RegionCommandType::
-                                                    PrependPlanarArc;
+                                                    PrependPlanarArc
+                                            || command.type ==
+                                                RegionCommandType::
+                                                    PrependForceDriven;
                                         const bool insertedAfter =
                                             command.type ==
                                                 RegionCommandType::
                                                     InsertAfterRateProfiles
                                             || command.type ==
                                                 RegionCommandType::
-                                                    InsertAfterPlanarArc;
+                                                    InsertAfterPlanarArc
+                                            || command.type ==
+                                                RegionCommandType::
+                                                    InsertAfterForceDriven;
                                         const std::size_t createdIndex =
                                             insertedAfter
                                                 ? command.sectionIndex + 1
@@ -2917,21 +3458,24 @@ editorUi.selectSection(restoredSelection, true);
                                                     ? 0
                                                     : authoredTrack
                                                         .sectionCount()
-                                                    - 1;
+                                                        - 1;
                                         const char* verb =
                                             prepended ? "prepended"
                                             : insertedAfter ? "inserted"
                                                             : "appended";
+                                        const auto& created =
+                                            authoredTrack.section(
+                                                createdIndex);
 
                                         if (command.type ==
-                                            RegionCommandType::
-                                                AppendRateProfiles
+                                                RegionCommandType::
+                                                    AppendRateProfiles
                                             || command.type ==
-                                            RegionCommandType::
-                                                PrependRateProfiles
+                                                RegionCommandType::
+                                                    PrependRateProfiles
                                             || command.type ==
-                                            RegionCommandType::
-                                                InsertAfterRateProfiles)
+                                                RegionCommandType::
+                                                    InsertAfterRateProfiles)
                                         {
                                             quantum::logging::logMessagef(
                                                 quantum::logging::LogLevel::Info,
@@ -2942,6 +3486,38 @@ editorUi.selectSection(restoredSelection, true);
                                                 createdIndex
                                             );
                                         }
+                                        else if (quantum::coaster::
+                                            isForceDrivenSection(created))
+                                        {
+                                            const auto& force =
+                                                std::get<quantum::coaster::
+                                                    ForceDrivenRegion>(
+                                                    std::get<quantum::
+                                                        coaster::
+                                                            GeometryRegion>(
+                                                            created.region)
+                                                        .construction);
+                                            quantum::logging::logMessagef(
+                                                quantum::logging::LogLevel::Info,
+                                                "EDIT",
+                                                "%s region=%zu "
+                                                "kind=forceDriven length=%.6f "
+                                                "normalGEnd=%.6f "
+                                                "lateralGEnd=%.6f "
+                                                "rollRateEnd=%.6f",
+                                                verb,
+                                                createdIndex,
+                                                created.length,
+                                                force.targetNormalG.segments
+                                                    .back()
+                                                    .transition.valueEnd,
+                                                force.targetLateralG.segments
+                                                    .back()
+                                                    .transition.valueEnd,
+                                                force.rollRate.segments.back()
+                                                    .transition.valueEnd
+                                            );
+                                        }
                                         else
                                         {
                                             const auto& arc =
@@ -2950,11 +3526,8 @@ editorUi.selectSection(restoredSelection, true);
                                                     std::get<quantum::
                                                         coaster::
                                                             GeometryRegion>(
-                                                        authoredTrack
-                                                            .section(
-                                                                createdIndex)
-                                                            .region)
-                                                    .construction);
+                                                            created.region)
+                                                        .construction);
                                             quantum::logging::logMessagef(
                                                 quantum::logging::LogLevel::Info,
                                                 "EDIT",
@@ -3039,6 +3612,35 @@ editorUi.selectSection(restoredSelection, true);
                                 }
                             }
                         }
+                        catch (const quantum::coaster::TrackGenerationError&
+                            generationError)
+                        {
+                            // A force-driven region that cannot be generated
+                            // reports where and why. The reason and location
+                            // are forwarded verbatim so the editor never
+                            // substitutes a generic message for a real
+                            // infeasibility, and the last valid committed
+                            // state is kept.
+                            if (boundsApplied)
+                            {
+                                editorUi.setCenterlineBounds(
+                                    centerline.minimumPosition,
+                                    centerline.maximumPosition
+                                );
+                                editorUi.setCenterlineSections(
+                                    centerline.sectionSlices
+                                );
+                            }
+                            editorUi.setGeometryEditError(
+                                describeTrackGenerationFailure(
+                                    generationError.failure()));
+                            quantum::logging::logMessagef(
+                                quantum::logging::LogLevel::Warning,
+                                "EDIT",
+                                "Authored edit was rejected: %s",
+                                generationError.what()
+                            );
+                        }
                         catch (const std::exception& exception)
                         {
                             if (boundsApplied)
@@ -3051,6 +3653,8 @@ editorUi.selectSection(restoredSelection, true);
                                     centerline.sectionSlices
                                 );
                             }
+
+                            editorUi.setGeometryEditError(exception.what());
 
                             if (requestedStartPoseEdit.has_value())
                             {
@@ -3110,7 +3714,7 @@ editorUi.selectSection(restoredSelection, true);
                                 < authoredTrack.sectionCount())
                         {
                             auto& committedChannel =
-                                quantum::editor::sectionRateChannel(
+                                quantum::editor::sectionProfileChannel(
                                     authoredTrack.section(
                                         requestedValueEdit->sectionIndex),
                                     requestedValueEdit->channel

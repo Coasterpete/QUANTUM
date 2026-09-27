@@ -37,6 +37,14 @@ namespace quantum::editor
         bool msaaOff = false;
         bool environmentOff = false;
         bool transitionDrag = false;
+        // Drives the force-driven authoring workflow through the real editor
+        // command pipeline: creating a Force-Based region, editing its three
+        // target channels, changing a transition shape, splitting and moving a
+        // segment boundary, provoking an infeasible target, then undo/redo and
+        // a region-kind switch. Each step injects the same intent the Geometry
+        // Editor emits; the real transaction, regeneration, history, and error
+        // surfaces do the work.
+        bool forceDrivenAuthoring = false;
         bool resizeWindow = false;
         bool disableGpuPreviewSampling = false;
         bool enableGpuValidation = false;

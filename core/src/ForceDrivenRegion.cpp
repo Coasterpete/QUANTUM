@@ -18,6 +18,25 @@ namespace quantum::coaster
         return failure_;
     }
 
+    const char* trackGenerationFailureReasonToString(
+        const TrackGenerationFailureReason reason) noexcept
+    {
+        switch (reason)
+        {
+        case TrackGenerationFailureReason::InvalidInput:
+            return "invalid input";
+        case TrackGenerationFailureReason::EnergeticallyUnreachable:
+            return "energetically unreachable";
+        case TrackGenerationFailureReason::InsufficientSpeed:
+            return "insufficient speed";
+        case TrackGenerationFailureReason::NonfiniteDerivedRates:
+            return "nonfinite derived rates";
+        case TrackGenerationFailureReason::IntegrationFailure:
+            return "integration failure";
+        }
+        return "unknown failure";
+    }
+
     void validateForceDrivenRegion(const ForceDrivenRegion& region, const double length)
     {
         for (const ChannelProfile* channel :
