@@ -176,6 +176,22 @@ namespace
             "viewport settings use the product-facing shaded default");
     }
 
+    void neutralSceneDefaults()
+    {
+        const ViewportSettings settings;
+        require(settings.environmentAsset
+                == quantum::renderer::defaultEnvironmentAssetIdentifier,
+            "fresh Editor sessions use the explicit DaySky environment");
+        require(settings.groundSurface.enabled,
+            "fresh Editor sessions keep the physical ground enabled");
+        require(settings.groundSurface.albedoTexture.empty()
+                && settings.groundSurface.normalTexture.empty()
+                && settings.groundSurface.roughnessTexture.empty(),
+            "fresh Editor sessions use neutral built-in ground maps");
+        require(!settings.gridVisible,
+            "fresh Editor sessions hide the diagnostic reference grid");
+    }
+
     void translatedGrid()
     {
         using namespace quantum::renderer;
@@ -356,6 +372,7 @@ int main(int argc, char** argv)
         require(argc == 2, "pass the deployed editor asset directory");
         presetSurvivesSettings();
         trackPresentationState();
+        neutralSceneDefaults();
         translatedGrid();
         framingMatrix();
         actualReferenceCurvesFit();

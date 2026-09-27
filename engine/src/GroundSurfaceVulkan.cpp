@@ -32,6 +32,17 @@ namespace
         128, 128, 255, 255};
     constexpr std::array<std::uint8_t, 4> fallbackRoughnessTexel{
         255, 255, 255, 255};
+
+    quantum::renderer::GroundTextureImage fallbackGroundTextureImage(
+        const std::uint32_t slot,
+        const bool srgb)
+    {
+        const std::array<std::uint8_t, 4>& texel = slot == 1
+            ? fallbackNormalTexel
+            : (slot == 2 ? fallbackRoughnessTexel : fallbackAlbedoTexel);
+        return {1, 1, 1, srgb,
+            std::vector<std::uint8_t>(texel.begin(), texel.end())};
+    }
 }
 
 namespace quantum::renderer
@@ -469,8 +480,11 @@ namespace quantum::renderer
                 status.requestedIdentifier = identifiers[slot];
                 if (identifiers[slot].empty())
                 {
-                    // No custom map: the neutral 1x1 texel already published at
-                    // initialization stays bound.
+                    // A custom map may already be bound, so clearing the slot
+                    // must actively republish its neutral 1x1 fallback.
+                    replaceGroundTexture(slot,
+                        fallbackGroundTextureImage(slot, srgbSlots[slot]),
+                        formats[slot]);
                     groundTextureLoadStatuses_[slot] = std::move(status);
                     groundTextureIdentifiers_[slot] = {};
                     continue;
@@ -494,8 +508,7 @@ namespace quantum::renderer
                     status.usingFallback = true;
                     status.detail = error.what();
                     replaceGroundTexture(slot,
-                        GroundTextureImage{1, 1, 1, srgbSlots[slot],
-                            {255, 255, 255, 255}},
+                        fallbackGroundTextureImage(slot, srgbSlots[slot]),
                         formats[slot]);
                 }
                 std::string detail;

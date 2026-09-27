@@ -5,6 +5,7 @@
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
+#include <quantum/editor/SimulationPreview.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 
@@ -99,6 +100,21 @@ namespace quantum::editor
             ui.setCenterlineVisualization(loaded.centerline);
             ui.setSupportVisualization(loaded.supports);
             ui.setRiderLoadHistory(loaded.loads);
+
+            // The capture runner owns the same preview status publication as
+            // Application. Without it, otherwise valid capture documents show
+            // a misleading generic "PREVIEW Unavailable" overlay.
+            SimulationPreview preview;
+            if (preview.rebuild(loaded.track))
+            {
+                ui.setSimulationStatus(
+                    SimulationPlaybackState::Stopped,
+                    preview.speedMetersPerSecond());
+            }
+            else
+            {
+                ui.setSimulationUnavailable(preview.error());
+            }
 
             int stableFrames = 0;
             auto generation = vulkan.swapchainGeneration();
