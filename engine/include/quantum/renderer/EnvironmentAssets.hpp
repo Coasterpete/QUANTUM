@@ -39,6 +39,12 @@ namespace quantum::renderer
     inline constexpr std::string_view fallbackEnvironmentIdentifier =
         "builtin://environment/constant-ambient";
 
+    // The Editor's neutral new-session sky. Keep this independent of registry
+    // ordering so presentation defaults do not change when assets are added or
+    // rearranged.
+    inline constexpr std::string_view defaultEnvironmentAssetIdentifier =
+        "assets://environment/dayskyhdri027b_1k.hdr";
+
     // Throws std::invalid_argument for an identifier that is not a bundled
     // environment, so an unsupported value can never reach the renderer.
     [[nodiscard]] std::string validateEnvironmentAssetIdentifier(

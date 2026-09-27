@@ -59,9 +59,6 @@ namespace quantum::editor
         bool changed = false;
         CoasterSetupWindowEdits edits;
 
-        ImGui::SetNextWindowPos(
-            ImVec2(760.0F, 110.0F),
-            ImGuiCond_FirstUseEver);
         if (!ImGui::Begin(
                 coasterSetupWindowName,
                 open,

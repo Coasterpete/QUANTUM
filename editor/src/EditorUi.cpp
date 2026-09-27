@@ -1929,6 +1929,9 @@ namespace
             names.push_back('\0');
             names.append(asset.displayName);
         }
+        // ImGui's zero-separated Combo overload requires an additional empty
+        // item after the final label to terminate the list.
+        names.push_back('\0');
         return names;
     }
 
@@ -1975,9 +1978,6 @@ namespace
             return;
         }
 
-        // Appearing keeps a sensible first-session position while letting
-        // a user-moved (ini-persisted) position win afterwards.
-        ImGui::SetNextWindowPos(ImVec2(640.0F, 110.0F), ImGuiCond_Appearing);
         if (!ImGui::Begin("Viewport Settings", open))
         {
             ImGui::End();
@@ -3295,9 +3295,6 @@ namespace
             return;
         }
 
-        // Appearing keeps a sensible first-session position while letting
-        // a user-moved (ini-persisted) position win afterwards.
-        ImGui::SetNextWindowPos(ImVec2(480.0F, 110.0F), ImGuiCond_Appearing);
         if (!ImGui::Begin("Transition Editor Input", open))
         {
             ImGui::End();
@@ -4329,8 +4326,7 @@ namespace
     void buildDefaultDockLayout(
         const ImGuiID dockspaceId,
         const ImVec2 dockspaceSize,
-        const float bottomFraction = 0.27F,
-        const bool captureLayout = false)
+        const float bottomFraction = 0.27F)
     {
         ImGui::DockBuilderRemoveNode(dockspaceId);
         ImGui::DockBuilderAddNode(
@@ -4370,18 +4366,20 @@ namespace
         );
 
         ImGui::DockBuilderDockWindow(trackWorkspaceWindowName, leftId);
+        ImGui::DockBuilderDockWindow(
+            quantum::editor::coasterSetupWindowName, leftId);
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
         ImGui::DockBuilderDockWindow("Track Devices", rightId);
-        ImGui::DockBuilderDockWindow(
-            quantum::editor::coasterSetupWindowName, rightId);
-        if (captureLayout)
-            ImGui::DockBuilderDockWindow(geometryEditorWindowName, rightId);
+        ImGui::DockBuilderDockWindow("Viewport Settings", rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
         ImGui::DockBuilderDockWindow(
             riderLoadDiagnosticsWindowName,
             bottomId
         );
+        ImGui::DockBuilderDockWindow(geometryEditorWindowName, bottomId);
+        ImGui::DockBuilderDockWindow("Performance Telemetry", bottomId);
+        ImGui::DockBuilderDockWindow("Transition Editor Input", bottomId);
         ImGui::DockBuilderFinish(dockspaceId);
     }
 }
@@ -5651,17 +5649,6 @@ namespace quantum::editor
     {
         if (authoredTrack_ == nullptr)
             return;
-        if (trackDeviceInitialDockPending_)
-        {
-            ImGuiWindow* supportWindow = ImGui::FindWindowByName(
-                supportWorkspaceWindowName);
-            if (supportWindow != nullptr && supportWindow->DockId != 0)
-            {
-                ImGui::SetNextWindowDockID(supportWindow->DockId,
-                    ImGuiCond_Always);
-                trackDeviceInitialDockPending_ = false;
-            }
-        }
         ImGui::SetNextWindowSizeConstraints(ImVec2(300.0F, 360.0F),
             ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(340.0F, 520.0F),
@@ -6202,10 +6189,10 @@ namespace quantum::editor
     void EditorUi::setViewportEnvironmentEnabled(const bool enabled) noexcept
     {
         // Coarse control used by preview smoke: "no environment" versus the
-        // first bundled sky. Choosing a specific sky is the Editor combo's job.
-        const auto assets = quantum::renderer::bundledEnvironmentAssets();
-        viewportSettings_.environmentAsset = enabled && !assets.empty()
-            ? assets.front().identifier : std::string{};
+        // Editor's explicit default. Choosing a specific sky is the combo's job.
+        viewportSettings_.environmentAsset = enabled
+            ? std::string(quantum::renderer::defaultEnvironmentAssetIdentifier)
+            : std::string{};
     }
 
     void EditorUi::enterSimulatorForPreviewSmoke() noexcept
@@ -7795,7 +7782,7 @@ namespace quantum::editor
                 sizeof(status),
                 "%s",
                 simulationError_.empty()
-                    ? "PREVIEW  Unavailable"
+                    ? "PREVIEW  Waiting for simulation status"
                     : simulationError_.c_str());
             textColor = ImGui::ColorConvertFloat4ToU32(palette::warning);
         }
@@ -8420,6 +8407,11 @@ ImGui::MenuItem(
                     viewportSettingsWindowOpen_ ? "open" : "closed"
                 );
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset Workspace Layout"))
+            {
+                resetDockLayoutPending_ = true;
+            }
             ImGui::EndMenu();
         }
 
@@ -8814,9 +8806,8 @@ ImGui::MenuItem(
                 && vulkan.capabilities().viewportMsaa4;
             viewportSettings_.environmentAsset = captureScenario_->environmentEnabled
                 ? (captureScenario_->environmentAsset.empty()
-                    ? std::string(
-                        quantum::renderer::bundledEnvironmentAssets()
-                            .front().identifier)
+                    ? std::string(quantum::renderer::
+                        defaultEnvironmentAssetIdentifier)
                     : captureScenario_->environmentAsset)
                 : std::string{};
             viewportSettings_.environmentRotationDegrees =
@@ -8883,43 +8874,13 @@ ImGui::MenuItem(
             canUndo_,
             canRedo_);
 
-        showTransitionEditorInputSettings(
-            transitionEditorInputSettings_,
-            &inputSettingsWindowOpen_
-        );
-
-        showViewportSettingsWindow(
-            viewportSettings_,
-            &viewportSettingsWindowOpen_,
-            vulkan.capabilities().viewportMsaa4,
-            vulkan.capabilities().hdrEnvironment,
-            window_,
-            vulkan
-        );
-
-        drawPerformanceTelemetry();
-        CoasterSetupWindowEdits setupEdits = drawCoasterSetupWindow(
-            authoredTrack_, &coasterSetupWindowOpen_, fonts_);
-        if (setupEdits.coasterSetup.has_value())
-        {
-            pendingCoasterSetupEdit_ = std::move(*setupEdits.coasterSetup);
-        }
-        if (setupEdits.physicalSettings.has_value())
-        {
-            pendingPhysicalSettingsEdit_ =
-                std::move(*setupEdits.physicalSettings);
-        }
-        if (setupEdits.trackConfigurationId.has_value())
-        {
-            pendingTrackConfigurationSelection_ =
-                std::move(*setupEdits.trackConfigurationId);
-        }
-        pendingTrackConfigurationReset_ |=
-            setupEdits.resetTrackConfiguration;
-
+        // Build/submit the dockspace before any dockable window. Windows that
+        // call Begin first cannot join a layout created later in the frame and
+        // would remain floating until manually moved.
         const ImGuiID dockspaceId = ImGui::GetID(editorDockspaceName);
         const bool defaultLayoutRequired =
-            ImGui::DockBuilderGetNode(dockspaceId) == nullptr;
+            resetDockLayoutPending_
+            || ImGui::DockBuilderGetNode(dockspaceId) == nullptr;
 
         ImGui::DockSpaceOverViewport(
             dockspaceId,
@@ -8953,9 +8914,64 @@ ImGui::MenuItem(
                     == ReadmeCaptureKind::TrackStyleRegions)
                     bottomFraction = 0.12F;
             }
-            buildDefaultDockLayout(dockspaceId, defaultDockspaceSize, bottomFraction,
-                captureScenario_ != nullptr);
+            buildDefaultDockLayout(
+                dockspaceId, defaultDockspaceSize, bottomFraction);
+            resetDockLayoutPending_ = false;
+            coasterSetupInitialDockPending_ = true;
         }
+
+
+        showTransitionEditorInputSettings(
+            transitionEditorInputSettings_,
+            &inputSettingsWindowOpen_
+        );
+
+        showViewportSettingsWindow(
+            viewportSettings_,
+            &viewportSettingsWindowOpen_,
+            vulkan.capabilities().viewportMsaa4,
+            vulkan.capabilities().hdrEnvironment,
+            window_,
+            vulkan
+        );
+
+        drawPerformanceTelemetry();
+        // Coaster Setup is the one default-layout window ImGui does not dock
+        // from the builder's pending request on a clean first launch, so it is
+        // docked explicitly here, into the left node it shares with the Track
+        // Workspace. The flag is only consumed on a frame that actually reaches
+        // Begin, so the request can never be consumed by a later window.
+        if (coasterSetupInitialDockPending_
+            && coasterSetupWindowOpen_ && authoredTrack_ != nullptr)
+        {
+            ImGuiWindow* trackWorkspaceWindow = ImGui::FindWindowByName(
+                trackWorkspaceWindowName);
+            if (trackWorkspaceWindow != nullptr
+                && trackWorkspaceWindow->DockId != 0)
+            {
+                ImGui::SetNextWindowDockID(
+                    trackWorkspaceWindow->DockId, ImGuiCond_Always);
+                coasterSetupInitialDockPending_ = false;
+            }
+        }
+        CoasterSetupWindowEdits setupEdits = drawCoasterSetupWindow(
+            authoredTrack_, &coasterSetupWindowOpen_, fonts_);
+        if (setupEdits.coasterSetup.has_value())
+        {
+            pendingCoasterSetupEdit_ = std::move(*setupEdits.coasterSetup);
+        }
+        if (setupEdits.physicalSettings.has_value())
+        {
+            pendingPhysicalSettingsEdit_ =
+                std::move(*setupEdits.physicalSettings);
+        }
+        if (setupEdits.trackConfigurationId.has_value())
+        {
+            pendingTrackConfigurationSelection_ =
+                std::move(*setupEdits.trackConfigurationId);
+        }
+        pendingTrackConfigurationReset_ |=
+            setupEdits.resetTrackConfiguration;
 
         constexpr ImGuiWindowFlags viewportWindowFlags =
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
@@ -9572,13 +9588,6 @@ ImGui::MenuItem(
 
         if (editedSection.kind != coaster::RegionKind::RateProfiles)
         {
-            if (captureScenario_ == nullptr)
-            {
-                ImGui::SetNextWindowPos(
-                    ImVec2(80.0F, 260.0F),
-                    ImGuiCond_Appearing
-                );
-            }
             ImGui::Begin(geometryEditorWindowName);
 
             if (coaster::isForceDrivenSection(editedSection))

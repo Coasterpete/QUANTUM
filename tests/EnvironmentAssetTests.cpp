@@ -121,6 +121,12 @@ namespace
         require(validateEnvironmentAssetIdentifier(identifiers.front())
                 == identifiers.front(),
             "A canonical bundled identifier round-trips.");
+        require(findBundledEnvironmentAsset(
+                    defaultEnvironmentAssetIdentifier) != nullptr,
+            "The explicit new-session environment is bundled.");
+        require(defaultEnvironmentAssetIdentifier
+                == "assets://environment/dayskyhdri027b_1k.hdr",
+            "The new-session environment remains the neutral DaySky asset.");
         require(!messageFrom([] {
             static_cast<void>(validateEnvironmentAssetIdentifier(
                 "C:/skies/mine.hdr"));

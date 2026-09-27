@@ -401,18 +401,17 @@ namespace quantum::editor
         float exposure = 1.0F;
         // Package-relative identity of the selected bundled HDR sky. Empty
         // means "None": no sky is drawn and the renderer keeps its constant
-        // ambient term. It defaults to the first registered sky so a fresh
-        // session still has a sky and image-based lighting. Rotation,
-        // intensity, and sky visibility are push constants, so only a changed
-        // identity touches GPU images.
+        // ambient term. The explicit default is independent of registry order.
+        // Rotation, intensity, and sky visibility are push constants, so only
+        // a changed identity touches GPU images.
         std::string environmentAsset =
-            renderer::environmentAssetRegistry().front().identifier;
+            std::string(renderer::defaultEnvironmentAssetIdentifier);
         float environmentRotationDegrees = 0.0F;
         float environmentIntensity = 0.35F;
         bool skyVisible = true;
         bool msaaEnabled = true;
 
-        bool gridVisible = true;
+        bool gridVisible = false;
         bool anchorsVisible = true;
         bool centerlineVisible = true;
         bool leftRailVisible = true;
@@ -940,7 +939,6 @@ void drawSimulationTelemetry();
         coaster::TrackDevice deviceEditBuffer_;
         std::array<char, 128> deviceNameBuffer_{};
         std::string deviceEditError_;
-        bool trackDeviceInitialDockPending_ = true;
 
         // Acceleration profile editor state for the selected track device.
         // Mirrors the Transition Editor's per-channel state but for a single
@@ -999,6 +997,12 @@ bool canUndo_ = false;
         std::size_t performanceHistoryNext_ = 0;
         std::size_t performanceHistoryCount_ = 0;
         bool performanceTelemetryWindowOpen_ = false;
+        bool resetDockLayoutPending_ = false;
+        // The default layout is built before any window calls Begin, so a window
+        // that does not exist yet is only recorded in ImGui's window settings.
+        // ImGui does not reliably honor that pending request for Coaster Setup,
+        // so it is re-docked explicitly once, on the first frame where it does.
+        bool coasterSetupInitialDockPending_ = false;
         FrameBlockingEvents frameBlockingEvents_;
     };
 }

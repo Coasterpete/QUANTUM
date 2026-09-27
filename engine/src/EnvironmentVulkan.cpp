@@ -293,12 +293,11 @@ namespace quantum::renderer
             check(vkCreateSampler(device_, &samplerInfo, nullptr,
                 &environmentSampler_), "vkCreateSampler for HDR environment");
 
-            // IBL preprocessing and upload are expensive, so the first
-            // environment is prepared here, which keeps startup behavior
-            // identical to Rendering M2. Later selections are prepared once on
-            // demand and then retained by the cache.
+            // IBL preprocessing and upload are expensive, so the Editor's
+            // explicit default is prepared here. Later selections are prepared
+            // once on demand and then retained by the cache.
             const std::string initial = environmentAsset_.empty()
-                ? std::string(bundledEnvironmentAssets().front().identifier)
+                ? std::string(defaultEnvironmentAssetIdentifier)
                 : environmentAsset_;
             environmentDetail_.clear();
             try

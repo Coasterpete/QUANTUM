@@ -102,6 +102,17 @@ OpenEXR. That decision, the reasons, and the deferred runtime EXR work are
 recorded in [`ground-surface-m0.md`](ground-surface-m0.md), along with the two
 Vulkan defects found and fixed during the milestone.
 
+A new session selects DaySky through the explicit
+`defaultEnvironmentAssetIdentifier` constant rather than the first entry of the
+bundled-sky registry, so the default cannot change when a sky is added or the
+registry is reordered. A fresh session also leaves the ground's three texture
+identifiers empty, so the built-in neutral maps apply instead of the synthetic
+`test-ground-*.png` diagnostics, and the reference grid starts hidden. Clearing a
+ground map republishes that slot's neutral fallback rather than leaving the
+previously bound map in place. These presentation defaults, and the workspace
+changes made alongside them, are recorded in
+[`ground-surface-m0-1.md`](ground-surface-m0-1.md).
+
 
 The deliberately small Blender/GLB contract and asset lifetime boundary are
 documented in [`static-mesh-assets.md`](static-mesh-assets.md).
@@ -696,9 +707,21 @@ The editor retains its 0.75-unit kinematic sample spacing as output configuratio
 
 The current Editor opens a resizable SDL3 Vulkan window with an intentional,
 persistent Dear ImGui workspace. A main menu and provisional COMMAND toolbar
-sit above the dockspace. The default docked shell contains `TRACK WORKSPACE`,
-the texture-backed `3D Viewport`, `Support Workspace`, and the detailed editor
-appropriate to the selected region.
+sit above the dockspace. The default docked shell contains `COASTER SETUP` and
+`TRACK WORKSPACE` on the left, the texture-backed `3D Viewport` in the centre,
+`Support Workspace`, `Track Devices`, and `Viewport Settings` on the right, a
+bottom row for the `Transition Editor`, Force Diagnostics, Geometry Editor,
+Performance Telemetry, and Transition Editor Input windows, and the detailed
+editor appropriate to the selected region.
+
+`EditorUi::draw` builds and submits the dockspace before any dockable window
+calls `Begin()`. A window that calls `Begin` first cannot join a layout created
+later in the same frame and would remain floating until moved by hand. The
+default layout is built only when no dockspace node exists yet, or when
+`View → Reset Workspace Layout` requests it, so a user-arranged workspace
+persists across relaunch. Layout is stored in ImGui's own ini under the SDL
+preference path; the Editor never writes it directly. See
+[`ground-surface-m0-1.md`](ground-surface-m0-1.md).
 
 ### Shared region selection
 
