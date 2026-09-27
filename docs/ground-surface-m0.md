@@ -390,6 +390,9 @@ output. The normal render path is unchanged unless they are passed.
 
 ## Follow-up milestone: Ground Surface M1 — persisted ground appearance
 
+Implemented in [Ground Surface M1](ground-surface-m1.md). The text below
+records the original follow-up scope.
+
 Recorded here as an explicit, scoped follow-up. It is **not** implemented by
 this milestone.
 

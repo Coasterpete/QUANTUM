@@ -13,6 +13,7 @@ target_sources(
         src/CoasterDocument.cpp
         src/CoasterSetup.cpp
         src/ForceDrivenRegion.cpp
+        src/GroundAppearance.cpp
         src/TrackPhysicalSettings.cpp
         src/TrackConfiguration.cpp
         src/TrackStyle.cpp
@@ -41,6 +42,7 @@ target_sources(
         include/quantum/coaster/CoasterSetup.hpp
         include/quantum/coaster/GeometricSection.hpp
         include/quantum/coaster/ForceDrivenRegion.hpp
+        include/quantum/coaster/GroundAppearance.hpp
         include/quantum/coaster/TrackGeneration.hpp
         include/quantum/coaster/TrackPhysicalSettings.hpp
         include/quantum/coaster/TrackConfiguration.hpp

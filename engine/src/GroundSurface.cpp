@@ -19,7 +19,6 @@ namespace
     // assets, and additionally pin the "ground" package root so a value can
     // never point at an unrelated asset category.
     constexpr std::string_view assetsScheme = "assets://";
-    constexpr std::string_view groundPackageRoot = "ground";
 
     // A quad this small or large stops being a usable ground surface: the
     // lower bound keeps the texture's world density meaningful and the upper
@@ -137,59 +136,7 @@ namespace quantum::renderer
     std::string normalizeGroundTextureAssetIdentifier(
         const std::string_view identifier)
     {
-        if (identifier.empty())
-        {
-            throw std::invalid_argument(
-                "Ground texture asset identifier is empty.");
-        }
-        std::string normalized{identifier};
-        std::ranges::replace(normalized, '\\', '/');
-        if (!normalized.starts_with(assetsScheme))
-        {
-            throw std::invalid_argument(
-                "Ground texture asset identifier must use assets://: "
-                + normalized);
-        }
-
-        const std::filesystem::path relative = std::filesystem::path(
-            normalized.substr(assetsScheme.size())).lexically_normal();
-        if (relative.empty() || relative.is_absolute()
-            || relative.has_root_name() || relative.has_root_directory())
-        {
-            throw std::invalid_argument(
-                "Ground texture asset identifier has no valid "
-                "package-relative path: " + normalized);
-        }
-        for (const std::filesystem::path& part : relative)
-        {
-            if (part == "..")
-            {
-                throw std::invalid_argument(
-                    "Ground texture asset identifier cannot escape the "
-                    "package root: " + normalized);
-            }
-        }
-        if (relative.begin() == relative.end()
-            || relative.begin()->generic_string() != groundPackageRoot)
-        {
-            throw std::invalid_argument(
-                "Ground texture assets must live below assets://ground/: "
-                + normalized);
-        }
-
-        const std::string generic = relative.generic_string();
-        std::string suffix = relative.extension().string();
-        std::ranges::transform(suffix, suffix.begin(),
-            [](const unsigned char character)
-            {
-                return static_cast<char>(std::tolower(character));
-            });
-        if (suffix != ".png")
-        {
-            throw std::invalid_argument(
-                "Ground Surface M0 loads PNG ground textures only: " + normalized);
-        }
-        return std::string(assetsScheme) + generic;
+        return coaster::normalizeGroundTextureAssetIdentifier(identifier);
     }
 
     std::filesystem::path groundTextureAssetPath(

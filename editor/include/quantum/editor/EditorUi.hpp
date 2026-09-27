@@ -23,6 +23,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct SDL_Window;
@@ -484,6 +485,9 @@ namespace quantum::editor
         void installFrameRenderCallback(renderer::VulkanContext& vulkan) noexcept;
         void setViewportMsaaEnabled(bool enabled) noexcept;
         void setViewportEnvironmentEnabled(bool enabled) noexcept;
+        void synchronizeGround(const coaster::GroundAppearance& ground);
+        [[nodiscard]] std::optional<std::pair<coaster::GroundAppearance, bool>>
+        takeGroundEdit() noexcept;
         void enterSimulatorForPreviewSmoke() noexcept;
         void returnToEditorForPreviewSmoke() noexcept;
         void requestSimulationControlForPreviewSmoke(
@@ -886,6 +890,7 @@ void drawSimulationTelemetry();
         TransitionEditorInputSettings transitionEditorInputSettings_;
         bool inputSettingsWindowOpen_ = false;
         ViewportSettings viewportSettings_;
+        std::optional<std::pair<coaster::GroundAppearance, bool>> pendingGroundEdit_;
         bool viewportSettingsWindowOpen_ = false;
         std::array<char, 512> hardwareAssetIdBuffer_{};
         std::string hardwareAssetIdBufferSource_;

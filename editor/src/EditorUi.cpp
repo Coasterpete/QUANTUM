@@ -2003,6 +2003,7 @@ namespace
 
     void showViewportSettingsWindow(
         quantum::editor::ViewportSettings& settings,
+        std::optional<std::pair<quantum::coaster::GroundAppearance, bool>>& pendingGroundEdit,
         bool* const open,
         const bool msaaAvailable,
         const bool environmentAvailable,
@@ -2169,28 +2170,31 @@ namespace
 
         quantum::renderer::GroundSurfaceSettings& ground =
             settings.groundSurface;
-        committed = ImGui::Checkbox("Show Ground", &ground.enabled)
-            || committed;
+        bool groundChanged = ImGui::Checkbox("Show Ground", &ground.enabled);
 
         ImGui::BeginDisabled(!ground.enabled);
-        committed = ImGui::SliderFloat("Ground Elevation",
+        groundChanged = ImGui::SliderFloat("Ground Elevation",
             &ground.elevation, -500.0F, 500.0F, "%.1f units")
-            || committed;
-        committed = ImGui::DragFloat("Ground Size",
-            &ground.sizeX, 1.0F, 1.0F, 100000.0F, "%.0f units")
-            || committed;
-        // One control keeps X and Y equal, which is the only shape M0 needs and
-        // avoids a second slider in an already long window.
-        ground.sizeY = ground.sizeX;
-        committed = ImGui::ColorEdit4("Ground Base Color",
+            || groundChanged;
+        if (ImGui::DragFloat("Ground Size X",
+            &ground.sizeX, 1.0F, 1.0F, 100000.0F, "%.0f units"))
+            groundChanged = true;
+        if (ImGui::DragFloat("Ground Size Y",
+            &ground.sizeY, 1.0F, 1.0F, 100000.0F, "%.0f units"))
+            groundChanged = true;
+        groundChanged = ImGui::ColorEdit4("Ground Base Color",
             &ground.baseColor.r, ImGuiColorEditFlags_AlphaBar
-                | ImGuiColorEditFlags_NoInputs) || committed;
-        committed = ImGui::SliderFloat("Ground Roughness",
-            &ground.roughness, 0.0F, 1.0F, "%.2f") || committed;
-        committed = ImGui::SliderFloat("Ground UV Tiling",
+                | ImGuiColorEditFlags_NoInputs) || groundChanged;
+        groundChanged = ImGui::SliderFloat("Ground Metallic",
+            &ground.metallic, 0.0F, 1.0F, "%.2f") || groundChanged;
+        groundChanged = ImGui::SliderFloat("Ground Roughness",
+            &ground.roughness, 0.0F, 1.0F, "%.2f") || groundChanged;
+        groundChanged = ImGui::SliderFloat("Ground UV Tiling X",
             &ground.uvTiling.x, 1.0F, 512.0F, "%.0fx")
-            || committed;
-        ground.uvTiling.y = ground.uvTiling.x;
+            || groundChanged;
+        groundChanged = ImGui::SliderFloat("Ground UV Tiling Y",
+            &ground.uvTiling.y, 1.0F, 512.0F, "%.0fx")
+            || groundChanged;
         ImGui::EndDisabled();
 
         // A custom map replaces the built-in fallback. Failure is reported and
@@ -2227,12 +2231,14 @@ namespace
                     if (logicalId)
                     {
                         *identifier = *logicalId;
+                        groundChanged = true;
                     }
                 }
             }
             else if (clear)
             {
                 identifier->clear();
+                groundChanged = true;
             }
 
             const std::string display = identifier->empty()
@@ -2261,6 +2267,14 @@ namespace
         if (!ground.enabled)
             ImGui::TextDisabled(
                 "Ground is hidden; its settings apply when re-enabled.");
+        if (ImGui::Button("Reset Ground to Defaults"))
+        {
+            ground = {};
+            groundChanged = true;
+        }
+        if (groundChanged)
+            pendingGroundEdit = std::pair{ground,
+                ImGui::IsMouseDown(ImGuiMouseButton_Left)};
 
         ImGui::SeparatorText("Reference Elements");
 
@@ -6028,6 +6042,7 @@ namespace quantum::editor
         viewportSettings_.msaaEnabled = vulkan.capabilities().viewportMsaa4;
         captureSetupPending_ = captureScenario != nullptr;
         authoredTrack_ = &authoredTrack;
+        viewportSettings_.groundSurface = authoredTrack.ground();
         selectedSection_ = 0;
         selectedTrackAnchor_ = 0;
         for (std::size_t channelIndex = 0;
@@ -6380,6 +6395,18 @@ namespace quantum::editor
     void EditorUi::setViewportMsaaEnabled(const bool enabled) noexcept
     {
         viewportSettings_.msaaEnabled = enabled;
+    }
+
+    void EditorUi::synchronizeGround(const coaster::GroundAppearance& ground)
+    {
+        viewportSettings_.groundSurface = ground;
+        pendingGroundEdit_.reset();
+    }
+
+    std::optional<std::pair<coaster::GroundAppearance, bool>>
+    EditorUi::takeGroundEdit() noexcept
+    {
+        return std::exchange(pendingGroundEdit_, std::nullopt);
     }
 
     void EditorUi::setViewportEnvironmentEnabled(const bool enabled) noexcept
@@ -9131,6 +9158,7 @@ ImGui::MenuItem(
 
         showViewportSettingsWindow(
             viewportSettings_,
+            pendingGroundEdit_,
             &viewportSettingsWindowOpen_,
             vulkan.capabilities().viewportMsaa4,
             vulkan.capabilities().hdrEnvironment,
@@ -11715,6 +11743,7 @@ std::optional<coaster::LayoutMode>
 
     void EditorUi::resetTransientState()
     {
+        pendingGroundEdit_.reset();
         selectedTrackDeviceId_ = 0;
         deviceBufferId_ = 0;
         trackDeviceCommand_.reset();

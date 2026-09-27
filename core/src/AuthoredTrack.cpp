@@ -887,6 +887,22 @@ namespace quantum::coaster
         physicalSettings_ = settings;
     }
 
+    const GroundAppearance& AuthoredTrack::ground() const noexcept
+    {
+        return ground_;
+    }
+
+    void AuthoredTrack::setGround(const GroundAppearance& ground)
+    {
+        validateGroundAppearance(ground);
+        GroundAppearance normalized = ground;
+        for (std::string* id : {&normalized.albedoTexture,
+            &normalized.normalTexture, &normalized.roughnessTexture})
+            if (!id->empty())
+                *id = normalizeGroundTextureAssetIdentifier(*id);
+        ground_ = std::move(normalized);
+    }
+
     const TrackStylePreset& AuthoredTrack::trackStyle() const noexcept
     {
         return trackStyle_;

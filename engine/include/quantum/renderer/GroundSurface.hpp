@@ -1,4 +1,5 @@
 #pragma once
+#include <quantum/coaster/GroundAppearance.hpp>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -13,30 +14,15 @@
 namespace quantum::renderer
 {
     // Ground Surface M0 is a single flat, axis-aligned quad centered on the
-    // world XY origin. It is a scene presentation element: nothing here is
-    // coaster geometry, physics, or authored document state, and the renderer
-    // owns every GPU resource it needs.
+    // world XY origin. Its settings are renderer-neutral authored presentation
+    // data; the renderer owns every GPU resource it needs.
     //
     // The texture identifiers are package-relative logical strings
     // ("assets://ground/<file>") so a saved or shared value can never contain
     // a machine-specific absolute path. An empty identifier means "use the
     // built-in fallback", which is the neutral 1x1 map that leaves baseColor,
     // metallic, and roughness as the only appearance inputs.
-    struct GroundSurfaceSettings
-    {
-        bool enabled = true;
-        float elevation = 0.0F;
-        float sizeX = 1200.0F;
-        float sizeY = 1200.0F;
-        glm::vec4 baseColor{0.30F, 0.32F, 0.26F, 1.0F};
-        float metallic = 0.0F;
-        float roughness = 0.85F;
-        // Repeats of the map across the full width/height of the quad.
-        glm::vec2 uvTiling{48.0F, 48.0F};
-        std::string albedoTexture;
-        std::string normalTexture;
-        std::string roughnessTexture;
-    };
+    using GroundSurfaceSettings = coaster::GroundAppearance;
 
     // No normal attribute: the M0 surface is horizontal by definition and its
     // shading normal comes from the normal map, whose 1x1 built-in fallback
