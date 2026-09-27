@@ -939,6 +939,69 @@ namespace
     // Test runner
     // ----------------------------------------------------------------
 
+    void groundPersistenceAndLegacy()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        auto ground = track.ground();
+        ground.enabled = false;
+        ground.elevation = 17.5F;
+        ground.sizeX = 321.0F;
+        ground.sizeY = 654.0F;
+        ground.baseColor = {0.8F, 0.1F, 0.4F, 1.0F};
+        ground.metallic = 0.3F;
+        ground.roughness = 0.25F;
+        ground.uvTiling = {7.0F, 9.0F};
+        ground.albedoTexture = "assets://ground/test-ground-albedo.png";
+        ground.normalTexture = "assets://ground/test-ground-normal.png";
+        ground.roughnessTexture = "assets://ground/missing.png";
+        track.setGround(ground);
+        auto json = nlohmann::json::parse(serializeCoasterDocument(track));
+        require(json["ground"]["roughnessTexture"] == ground.roughnessTexture,
+            "missing texture identity must be preserved");
+        const auto restored = deserializeCoasterDocument(json.dump());
+        requireValidDocument(restored, "ground round trip");
+        require(restored->ground().sizeY == 654.0F
+            && restored->ground().baseColor.z == 0.4F
+            && restored->ground().uvTiling.y == 9.0F
+            && restored->ground().normalTexture == ground.normalTexture,
+            "ground values survive round trip");
+        json.erase("ground");
+        const auto legacy = deserializeCoasterDocument(json.dump());
+        requireValidDocument(legacy, "legacy document");
+        require(legacy->ground().sizeX == 1200.0F
+            && legacy->ground().albedoTexture.empty(),
+            "legacy document uses defaults");
+    }
+
+    void malformedGroundRejected()
+    {
+        auto json = nlohmann::json::parse(serializeCoasterDocument(
+            quantum::coaster::createNewDocument()));
+        const auto rejects = [&](const nlohmann::json& candidate)
+        {
+            require(!deserializeCoasterDocument(candidate.dump()),
+                "malformed ground must be rejected");
+        };
+        auto bad = json;
+        bad["ground"]["unknown"] = true;
+        rejects(bad);
+        bad = json;
+        bad["ground"]["enabled"] = "yes";
+        rejects(bad);
+        bad = json;
+        bad["ground"]["baseColor"] = {1.0, 0.5};
+        rejects(bad);
+        bad = json;
+        bad["ground"]["albedoTexture"] = "C:/Users/me/grass.png";
+        rejects(bad);
+        bad = json;
+        bad["ground"]["albedoTexture"] = "assets://ground/C:/grass.png";
+        rejects(bad);
+        bad = json;
+        bad["ground"]["roughness"] = 2.0;
+        rejects(bad);
+    }
+
     struct Test
     {
         std::string_view name;
@@ -973,6 +1036,8 @@ namespace
             {"ModernSteelStyleRoundTrip",        modernSteelStyleRoundTrip},
             {"RegionTrackStyleOverridesRoundTrip",
                 regionTrackStyleOverridesRoundTripAndStaySparse},
+            {"GroundPersistenceAndLegacy", groundPersistenceAndLegacy},
+            {"MalformedGroundRejected", malformedGroundRejected},
         };
 
         std::size_t failures = 0;

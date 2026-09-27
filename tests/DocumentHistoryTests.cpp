@@ -673,6 +673,36 @@ namespace
         require(snapshot(requireState(history.undo(), "delete Undo missing"))
                 == added, "Undo restores deleted device and stable ID");
     }
+
+    void groundEditAndResetUseWholeDocumentHistory()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        const std::string baseline = snapshot(track);
+        AuthoredTrackEditTransaction edit{track};
+        auto ground = edit.candidate().ground();
+        ground.baseColor = {0.9F, 0.2F, 0.1F, 1.0F};
+        ground.albedoTexture = "assets://ground/missing.png";
+        edit.candidate().setGround(ground);
+        edit.commit(track);
+        history.record(track);
+        const std::string customized = snapshot(track);
+        require(customized != baseline, "ground edit changes document");
+        AuthoredTrackEditTransaction reset{track};
+        reset.candidate().setGround({});
+        reset.commit(track);
+        history.record(track);
+        require(snapshot(track) == baseline, "reset restores defaults");
+        require(snapshot(requireState(history.undo(), "reset Undo missing"))
+            == customized, "Undo restores custom ground");
+        require(snapshot(requireState(history.undo(), "edit Undo missing"))
+            == baseline, "Undo restores original ground");
+        require(snapshot(requireState(history.redo(), "edit Redo missing"))
+            == customized, "Redo restores custom ground");
+        history.reset(quantum::coaster::createNewDocument());
+        require(!history.canUndo(), "new document clears ground history");
+    }
 }
 
 int main()
@@ -694,6 +724,7 @@ int main()
         regionStyleOverridesUseWholeDocumentHistory();
         trackConfigurationSelectionAndResetUndoExactly();
         trackDeviceEditsUseWholeDocumentHistory();
+        groundEditAndResetUseWholeDocumentHistory();
     }
     catch (const std::exception& exception)
     {

@@ -1155,6 +1155,7 @@ editorUi.selectSection(restoredSelection, true);
                                     publishHistoryState(*restoredTrack,
                                         documentHistory.
                                             lastRestoreTrackStylePresentationImpact());
+                                    editorUi.synchronizeGround(authoredTrack.ground());
                                     const auto restoredImpact = documentHistory.
                                         lastRestoreTrackStylePresentationImpact();
                                     applicationBlockingEvents
@@ -1296,6 +1297,7 @@ editorUi.selectSection(restoredSelection, true);
                                     documentHistory.reset(authoredTrack);
                                     documentState.newDocument();
                                     editorUi.resetTransientState();
+                                    editorUi.synchronizeGround(authoredTrack.ground());
                                     editorUi.selectSection(0, true);
 
                                     centerlineCache.markDirty();
@@ -1385,6 +1387,7 @@ editorUi.selectSection(restoredSelection, true);
                                             documentHistory.reset(authoredTrack);
                                             documentState.setOpenDocument(*openPath);
                                             editorUi.resetTransientState();
+                                            editorUi.synchronizeGround(authoredTrack.ground());
                                             editorUi.selectSection(0, true);
                                             editorUi.setSupportVisualization(
                                                 supportVisualization);
@@ -1941,6 +1944,29 @@ editorUi.selectSection(restoredSelection, true);
                         }
                         const auto requestedStartPoseEdit =
                             editorUi.takeStartPoseEdit();
+                        const auto groundEdit = editorUi.takeGroundEdit();
+                        if (groundEdit)
+                        {
+                            try
+                            {
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    transaction{authoredTrack};
+                                transaction.candidate().setGround(groundEdit->first);
+                                renderer.setGroundSurface(transaction.candidate().ground());
+                                transaction.commit(authoredTrack);
+                                documentHistory.record(authoredTrack,
+                                    groundEdit->second);
+                                synchronizeDirtyState();
+                            }
+                            catch (const std::exception& error)
+                            {
+                                editorUi.synchronizeGround(authoredTrack.ground());
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Error,
+                                    "GROUND", "Ground edit rejected: %s",
+                                    error.what());
+                            }
+                        }
                         const auto requestedHardwareEdit =
                             editorUi.takeTrackHardwareEdit();
                         const auto requestedSupportEdit =
@@ -1958,7 +1984,8 @@ editorUi.selectSection(restoredSelection, true);
                         // end-of-drag [EDIT] summaries are emitted by
                         // EditorUi on release.
                         const bool continuousDrag =
-                            (requestedValueEdit.has_value()
+                            (groundEdit.has_value() && groundEdit->second)
+                            || (requestedValueEdit.has_value()
                                 && requestedValueEdit->continuous)
                             || requestedDistanceEdit.has_value()
                             || (requestedStartPoseEdit.has_value()

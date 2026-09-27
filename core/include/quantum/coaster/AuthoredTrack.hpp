@@ -3,6 +3,7 @@
 
 #include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/coaster/GeometricSection.hpp>
+#include <quantum/coaster/GroundAppearance.hpp>
 #include <quantum/coaster/ForceDrivenRegion.hpp>
 #include <quantum/coaster/PlanarArcRegion.hpp>
 #include <quantum/coaster/RiderLocalGeometry.hpp>
@@ -220,6 +221,9 @@ namespace quantum::coaster
         // Validates before replacing the document's canonical physical inputs.
         void setPhysicalSettings(const TrackPhysicalSettings& settings);
 
+        [[nodiscard]] const GroundAppearance& ground() const noexcept;
+        void setGround(const GroundAppearance& ground);
+
         [[nodiscard]] const TrackStylePreset& trackStyle() const noexcept;
         // Validates the complete preset before replacing authored style state.
         void setTrackStyle(const TrackStylePreset& style);
@@ -360,6 +364,7 @@ namespace quantum::coaster
         LayoutMode layoutMode_ = LayoutMode::Circuit;
         AuthoredStartPose startPose_;
         TrackPhysicalSettings physicalSettings_;
+        GroundAppearance ground_;
         std::string trackConfigurationId_;
         TrackStylePreset trackStyle_;
         CoasterSetup coasterSetup_ =

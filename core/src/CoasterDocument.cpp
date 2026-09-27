@@ -1728,6 +1728,17 @@ TrackStylePreset deserializeTrackStyle(
             {"initialSpeed", physical.initialSpeed},
             {"metersPerCoordinateUnit", physical.metersPerCoordinateUnit},
             {"gravityAcceleration", physical.gravityAcceleration}};
+        const auto& ground = track.ground();
+        root["ground"] = {
+            {"enabled", ground.enabled}, {"elevation", ground.elevation},
+            {"sizeX", ground.sizeX}, {"sizeY", ground.sizeY},
+            {"baseColor", {ground.baseColor.x, ground.baseColor.y,
+                ground.baseColor.z, ground.baseColor.w}},
+            {"metallic", ground.metallic}, {"roughness", ground.roughness},
+            {"uvTiling", {ground.uvTiling.x, ground.uvTiling.y}},
+            {"albedoTexture", ground.albedoTexture},
+            {"normalTexture", ground.normalTexture},
+            {"roughnessTexture", ground.roughnessTexture}};
         if (!track.trackConfigurationId().empty())
         {
             root["trackConfigurationId"] =
@@ -1795,7 +1806,7 @@ TrackStylePreset deserializeTrackStyle(
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
                 "physicalSettings", "trackConfigurationId", "trackStyle",
-                "coasterSetup", "supports", "trackDevices"
+                "coasterSetup", "supports", "trackDevices", "ground"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -1965,6 +1976,48 @@ TrackStylePreset deserializeTrackStyle(
                 track.setPhysicalSettings({physical["initialSpeed"].get<double>(),
                     physical["metersPerCoordinateUnit"].get<double>(),
                     physical["gravityAcceleration"].get<double>()});
+            }
+            if (root.contains("ground"))
+            {
+                requireObject(root, "ground", "root");
+                const json& value = root["ground"];
+                requireNoUnknownFields(value, {"enabled", "elevation",
+                    "sizeX", "sizeY", "baseColor", "metallic", "roughness",
+                    "uvTiling", "albedoTexture", "normalTexture",
+                    "roughnessTexture"}, "ground");
+                requireBoolean(value, "enabled", "ground");
+                for (const char* key : {"elevation", "sizeX", "sizeY",
+                    "metallic", "roughness"})
+                    requireNumber(value, key, "ground");
+                for (const char* key : {"albedoTexture", "normalTexture",
+                    "roughnessTexture"})
+                    requireString(value, key, "ground");
+                for (const auto& [key, count] : {
+                    std::pair{"baseColor", 4}, std::pair{"uvTiling", 2}})
+                {
+                    requireArray(value, key, "ground");
+                    if (value[key].size() != static_cast<std::size_t>(count))
+                        throw std::runtime_error(std::string("ground.") + key + ": wrong number of components");
+                    for (const json& component : value[key])
+                        if (!component.is_number())
+                            throw std::runtime_error(std::string("ground.") + key + ": non-numeric component");
+                }
+                GroundAppearance ground;
+                ground.enabled = value["enabled"].get<bool>();
+                ground.elevation = value["elevation"].get<float>();
+                ground.sizeX = value["sizeX"].get<float>();
+                ground.sizeY = value["sizeY"].get<float>();
+                const json& color = value["baseColor"];
+                ground.baseColor = {color[0].get<float>(), color[1].get<float>(),
+                    color[2].get<float>(), color[3].get<float>()};
+                ground.metallic = value["metallic"].get<float>();
+                ground.roughness = value["roughness"].get<float>();
+                const json& tiling = value["uvTiling"];
+                ground.uvTiling = {tiling[0].get<float>(), tiling[1].get<float>()};
+                ground.albedoTexture = value["albedoTexture"].get<std::string>();
+                ground.normalTexture = value["normalTexture"].get<std::string>();
+                ground.roughnessTexture = value["roughnessTexture"].get<std::string>();
+                track.setGround(ground);
             }
             if (root.contains("trackStyle"))
             {
