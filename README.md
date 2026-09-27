@@ -38,7 +38,7 @@ QUANTUM has progressed from isolated geometry experiments into a connected inter
 
 1. **Connected authored-track editing** — multiple Regions form one canonical track and regenerate through QuantumCore.
 2. **Force-aware geometry and diagnostics** — Force-Based construction and universal rider-load evaluation share the same track pipeline.
-3. **Multi-car train simulation** — a four-car train preview with rigid-bogie kinematics, signed velocity, and rollback behavior.
+3. **Multi-car train simulation** — a configurable-car-count train preview with rigid-bogie kinematics, signed velocity, and rollback behavior.
 4. **Track presentation** — the Modern Steel configuration provides configurable rail, spine, and crosstie hardware instancing.
 5. **Support authoring** — persistent support structures with nodes, members, track attachments, and end connections.
 6. **Performance stabilization** — frame-pacing work including fixed-step simulation, deferred retained buffers, and GPU validation gating.
@@ -108,7 +108,7 @@ The document owns canonical physical settings: initial speed (m/s), physical sca
 
 ## Simulation preview
 
-A fixed-step multi-car train simulation preview is available for diagnostic playback. The preview builds a four-car train with rigid-bogie geometry, supports signed velocity through zero (rollback), and renders wireframe car boxes, bogie markers, and connector lines in the 3D viewport. The simulation uses a 1/240-second fixed timestep with a bounded catch-up accumulator and interpolation.
+A fixed-step multi-car train simulation preview is available for diagnostic playback. The preview uses the Coaster Setup car count with the current repeated-car definition, supports signed velocity through zero (rollback), and renders wireframe car boxes, bogie markers, and connector lines in the 3D viewport. The simulation uses a 1/240-second fixed timestep with a bounded catch-up accumulator and interpolation.
 
 ## Multi-car rigid-bogie physics
 

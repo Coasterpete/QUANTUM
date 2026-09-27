@@ -21,6 +21,7 @@
 namespace
 {
     using quantum::math::evaluateTransition;
+    using quantum::math::evaluateTransitionDerivative;
     using quantum::math::evaluateTransitionIntegral;
     using quantum::math::TransitionType;
 
@@ -493,6 +494,40 @@ namespace
         }
     }
 
+    void testAnalyticDerivatives()
+    {
+        constexpr double step = 1.0e-6;
+        constexpr double progress = 0.371;
+
+        for (const TransitionReference& reference : transitionReferences)
+        {
+            const std::string context(reference.name);
+            requireNearWithTolerance(
+                evaluateTransitionDerivative(reference.type, 0.0),
+                reference.beginningFirstDerivative,
+                referenceTolerance,
+                context + " beginning analytic derivative"
+            );
+            requireNearWithTolerance(
+                evaluateTransitionDerivative(reference.type, 1.0),
+                reference.endingFirstDerivative,
+                referenceTolerance,
+                context + " ending analytic derivative"
+            );
+
+            const double numerical = (
+                evaluateTransition(reference.type, progress + step)
+                    - evaluateTransition(reference.type, progress - step))
+                / (2.0 * step);
+            requireNearWithTolerance(
+                evaluateTransitionDerivative(reference.type, progress),
+                numerical,
+                1.0e-8,
+                context + " interior analytic derivative"
+            );
+        }
+    }
+
     void testNewInteriorReferences()
     {
         for (const TransitionReference& reference : transitionReferences)
@@ -893,6 +928,16 @@ namespace
                 requireThrows<std::out_of_range>(
                     [&reference, progress]
                     {
+                        static_cast<void>(evaluateTransitionDerivative(
+                            reference.type,
+                            progress
+                        ));
+                    },
+                    context + " finite derivative outside [0, 1]"
+                );
+                requireThrows<std::out_of_range>(
+                    [&reference, progress]
+                    {
                         static_cast<void>(evaluateTransitionIntegral(
                             reference.type,
                             progress
@@ -921,6 +966,16 @@ namespace
                 requireThrows<std::invalid_argument>(
                     [&reference, progress]
                     {
+                        static_cast<void>(evaluateTransitionDerivative(
+                            reference.type,
+                            progress
+                        ));
+                    },
+                    context + " non-finite derivative"
+                );
+                requireThrows<std::invalid_argument>(
+                    [&reference, progress]
+                    {
                         static_cast<void>(evaluateTransitionIntegral(
                             reference.type,
                             progress
@@ -938,6 +993,16 @@ namespace
                 static_cast<void>(evaluateTransition(unsupported, 0.5));
             },
             "unsupported transition evaluation"
+        );
+        requireThrows<std::invalid_argument>(
+            [unsupported]
+            {
+                static_cast<void>(evaluateTransitionDerivative(
+                    unsupported,
+                    0.5
+                ));
+            },
+            "unsupported transition derivative"
         );
         requireThrows<std::invalid_argument>(
             [unsupported]
@@ -1002,6 +1067,7 @@ int main()
     const std::vector<Test> tests{
         {"exact endpoints and full areas", testEndpointsAndFullAreas},
         {"existing reference values", testExistingReferenceValues},
+        {"analytic derivatives", testAnalyticDerivatives},
         {"new interior references", testNewInteriorReferences},
         {"complement symmetry", testComplementSymmetry},
         {"power family relationships", testPowerFamilyRelationships},

@@ -1,0 +1,15 @@
+{
+  "width": 1600,
+  "height": 900,
+  "settle_frames": 20,
+  "output_directory": "geometry-functional-heartline-m1/offset-0m",
+  "overwrite": true,
+  "scenarios": [
+    {
+      "name": "force-diagnostics",
+      "document": "../smoke-tests/geometry-functional-heartline-zero.quantum",
+      "region": 0,
+      "framing": "all"
+    }
+  ]
+}

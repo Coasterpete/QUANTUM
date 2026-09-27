@@ -87,7 +87,7 @@ namespace quantum::editor
 
             throw std::invalid_argument(
                 "The authored track has no legal increasing-station placement "
-                "for the four-car preview train.");
+                "for the configured preview train.");
         }
 
         [[nodiscard]] renderer::LineVertex vertex(
@@ -300,8 +300,12 @@ namespace quantum::editor
         setUnavailable({});
         try
         {
+            coaster::TrainConfiguration trainConfiguration =
+                coaster::createDefaultTrainConfiguration();
+            trainConfiguration.carCount =
+                authoredTrack.coasterSetup().carsPerTrain;
             trainDefinition_ = coaster::resolveTrainConfiguration(
-                coaster::createDefaultTrainConfiguration());
+                trainConfiguration);
             const std::vector<coaster::TrackKinematicState> kinematics =
                 coaster::integrateAuthoredTrackKinematics(
                     authoredTrack,

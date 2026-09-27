@@ -103,6 +103,9 @@ namespace
     AuthoredTrack authoredTrackWithForceRegion()
     {
         auto track = createNewDocument();
+        auto setup = track.coasterSetup();
+        setup.heartline.offsetMeters = 0.0;
+        track.setCoasterSetup(setup);
         setSectionLength(track.section(0), 20.0);
         track.insertSectionAfter(0, createForceDrivenSection(40.0));
         track.appendSection();
@@ -764,6 +767,9 @@ namespace
         const double half = piRadians * radius;
         const double length = 2.0 * half;
         auto track = createNewDocument();
+        auto setup = track.coasterSetup();
+        setup.heartline.offsetMeters = 0.0;
+        track.setCoasterSetup(setup);
         setSectionLength(track.section(0), 20.0);
         track.insertSectionAfter(0, createForceDrivenSection(length));
         track.appendSection();

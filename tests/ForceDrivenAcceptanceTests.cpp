@@ -64,7 +64,10 @@ namespace
         const auto history = evaluateRiderLoadDiagnostics(track);
         require(history.completed() && history.states.front().vehicleSpeed == 27,
             "editor diagnostics consume document settings");
-        const auto expected = evaluateRiderLoads(canonical, riderLoadEvaluationSettings(track.physicalSettings()));
+        const auto expected = evaluateRiderLoads(canonical,
+            riderLoadEvaluationSettings(
+                track.physicalSettings(),
+                track.coasterSetup().heartline));
         require(history.states.size() == expected.states.size(), "diagnostics sample canonical states");
         for (std::size_t i = 0; i < expected.states.size(); ++i)
             require(history.states[i].normalG == expected.states[i].normalG

@@ -50,6 +50,14 @@ namespace quantum::math
         double normalizedProgress
     );
 
+    // Evaluates df/dx for a normalized transition over [0, 1]. Endpoint
+    // derivatives are the matching one-sided limits. This is used when an
+    // authored rate drives the acceleration of an offset rider reference.
+    [[nodiscard]] double evaluateTransitionDerivative(
+        TransitionType type,
+        double normalizedProgress
+    );
+
     // Evaluates F(x), the analytic integral of the normalized transition from
     // zero through normalizedProgress. The built-in integrals are:
     //

@@ -2215,6 +2215,8 @@ namespace quantum::coaster
 
         for (const RiderLocalGeometryState& state : geometryStates)
         {
+            const double rollRate =
+                evaluateChannelProfile(rollRateProfile, state.distance);
             const double pitchRate =
                 evaluateChannelProfile(pitchRateProfile, state.distance);
             const double yawRate =
@@ -2225,7 +2227,12 @@ namespace quantum::coaster
                 state.position,
                 state.frame,
                 yawRate * state.frame.lateral
-                    - pitchRate * state.frame.up
+                    - pitchRate * state.frame.up,
+                {rollRate, pitchRate, yawRate},
+                evaluateChannelProfileDerivative(
+                    rollRateProfile, state.distance),
+                evaluateChannelProfileDerivative(
+                    pitchRateProfile, state.distance)
             });
         }
 

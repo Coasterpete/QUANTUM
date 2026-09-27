@@ -316,6 +316,24 @@ namespace
             "four boxes, eight bogie markers, and three connectors");
     }
 
+    void authoredCarCountConfiguresPreviewConsist()
+    {
+        auto track = straightTrack(60.0, 7.25);
+        auto setup = track.coasterSetup();
+        setup.carsPerTrain = 2;
+        track.setCoasterSetup(setup);
+
+        SimulationPreview preview;
+        require(preview.rebuild(track),
+            "configured two-car preview should initialize");
+        require(preview.trainDefinition().cars.size() == 2
+                && preview.trainDefinition().connections.size() == 1
+                && preview.pose()->carCount() == 2,
+            "authored train count reaches Core train definition and pose");
+        require(preview.vertices().size() == 74,
+            "two rendered cars retain boxes, bogies, and one connector");
+    }
+
     void rebuildUsesNewInitialSpeedAndResetsPlayback()
     {
         SimulationPreview preview;
@@ -1125,6 +1143,7 @@ int main()
         renderCadenceDoesNotAffectPhysics();
         spikeRollbackInterpolation();
         initializesFromAuthoredPhysicalSettings();
+        authoredCarCountConfiguresPreviewConsist();
         rebuildUsesNewInitialSpeedAndResetsPlayback();
         playbackUsesFixedStepsAndResetIsDeterministic();
         catchUpIsBounded();

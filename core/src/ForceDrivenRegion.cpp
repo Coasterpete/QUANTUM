@@ -74,6 +74,8 @@ namespace quantum::coaster
             glm::dvec3 tangent;
             glm::dquat orientation;
             glm::dvec3 rates; // roll, pitch, yaw in radians / Core unit
+            double rollRateDerivative;
+            double pitchRateDerivative;
             double distance;
             double speedSquared;
         };
@@ -119,6 +121,7 @@ namespace quantum::coaster
         const double length,
         const TrackPhysicalSettings& physicalSettings,
         const glm::dvec3& wholeTrackStartPosition,
+        const double riderReferenceOffsetMeters,
         const double integrationSpacing,
         const ForceDrivenIntegrationSettings& settings)
     {
@@ -127,6 +130,8 @@ namespace quantum::coaster
         if (!std::isfinite(integrationSpacing) || integrationSpacing <= 0.0
             || !std::isfinite(settings.tolerance) || settings.tolerance <= 0.0
             || settings.maximumRefinements > 50
+            || !std::isfinite(riderReferenceOffsetMeters)
+            || riderReferenceOffsetMeters < 0.0
             || !finite(startingPosition) || !finite(wholeTrackStartPosition)
             || !finite(startingFrame.tangent) || !finite(startingFrame.lateral)
             || !finite(startingFrame.up)
@@ -140,6 +145,8 @@ namespace quantum::coaster
         }
 
         const glm::dvec3 gravity{0.0, 0.0, -physicalSettings.gravityAcceleration};
+        const double heartlineOffset = riderReferenceOffsetMeters
+            / physicalSettings.metersPerCoordinateUnit;
         const auto derivative = [&](const Pose& pose, const double s) -> Derivative
         {
             const glm::dvec3 worldPosition = startingPosition + pose.displacement;
@@ -166,21 +173,80 @@ namespace quantum::coaster
             const double normal = evaluateChannelProfile(region.targetNormalG, s);
             const double lateral = evaluateChannelProfile(region.targetLateralG, s);
             const double roll = evaluateChannelProfile(region.rollRate, s);
-            const double yaw = physicalSettings.metersPerCoordinateUnit
-                * (standardGravityAcceleration * lateral + glm::dot(gravity, frame.lateral))
+            const double normalDerivative = evaluateChannelProfileDerivative(
+                region.targetNormalG, s);
+            const double rollDerivative = evaluateChannelProfileDerivative(
+                region.rollRate, s);
+            const double gravityTangent = glm::dot(gravity, frame.tangent);
+            const double gravityLateral = glm::dot(gravity, frame.lateral);
+            const double gravityUp = glm::dot(gravity, frame.up);
+            const double scale = physicalSettings.metersPerCoordinateUnit;
+            const double legacyPitch = -scale
+                * (standardGravityAcceleration * normal + gravityUp)
                 / energy.speedSquared;
-            const double pitch = -physicalSettings.metersPerCoordinateUnit
-                * (standardGravityAcceleration * normal + glm::dot(gravity, frame.up))
-                / energy.speedSquared;
+
+            double pitch = legacyPitch;
+            if (heartlineOffset != 0.0)
+            {
+                const double reducedTarget = legacyPitch
+                    - heartlineOffset * roll * roll;
+                const double discriminant = 1.0
+                    + 4.0 * heartlineOffset * reducedTarget;
+                if (!std::isfinite(discriminant) || discriminant <= 0.0)
+                {
+                    fail(TrackGenerationFailureReason::NonfiniteDerivedRates,
+                        s, energy.speedSquared,
+                        "The rider-reference offset makes the requested normal G geometrically singular.");
+                }
+                // Stable root continuous with the zero-offset solution.
+                pitch = 2.0 * reducedTarget
+                    / (1.0 + std::sqrt(discriminant));
+            }
+
+            const double riderTangentScale = 1.0
+                + heartlineOffset * pitch;
+            if (!std::isfinite(riderTangentScale)
+                || std::abs(riderTangentScale) <= 1.0e-12)
+            {
+                fail(TrackGenerationFailureReason::NonfiniteDerivedRates,
+                    s, energy.speedSquared,
+                    "The rider-reference offset collapses the local forward direction.");
+            }
+            const double yaw = (
+                scale * (standardGravityAcceleration * lateral
+                    + gravityLateral
+                    + heartlineOffset * roll * gravityTangent)
+                    / energy.speedSquared
+                + heartlineOffset * rollDerivative)
+                / riderTangentScale;
+
+            const double speedSquaredDerivative =
+                2.0 * scale * gravityTangent;
+            const double normalForceTerm =
+                standardGravityAcceleration * normal + gravityUp;
+            const double normalForceTermDerivative =
+                standardGravityAcceleration * normalDerivative
+                + pitch * gravityTangent - roll * gravityLateral;
+            const double legacyPitchDerivative = -scale * (
+                normalForceTermDerivative * energy.speedSquared
+                    - normalForceTerm * speedSquaredDerivative)
+                / (energy.speedSquared * energy.speedSquared);
+            const double pitchDerivative = (
+                legacyPitchDerivative
+                    - 2.0 * heartlineOffset * roll * rollDerivative)
+                / (1.0 + 2.0 * heartlineOffset * pitch);
             const glm::dvec3 rates{roll, pitch, yaw};
-            if (!finite(rates) || !std::isfinite(std::hypot(roll, pitch, yaw)))
+            if (!finite(rates) || !std::isfinite(rollDerivative)
+                || !std::isfinite(pitchDerivative)
+                || !std::isfinite(std::hypot(roll, pitch, yaw)))
             {
                 fail(TrackGenerationFailureReason::NonfiniteDerivedRates, s,
                     energy.speedSquared, "Force-to-rate conversion produced nonfinite rates.");
             }
             // Local angular velocity (r,p,y) gives T'=yL-pU, L'=-yT+rU.
             return {frame.tangent, 0.5 * (q * glm::dquat{0.0, roll, pitch, yaw}),
-                rates, s, energy.speedSquared};
+                rates, rollDerivative, pitchDerivative, s,
+                energy.speedSquared};
         };
 
         const auto rk4 = [&](const Pose& pose, const double begin, const double end)
@@ -307,7 +373,8 @@ namespace quantum::coaster
             const Derivative d = derivative(pose, s);
             const geometry::CurveFrame frame = i == 0 ? startingFrame : frameOf(pose.orientation);
             states.push_back({s, startingPosition + pose.displacement, frame,
-                d.rates.z * frame.lateral - d.rates.y * frame.up});
+                d.rates.z * frame.lateral - d.rates.y * frame.up,
+                d.rates, d.rollRateDerivative, d.pitchRateDerivative});
         }
         return states;
     }

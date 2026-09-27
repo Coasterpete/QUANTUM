@@ -100,6 +100,30 @@ namespace quantum::math
                 * transitionProgress;
     }
 
+    double evaluateScalarTransitionDerivative(
+        const ScalarTransition& transition,
+        const double independentValue)
+    {
+        const double domainLength = validatedDomainLength(transition);
+        if (!std::isfinite(independentValue))
+        {
+            throw std::invalid_argument(
+                "Scalar transition values and query must be finite.");
+        }
+        if (independentValue < transition.domainBegin
+            || independentValue > transition.domainEnd)
+        {
+            throw std::out_of_range(
+                "Scalar transition query must be inside its inclusive domain.");
+        }
+        const double normalizedProgress =
+            (independentValue - transition.domainBegin) / domainLength;
+        return (transition.valueEnd - transition.valueBegin)
+            * evaluateTransitionDerivative(
+                transition.transitionType, normalizedProgress)
+            / domainLength;
+    }
+
     double integrateScalarTransition(
         const ScalarTransition& transition,
         const double independentBegin,

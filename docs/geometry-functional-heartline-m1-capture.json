@@ -1,0 +1,21 @@
+{
+  "width": 1600,
+  "height": 900,
+  "settle_frames": 20,
+  "output_directory": "geometry-functional-heartline-m1",
+  "overwrite": true,
+  "scenarios": [
+    {
+      "name": "force-driven-authoring",
+      "document": "../smoke-tests/geometry-functional-heartline.quantum",
+      "region": 1,
+      "framing": "selected"
+    },
+    {
+      "name": "geometry-regions",
+      "document": "../smoke-tests/geometry-functional-heartline.quantum",
+      "region": 2,
+      "framing": "selected"
+    }
+  ]
+}
