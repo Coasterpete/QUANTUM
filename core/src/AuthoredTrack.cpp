@@ -520,6 +520,22 @@ namespace quantum::coaster
         section = std::move(converted);
     }
 
+    void convertSectionToForceDriven(AuthoredTrackSection& section)
+    {
+        if (isForceDrivenSection(section))
+        {
+            return;
+        }
+
+        // Only the authored length carries over. A force-driven region
+        // generates its geometry, so nothing about the previous
+        // construction implies a force target.
+        const double length = sectionLength(section);
+        const RegionTrackStyleOverrides overrides = section.trackStyleOverrides;
+        section = createForceDrivenSection(length);
+        section.trackStyleOverrides = overrides;
+    }
+
     void setPlanarArcRadius(AuthoredTrackSection& section, const double radius)
     {
         if (section.kind != RegionKind::Geometry)

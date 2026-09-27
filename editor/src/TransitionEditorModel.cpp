@@ -21,7 +21,7 @@ namespace quantum::editor
 
         [[nodiscard]] std::optional<double> candidateDistance(
             const std::span<const CurveHitCandidate> candidates,
-            const RateChannel channel,
+            const ProfileChannel channel,
             const double maximumDistanceSquared)
         {
             std::optional<double> best;
@@ -73,7 +73,7 @@ namespace quantum::editor
         [[nodiscard]] std::optional<MarkerHitCandidate> nearestMarker(
             const std::span<const MarkerHitCandidate> candidates,
             const double maximumDistanceSquared,
-            const std::optional<RateChannel> channel)
+            const std::optional<ProfileChannel> channel)
         {
             std::optional<MarkerHitCandidate> best;
             for (const MarkerHitCandidate& candidate : candidates)
@@ -114,38 +114,120 @@ namespace quantum::editor
             }
             return std::round(value / *increment) * *increment;
         }
+
+        // Displayed degrees-per-meter values depend on how many meters one
+        // Core coordinate unit represents, so the scale must be positive and
+        // finite before it is used as a divisor.
+        [[nodiscard]] double requireCoordinateScale(
+            const double metersPerCoordinateUnit)
+        {
+            if (!std::isfinite(metersPerCoordinateUnit)
+                || metersPerCoordinateUnit <= 0.0)
+            {
+                throw std::invalid_argument(
+                    "Meters per coordinate unit must be positive and finite."
+                );
+            }
+            return metersPerCoordinateUnit;
+        }
     }
 
-    coaster::ChannelProfile& sectionRateChannel(
+    coaster::ChannelProfile& sectionProfileChannel(
         coaster::AuthoredTrackSection& section,
-        const RateChannel channel)
+        const ProfileChannel channel)
     {
+        if (auto* geometry = std::get_if<coaster::GeometryRegion>(&section.region))
+        {
+            if (auto* forceDriven =
+                std::get_if<coaster::ForceDrivenRegion>(&geometry->construction))
+            {
+                // A force-driven row authors the rider-force target on the
+                // same rider-local axes the rate rows author rates on.
+                switch (channel)
+                {
+                case ProfileChannel::Roll:
+                    return forceDriven->rollRate;
+                case ProfileChannel::Pitch:
+                    return forceDriven->targetNormalG;
+                case ProfileChannel::Yaw:
+                default:
+                    return forceDriven->targetLateralG;
+                }
+            }
+        }
+
         switch (channel)
         {
-        case RateChannel::Roll:
+        case ProfileChannel::Roll:
             return section.rateProfileRegion().rateProfiles.roll;
-        case RateChannel::Pitch:
+        case ProfileChannel::Pitch:
             return section.rateProfileRegion().rateProfiles.pitch;
-        case RateChannel::Yaw:
+        case ProfileChannel::Yaw:
         default:
             return section.rateProfileRegion().rateProfiles.yaw;
         }
     }
 
-    const coaster::ChannelProfile& sectionRateChannel(
+    const coaster::ChannelProfile& sectionProfileChannel(
         const coaster::AuthoredTrackSection& section,
-        const RateChannel channel)
+        const ProfileChannel channel)
     {
-        switch (channel)
-        {
-        case RateChannel::Roll:
-            return section.rateProfileRegion().rateProfiles.roll;
-        case RateChannel::Pitch:
-            return section.rateProfileRegion().rateProfiles.pitch;
-        case RateChannel::Yaw:
-        default:
-            return section.rateProfileRegion().rateProfiles.yaw;
-        }
+        // Const-correct dispatch without duplicating the routing table.
+        return const_cast<coaster::ChannelProfile&>(
+            sectionProfileChannel(
+                const_cast<coaster::AuthoredTrackSection&>(section), channel));
+    }
+
+    std::array<ProfileRowStyle, profileChannelCount> rateProfileRowStyles(
+        const double metersPerCoordinateUnit)
+    {
+        const double degreesPerMeter = degreesPerRadian
+            / requireCoordinateScale(metersPerCoordinateUnit);
+        return {{
+            {
+                "Roll", "deg/m", "Start rate", "End rate",
+                degreesPerMeter, 1.0 / degreesPerMeter,
+                defaultGraphMagnitude(ProfileChannel::Roll),
+                ProfileRowDiagnostic::IntegratedRotation
+            },
+            {
+                "Pitch", "deg/m", "Start rate", "End rate",
+                degreesPerMeter, 1.0 / degreesPerMeter,
+                defaultGraphMagnitude(ProfileChannel::Pitch),
+                ProfileRowDiagnostic::Curvature
+            },
+            {
+                "Yaw", "deg/m", "Start rate", "End rate",
+                degreesPerMeter, 1.0 / degreesPerMeter,
+                defaultGraphMagnitude(ProfileChannel::Yaw),
+                ProfileRowDiagnostic::Curvature
+            }
+        }};
+    }
+
+    std::array<ProfileRowStyle, profileChannelCount> forceDrivenRowStyles(
+        const double metersPerCoordinateUnit)
+    {
+        // Normal and lateral targets are dimensionless, so the coordinate
+        // scale only affects the authored roll rate's deg/m presentation.
+        const double scale = requireCoordinateScale(metersPerCoordinateUnit);
+        const double degreesPerMeter = degreesPerRadian / scale;
+        return {{
+            {
+                "Roll Rate", "deg/m", "Start roll rate", "End roll rate",
+                degreesPerMeter, 1.0 / degreesPerMeter,
+                defaultGraphMagnitude(ProfileChannel::Roll) * scale,
+                ProfileRowDiagnostic::IntegratedRotation
+            },
+            {
+                "Normal G", "G", "Start target", "End target",
+                1.0, 1.0, 2.0, ProfileRowDiagnostic::ForceTarget
+            },
+            {
+                "Lateral G", "G", "Start target", "End target",
+                1.0, 1.0, 1.0, ProfileRowDiagnostic::ForceTarget
+            }
+        }};
     }
 
     double angularRateDegreesToRadians(
@@ -283,15 +365,15 @@ namespace quantum::editor
         return std::max(std::abs(minimum), std::abs(maximum));
     }
 
-    double defaultGraphMagnitude(const RateChannel channel) noexcept
+    double defaultGraphMagnitude(const ProfileChannel channel) noexcept
     {
         switch (channel)
         {
-        case RateChannel::Roll:
+        case ProfileChannel::Roll:
             return 30.0 * radiansPerDegree;
-        case RateChannel::Pitch:
+        case ProfileChannel::Pitch:
             return 2.0 * radiansPerDegree;
-        case RateChannel::Yaw:
+        case ProfileChannel::Yaw:
         default:
             return 0.5 * radiansPerDegree;
         }
@@ -633,11 +715,11 @@ namespace quantum::editor
         return proposed;
     }
 
-    std::optional<RateChannel> chooseCurveHit(
+    std::optional<ProfileChannel> chooseCurveHit(
         const std::span<const CurveHitCandidate> candidates,
         const double hitRadius,
-        const RateChannel activeChannel,
-        const std::optional<RateChannel> previouslyHovered)
+        const ProfileChannel activeChannel,
+        const std::optional<ProfileChannel> previouslyHovered)
     {
         if (!std::isfinite(hitRadius) || hitRadius < 0.0)
         {
@@ -681,14 +763,14 @@ namespace quantum::editor
             }
         }
         return best.has_value()
-            ? std::optional<RateChannel>{best->channel}
+            ? std::optional<ProfileChannel>{best->channel}
             : std::nullopt;
     }
 
     std::optional<GraphMarkerId> chooseMarkerHit(
         const std::span<const MarkerHitCandidate> candidates,
         const double hitRadius,
-        const RateChannel activeChannel,
+        const ProfileChannel activeChannel,
         const std::optional<GraphMarkerId> previouslyHovered)
     {
         if (!std::isfinite(hitRadius) || hitRadius < 0.0)

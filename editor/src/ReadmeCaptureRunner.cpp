@@ -52,13 +52,16 @@ namespace quantum::editor
             auto loads = evaluateRiderLoadDiagnostics(*track);
             AuthoredTrackEditTransaction transaction{*track};
             transaction.requireAcceptableRiderLoads(loads);
-            if (scenario.kind == ReadmeCaptureKind::ForceDiagnostics)
+            if (scenario.kind == ReadmeCaptureKind::ForceDiagnostics
+                || scenario.kind == ReadmeCaptureKind::ForceDrivenAuthoring)
             {
                 RiderLoadDiagnosticsModel model;
                 model.update(*track, loads);
                 model.selectSection(scenario.region);
                 if (model.selectedSection().samples.size() < 2)
-                    throw std::invalid_argument("force-diagnostics: selected region has no plottable rider loads.");
+                    throw std::invalid_argument(
+                        std::string(readmeCaptureName(scenario.kind))
+                        + ": selected region has no plottable rider loads.");
             }
             return {std::move(*track), std::move(centerline),
                 std::move(supports), std::move(loads)};

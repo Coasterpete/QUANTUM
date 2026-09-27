@@ -140,7 +140,7 @@ namespace
         const editor::GraphValueRange rollRange =
             editor::fitSymmetricGraphRange(
                 rollEndpoints,
-                editor::defaultGraphMagnitude(editor::RateChannel::Roll)
+                editor::defaultGraphMagnitude(editor::ProfileChannel::Roll)
             );
         require(
             rollRange.maximum > peakRollRadiansPerMeter,

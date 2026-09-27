@@ -296,6 +296,24 @@ if(QUANTUM_ENABLE_EDITOR)
     set_target_properties(QuantumEditorForceDrivenAcceptanceTests PROPERTIES CXX_EXTENSIONS OFF)
     add_test(NAME QuantumEditor.ForceDrivenAcceptance COMMAND QuantumEditorForceDrivenAcceptanceTests)
     set_tests_properties(QuantumEditor.ForceDrivenAcceptance PROPERTIES LABELS "editor;force;transaction;physics")
+
+    add_executable(QuantumEditorForceDrivenAuthoringTests
+        ForceDrivenAuthoringTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/CenterlineVisualization.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RiderLoadDiagnostics.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RegionSummary.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TransitionEditorModel.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp
+    )
+    target_include_directories(QuantumEditorForceDrivenAuthoringTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorForceDrivenAuthoringTests PRIVATE Quantum::Core Quantum::Engine)
+    target_compile_features(QuantumEditorForceDrivenAuthoringTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorForceDrivenAuthoringTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.ForceDrivenAuthoring COMMAND QuantumEditorForceDrivenAuthoringTests)
+    set_tests_properties(QuantumEditor.ForceDrivenAuthoring PROPERTIES LABELS "editor;force;authoring;transaction;geometry")
 endif()
 
 if(QUANTUM_ENABLE_ENGINE)

@@ -370,21 +370,21 @@ namespace
         // the cursor, which becomes the row's selection.
         struct Click
         {
-            quantum::editor::RateChannel channel;
+            quantum::editor::ProfileChannel channel;
             quantum::editor::ScalarProfileEndpoint endpoint;
             std::uint32_t segmentId;
         };
 
         struct TypeChange
         {
-            quantum::editor::RateChannel channel;
+            quantum::editor::ProfileChannel channel;
             quantum::math::TransitionType type;
             std::uint32_t segmentId;
         };
 
         struct DistanceMove
         {
-            quantum::editor::RateChannel channel;
+            quantum::editor::ProfileChannel channel;
             std::uint32_t segmentId;
             quantum::editor::ScalarProfileEndpoint endpoint;
             double distance;
@@ -392,14 +392,14 @@ namespace
 
         struct SplitRequest
         {
-            quantum::editor::RateChannel channel;
+            quantum::editor::ProfileChannel channel;
             std::uint32_t segmentId;
             double distance;
         };
 
         struct RemoveRequest
         {
-            quantum::editor::RateChannel channel;
+            quantum::editor::ProfileChannel channel;
             std::uint32_t segmentId;
         };
 
@@ -412,12 +412,16 @@ namespace
         std::optional<RemoveRequest> removeRequest;
     };
 
-    // Read-only view into one authored channel row of the Transition Editor.
+    // Read-only view into one authored channel row of the shared profile
+    // graph. `channel` is the row's identity in hit testing and per-row
+    // editor state; `style` supplies the label, display unit, and derived
+    // read-out for the region type currently being edited.
     struct ProfileRowView
     {
         const char* label;
         const quantum::coaster::ChannelProfile* profile;
-        quantum::editor::RateChannel channel;
+        quantum::editor::ProfileChannel channel;
+        quantum::editor::ProfileRowStyle style;
     };
 
     struct TrackWorkspaceEdit
@@ -434,7 +438,7 @@ namespace
         std::optional<quantum::coaster::LayoutMode> layoutModeChanged;
         // Present when the user picked an authoring type in the create
         // flow; the append/prepend direction lives in RegionCreateFlow.
-        std::optional<quantum::coaster::RegionKind> createdRegionKind;
+        std::optional<quantum::editor::RegionType> createdRegionType;
         std::optional<quantum::editor::TrackHardwareEdit> hardwareEdit;
         std::optional<quantum::editor::RegionTrackStyleEdit> regionStyleEdit;
     };
@@ -452,7 +456,7 @@ namespace
     // endpoint interaction is active; returns the first active one.
     [[nodiscard]] quantum::editor::ScalarProfileEndpoint firstActiveEndpoint(
         const std::array<quantum::editor::ScalarProfileEndpoint,
-            quantum::editor::rateChannelCount>& perChannelEndpoints) noexcept
+            quantum::editor::profileChannelCount>& perChannelEndpoints) noexcept
     {
         for (const quantum::editor::ScalarProfileEndpoint endpoint
             : perChannelEndpoints)
@@ -519,7 +523,7 @@ namespace
         ImDrawList* const drawList,
         const std::span<const RowHandlePoint> handles,
         const ImU32 curveColor,
-        const quantum::editor::RateChannel channel,
+        const quantum::editor::ProfileChannel channel,
         const std::uint32_t selectedSegmentId,
         const quantum::editor::ScalarProfileEndpoint selectedEndpoint,
         const std::optional<quantum::editor::GraphMarkerId> hoveredMarker,
@@ -534,14 +538,14 @@ namespace
         {
             switch (channel)
             {
-            case quantum::editor::RateChannel::Roll:
+            case quantum::editor::ProfileChannel::Roll:
                 drawList->AddRectFilled(
                     ImVec2(position.x - radius, position.y - radius),
                     ImVec2(position.x + radius, position.y + radius),
                     color
                 );
                 break;
-            case quantum::editor::RateChannel::Yaw:
+            case quantum::editor::ProfileChannel::Yaw:
                 drawList->AddQuadFilled(
                     ImVec2(position.x, position.y - radius),
                     ImVec2(position.x + radius, position.y),
@@ -550,7 +554,7 @@ namespace
                     color
                 );
                 break;
-            case quantum::editor::RateChannel::Pitch:
+            case quantum::editor::ProfileChannel::Pitch:
             default:
                 drawList->AddCircleFilled(position, radius, color);
                 break;
@@ -563,7 +567,7 @@ namespace
         {
             switch (channel)
             {
-            case quantum::editor::RateChannel::Roll:
+            case quantum::editor::ProfileChannel::Roll:
                 drawList->AddRect(
                     ImVec2(position.x - radius, position.y - radius),
                     ImVec2(position.x + radius, position.y + radius),
@@ -573,7 +577,7 @@ namespace
                     1.5F
                 );
                 break;
-            case quantum::editor::RateChannel::Yaw:
+            case quantum::editor::ProfileChannel::Yaw:
                 drawList->AddQuad(
                     ImVec2(position.x, position.y - radius),
                     ImVec2(position.x + radius, position.y),
@@ -583,7 +587,7 @@ namespace
                     1.5F
                 );
                 break;
-            case quantum::editor::RateChannel::Pitch:
+            case quantum::editor::ProfileChannel::Pitch:
             default:
                 drawList->AddCircle(
                     position,
@@ -1226,11 +1230,21 @@ namespace
                 == quantum::editor::ScalarProfileEndpoint::Begin
             ? quantum::editor::ScalarProfileEndpoint::Begin
             : quantum::editor::ScalarProfileEndpoint::End;
+        // The unit is part of the format string ImGui passes straight to its
+        // own formatter, so it is composed per frame from the row's style.
+        char valueFormat[48]{};
+        std::snprintf(
+            valueFormat,
+            sizeof(valueFormat),
+            "%%.5f %s",
+            row.style.valueUnitLabel
+        );
         ImGui::BeginGroup();
         ImGui::TextDisabled(
+            "%s",
             numericEndpoint == quantum::editor::ScalarProfileEndpoint::Begin
-                ? "Start rate"
-                : "End rate"
+                ? row.style.beginValueLabel
+                : row.style.endValueLabel
         );
         ImGui::SetNextItemWidth(valueWidth);
         ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
@@ -1239,7 +1253,7 @@ namespace
             selectedValueBuffer,
             0.25,
             1.0,
-            "%.5f deg/m"
+            valueFormat
         );
         ImGui::PopFont();
         if (ImGui::IsItemHovered())
@@ -1247,8 +1261,8 @@ namespace
             ImGui::SetTooltip(
                 numericEndpoint
                     == quantum::editor::ScalarProfileEndpoint::Begin
-                ? "Selected marker angular rate (degrees per meter)"
-                : "Selected segment end angular rate (degrees per meter)"
+                ? row.style.beginValueLabel
+                : row.style.endValueLabel
             );
         }
 
@@ -1469,7 +1483,7 @@ namespace
 
     [[nodiscard]] quantum::editor::GraphValueRange fitProfileGraphRange(
         const quantum::coaster::ChannelProfile& profile,
-        const quantum::editor::RateChannel channel)
+        const double minimumGraphMagnitude)
     {
         std::vector<double> endpointValues;
         endpointValues.reserve(profile.segments.size() * 2);
@@ -1480,12 +1494,12 @@ namespace
             endpointValues.push_back(segment.transition.valueEnd);
         }
 
-        // Channel-specific flat-profile spans keep first drags practical
-        // while each curve retains its own engineering transform. These are
-        // view defaults only, never clamps on authored values.
+        // The row's own flat-profile span keeps first drags practical while
+        // each curve retains its own engineering transform. These are view
+        // defaults only, never clamps on authored values.
         return quantum::editor::fitSymmetricGraphRange(
             endpointValues,
-            quantum::editor::defaultGraphMagnitude(channel)
+            minimumGraphMagnitude
         );
     }
 
@@ -1574,14 +1588,15 @@ namespace
         const float plotBeginY,
         const float plotEndY,
         const quantum::editor::GraphValueRange activeRange,
+        const double authoredToDisplay,
         const ImU32 activeColor)
     {
         const ImU32 secondaryTextColor = ImGui::ColorConvertFloat4ToU32(
             quantum::editor::palette::textSecondary);
         drawScalarDotGrid(drawList, {
             domainView,
-            {activeRange.minimum * quantum::editor::degreesPerRadian,
-                activeRange.maximum * quantum::editor::degreesPerRadian},
+            {activeRange.minimum * authoredToDisplay,
+                activeRange.maximum * authoredToDisplay},
             plotBeginY, plotEndY});
 
         drawList->AddRect(
@@ -1612,7 +1627,7 @@ namespace
                 label,
                 sizeof(label),
                 "%+.3g",
-                radians * quantum::editor::degreesPerRadian
+                radians * authoredToDisplay
             );
             drawList->AddText(
                 ImVec2(domainView.pixelBegin + 4.0F,
@@ -1676,6 +1691,30 @@ namespace
         {
             ImGui::Text("%s Straight", label);
         }
+    }
+
+    // Nearest evaluated rider-load sample to a local distance. Diagnostics
+    // are evaluated on their own sampling grid, so an exact distance match is
+    // not assumed and the nearest sample is reported instead.
+    [[nodiscard]] const quantum::editor::RiderLoadDiagnosticSample*
+    nearestRiderLoadSample(
+        const std::vector<quantum::editor::RiderLoadDiagnosticSample>& samples,
+        const double localDistance) noexcept
+    {
+        const quantum::editor::RiderLoadDiagnosticSample* best = nullptr;
+        double bestDistance = 0.0;
+        for (const quantum::editor::RiderLoadDiagnosticSample& sample :
+            samples)
+        {
+            const double distance = std::abs(
+                sample.localDistance - localDistance);
+            if (best == nullptr || distance < bestDistance)
+            {
+                best = &sample;
+                bestDistance = distance;
+            }
+        }
+        return best;
     }
 
     [[nodiscard]] ScalarProfileRowEdit drawProfileSegmentMenu(
@@ -2946,6 +2985,7 @@ namespace
         SDL_Window* const window,
         const std::size_t selectedIndex,
         double* const sectionLengthEdit,
+        const std::string& geometryEditError,
         quantum::editor::RegionCreateFlow& regionCreateFlow,
         const std::optional<double>& selectedHeightDelta,
         const quantum::coaster::TrackTopology& topology,
@@ -3111,13 +3151,32 @@ namespace
 
             ImGui::Spacing();
             quantum::editor::editorHeading("Region actions", fonts);
+            // A rejected authored edit leaves the committed document and the
+            // viewport untouched, so the reason has to be reported here or
+            // the user has no indication that nothing changed. The message
+            // already carries the region, distance, and reason Core reported.
+            if (!geometryEditError.empty())
+            {
+                ImGui::PushTextWrapPos();
+                ImGui::TextColored(
+                    quantum::editor::palette::warning,
+                    "%s",
+                    geometryEditError.c_str()
+                );
+                ImGui::PopTextWrapPos();
+                ImGui::TextDisabled(
+                    "The last edit was rejected; the committed region and "
+                    "track are unchanged."
+                );
+                ImGui::Spacing();
+            }
             const bool hasSelection = selectedIndex < sectionCount;
             if (ImGui::Button("Append Region..."))
             {
                 regionCreateFlow.choicePending = true;
                 regionCreateFlow.anchor = quantum::editor::RegionCreateAnchor::Append;
             }
-            itemTooltip("Add a Profile or Circular Arc at the end of the track");
+            itemTooltip("Add a Profile, Circular Arc, or Force-Based region at the end of the track");
             sameLineIfFits(buttonWidth("More..."));
             if (ImGui::Button("More..."))
             {
@@ -3186,17 +3245,32 @@ namespace
                 ImGui::TextWrapped("%s: choose region type", placement);
                 if (ImGui::Button("Profile###Rate/Profile"))
                 {
-                    edit.createdRegionKind = quantum::coaster::RegionKind::RateProfiles;
+                    edit.createdRegionType =
+                        quantum::editor::RegionType::Profile;
                 }
                 sameLineIfFits(buttonWidth("Circular Arc"));
                 if (ImGui::Button("Circular Arc###Geometry / Planar Arc"))
                 {
-                    edit.createdRegionKind = quantum::coaster::RegionKind::Geometry;
+                    edit.createdRegionType =
+                        quantum::editor::RegionType::CircularArc;
+                }
+                sameLineIfFits(buttonWidth("Force-Based"));
+                if (ImGui::Button("Force-Based###Geometry / Force Driven"))
+                {
+                    edit.createdRegionType =
+                        quantum::editor::RegionType::ForceBased;
                 }
                 sameLineIfFits(buttonWidth("Cancel"));
                 if (ImGui::Button("Cancel"))
                 {
                     regionCreateFlow.choicePending = false;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                {
+                    ImGui::SetTooltip(
+                        "Force-Based regions generate their track geometry "
+                        "from authored rider-force targets."
+                    );
                 }
             }
 
@@ -3381,40 +3455,67 @@ namespace
         ImGui::End();
     }
 
+    // Draws one authored scalar profile graph with three independently
+    // editable rows. `windowName` selects the primary editor surface so the
+    // same graph serves a rate-profile region's Transition Editor and a
+    // force-driven region's Geometry Editor.
+    //
+    // `riderLoadSamples` carries the read-only evaluated loads of the edited
+    // region, or null when no evaluation matches the current document. It is
+    // only used to place authored force targets next to the resulting loads,
+    // and `riderLoadDiagnosticsOpen` reveals the diagnostics window from the
+    // force-target surface.
     [[nodiscard]] TransitionEditorEdit showTransitionEditor(
+        const char* const windowName,
         const std::span<const ProfileRowView> profileRows,
         const double sectionLength,
-        std::array<double, quantum::editor::rateChannelCount>&
+        const std::vector<quantum::editor::RiderLoadDiagnosticSample>*
+            const riderLoadSamples,
+        bool* const riderLoadDiagnosticsOpen,
+        std::array<double, quantum::editor::profileChannelCount>&
             valueEndBuffers,
         const std::array<quantum::editor::ScalarProfileEndpoint,
-            quantum::editor::rateChannelCount>& endpointSelections,
+            quantum::editor::profileChannelCount>& endpointSelections,
         const std::array<quantum::editor::ScalarProfileEndpoint,
-            quantum::editor::rateChannelCount>& endpointDrags,
+            quantum::editor::profileChannelCount>& endpointDrags,
         const std::array<std::uint32_t,
-            quantum::editor::rateChannelCount>& selectedSegmentIds,
+            quantum::editor::profileChannelCount>& selectedSegmentIds,
         std::array<std::uint32_t,
-            quantum::editor::rateChannelCount>& dragSegmentIds,
+            quantum::editor::profileChannelCount>& dragSegmentIds,
         std::array<quantum::editor::DragAxisLock,
-            quantum::editor::rateChannelCount>& dragAxisLocks,
-        std::array<double, quantum::editor::rateChannelCount>&
+            quantum::editor::profileChannelCount>& dragAxisLocks,
+        std::array<double, quantum::editor::profileChannelCount>&
             dragAxisTravelX,
-        std::array<double, quantum::editor::rateChannelCount>&
+        std::array<double, quantum::editor::profileChannelCount>&
             dragAxisTravelY,
-        std::array<double, quantum::editor::rateChannelCount>&
+        std::array<double, quantum::editor::profileChannelCount>&
             contextMenuSplitDistances,
         std::array<std::optional<quantum::editor::ScalarDragAnchor>,
-            quantum::editor::rateChannelCount>& dragAnchors,
+            quantum::editor::profileChannelCount>& dragAnchors,
         std::array<quantum::editor::GraphValueRange,
-            quantum::editor::rateChannelCount>& graphRanges,
-        quantum::editor::RateChannel& activeChannel,
-        std::optional<quantum::editor::RateChannel>& hoveredChannel,
+            quantum::editor::profileChannelCount>& graphRanges,
+        quantum::editor::ProfileChannel& activeChannel,
+        std::optional<quantum::editor::ProfileChannel>& hoveredChannel,
         std::optional<quantum::editor::GraphMarkerId>& hoveredMarker,
         const quantum::editor::TransitionEditorInputSettings&
             inputSettings,
         const quantum::editor::EditorFonts& fonts)
     {
         TransitionEditorEdit edit;
-        ImGui::Begin("Transition Editor");
+        ImGui::Begin(windowName);
+
+        const auto hasForceTargetRow = [profileRows]
+        {
+            for (const ProfileRowView& row : profileRows)
+            {
+                if (row.style.diagnostic
+                    == quantum::editor::ProfileRowDiagnostic::ForceTarget)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }();
 
         for (const ProfileRowView& row : profileRows)
         {
@@ -3425,7 +3526,7 @@ namespace
             {
                 graphRanges[channelIndex] = fitProfileGraphRange(
                     *row.profile,
-                    row.channel
+                    row.style.minimumGraphMagnitude
                 );
             }
         }
@@ -3500,11 +3601,13 @@ namespace
         const std::size_t activeIndex = static_cast<std::size_t>(
             activeChannel
         );
-        const char* const activeLabel = profileRows[activeIndex].label;
+        const ProfileRowView& activeRow = profileRows[activeIndex];
+        const quantum::editor::ProfileRowStyle& activeStyle =
+            activeRow.style;
 
         const quantum::coaster::ProfileSegment* const focusedSegment =
             findProfileSegment(
-                *profileRows[activeIndex].profile,
+                *activeRow.profile,
                 selectedSegmentIds[activeIndex]
             );
         const quantum::editor::ScalarProfileEndpoint selectedEndpoint =
@@ -3531,7 +3634,7 @@ namespace
 
         const ScalarProfileRowEdit controlEdit =
             drawSelectedProfileControls(
-                profileRows[activeIndex],
+                activeRow,
                 &valueEndBuffers[activeIndex],
                 selectedSegmentIds[activeIndex],
                 selectedEndpoint,
@@ -3547,18 +3650,16 @@ namespace
         {
             if (std::isfinite(valueEndBuffers[activeIndex]))
             {
-                const double valueRadians = quantum::editor::
-                    angularRateDegreesToRadians(
-                        valueEndBuffers[activeIndex]
-                    );
+                const double authoredValue = valueEndBuffers[activeIndex]
+                    * activeStyle.displayToAuthored;
                 graphRanges[activeIndex] = quantum::editor::
                     expandGraphRangeToInclude(
                         graphRanges[activeIndex],
-                        valueRadians
+                        authoredValue
                     );
                 edit.endpointValueEdit = {
                     .endpoint = numericEndpoint,
-                    .value = valueRadians,
+                    .value = authoredValue,
                     .continuous = false,
                     .channel = activeChannel,
                     .segmentId = selectedSegmentIds[activeIndex]
@@ -3566,10 +3667,11 @@ namespace
             }
             else
             {
-                // Core accepts every finite rate but never non-finite data.
+                // Core accepts every finite target or rate but never
+                // non-finite data.
                 valueEndBuffers[activeIndex] =
                     focusedEndpoint(activeIndex).second
-                        * quantum::editor::degreesPerRadian;
+                        * activeStyle.authoredToDisplay;
             }
         }
         if (controlEdit.transitionType.has_value())
@@ -3584,8 +3686,8 @@ namespace
         if (ImGui::SmallButton("Fit Y"))
         {
             graphRanges[activeIndex] = fitProfileGraphRange(
-                *profileRows[activeIndex].profile,
-                activeChannel
+                *activeRow.profile,
+                activeStyle.minimumGraphMagnitude
             );
         }
         itemTooltip("Fit the active channel's vertical range to its authored values");
@@ -3609,9 +3711,10 @@ namespace
         itemTooltip("Zoom out on the active channel's vertical range");
         sameLineIfFits(ImGui::CalcTextSize("Y +/- 0.000e+00 deg/m").x);
         quantum::editor::editorSecondaryText(
-            "Y +/- %.4g deg/m",
+            "Y +/- %.4g %s",
             graphRanges[activeIndex].magnitude()
-                * quantum::editor::degreesPerRadian
+                * activeStyle.authoredToDisplay,
+            activeStyle.valueUnitLabel
         );
 
         sameLineIfFits(buttonWidth("Details..."));
@@ -3625,21 +3728,65 @@ namespace
         {
             ImGui::PushTextWrapPos();
             quantum::editor::editorHeading("Selected endpoint", fonts);
-            const auto [diagnosticDistance, diagnosticRate] =
+            const auto [diagnosticDistance, diagnosticValue] =
                 focusedEndpoint(activeIndex);
-            if (activeChannel == quantum::editor::RateChannel::Roll)
+            if (activeStyle.diagnostic
+                == quantum::editor::ProfileRowDiagnostic::ForceTarget)
+            {
+                // A force target is a rider-load target, not a rate: there is
+                // no curvature or radius to report for it.
+                ImGui::TextDisabled(
+                    "%s target @ %.4g m: %+.5f %s",
+                    activeRow.label,
+                    diagnosticDistance,
+                    diagnosticValue * activeStyle.authoredToDisplay,
+                    activeStyle.valueUnitLabel
+                );
+                // The target is authoring intent for the whole-train
+                // point-mass model; the evaluated load is what the resulting
+                // geometry produced. They are related, not identical.
+                const quantum::editor::RiderLoadDiagnosticSample* const
+                    actual = riderLoadSamples != nullptr
+                        ? nearestRiderLoadSample(
+                            *riderLoadSamples, diagnosticDistance)
+                        : nullptr;
+                if (actual != nullptr)
+                {
+                    const double actualG = activeChannel
+                            == quantum::editor::ProfileChannel::Pitch
+                        ? actual->normalG
+                        : actual->lateralG;
+                    ImGui::TextDisabled(
+                        "Actual %s @ %.4g m: %+.5f G  (difference %+.5f G)",
+                        activeRow.label,
+                        actual->localDistance,
+                        actualG,
+                        actualG - diagnosticValue
+                    );
+                    ImGui::TextDisabled(
+                        "Vehicle speed %.3f m/s",
+                        actual->vehicleSpeed
+                    );
+                }
+                else
+                {
+                    ImGui::TextDisabled(
+                        "No evaluated rider loads for this region yet."
+                    );
+                }
+            }
+            else if (activeStyle.diagnostic
+                == quantum::editor::ProfileRowDiagnostic::IntegratedRotation)
             {
                 const double integratedRollDegrees = quantum::editor::
-                    computeChannelNetRotationDegrees(
-                        *profileRows[activeIndex].profile
-                    );
+                    computeChannelNetRotationDegrees(*activeRow.profile);
                 ImGui::TextDisabled(
-                    "Roll Rate @ %.4g m: %+.5f deg/m  "
+                    "%s @ %.4g m: %+.5f %s  "
                     "Integrated region roll: %+.3f deg",
+                    activeRow.label,
                     diagnosticDistance,
-                    quantum::editor::angularRateRadiansToDegrees(
-                        diagnosticRate
-                    ),
+                    diagnosticValue * activeStyle.authoredToDisplay,
+                    activeStyle.valueUnitLabel,
                     integratedRollDegrees
                 );
             }
@@ -3647,39 +3794,51 @@ namespace
             {
                 const quantum::editor::CurvatureDiagnostic activeDiagnostic =
                     quantum::editor::curvatureDiagnosticFromRateRadians(
-                        diagnosticRate
+                        diagnosticValue
                     );
                 ImGui::TextDisabled(
-                    "%s Rate @ %.4g m: %+.5f deg/m  "
+                    "%s Rate @ %.4g m: %+.5f %s  "
                     "Curvature %+.6f 1/m",
-                    activeLabel,
+                    activeRow.label,
                     diagnosticDistance,
                     activeDiagnostic.rateDegreesPerMeter,
+                    activeStyle.valueUnitLabel,
                     activeDiagnostic.curvaturePerMeter
                 );
                 showRadiusLine("Radius", activeDiagnostic);
+                // Resultant centerline curvature only exists for a region
+                // whose pitch and yaw rows are angular rates.
+                const double pitchRate = quantum::coaster::
+                    evaluateChannelProfile(
+                        *profileRows[static_cast<std::size_t>(
+                            quantum::editor::ProfileChannel::Pitch)].profile,
+                        diagnosticDistance
+                    );
+                const double yawRate = quantum::coaster::
+                    evaluateChannelProfile(
+                        *profileRows[static_cast<std::size_t>(
+                            quantum::editor::ProfileChannel::Yaw)].profile,
+                        diagnosticDistance
+                    );
+                const auto resultant = quantum::editor::
+                    resultantCurvatureDiagnostic(pitchRate, yawRate);
+                ImGui::TextDisabled(
+                    "Local centerline curvature @ %.4g m: %.6f 1/m",
+                    diagnosticDistance,
+                    resultant.curvaturePerMeter
+                );
+                showRadiusLine("Resultant radius", resultant);
             }
-            const double pitchRate = quantum::coaster::evaluateChannelProfile(
-                *profileRows[static_cast<std::size_t>(
-                    quantum::editor::RateChannel::Pitch)].profile,
-                diagnosticDistance
-            );
-            const double yawRate = quantum::coaster::evaluateChannelProfile(
-                *profileRows[static_cast<std::size_t>(
-                    quantum::editor::RateChannel::Yaw)].profile,
-                diagnosticDistance
-            );
-            const auto resultant = quantum::editor::
-                resultantCurvatureDiagnostic(pitchRate, yawRate);
-            ImGui::TextDisabled(
-                "Local centerline curvature @ %.4g m: %.6f 1/m",
-                diagnosticDistance,
-                resultant.curvaturePerMeter
-            );
-            showRadiusLine("Resultant radius", resultant);
             quantum::editor::editorHeading("Total rotation", fonts);
             for (const ProfileRowView& row : profileRows)
             {
+                // Only a roll row integrates to an authored angle; a force
+                // target integrates to a rider load and has no rotation.
+                if (row.style.diagnostic
+                    != quantum::editor::ProfileRowDiagnostic::IntegratedRotation)
+                {
+                    continue;
+                }
                 ImGui::TextDisabled("%s %+.3f deg", row.label,
                     quantum::editor::computeChannelNetRotationDegrees(*row.profile));
             }
@@ -3691,9 +3850,17 @@ namespace
             ImGuiWindowFlags_NoScrollbar
             | ImGuiWindowFlags_NoScrollWithMouse;
 
+        // A force-target surface carries a persistent note and a diagnostics
+        // button below the graph, so the graph must not claim every remaining
+        // pixel or those controls fall outside the window.
+        const float timelineHeight = ImGui::GetContentRegionAvail().y
+            - (hasForceTargetRow
+                ? 4.0F * ImGui::GetTextLineHeight() + 3.0F * ImGui::GetStyle().ItemSpacing.y
+                : 0.0F);
+
         if (ImGui::BeginChild(
             "##TransitionTimeline",
-            ImVec2(0.0F, std::max(200.0F, ImGui::GetContentRegionAvail().y)),
+            ImVec2(0.0F, std::max(200.0F, timelineHeight)),
             ImGuiChildFlags_Borders,
             timelineWindowFlags))
         {
@@ -3776,13 +3943,14 @@ namespace
                     plotBeginY,
                     plotEndY,
                     graphRanges[activeIndex],
+                    activeStyle.authoredToDisplay,
                     profileCurveColors[activeIndex]
                 );
 
                 std::array<std::optional<ScalarRowEditGeometry>,
-                    quantum::editor::rateChannelCount> rowGeometries{};
+                    quantum::editor::profileChannelCount> rowGeometries{};
                 std::array<ChannelPlotGeometry,
-                    quantum::editor::rateChannelCount> plotGeometries{};
+                    quantum::editor::profileChannelCount> plotGeometries{};
                 for (std::size_t rowIndex = 0;
                     rowIndex < profileRows.size();
                     ++rowIndex)
@@ -3812,7 +3980,7 @@ namespace
                     && mousePosition.x <= plotEndX
                     && mousePosition.y >= plotBeginY
                     && mousePosition.y <= plotEndY;
-                const std::optional<quantum::editor::RateChannel>
+                const std::optional<quantum::editor::ProfileChannel>
                     previousHovered = hoveredChannel;
                 const std::optional<quantum::editor::GraphMarkerId>
                     previousHoveredMarker = hoveredMarker;
@@ -3824,22 +3992,22 @@ namespace
                 if (mouseInPlot)
                 {
                     std::array<quantum::editor::CurveHitCandidate,
-                        quantum::editor::rateChannelCount> curveCandidates{};
+                        quantum::editor::profileChannelCount> curveCandidates{};
                     std::vector<quantum::editor::MarkerHitCandidate>
                         markerCandidates;
                     markerCandidates.reserve(
                         profileRows[0].profile->segments.size()
                             + profileRows[1].profile->segments.size()
                             + profileRows[2].profile->segments.size()
-                            + quantum::editor::rateChannelCount
+                            + quantum::editor::profileChannelCount
                     );
 
                     for (std::size_t channelIndex = 0;
-                        channelIndex < quantum::editor::rateChannelCount;
+                        channelIndex < quantum::editor::profileChannelCount;
                         ++channelIndex)
                     {
                         curveCandidates[channelIndex] = {
-                            static_cast<quantum::editor::RateChannel>(
+                            static_cast<quantum::editor::ProfileChannel>(
                                 channelIndex),
                             nearestPolylineDistanceSquared(
                                 mousePosition,
@@ -3853,7 +4021,7 @@ namespace
                             markerCandidates.push_back({
                                 {
                                     static_cast<quantum::editor::
-                                        RateChannel>(channelIndex),
+                                        ProfileChannel>(channelIndex),
                                     handle.segmentId,
                                     handle.endpoint
                                 },
@@ -3873,7 +4041,7 @@ namespace
                     );
                     hoveredMarker = markerHit;
                     hoveredChannel = markerHit.has_value()
-                        ? std::optional<quantum::editor::RateChannel>{
+                        ? std::optional<quantum::editor::ProfileChannel>{
                             markerHit->channel}
                         : quantum::editor::chooseCurveHit(
                             curveCandidates,
@@ -3922,11 +4090,11 @@ namespace
                     true
                 );
                 for (std::size_t channelIndex = 0;
-                    channelIndex < quantum::editor::rateChannelCount;
+                    channelIndex < quantum::editor::profileChannelCount;
                     ++channelIndex)
                 {
                     const auto channel = static_cast<
-                        quantum::editor::RateChannel>(channelIndex);
+                        quantum::editor::ProfileChannel>(channelIndex);
                     const bool channelHovered = hoveredChannel.has_value()
                         && *hoveredChannel == channel;
                     if (channel == activeChannel || channelHovered)
@@ -3975,11 +4143,11 @@ namespace
                     ++foregroundPass)
                 {
                     for (std::size_t channelIndex = 0;
-                        channelIndex < quantum::editor::rateChannelCount;
+                        channelIndex < quantum::editor::profileChannelCount;
                         ++channelIndex)
                     {
                         const auto channel = static_cast<quantum::editor::
-                            RateChannel>(channelIndex);
+                            ProfileChannel>(channelIndex);
                         const bool foreground = channel == activeChannel
                             || (hoveredChannel.has_value()
                                 && *hoveredChannel == channel);
@@ -4031,14 +4199,16 @@ namespace
                             hoveredSegmentId
                         );
                     ImGui::BeginTooltip();
-                    ImGui::Text("%s Rate", hoveredRow.label);
+                    ImGui::Text("%s", hoveredRow.label);
                     ImGui::Text("Distance: %.6g m", hoverDistance);
                     ImGui::Text(
-                        "Rate: %+.6f deg/m",
-                        value * quantum::editor::degreesPerRadian
+                        "Value: %+.6f %s",
+                        value * hoveredRow.style.authoredToDisplay,
+                        hoveredRow.style.valueUnitLabel
                     );
-                    if (*hoveredChannel
-                        != quantum::editor::RateChannel::Roll)
+                    switch (hoveredRow.style.diagnostic)
+                    {
+                    case quantum::editor::ProfileRowDiagnostic::Curvature:
                     {
                         const auto diagnostic = quantum::editor::
                             curvatureDiagnosticFromRateRadians(value);
@@ -4047,9 +4217,10 @@ namespace
                             diagnostic.curvaturePerMeter
                         );
                         showRadiusLine("Radius:", diagnostic);
+                        break;
                     }
-                    else
-                    {
+                    case quantum::editor::ProfileRowDiagnostic::
+                        IntegratedRotation:
                         ImGui::Text(
                             "Integrated region roll: %+.3f deg",
                             quantum::editor::
@@ -4057,6 +4228,13 @@ namespace
                                     *hoveredRow.profile
                                 )
                         );
+                        break;
+                    case quantum::editor::ProfileRowDiagnostic::ForceTarget:
+                        ImGui::TextDisabled(
+                            "Authored rider-force target; the resulting "
+                            "loads are shown in Force Diagnostics."
+                        );
+                        break;
                     }
                     ImGui::TextDisabled(
                         *hoveredChannel == activeChannel
@@ -4113,11 +4291,11 @@ namespace
                 }
 
                 for (std::size_t channelIndex = 0;
-                    channelIndex < quantum::editor::rateChannelCount;
+                    channelIndex < quantum::editor::profileChannelCount;
                     ++channelIndex)
                 {
                     const auto channel = static_cast<
-                        quantum::editor::RateChannel>(channelIndex);
+                        quantum::editor::ProfileChannel>(channelIndex);
                     const bool openMenu = hoveredChannel.has_value()
                         && *hoveredChannel == channel
                         && ImGui::IsMouseReleased(
@@ -4159,7 +4337,7 @@ namespace
                 // live precision mode on both axes.
                 const ImGuiIO& dragIo = ImGui::GetIO();
                 for (std::size_t channelIndex = 0;
-                    channelIndex < quantum::editor::rateChannelCount;
+                    channelIndex < quantum::editor::profileChannelCount;
                     ++channelIndex)
                 {
                     if (endpointDrags[channelIndex]
@@ -4267,7 +4445,7 @@ namespace
                                 edit.distanceMove =
                                     TransitionEditorEdit::DistanceMove{
                                         static_cast<quantum::editor::
-                                            RateChannel>(channelIndex),
+                                            ProfileChannel>(channelIndex),
                                         dragSegmentIds[channelIndex],
                                         endpointDrags[channelIndex],
                                         distance
@@ -4306,7 +4484,7 @@ namespace
                             .value = value,
                             .continuous = true,
                             .channel = static_cast<quantum::editor::
-                                RateChannel>(channelIndex),
+                                ProfileChannel>(channelIndex),
                             .segmentId = dragSegmentIds[channelIndex]
                         };
                     }
@@ -4318,6 +4496,24 @@ namespace
             ImGui::Dummy(canvasSize);
         }
         ImGui::EndChild();
+
+        if (hasForceTargetRow)
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos();
+            ImGui::TextDisabled(
+                "Authored rider-force targets drive the generated track. "
+                "Force Diagnostics shows the evaluated loads of the resulting "
+                "geometry; a target curve is not the same as a final dynamic "
+                "train load."
+            );
+            ImGui::PopTextWrapPos();
+            if (ImGui::SmallButton("Show Force Diagnostics"))
+            {
+                *riderLoadDiagnosticsOpen = true;
+                ImGui::SetWindowFocus(riderLoadDiagnosticsWindowName);
+            }
+        }
 
         ImGui::End();
         return edit;
@@ -5835,12 +6031,12 @@ namespace quantum::editor
         selectedSection_ = 0;
         selectedTrackAnchor_ = 0;
         for (std::size_t channelIndex = 0;
-            channelIndex < rateChannelCount;
+            channelIndex < profileChannelCount;
             ++channelIndex)
         {
-            const auto channel = static_cast<RateChannel>(channelIndex);
+            const auto channel = static_cast<ProfileChannel>(channelIndex);
             const auto& profile =
-                sectionRateChannel(authoredTrack.section(0), channel);
+                sectionProfileChannel(authoredTrack.section(0), channel);
             valueEndEditBuffers_[channelIndex] =
                 profile.segments.empty()
                     ? 0.0
@@ -5860,8 +6056,8 @@ namespace quantum::editor
             scalarDragAnchors_[channelIndex].reset();
             graphValueRanges_[channelIndex] = {};
         }
-        activeRateChannel_ = RateChannel::Pitch;
-        hoveredRateChannel_.reset();
+        activeProfileChannel_ = ProfileChannel::Pitch;
+        hoveredProfileChannel_.reset();
         sectionLengthEditBuffer_ =
             coaster::sectionLength(authoredTrack.section(0));
         profileEndpointValueEdit_.reset();
@@ -8906,7 +9102,14 @@ ImGui::MenuItem(
                 bottomFraction = 0.38F;
                 if (captureScenario_->kind == ReadmeCaptureKind::ForceDiagnostics)
                     bottomFraction = 0.76F;
-                else if (captureScenario_->kind == ReadmeCaptureKind::TransitionEditor)
+                else if (captureScenario_->kind
+                    == ReadmeCaptureKind::TransitionEditor)
+                    bottomFraction = 0.52F;
+                else if (captureScenario_->kind
+                    == ReadmeCaptureKind::ForceDrivenAuthoring)
+                    // The force-driven surface is the profile graph in the
+                    // bottom row, so it needs the same room the Transition
+                    // Editor gets.
                     bottomFraction = 0.52F;
                 else if (captureScenario_->kind == ReadmeCaptureKind::ModernSteel)
                     bottomFraction = 0.12F;
@@ -9426,8 +9629,8 @@ ImGui::MenuItem(
             selectedSegmentIds_.fill(coaster::invalidSegmentId);
             dragSegmentIds_.fill(coaster::invalidSegmentId);
             graphValueRanges_.fill({});
-            activeRateChannel_ = RateChannel::Pitch;
-            hoveredRateChannel_.reset();
+            activeProfileChannel_ = ProfileChannel::Pitch;
+            hoveredProfileChannel_.reset();
             dragAxisLocks_.fill(DragAxisLock::None);
             dragAxisTravelX_.fill(0.0);
             dragAxisTravelY_.fill(0.0);
@@ -9460,6 +9663,7 @@ ImGui::MenuItem(
             window_,
             selectedSection_,
             &sectionLengthEditBuffer_,
+            geometryEditError_,
             regionCreateFlow_,
             selectedRegionHeightDelta,
             quantum::coaster::computeTrackTopology(*authoredTrack_),
@@ -9486,36 +9690,45 @@ ImGui::MenuItem(
             selectSection(*workspaceEdit.selectRequest);
         }
 
-        if (workspaceEdit.createdRegionKind.has_value())
+        if (workspaceEdit.createdRegionType.has_value())
         {
             const quantum::editor::RegionCreateAnchor anchor =
                 regionCreateFlow_.anchor;
             regionCreateFlow_.choicePending = false;
 
+            // The anchor chooses the ordering position; the chosen region
+            // type chooses the construction. The two are independent so a
+            // future authoring type only adds one case per anchor.
             RegionCommandType createType =
                 RegionCommandType::AppendRateProfiles;
-            switch (anchor)
+            switch (*workspaceEdit.createdRegionType)
             {
-            case quantum::editor::RegionCreateAnchor::Prepend:
-                createType =
-                    *workspaceEdit.createdRegionKind
-                            == coaster::RegionKind::Geometry
-                        ? RegionCommandType::PrependPlanarArc
-                        : RegionCommandType::PrependRateProfiles;
+            case quantum::editor::RegionType::Profile:
+                createType = anchor
+                        == quantum::editor::RegionCreateAnchor::Prepend
+                    ? RegionCommandType::PrependRateProfiles
+                    : anchor
+                        == quantum::editor::RegionCreateAnchor::AfterSelected
+                    ? RegionCommandType::InsertAfterRateProfiles
+                    : RegionCommandType::AppendRateProfiles;
                 break;
-            case quantum::editor::RegionCreateAnchor::AfterSelected:
-                createType =
-                    *workspaceEdit.createdRegionKind
-                            == coaster::RegionKind::Geometry
-                        ? RegionCommandType::InsertAfterPlanarArc
-                        : RegionCommandType::InsertAfterRateProfiles;
+            case quantum::editor::RegionType::CircularArc:
+                createType = anchor
+                        == quantum::editor::RegionCreateAnchor::Prepend
+                    ? RegionCommandType::PrependPlanarArc
+                    : anchor
+                        == quantum::editor::RegionCreateAnchor::AfterSelected
+                    ? RegionCommandType::InsertAfterPlanarArc
+                    : RegionCommandType::AppendPlanarArc;
                 break;
-            case quantum::editor::RegionCreateAnchor::Append:
-                createType =
-                    *workspaceEdit.createdRegionKind
-                            == coaster::RegionKind::Geometry
-                        ? RegionCommandType::AppendPlanarArc
-                        : RegionCommandType::AppendRateProfiles;
+            case quantum::editor::RegionType::ForceBased:
+                createType = anchor
+                        == quantum::editor::RegionCreateAnchor::Prepend
+                    ? RegionCommandType::PrependForceDriven
+                    : anchor
+                        == quantum::editor::RegionCreateAnchor::AfterSelected
+                    ? RegionCommandType::InsertAfterForceDriven
+                    : RegionCommandType::AppendForceDriven;
                 break;
             }
 
@@ -9571,145 +9784,135 @@ ImGui::MenuItem(
             regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
                               selectedSection_, 0.0};
         }
-        // The Transition Editor is the primary detailed editor for
-        // rate-profile regions and shows the selected section's authored
-        // rate profiles over that section's local distance domain, with
-        // every channel row editable the same way.
-        //
-        // Geometry regions get the dedicated Geometry Editor instead; the
-        // Transition Editor window is not submitted at all for those
-        // selections so each authoring model owns exactly one primary
-        // editor surface and no irrelevant editor idles in a disabled
-        // state. The dock slot stays registered in the layout ini, so
-        // switching back to a rate-profile region restores the previous
-        // placement.
+        // Each region kind owns exactly one primary editor surface. A
+        // rate-profile region is edited in the Transition Editor and a
+        // planar-arc region in the Geometry Editor. A force-driven region is
+        // also edited in the Geometry Editor, which hosts the same authored
+        // profile graph over its three force channels, because its targets
+        // are authored curves rather than scalar parameters. The unused
+        // window is not submitted at all so no irrelevant editor idles in a
+        // disabled state, and the dock slot stays registered in the layout
+        // ini so switching back restores the previous placement.
         const coaster::AuthoredTrackSection& editedSection =
             authoredTrack_->section(selectedSection_);
+        const bool editingForceTargets =
+            coaster::isForceDrivenSection(editedSection);
+        const double metersPerCoordinateUnit =
+            authoredTrack_->physicalSettings().metersPerCoordinateUnit;
 
-        if (editedSection.kind != coaster::RegionKind::RateProfiles)
+        if (editedSection.kind != coaster::RegionKind::RateProfiles
+            && !editingForceTargets)
         {
             ImGui::Begin(geometryEditorWindowName);
 
-            if (coaster::isForceDrivenSection(editedSection))
-            {
-                ImGui::TextDisabled("Force-Based \xe2\x80\x94 read-only");
-                ImGui::TextWrapped("Target profile editing is not available yet. Actual loads appear in Force Diagnostics.");
-                if (ImGui::SmallButton("Show Force Diagnostics"))
-                {
-                    riderLoadDiagnosticsWindowOpen_ = true;
-                    ImGui::SetWindowFocus(riderLoadDiagnosticsWindowName);
-                }
-            }
-            else
-            {
-            const auto& committedArc =
-                std::get<coaster::PlanarArcRegion>(
-                    std::get<coaster::GeometryRegion>(
-                        editedSection.region).construction);
+        const auto& committedArc =
+            std::get<coaster::PlanarArcRegion>(
+                std::get<coaster::GeometryRegion>(
+                    editedSection.region).construction);
 
-            editorHeading("Circular arc geometry", fonts_);
+        editorHeading("Circular arc geometry", fonts_);
 
-            // Angle fields present degrees; commands carry Core radians.
-            // Every edit flows through the same candidate/commit pipeline
-            // as rate-profile edits.
-            const auto inputProperty = [this](const char* const label,
-                const char* const id, double* const value,
-                const double step, const double fastStep)
+        // Angle fields present degrees; commands carry Core radians.
+        // Every edit flows through the same candidate/commit pipeline
+        // as rate-profile edits.
+        const auto inputProperty = [this](const char* const label,
+            const char* const id, double* const value,
+            const double step, const double fastStep)
+        {
+            const float labelWidth = ImGui::CalcTextSize("Bank change (deg)").x
+                + ImGui::GetStyle().ItemSpacing.x;
+            const bool inlineField = ImGui::GetContentRegionAvail().x
+                >= labelWidth + 200.0F;
+            const float rowX = ImGui::GetCursorPosX();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(label);
+            if (inlineField)
             {
-                const float labelWidth = ImGui::CalcTextSize("Bank change (deg)").x
-                    + ImGui::GetStyle().ItemSpacing.x;
-                const bool inlineField = ImGui::GetContentRegionAvail().x
-                    >= labelWidth + 200.0F;
-                const float rowX = ImGui::GetCursorPosX();
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted(label);
-                if (inlineField)
-                {
-                    ImGui::SameLine(rowX + labelWidth);
-                }
-                ImGui::SetNextItemWidth(std::min(320.0F,
-                    ImGui::GetContentRegionAvail().x));
-                ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
-                const bool changed = ImGui::InputDouble(id, value, step, fastStep, "%.3f");
-                ImGui::PopFont();
-                return changed;
-            };
-            if (inputProperty(
-                "Radius", "###Radius",
-                &planarArcEditBuffers_[0],
-                1.0,
-                10.0
-            ))
-            {
-                regionCommand_ = {RegionCommandType::SetPlanarArcRadius,
-                                  selectedSection_,
-                                  planarArcEditBuffers_[0]};
+                ImGui::SameLine(rowX + labelWidth);
             }
+            ImGui::SetNextItemWidth(std::min(320.0F,
+                ImGui::GetContentRegionAvail().x));
+            ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
+            const bool changed = ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+            ImGui::PopFont();
+            return changed;
+        };
+        if (inputProperty(
+            "Radius", "###Radius",
+            &planarArcEditBuffers_[0],
+            1.0,
+            10.0
+        ))
+        {
+            regionCommand_ = {RegionCommandType::SetPlanarArcRadius,
+                              selectedSection_,
+                              planarArcEditBuffers_[0]};
+        }
 
-            if (inputProperty(
-                "Arc angle (deg)", "###Swept Angle (deg)",
-                &planarArcEditBuffers_[1],
-                5.0,
-                15.0
-            ))
-            {
-                regionCommand_ = {
-                    RegionCommandType::SetPlanarArcSweptAngle,
-                    selectedSection_,
-                    planarArcEditBuffers_[1] * radiansPerDegree};
-            }
+        if (inputProperty(
+            "Arc angle (deg)", "###Swept Angle (deg)",
+            &planarArcEditBuffers_[1],
+            5.0,
+            15.0
+        ))
+        {
+            regionCommand_ = {
+                RegionCommandType::SetPlanarArcSweptAngle,
+                selectedSection_,
+                planarArcEditBuffers_[1] * radiansPerDegree};
+        }
 
-            if (inputProperty(
-                "Plane tilt (deg)", "###Plane Tilt (deg)",
-                &planarArcEditBuffers_[2],
-                5.0,
-                15.0
-            ))
-            {
-                regionCommand_ = {
-                    RegionCommandType::SetPlanarArcPlaneTilt,
-                    selectedSection_,
-                    planarArcEditBuffers_[2] * radiansPerDegree};
-            }
+        if (inputProperty(
+            "Plane tilt (deg)", "###Plane Tilt (deg)",
+            &planarArcEditBuffers_[2],
+            5.0,
+            15.0
+        ))
+        {
+            regionCommand_ = {
+                RegionCommandType::SetPlanarArcPlaneTilt,
+                selectedSection_,
+                planarArcEditBuffers_[2] * radiansPerDegree};
+        }
 
-            ImGui::Spacing();
-            editorHeading("Banking", fonts_);
-            if (inputProperty(
-                "Bank change (deg)", "###Bank Change (deg)",
-                &planarArcEditBuffers_[3],
-                5.0,
-                15.0
-            ))
-            {
-                regionCommand_ = {
-                    RegionCommandType::SetPlanarArcBankChange,
-                    selectedSection_,
-                    planarArcEditBuffers_[3] * radiansPerDegree};
-            }
-            ImGui::Spacing();
-            ImGui::PushTextWrapPos();
-            ImGui::TextDisabled(
-                "Resulting length %.6g",
-                coaster::planarArcLength(committedArc)
-            );
-            ImGui::PopTextWrapPos();
-
-            ImGui::Spacing();
-            if (ImGui::SmallButton("Convert to Profile###Convert to Rate Profiles"))
-            {
-                regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
-                                  selectedSection_, 0.0};
-            }
-            }
+        ImGui::Spacing();
+        editorHeading("Banking", fonts_);
+        if (inputProperty(
+            "Bank change (deg)", "###Bank Change (deg)",
+            &planarArcEditBuffers_[3],
+            5.0,
+            15.0
+        ))
+        {
+            regionCommand_ = {
+                RegionCommandType::SetPlanarArcBankChange,
+                selectedSection_,
+                planarArcEditBuffers_[3] * radiansPerDegree};
+        }
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos();
+        ImGui::TextDisabled(
+            "Resulting length %.6g",
+            coaster::planarArcLength(committedArc)
+        );
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        if (ImGui::SmallButton("Convert to Profile###Convert to Rate Profiles"))
+        {
+            regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
+                              selectedSection_, 0.0};
+        }
 
             ImGui::End();
         }
         else
         {
-
-        // Resolve per-channel segment selections against the committed
-        // document; stale ids fall back to the tail segment so the numeric
-        // field and type combo always address a live segment.
+        // Resolve per-row segment selections against the committed document;
+        // stale ids fall back to the tail segment so the numeric field and
+        // type combo always address a live segment. The same resolution
+        // serves rate-profile and force-driven rows, which is what keeps
+        // editing stable across a region-kind switch. A planar arc owns scalar
+        // parameters rather than authored curves, so it has no rows at all.
         const auto containsSegment = [](
             const coaster::ChannelProfile& profile,
             const std::uint32_t segmentId)
@@ -9726,12 +9929,20 @@ ImGui::MenuItem(
             return false;
         };
 
+        // Both authoring models supply three rows in the same slot order, so
+        // one table drives selection resolution, the graph, and every queued
+        // edit for either region kind.
+        const std::array<ProfileRowStyle, profileChannelCount> rowStyles =
+            editingForceTargets
+                ? forceDrivenRowStyles(metersPerCoordinateUnit)
+                : rateProfileRowStyles(metersPerCoordinateUnit);
+
         for (std::size_t channelIndex = 0;
-            channelIndex < rateChannelCount;
+            channelIndex < profileChannelCount;
             ++channelIndex)
         {
-            const auto channel = static_cast<RateChannel>(channelIndex);
-            const auto& profile = sectionRateChannel(editedSection, channel);
+            const auto channel = static_cast<ProfileChannel>(channelIndex);
+            const auto& profile = sectionProfileChannel(editedSection, channel);
 
             if (profile.segments.empty())
             {
@@ -9750,7 +9961,7 @@ ImGui::MenuItem(
                     ScalarProfileEndpoint::None;
                 valueEndEditBuffers_[channelIndex] =
                     profile.segments.back().transition.valueEnd
-                        * degreesPerRadian;
+                        * rowStyles[channelIndex].authoredToDisplay;
             }
 
             const bool dragLive = endpointDrags_[channelIndex]
@@ -9767,20 +9978,41 @@ ImGui::MenuItem(
             }
         }
 
-        const std::array<ProfileRowView, rateChannelCount> profileRows{{
-            {"Roll",
-             &sectionRateChannel(editedSection, RateChannel::Roll),
-             RateChannel::Roll},
-            {"Pitch",
-             &sectionRateChannel(editedSection, RateChannel::Pitch),
-             RateChannel::Pitch},
-            {"Yaw",
-             &sectionRateChannel(editedSection, RateChannel::Yaw),
-             RateChannel::Yaw},
+        const std::array<ProfileRowView, profileChannelCount> profileRows{{
+            {rowStyles[static_cast<std::size_t>(ProfileChannel::Roll)].label,
+             &sectionProfileChannel(editedSection, ProfileChannel::Roll),
+             ProfileChannel::Roll,
+             rowStyles[static_cast<std::size_t>(ProfileChannel::Roll)]},
+            {rowStyles[static_cast<std::size_t>(ProfileChannel::Pitch)].label,
+             &sectionProfileChannel(editedSection, ProfileChannel::Pitch),
+             ProfileChannel::Pitch,
+             rowStyles[static_cast<std::size_t>(ProfileChannel::Pitch)]},
+            {rowStyles[static_cast<std::size_t>(ProfileChannel::Yaw)].label,
+             &sectionProfileChannel(editedSection, ProfileChannel::Yaw),
+             ProfileChannel::Yaw,
+             rowStyles[static_cast<std::size_t>(ProfileChannel::Yaw)]},
         }};
+
+        // Evaluated loads are only offered when they describe the region
+        // currently being edited, so a stale whole-track history can never be
+        // compared against a different region's targets.
+        const std::vector<quantum::editor::RiderLoadDiagnosticSample>*
+            loadSamples =
+            riderLoadDiagnostics_.sectionCount()
+                    == authoredTrack_->sectionCount()
+                && riderLoadDiagnostics_.selectedSection().sectionIndex
+                    == selectedSection_
+            ? &riderLoadDiagnostics_.selectedSection().samples
+            : nullptr;
+
         const TransitionEditorEdit transitionEdit = showTransitionEditor(
+            editingForceTargets
+                ? geometryEditorWindowName
+                : "Transition Editor",
             profileRows,
             coaster::sectionLength(editedSection),
+            loadSamples,
+            &riderLoadDiagnosticsWindowOpen_,
             valueEndEditBuffers_,
             endpointSelections_,
             endpointDrags_,
@@ -9792,8 +10024,8 @@ ImGui::MenuItem(
             contextMenuSplitDistances_,
             scalarDragAnchors_,
             graphValueRanges_,
-            activeRateChannel_,
-            hoveredRateChannel_,
+            activeProfileChannel_,
+            hoveredProfileChannel_,
             hoveredGraphMarker_,
             transitionEditorInputSettings_,
             fonts_
@@ -9803,7 +10035,7 @@ ImGui::MenuItem(
         {
             const ScalarProfileEndpointValueEdit& valueEdit =
                 *transitionEdit.endpointValueEdit;
-            const auto& channelProfile = sectionRateChannel(
+            const auto& channelProfile = sectionProfileChannel(
                 editedSection,
                 valueEdit.channel
             );
@@ -9979,7 +10211,7 @@ ImGui::MenuItem(
 
                 // Seed the rolling drag anchor at the committed value and
                 // current cursor so arming a drag never jumps the value.
-                const auto& clickedProfile = sectionRateChannel(
+                const auto& clickedProfile = sectionProfileChannel(
                     editedSection,
                     transitionEdit.click->channel
                 );
@@ -10010,11 +10242,11 @@ ImGui::MenuItem(
                     committedDistance
                 };
                 valueEndEditBuffers_[clickChannel] = committedValue
-                    * degreesPerRadian;
+                    * rowStyles[clickChannel].authoredToDisplay;
             }
             else
             {
-                const auto& plotProfile = sectionRateChannel(
+                const auto& plotProfile = sectionProfileChannel(
                     editedSection,
                     transitionEdit.click->channel
                 );
@@ -10045,7 +10277,7 @@ ImGui::MenuItem(
                     {
                         valueEndEditBuffers_[clickChannel] =
                             segment.transition.valueEnd
-                                * degreesPerRadian;
+                                * rowStyles[clickChannel].authoredToDisplay;
                         break;
                     }
                 }
@@ -10589,13 +10821,16 @@ ImGui::MenuItem(
             riderLoadDiagnostics_.selectSection(selectedSection_);
         }
         regionCreateFlow_.choicePending = false;
+        // A rejection message names a region, so it does not follow the user
+        // to a different selection.
+        geometryEditError_.clear();
         endpointSelections_.fill(ScalarProfileEndpoint::None);
         endpointDrags_.fill(ScalarProfileEndpoint::None);
         selectedSegmentIds_.fill(coaster::invalidSegmentId);
         dragSegmentIds_.fill(coaster::invalidSegmentId);
         graphValueRanges_.fill({});
-        activeRateChannel_ = RateChannel::Pitch;
-        hoveredRateChannel_.reset();
+        activeProfileChannel_ = ProfileChannel::Pitch;
+        hoveredProfileChannel_.reset();
         hoveredGraphMarker_.reset();
         dragAxisLocks_.fill(DragAxisLock::None);
         dragAxisTravelX_.fill(0.0);
@@ -10616,14 +10851,24 @@ ImGui::MenuItem(
         // Both selection log formats are consumed by tooling; keep
         // the rate-profile format byte-identical to its historical
         // shape and give geometry sections their own line.
+        const bool selectedIsForceDriven =
+            coaster::isForceDrivenSection(selected);
+        const std::array<ProfileRowStyle, profileChannelCount> rowStyles =
+            selectedIsForceDriven
+                ? forceDrivenRowStyles(
+                    authoredTrack_->physicalSettings()
+                        .metersPerCoordinateUnit)
+                : rateProfileRowStyles(
+                    authoredTrack_->physicalSettings()
+                        .metersPerCoordinateUnit);
         if (selected.kind == coaster::RegionKind::RateProfiles)
         {
             const auto& rollProfile =
-                sectionRateChannel(selected, RateChannel::Roll);
+                sectionProfileChannel(selected, ProfileChannel::Roll);
             const auto& pitchProfile =
-                sectionRateChannel(selected, RateChannel::Pitch);
+                sectionProfileChannel(selected, ProfileChannel::Pitch);
             const auto& yawProfile =
-                sectionRateChannel(selected, RateChannel::Yaw);
+                sectionProfileChannel(selected, ProfileChannel::Yaw);
             quantum::logging::logMessagef(
                 quantum::logging::LogLevel::Debug,
                 "SEL",
@@ -10634,19 +10879,27 @@ ImGui::MenuItem(
                 pitchProfile.segments.back().transition.valueEnd,
                 yawProfile.segments.back().transition.valueEnd
             );
-            for (std::size_t channelIndex = 0;
-                channelIndex < rateChannelCount;
-                ++channelIndex)
-            {
-                valueEndEditBuffers_[channelIndex] =
-                    sectionRateChannel(
-                        selected,
-                        static_cast<RateChannel>(channelIndex)
-                    ).segments.back().transition.valueEnd
-                        * degreesPerRadian;
-            }
         }
-        else if (!coaster::isForceDrivenSection(selected))
+        else if (selectedIsForceDriven)
+        {
+            const auto& forceDriven = std::get<coaster::ForceDrivenRegion>(
+                std::get<coaster::GeometryRegion>(
+                    selected.region).construction);
+            quantum::logging::logMessagef(
+                quantum::logging::LogLevel::Debug,
+                "SEL",
+                "selected=%zu kind=forceDriven length=%.6f "
+                "normalGEnd=%.6f lateralGEnd=%.6f rollRateEnd=%.6f",
+                selectedSection_,
+                selected.length,
+                forceDriven.targetNormalG.segments.back()
+                    .transition.valueEnd,
+                forceDriven.targetLateralG.segments.back()
+                    .transition.valueEnd,
+                forceDriven.rollRate.segments.back().transition.valueEnd
+            );
+        }
+        else
         {
             const auto& arc = std::get<coaster::PlanarArcRegion>(
                 std::get<coaster::GeometryRegion>(
@@ -10666,8 +10919,27 @@ ImGui::MenuItem(
             );
         }
 
+        // Both authoring models seed the same three numeric buffers through
+        // their own display styles, so switching region kind never leaves a
+        // stale unit in a field.
+        if (selected.kind == coaster::RegionKind::RateProfiles
+            || selectedIsForceDriven)
+        {
+            for (std::size_t channelIndex = 0;
+                channelIndex < profileChannelCount;
+                ++channelIndex)
+            {
+                valueEndEditBuffers_[channelIndex] =
+                    sectionProfileChannel(
+                        selected,
+                        static_cast<ProfileChannel>(channelIndex)
+                    ).segments.back().transition.valueEnd
+                        * rowStyles[channelIndex].authoredToDisplay;
+            }
+        }
+
         if (selected.kind == coaster::RegionKind::Geometry
-            && !coaster::isForceDrivenSection(selected))
+            && !selectedIsForceDriven)
         {
             const auto& arc = std::get<coaster::PlanarArcRegion>(
                 std::get<coaster::GeometryRegion>(
@@ -10727,7 +10999,7 @@ ImGui::MenuItem(
     }
 
     void EditorUi::synchronizeSegmentEndpointValue(
-        const RateChannel channel,
+        const ProfileChannel channel,
         const std::uint32_t segmentId,
         const ScalarProfileEndpoint endpoint,
         const double acceptedValue)
@@ -10748,9 +11020,27 @@ ImGui::MenuItem(
         if (selectedSegmentIds_[channelIndex] == segmentId
             && displayedEndpoint == endpoint)
         {
+            // Rejected edits land here too, so the field has to be refreshed
+            // in the edited region's own display unit.
+            const double metersPerCoordinateUnit =
+                authoredTrack_ != nullptr
+                ? authoredTrack_->physicalSettings()
+                    .metersPerCoordinateUnit
+                : 1.0;
+            const std::array<ProfileRowStyle, profileChannelCount> rowStyles =
+                authoredTrack_ != nullptr
+                && coaster::isForceDrivenSection(
+                    authoredTrack_->section(selectedSection_))
+                ? forceDrivenRowStyles(metersPerCoordinateUnit)
+                : rateProfileRowStyles(metersPerCoordinateUnit);
             valueEndEditBuffers_[channelIndex] =
-                acceptedValue * degreesPerRadian;
+                acceptedValue * rowStyles[channelIndex].authoredToDisplay;
         }
+    }
+
+    void EditorUi::setGeometryEditError(std::string message)
+    {
+        geometryEditError_ = std::move(message);
     }
 
     void EditorUi::synchronizeSectionLength(const double acceptedLength)
@@ -10939,8 +11229,8 @@ ImGui::MenuItem(
         selectedSegmentIds_.fill(coaster::invalidSegmentId);
         dragSegmentIds_.fill(coaster::invalidSegmentId);
         graphValueRanges_.fill({});
-        activeRateChannel_ = RateChannel::Pitch;
-        hoveredRateChannel_.reset();
+        activeProfileChannel_ = ProfileChannel::Pitch;
+        hoveredProfileChannel_.reset();
         hoveredGraphMarker_.reset();
         dragAxisLocks_.fill(DragAxisLock::None);
         dragAxisTravelX_.fill(0.0);
@@ -11429,6 +11719,7 @@ std::optional<coaster::LayoutMode>
         deviceBufferId_ = 0;
         trackDeviceCommand_.reset();
         deviceEditError_.clear();
+        geometryEditError_.clear();
         cameraGesture_ = CameraGesture::None;
         viewportNavigationActive_ = false;
         selectedSection_ = 0;
@@ -11473,8 +11764,8 @@ std::optional<coaster::LayoutMode>
         selectedSegmentIds_.fill(coaster::invalidSegmentId);
         dragSegmentIds_.fill(coaster::invalidSegmentId);
         graphValueRanges_.fill({});
-        activeRateChannel_ = RateChannel::Pitch;
-        hoveredRateChannel_.reset();
+        activeProfileChannel_ = ProfileChannel::Pitch;
+        hoveredProfileChannel_.reset();
         hoveredGraphMarker_.reset();
         dragAxisLocks_.fill(DragAxisLock::None);
         dragAxisTravelX_.fill(0.0);

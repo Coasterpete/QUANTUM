@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -10,16 +11,24 @@
 
 namespace quantum::editor
 {
-    // One authored rate-profile channel. The order is also the stable
-    // tie-break order used when two graph curves are equally close.
-    enum class RateChannel
+    // One editable scalar profile row of the geometry editor graph. The
+    // three rows are named after the rider-local axis they control and are
+    // also the stable tie-break order used when two graph curves are equally
+    // close. Which authored ChannelProfile a row addresses depends on the
+    // selected region's authoring model, so the row alone never implies a
+    // unit: see ProfileRowStyle.
+    //
+    //  - A rate-profile region authors an angular rate on that axis.
+    //  - A force-driven region authors the rider-force target on the same
+    //    axis (normal G, lateral G) or the authored roll rate.
+    enum class ProfileChannel
     {
         Roll,
         Pitch,
         Yaw
     };
 
-    inline constexpr std::size_t rateChannelCount = 3;
+    inline constexpr std::size_t profileChannelCount = 3;
 
     enum class ScalarProfileEndpoint
     {
@@ -28,15 +37,56 @@ namespace quantum::editor
         End
     };
 
-    [[nodiscard]] coaster::ChannelProfile& sectionRateChannel(
+    // Resolves one graph row to the authored ChannelProfile of the section.
+    // Throws std::logic_error when the section's authoring model does not
+    // define that row, which keeps every edit routed through one place.
+    [[nodiscard]] coaster::ChannelProfile& sectionProfileChannel(
         coaster::AuthoredTrackSection& section,
-        RateChannel channel
+        ProfileChannel channel
     );
 
-    [[nodiscard]] const coaster::ChannelProfile& sectionRateChannel(
+    [[nodiscard]] const coaster::ChannelProfile& sectionProfileChannel(
         const coaster::AuthoredTrackSection& section,
-        RateChannel channel
+        ProfileChannel channel
     );
+
+    // Which derived read-out a row's value supports. Pitch/Yaw rate rows
+    // relate to centerline curvature and radius, a roll row integrates to a
+    // net rotation, and a force target is a rider load that is only related
+    // to the resulting geometry through the document's physics.
+    enum class ProfileRowDiagnostic
+    {
+        Curvature,
+        IntegratedRotation,
+        ForceTarget
+    };
+
+    // Presentation and unit policy for one editable profile row. Authored
+    // Core data is never rescaled by a style: the two factors only convert an
+    // authored value to the displayed unit and back. minimumGraphMagnitude
+    // is in authored units and only picks a useful vertical view for a flat
+    // profile; it never clamps authored data.
+    struct ProfileRowStyle
+    {
+        const char* label = "";
+        const char* valueUnitLabel = "";
+        const char* beginValueLabel = "";
+        const char* endValueLabel = "";
+        double authoredToDisplay = 1.0;
+        double displayToAuthored = 1.0;
+        double minimumGraphMagnitude = 1.0;
+        ProfileRowDiagnostic diagnostic = ProfileRowDiagnostic::Curvature;
+    };
+
+    // Angular rates are authored in radians per Core coordinate unit, so a
+    // degrees-per-meter presentation divides by the document's
+    // metersPerCoordinateUnit. Both factories therefore take that scale and
+    // return a matching displayToAuthored reciprocal.
+    [[nodiscard]] std::array<ProfileRowStyle, profileChannelCount>
+        rateProfileRowStyles(double metersPerCoordinateUnit);
+
+    [[nodiscard]] std::array<ProfileRowStyle, profileChannelCount>
+        forceDrivenRowStyles(double metersPerCoordinateUnit);
 
     inline constexpr double radiansPerDegree =
         0.017453292519943295769236907684886;
@@ -105,9 +155,11 @@ namespace quantum::editor
     };
 
     // Useful flat-profile presentation ranges for each independently
-    // transformed channel. They tune drag feel but never clamp authored data.
+    // transformed rate-profile row. They tune drag feel but never clamp
+    // authored data. Force-driven rows carry their own magnitudes in
+    // ProfileRowStyle because they are not angular rates.
     [[nodiscard]] double defaultGraphMagnitude(
-        RateChannel channel
+        ProfileChannel channel
     ) noexcept;
 
     // The fallback only chooses a useful view for a flat profile. It is not
@@ -214,22 +266,22 @@ namespace quantum::editor
 
     struct CurveHitCandidate
     {
-        RateChannel channel = RateChannel::Roll;
+        ProfileChannel channel = ProfileChannel::Roll;
         double distanceSquared = 0.0;
     };
 
     // Chooses within hitRadius using active channel, previous hover, nearest
-    // distance, then RateChannel order. Render order never decides a hit.
-    [[nodiscard]] std::optional<RateChannel> chooseCurveHit(
+    // distance, then ProfileChannel order. Render order never decides a hit.
+    [[nodiscard]] std::optional<ProfileChannel> chooseCurveHit(
         std::span<const CurveHitCandidate> candidates,
         double hitRadius,
-        RateChannel activeChannel,
-        std::optional<RateChannel> previouslyHovered
+        ProfileChannel activeChannel,
+        std::optional<ProfileChannel> previouslyHovered
     );
 
     struct GraphMarkerId
     {
-        RateChannel channel = RateChannel::Roll;
+        ProfileChannel channel = ProfileChannel::Roll;
         coaster::SegmentId segmentId = coaster::invalidSegmentId;
         ScalarProfileEndpoint endpoint = ScalarProfileEndpoint::None;
 
@@ -248,7 +300,7 @@ namespace quantum::editor
     [[nodiscard]] std::optional<GraphMarkerId> chooseMarkerHit(
         std::span<const MarkerHitCandidate> candidates,
         double hitRadius,
-        RateChannel activeChannel,
+        ProfileChannel activeChannel,
         std::optional<GraphMarkerId> previouslyHovered
     );
 

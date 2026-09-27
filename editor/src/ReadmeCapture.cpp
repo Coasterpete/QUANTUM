@@ -15,10 +15,10 @@ namespace quantum::editor
 {
     namespace
     {
-        constexpr std::array<std::string_view, 7> names{
+        constexpr std::array<std::string_view, 8> names{
             "editor-overview", "transition-editor", "geometry-regions",
             "track-start-gizmo", "force-diagnostics", "modern-steel",
-            "track-style-regions"
+            "track-style-regions", "force-driven-authoring"
         };
 
         void requireKeys(const nlohmann::json& object,
@@ -326,6 +326,12 @@ namespace quantum::editor
                     varying |= segment.transition.valueBegin != segment.transition.valueEnd;
             if (!varying)
                 throw std::invalid_argument(name + ": supply a region with a varying authored profile curve.");
+        }
+        if (scenario.kind == ReadmeCaptureKind::ForceDrivenAuthoring
+            && !coaster::isForceDrivenSection(section))
+        {
+            throw std::invalid_argument(
+                name + ": select a Force-Based region in the supplied document.");
         }
         if (scenario.kind == ReadmeCaptureKind::ModernSteel)
         {

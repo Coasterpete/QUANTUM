@@ -132,6 +132,10 @@ namespace quantum::coaster
         double length
     );
 
+    // Creates one force-driven section whose initial target profiles cover
+    // [0, length] exactly: a constant 1.0 G normal target and zero lateral
+    // and roll rates. The region is valid and editable as soon as it exists.
+    // Throws std::invalid_argument for a non-positive or non-finite length.
     [[nodiscard]] AuthoredTrackSection createForceDrivenSection(double length);
     [[nodiscard]] bool isForceDrivenSection(const AuthoredTrackSection& section) noexcept;
     [[nodiscard]] bool hasForceDrivenRegions(const AuthoredTrack& track) noexcept;
@@ -148,6 +152,12 @@ namespace quantum::coaster
     // regions also reject conversion to state-independent rate profiles.
     void convertSectionToRateProfiles(AuthoredTrackSection& section);
     void convertSectionToPlanarArc(AuthoredTrackSection& section);
+    // Replaces any non-force-driven construction with a force-driven region of
+    // the same authored length and fresh valid initial targets. Authored track
+    // style overrides are carried across; no geometry is inferred from the
+    // previous construction because a force-driven region's geometry is
+    // generated, not authored.
+    void convertSectionToForceDriven(AuthoredTrackSection& section);
 
     // Planar-arc parameter edits enforcing the authoring length policy:
     // the stored length stays authoritative for radius edits (the swept

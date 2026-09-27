@@ -96,7 +96,7 @@ namespace quantum::editor
         double value = 0.0;
         bool continuous = false;
         std::size_t sectionIndex = 0;
-        RateChannel channel = RateChannel::Pitch;
+        ProfileChannel channel = ProfileChannel::Pitch;
         // Target segment within the channel; stable across edits.
         std::uint32_t segmentId = 0;
     };
@@ -105,7 +105,7 @@ namespace quantum::editor
     {
         math::TransitionType type = math::TransitionType::Linear;
         std::size_t sectionIndex = 0;
-        RateChannel channel = RateChannel::Pitch;
+        ProfileChannel channel = ProfileChannel::Pitch;
         std::uint32_t segmentId = 0;
     };
 
@@ -120,7 +120,7 @@ namespace quantum::editor
     {
         ProfileSegmentOperation operation = ProfileSegmentOperation::Split;
         std::size_t sectionIndex = 0;
-        RateChannel channel = RateChannel::Pitch;
+        ProfileChannel channel = ProfileChannel::Pitch;
         std::uint32_t segmentId = 0;
         double splitDistance = 0.0;
     };
@@ -131,7 +131,7 @@ namespace quantum::editor
     struct ProfileSegmentDistanceEdit
     {
         std::size_t sectionIndex = 0;
-        RateChannel channel = RateChannel::Pitch;
+        ProfileChannel channel = ProfileChannel::Pitch;
         std::uint32_t segmentId = 0;
         ScalarProfileEndpoint endpoint = ScalarProfileEndpoint::End;
         double distance = 0.0;
@@ -315,19 +315,33 @@ namespace quantum::editor
         RegionCreateAnchor anchor = RegionCreateAnchor::Append;
     };
 
+    // User-facing region type offered by the typed creation flow. Core
+    // distinguishes force-driven geometry from planar-arc geometry inside
+    // RegionKind, so the editor names the authored construction explicitly
+    // instead of overloading a two-value enum.
+    enum class RegionType
+    {
+        Profile,
+        CircularArc,
+        ForceBased
+    };
+
     // Region-level authoring commands for one section: typed creation of a
-    // new region, kind conversion between rate profiles and planar-arc
-    // geometry, and planar-arc parameter updates. `value` carries the new
-    // parameter for the Set* commands (radians for angles) and is ignored
-    // by every other command.
+    // new region, kind conversion between rate profiles and geometry
+    // construction, and planar-arc parameter updates. `value` carries the
+    // new parameter for the Set* commands (radians for angles) and is
+    // ignored by every other command.
     enum class RegionCommandType
     {
         AppendRateProfiles,
         PrependRateProfiles,
         AppendPlanarArc,
         PrependPlanarArc,
+        AppendForceDriven,
+        PrependForceDriven,
         InsertAfterRateProfiles,
         InsertAfterPlanarArc,
+        InsertAfterForceDriven,
         ConvertToRateProfiles,
         ConvertToPlanarArc,
         SetPlanarArcRadius,
@@ -511,7 +525,7 @@ namespace quantum::editor
         // Refreshes the numeric edit buffer for a channel, but only when
         // the committed semantic endpoint is the one the controls address.
         void synchronizeSegmentEndpointValue(
-            RateChannel channel,
+            ProfileChannel channel,
             std::uint32_t segmentId,
             ScalarProfileEndpoint endpoint,
             double acceptedValue
@@ -522,6 +536,13 @@ namespace quantum::editor
         // the fields showing authoritative data.
         void synchronizePlanarArcParams(
             const coaster::PlanarArcRegion& committedParams);
+        // Reports why the last authored region edit was rejected. The
+        // message is authored-edit specific and carries the failure reason
+        // and location when Core supplied one. An empty message clears it.
+        // The Track Workspace shows the current message for every selection,
+        // so a force-driven infeasibility stays visible while the committed
+        // document is unchanged.
+        void setGeometryEditError(std::string message);
         void setCenterlineBounds(
             const glm::dvec3& centerlineMinimum,
             const glm::dvec3& centerlineMaximum
@@ -823,34 +844,34 @@ void drawSimulationTelemetry();
         std::optional<StartPoseManipulation> startPoseManipulation_;
         std::optional<SupportNodeManipulation> supportNodeManipulation_;
 
-        // Per-channel editing state, indexed by RateChannel. Numeric buffers
+        // Per-channel editing state, indexed by ProfileChannel. Numeric buffers
         // present the selected marker value (or a selected segment's End
         // value) in degrees per meter; drag anchors and authoritative
         // profiles remain radians per meter.
         // Interaction slots track the selected/dragged endpoint.
-        std::array<double, rateChannelCount> valueEndEditBuffers_{};
-        std::array<ScalarProfileEndpoint, rateChannelCount>
+        std::array<double, profileChannelCount> valueEndEditBuffers_{};
+        std::array<ScalarProfileEndpoint, profileChannelCount>
             endpointSelections_{};
-        std::array<ScalarProfileEndpoint, rateChannelCount> endpointDrags_{};
+        std::array<ScalarProfileEndpoint, profileChannelCount> endpointDrags_{};
         // Per-channel selected profile segments, keyed by stable id. Stale
         // ids are re-resolved against the committed document every frame;
         // zero only ever appears before the first resolution.
-        std::array<std::uint32_t, rateChannelCount> selectedSegmentIds_{};
-        std::array<std::uint32_t, rateChannelCount> dragSegmentIds_{};
-        std::array<GraphValueRange, rateChannelCount> graphValueRanges_{};
-        RateChannel activeRateChannel_ = RateChannel::Pitch;
-        std::optional<RateChannel> hoveredRateChannel_;
+        std::array<std::uint32_t, profileChannelCount> selectedSegmentIds_{};
+        std::array<std::uint32_t, profileChannelCount> dragSegmentIds_{};
+        std::array<GraphValueRange, profileChannelCount> graphValueRanges_{};
+        ProfileChannel activeProfileChannel_ = ProfileChannel::Pitch;
+        std::optional<ProfileChannel> hoveredProfileChannel_;
         std::optional<GraphMarkerId> hoveredGraphMarker_;
-        std::array<DragAxisLock, rateChannelCount> dragAxisLocks_{};
+        std::array<DragAxisLock, profileChannelCount> dragAxisLocks_{};
         // Cumulative cursor travel per active drag; picks the drag axis
         // once motion becomes unambiguous.
-        std::array<double, rateChannelCount> dragAxisTravelX_{};
-        std::array<double, rateChannelCount> dragAxisTravelY_{};
-        std::array<std::optional<double>, rateChannelCount>
+        std::array<double, profileChannelCount> dragAxisTravelX_{};
+        std::array<double, profileChannelCount> dragAxisTravelY_{};
+        std::array<std::optional<double>, profileChannelCount>
             dragLastValues_{};
         // Rolling per-channel anchors for active handle drags; present
         // exactly while the matching slot in endpointDrags_ is active.
-        std::array<std::optional<ScalarDragAnchor>, rateChannelCount>
+        std::array<std::optional<ScalarDragAnchor>, profileChannelCount>
             scalarDragAnchors_{};
         // Last continuous edit queued during the active drag, kept so the
         // release handler can emit a single end-of-drag [EDIT] summary
@@ -861,7 +882,7 @@ void drawSimulationTelemetry();
         bool pendingDistanceSummary_ = false;
         ProfileSegmentDistanceEdit distanceSummaryEdit_{};
         // Split-at-cursor candidate captured when a row context menu opens.
-        std::array<double, rateChannelCount> contextMenuSplitDistances_{};
+        std::array<double, profileChannelCount> contextMenuSplitDistances_{};
         TransitionEditorInputSettings transitionEditorInputSettings_;
         bool inputSettingsWindowOpen_ = false;
         ViewportSettings viewportSettings_;
@@ -927,6 +948,9 @@ void drawSimulationTelemetry();
         // converted to Core radians only when a command is queued.
         std::array<double, 4> planarArcEditBuffers_{};
         RegionCreateFlow regionCreateFlow_;
+        // Last rejected authored region edit, shown in the Track Workspace
+        // until an edit is accepted or the selection changes.
+        std::string geometryEditError_;
         std::optional<ScalarProfileEndpointValueEdit>
             profileEndpointValueEdit_;
         std::optional<ProfileTransitionTypeEdit> profileTransitionTypeEdit_;

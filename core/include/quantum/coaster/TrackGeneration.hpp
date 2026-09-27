@@ -30,6 +30,13 @@ namespace quantum::coaster
         std::string message;
     };
 
+    // Stable reason label for editor surfaces and logs. The mapping is
+    // exhaustive so a new reason cannot be silently reported as another
+    // failure; it is never used in place of failure.message.
+    [[nodiscard]] const char* trackGenerationFailureReasonToString(
+        TrackGenerationFailureReason reason
+    ) noexcept;
+
     using TrackGenerationResult = std::expected<
         std::vector<TrackKinematicState>, TrackGenerationFailure>;
 

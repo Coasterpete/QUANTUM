@@ -505,6 +505,11 @@ namespace quantum::editor
                 options.transitionDrag = true;
                 continue;
             }
+            if (argument == "--force-driven-authoring")
+            {
+                options.forceDrivenAuthoring = true;
+                continue;
+            }
             if (argument == "--resize-window")
             {
                 options.resizeWindow = true;
