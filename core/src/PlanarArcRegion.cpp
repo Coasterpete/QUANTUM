@@ -186,17 +186,32 @@ namespace quantum::coaster
             - std::sin(region.planeTilt) * startingFrame.lateral;
         const double signedCurvature =
             (region.sweptAngle < 0.0 ? -1.0 : 1.0) / region.radius;
+        const double length = planarArcLength(region);
+        const PlanarArcCompiledRates compiled =
+            compilePlanarArcRates(region, length);
+        const double unbankedPitch = compiled.pitchRate.valueBegin;
+        const double unbankedYaw = compiled.yawRate.valueBegin;
+        const double rollRate = region.bankChange / length;
 
         std::vector<TrackKinematicState> kinematics;
         kinematics.reserve(geometryStates.size());
         for (const RiderLocalGeometryState& state : geometryStates)
         {
+            const double bankAngle =
+                region.bankChange * state.distance / length;
+            const double pitchRate = unbankedPitch * std::cos(bankAngle)
+                + unbankedYaw * std::sin(bankAngle);
+            const double yawRate = unbankedYaw * std::cos(bankAngle)
+                - unbankedPitch * std::sin(bankAngle);
             kinematics.push_back(TrackKinematicState{
                 state.distance,
                 state.position,
                 state.frame,
                 signedCurvature
-                    * glm::cross(planeNormal, state.frame.tangent)
+                    * glm::cross(planeNormal, state.frame.tangent),
+                {rollRate, pitchRate, yawRate},
+                0.0,
+                rollRate * yawRate
             });
         }
 

@@ -59,6 +59,9 @@ namespace
     AuthoredTrack forceTrack(const double length = 30.0)
     {
         auto track = createNewDocument();
+        auto setup = track.coasterSetup();
+        setup.heartline.offsetMeters = 0.0;
+        track.setCoasterSetup(setup);
         track.section(0) = createForceDrivenSection(length);
         return track;
     }
@@ -282,6 +285,9 @@ namespace
     void mixedBoundaryAndGlobalEnergy()
     {
         auto track = createNewDocument();
+        auto setup = track.coasterSetup();
+        setup.heartline.offsetMeters = 0.0;
+        track.setCoasterSetup(setup);
         setSectionLength(track.section(0), 12);
         track.section(0).rateProfileRegion().rateProfiles.pitch = channel(12, 0.03, 0.03);
         track.insertSectionAfter(0, createForceDrivenSection(15));
@@ -308,7 +314,10 @@ namespace
         near(loads.states[entryIndex].normalG, 1.2, 1.0e-12, "right-owned force entry load");
         near(loads.states[entryIndex].lateralG, -0.2, 1.0e-12, "right-owned force lateral load");
         const auto direct = integrateForceDrivenRegion(entry.position, entry.frame, force(track, 1), 15,
-            track.physicalSettings(), track.startPose().position, 0.1);
+            track.physicalSettings(), track.startPose().position,
+            track.coasterSetup().heartline.enabled
+                ? track.coasterSetup().heartline.offsetMeters : 0.0,
+            0.1);
         const auto arcEntry = std::find_if(states.begin(), states.end(), [](const auto& state)
             { return state.distance == 27.0; });
         near(arcEntry->position, direct.back().position, 1.0e-12, "continuous force-to-arc position");
@@ -326,6 +335,9 @@ namespace
             std::array{1, 2, 0}, std::array{2, 0, 1}, std::array{2, 1, 0}})
         {
             auto permutation = createNewDocument();
+            auto setup = permutation.coasterSetup();
+            setup.heartline.offsetMeters = 0.0;
+            permutation.setCoasterSetup(setup);
             permutation.section(0) = track.section(order[0]);
             permutation.insertSectionAfter(0, track.section(order[1]));
             permutation.insertSectionAfter(1, track.section(order[2]));
@@ -433,6 +445,9 @@ namespace
 
         // Later force entry still uses the whole-track reference.
         auto later = createNewDocument();
+        auto setup = later.coasterSetup();
+        setup.heartline.offsetMeters = 0.0;
+        later.setCoasterSetup(setup);
         setSectionLength(later.section(0), 30);
         later.setStartPose({{}, glm::angleAxis(-pi / 2.0, glm::dvec3{0, 1, 0})});
         later.insertSectionAfter(0, createForceDrivenSection(1));

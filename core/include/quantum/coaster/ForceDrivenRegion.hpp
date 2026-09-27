@@ -25,8 +25,11 @@ namespace quantum::coaster
 
     void validateForceDrivenRegion(const ForceDrivenRegion& region, double length);
 
-    // Profiles are evaluated at their original local coordinates at every
-    // RK stage. No clipped/reconstructed easing or generated rates are stored.
+    // Profiles are evaluated at their original local coordinates at every RK
+    // stage. G targets apply at C+hU while the integrated position remains the
+    // construction reference C. Construction energy and station speed retain
+    // their existing meaning. No clipped/reconstructed easing or generated
+    // rates are stored.
     [[nodiscard]] std::vector<TrackKinematicState> integrateForceDrivenRegion(
         const glm::dvec3& startingPosition,
         const geometry::CurveFrame& startingFrame,
@@ -34,6 +37,7 @@ namespace quantum::coaster
         double length,
         const TrackPhysicalSettings& physicalSettings,
         const glm::dvec3& wholeTrackStartPosition,
+        double riderReferenceOffsetMeters,
         double integrationSpacing,
         const ForceDrivenIntegrationSettings& settings = {});
 }

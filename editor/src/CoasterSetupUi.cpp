@@ -285,13 +285,14 @@ namespace quantum::editor
             changed = true;
         }
         editorSecondaryTextWrapped(
-            "Setup metadata only; Simulation Preview uses its own fixed "
-            "four-car physics definition.");
+            "Simulation Preview uses this car count with its current repeated-car "
+            "physics definition. Rider positions remain car-loadout data, not "
+            "the authored heartline.");
 
         ImGui::Separator();
-        editorHeading("Heartline reference", fonts);
+        editorHeading("Authored rider reference", fonts);
         if (ImGui::Checkbox(
-                "Apply reference-line offset",
+                "Use heartline offset",
                 &draft.heartline.enabled))
         {
             changed = true;
@@ -311,8 +312,10 @@ namespace quantum::editor
             changed = true;
         }
         editorSecondaryTextWrapped(
-            "Affects the viewport reference curve only; authored track "
-            "geometry and physics are unchanged.");
+            "Measured from the track construction reference along local +up. "
+            "Force-Based targets and rider-load diagnostics use this point; "
+            "rails, supports, bogies, and train poses stay on the construction "
+            "reference.");
 
         ImGui::Separator();
         editorHeading("Physical settings", fonts);

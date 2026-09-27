@@ -1,0 +1,137 @@
+{
+  "formatVersion": 1,
+  "layoutMode": "Shuttle",
+  "physicalSettings": {
+    "initialSpeed": 30.0,
+    "metersPerCoordinateUnit": 1.0,
+    "gravityAcceleration": 9.80665
+  },
+  "coasterSetup": {
+    "styleId": "placeholder-style-1",
+    "carsPerTrain": 4,
+    "options": [
+      {
+        "optionId": "train-layout",
+        "choice": "layout-1"
+      }
+    ],
+    "heartline": {
+      "enabled": true,
+      "offsetMeters": 1.4
+    }
+  },
+  "sections": [
+    {
+      "kind": "RateProfiles",
+      "length": 30.0,
+      "rateProfiles": {
+        "roll": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 30.0,
+                "valueBegin": 0.0,
+                "valueEnd": 0.04,
+                "type": "Smootherstep"
+              }
+            }
+          ]
+        },
+        "pitch": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 30.0,
+                "valueBegin": 0.0,
+                "valueEnd": 0.0,
+                "type": "Linear"
+              }
+            }
+          ]
+        },
+        "yaw": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 30.0,
+                "valueBegin": 0.015,
+                "valueEnd": 0.015,
+                "type": "Linear"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "Geometry",
+      "length": 50.0,
+      "forceDriven": {
+        "targetNormalG": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 50.0,
+                "valueBegin": 1.1,
+                "valueEnd": 1.3,
+                "type": "CosineEaseInOut"
+              }
+            }
+          ]
+        },
+        "targetLateralG": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 50.0,
+                "valueBegin": 0.1,
+                "valueEnd": -0.1,
+                "type": "Smootherstep"
+              }
+            }
+          ]
+        },
+        "rollRate": {
+          "nextSegmentId": 2,
+          "segments": [
+            {
+              "id": 1,
+              "transition": {
+                "domainBegin": 0.0,
+                "domainEnd": 50.0,
+                "valueBegin": 0.04,
+                "valueEnd": 0.0,
+                "type": "Smootherstep"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "Geometry",
+      "length": 30.0,
+      "planarArc": {
+        "radius": 20.0,
+        "sweptAngle": 1.5,
+        "planeTilt": 0.4,
+        "bankChange": 1.2
+      }
+    }
+  ]
+}

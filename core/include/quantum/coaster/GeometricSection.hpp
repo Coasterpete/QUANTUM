@@ -91,6 +91,14 @@ namespace quantum::coaster
         double independentValue
     );
 
+    // Evaluates the one-sided derivative of the containing segment. An exact
+    // internal joint belongs to the following segment, matching generated
+    // track kinematics' right-continuous boundary convention.
+    [[nodiscard]] double evaluateChannelProfileDerivative(
+        const ChannelProfile& profile,
+        double independentValue
+    );
+
     // Validates all three channels over one shared section-local distance
     // domain [0, sectionLength]. Throws std::invalid_argument for a
     // non-positive non-finite length or any per-channel defect above.

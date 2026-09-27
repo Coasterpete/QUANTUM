@@ -569,6 +569,8 @@ namespace quantum::engine
                 quantum::coaster::TrackPhysicalSettings
                     simulationPhysicalSettings =
                         authoredTrack.physicalSettings();
+                std::uint32_t simulationCarCount =
+                    authoredTrack.coasterSetup().carsPerTrain;
                 std::uint64_t uploadedSimulationVertexGeneration =
                     std::numeric_limits<std::uint64_t>::max();
 
@@ -579,8 +581,9 @@ namespace quantum::engine
                         quantum::logging::logMessagef(
                             quantum::logging::LogLevel::Info,
                             "SIM",
-                            "Four-car preview initialized at %.3f m and "
+                            "%zu-car preview initialized at %.3f m and "
                             "%.3f m/s",
+                            simulationPreview.trainDefinition().cars.size(),
                             simulationPreview.dynamicsState()
                                 ->generalizedReferenceLocation.stationMeters,
                             simulationPreview.speedMetersPerSecond());
@@ -3786,10 +3789,11 @@ editorUi.selectSection(restoredSelection, true);
                                     authoredTrack.layoutMode()));
                         }
 
-                        // Setup edits are document configuration. Only a
-                        // heartline edit regenerates viewport reference-curve
-                        // vertices; it does not change authored geometry,
-                        // track mesh geometry, or simulation physics.
+                        // A heartline edit changes force-generated geometry
+                        // and rider-reference loads, so it uses the same staged
+                        // publication boundary as authored geometry edits.
+                        // Other setup fields remain document metadata; the car
+                        // count is consumed when Simulation Preview rebuilds.
                         const auto requestedCoasterSetup =
                             editorUi.takePendingCoasterSetupEdit();
 
@@ -3799,34 +3803,59 @@ editorUi.selectSection(restoredSelection, true);
                         {
                             try
                             {
-                                quantum::coaster::AuthoredTrack candidateTrack =
-                                    authoredTrack;
-                                candidateTrack.setCoasterSetup(
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    setupTransaction{authoredTrack};
+                                setupTransaction.candidate().setCoasterSetup(
                                     *requestedCoasterSetup);
-
-                                std::optional<quantum::editor::
-                                    CenterlineVisualization>
-                                    candidateCenterline;
-                                if (requestedCoasterSetup->heartline
-                                    != authoredTrack.coasterSetup().heartline)
+                                const bool heartlineChanged =
+                                    requestedCoasterSetup->heartline
+                                        != authoredTrack.coasterSetup().heartline;
+                                if (heartlineChanged)
                                 {
-                                    candidateCenterline = quantum::editor::
-                                        createCenterlineVisualization(
-                                            candidateTrack,
-                                            candidateTrack.trackStyle());
+                                    quantum::editor::CenterlineVisualization
+                                        candidateCenterline = quantum::editor::
+                                            createCenterlineVisualization(
+                                                setupTransaction.candidate(),
+                                                setupTransaction.candidate()
+                                                    .trackStyle());
+                                    quantum::coaster::RiderLoadHistory
+                                        candidateRiderLoads = quantum::editor::
+                                            evaluateRiderLoadDiagnostics(
+                                                setupTransaction.candidate());
+                                    quantum::editor::SupportVisualization
+                                        candidateSupports = quantum::editor::
+                                            createSupportVisualization(
+                                                setupTransaction.candidate(),
+                                                candidateCenterline.samples);
+                                    setupTransaction.requireAcceptableRiderLoads(
+                                        candidateRiderLoads);
+
+                                    editorUi.setCenterlineBounds(
+                                        candidateCenterline.minimumPosition,
+                                        candidateCenterline.maximumPosition);
+                                    editorUi.setCenterlineSections(
+                                        candidateCenterline.sectionSlices);
                                     renderer.updateTrackCurveVertices(
-                                        candidateCenterline->vertices,
-                                        candidateCenterline->verticesPerCurve);
+                                        candidateCenterline.vertices,
+                                        candidateCenterline.verticesPerCurve);
+                                    renderer.updateRenderableTrack(
+                                        candidateCenterline.renderableTrack);
+                                    renderer.updateSupportVertices(
+                                        candidateSupports.memberVertices);
                                     applicationBlockingEvents
                                         .trackBufferMutation = true;
+
+                                    centerlineCache.replace(
+                                        std::move(candidateCenterline));
+                                    supportVisualization =
+                                        std::move(candidateSupports);
+                                    editorUi.setSupportVisualization(
+                                        supportVisualization);
+                                    editorUi.setRiderLoadHistory(
+                                        std::move(candidateRiderLoads));
                                 }
 
-                                authoredTrack = std::move(candidateTrack);
-                                if (candidateCenterline.has_value())
-                                {
-                                    centerlineCache.replace(
-                                        std::move(*candidateCenterline));
-                                }
+                                setupTransaction.commit(authoredTrack);
                                 documentHistory.record(authoredTrack);
                                 synchronizeDirtyState();
                                 quantum::logging::logMessagef(
@@ -3839,6 +3868,24 @@ editorUi.selectSection(restoredSelection, true);
                                     static_cast<unsigned>(
                                         authoredTrack.coasterSetup()
                                             .carsPerTrain));
+                            }
+                            catch (const quantum::coaster::TrackGenerationError&
+                                generationError)
+                            {
+                                // A rider-reference offset can make an
+                                // existing force-driven target geometrically
+                                // singular. Report the real reason and
+                                // location, and keep the last valid committed
+                                // document, exactly as a rejected geometry
+                                // edit does.
+                                editorUi.setGeometryEditError(
+                                    describeTrackGenerationFailure(
+                                        generationError.failure()));
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "CFG",
+                                    "Coaster setup rejected: %s",
+                                    generationError.what());
                             }
                             catch (const std::invalid_argument& error)
                             {
@@ -4071,7 +4118,9 @@ editorUi.selectSection(restoredSelection, true);
                             || simulationLayoutMode
                                 != authoredTrack.layoutMode()
                             || simulationPhysicalSettings
-                                != authoredTrack.physicalSettings())
+                                != authoredTrack.physicalSettings()
+                            || simulationCarCount
+                                != authoredTrack.coasterSetup().carsPerTrain)
                         {
                             simulationTrackGeneration =
                                 centerlineCache.generation();
@@ -4079,6 +4128,8 @@ editorUi.selectSection(restoredSelection, true);
                                 authoredTrack.layoutMode();
                             simulationPhysicalSettings =
                                 authoredTrack.physicalSettings();
+                            simulationCarCount =
+                                authoredTrack.coasterSetup().carsPerTrain;
                             const auto rebuildBegin = PerformanceClock::now();
                             rebuildSimulationPreview();
                             if (fullEditTelemetry.has_value())
