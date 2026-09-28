@@ -200,7 +200,8 @@ namespace quantum::editor
         CreateNode,
         DeleteNode,
         CreateMember,
-        DeleteMember
+        DeleteMember,
+        GenerateWoodenRun
     };
 
     struct SupportEditCommand
@@ -216,6 +217,7 @@ namespace quantum::editor
             coaster::invalidSupportElementId;
         // Position for CreateNode.
         glm::dvec3 nodePosition{0.0};
+        coaster::WoodenSupportRunRecipe woodenRecipe;
     };
 
     // Anchor type exposed by the Editor for a selected SupportNode. None
@@ -909,6 +911,7 @@ void drawSimulationTelemetry();
         // Transient Connect Nodes workflow state. It is editor memory only
         // and is never serialized.
         std::optional<SupportEditCommand> supportEditCommand_;
+        coaster::WoodenSupportRunRecipe woodenSupportRecipe_;
         enum class SupportConnectState : std::uint8_t
         {
             Inactive,
