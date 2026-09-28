@@ -771,6 +771,22 @@ namespace quantum::coaster
         }
     }
 
+    void validateWoodenSupportRunRecipe(const WoodenSupportRunRecipe& recipe)
+    {
+        if (!std::isfinite(recipe.startStation)
+            || !std::isfinite(recipe.endStation)
+            || recipe.startStation < 0.0
+            || recipe.endStation <= recipe.startStation
+            || !std::isfinite(recipe.bentSpacing) || recipe.bentSpacing <= 0.0
+            || !std::isfinite(recipe.bentWidth) || recipe.bentWidth <= 0.0
+            || !std::isfinite(recipe.foundationElevation)
+            || !std::isfinite(recipe.attachmentVerticalOffset)
+            || !std::isfinite(recipe.memberSize) || recipe.memberSize <= 0.0)
+        {
+            throw std::invalid_argument("Invalid wooden support run recipe.");
+        }
+    }
+
     void validateSupportCollection(const SupportCollection& collection)
     {
         std::unordered_set<SupportStructureId> structureIds;
@@ -778,6 +794,10 @@ namespace quantum::coaster
 
         for (const SupportStructure& structure : collection.structures)
         {
+            if (structure.generatedWoodenRun)
+            {
+                validateWoodenSupportRunRecipe(*structure.generatedWoodenRun);
+            }
             if (structure.id == invalidSupportStructureId)
             {
                 throw std::invalid_argument(

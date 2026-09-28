@@ -616,12 +616,26 @@ namespace quantum::coaster
                     membersJson.push_back(std::move(memberJson));
                 }
 
-                structuresJson.push_back({
+                json structureJson{
                     {"id", structure.id},
                     {"name", structure.name},
                     {"nextElementId", structure.nextElementId},
                     {"nodes", std::move(nodesJson)},
-                    {"members", std::move(membersJson)}});
+                    {"members", std::move(membersJson)}};
+                if (structure.generatedWoodenRun)
+                {
+                    const auto& recipe = *structure.generatedWoodenRun;
+                    structureJson["generatedWoodenRun"] = {
+                        {"startStation", recipe.startStation},
+                        {"endStation", recipe.endStation},
+                        {"bentSpacing", recipe.bentSpacing},
+                        {"bentWidth", recipe.bentWidth},
+                        {"foundationElevation", recipe.foundationElevation},
+                        {"attachmentVerticalOffset", recipe.attachmentVerticalOffset},
+                        {"memberSize", recipe.memberSize},
+                        {"longitudinalBracing", recipe.longitudinalBracing}};
+                }
+                structuresJson.push_back(std::move(structureJson));
             }
 
             return {
@@ -1275,7 +1289,8 @@ namespace quantum::coaster
                         structurePath + ": expected a JSON object");
                 }
                 requireNoUnknownFields(structureJson,
-                    {"id", "name", "nextElementId", "nodes", "members"},
+                    {"id", "name", "nextElementId", "nodes", "members",
+                     "generatedWoodenRun"},
                     structurePath);
                 requireString(structureJson, "name", structurePath);
                 requireArray(structureJson, "nodes", structurePath);
@@ -1288,6 +1303,37 @@ namespace quantum::coaster
                 structure.nextElementId =
                     deserializeSupportId<SupportElementId>(
                         structureJson, "nextElementId", structurePath);
+                if (structureJson.contains("generatedWoodenRun"))
+                {
+                    requireObject(structureJson, "generatedWoodenRun", structurePath);
+                    const json& recipeJson = structureJson["generatedWoodenRun"];
+                    const std::string recipePath = structurePath + ".generatedWoodenRun";
+                    requireNoUnknownFields(recipeJson,
+                        {"startStation", "endStation", "bentSpacing", "bentWidth",
+                         "foundationElevation", "attachmentVerticalOffset",
+                         "memberSize", "longitudinalBracing"}, recipePath);
+                    for (const char* field : {"startStation", "endStation",
+                        "bentSpacing", "bentWidth", "foundationElevation",
+                        "attachmentVerticalOffset", "memberSize"})
+                    {
+                        requireNumber(recipeJson, field, recipePath);
+                    }
+                    if (!recipeJson.contains("longitudinalBracing")
+                        || !recipeJson["longitudinalBracing"].is_boolean())
+                    {
+                        throw std::runtime_error(
+                            recipePath + ".longitudinalBracing: expected a boolean");
+                    }
+                    structure.generatedWoodenRun = WoodenSupportRunRecipe{
+                        recipeJson["startStation"].get<double>(),
+                        recipeJson["endStation"].get<double>(),
+                        recipeJson["bentSpacing"].get<double>(),
+                        recipeJson["bentWidth"].get<double>(),
+                        recipeJson["foundationElevation"].get<double>(),
+                        recipeJson["attachmentVerticalOffset"].get<double>(),
+                        recipeJson["memberSize"].get<double>(),
+                        recipeJson["longitudinalBracing"].get<bool>()};
+                }
 
                 const json& nodes = structureJson["nodes"];
                 structure.nodes.reserve(nodes.size());

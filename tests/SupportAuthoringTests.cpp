@@ -1,6 +1,7 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
 #include <quantum/coaster/Supports.hpp>
+#include <quantum/coaster/WoodenSupportGenerator.hpp>
 #include <quantum/editor/AuthoredTrackEditTransaction.hpp>
 #include <quantum/editor/DocumentHistory.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
@@ -373,6 +374,30 @@ namespace
                     .startConnection.has_value(),
             "Redo must clear the same end again");
     }
+    void woodenRunUsesDocumentHistory()
+    {
+        coaster::AuthoredTrack track = coaster::createNewDocument();
+        coaster::AuthoredStartPose pose = track.startPose();
+        pose.position.z = 20.0;
+        track.setStartPose(pose);
+        editor::DocumentHistory history;
+        history.reset(track);
+        const coaster::WoodenSupportRunRecipe recipe{
+            0.0, 20.0, 5.0, 4.0, 0.0, -0.5, 0.2, true};
+        editor::AuthoredTrackEditTransaction transaction{track};
+        const auto generatedId = coaster::generateWoodenSupportRun(
+            transaction.candidate(), recipe);
+        transaction.commit(track);
+        history.record(track);
+        require(track.supports().structures.front().id == generatedId,
+            "generation transaction must publish the generated structure");
+        track = requireState(history.undo(), "wooden run Undo missing");
+        require(track.supports().empty(),
+            "Undo must remove the generated run");
+        track = requireState(history.redo(), "wooden run Redo missing");
+        require(track.supports().structures.front().id == generatedId,
+            "Redo must restore the same generated run");
+    }
 }
 
 int main()
@@ -380,4 +405,5 @@ int main()
     connectCheckClassifiesEveryCase();
     transactionPublishesManualGraphAndRecordsHistory();
     anchorAndConnectionAuthoringUsesTransactionsAndHistory();
+    woodenRunUsesDocumentHistory();
 }

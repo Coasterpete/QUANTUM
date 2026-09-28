@@ -4630,6 +4630,14 @@ namespace quantum::editor
         {
             selectedSupport_.reset();
         }
+        if (!selectedSupport_ && !supports.structures.empty()
+            && supports.structures.front().generatedWoodenRun)
+        {
+            const coaster::SupportStructure& first = supports.structures.front();
+            selectedSupport_ = {first.id, SupportSelectionKind::Structure,
+                coaster::invalidSupportElementId};
+            woodenSupportRecipe_ = *first.generatedWoodenRun;
+        }
 
         ImGui::Text("Supports");
         ImGui::Checkbox("Node Snap", &supportNodeSnapEnabled_);
@@ -4650,6 +4658,10 @@ namespace quantum::editor
                 selectedSupport_ = {
                     structure.id, SupportSelectionKind::Structure,
                     coaster::invalidSupportElementId};
+                if (structure.generatedWoodenRun)
+                {
+                    woodenSupportRecipe_ = *structure.generatedWoodenRun;
+                }
                 supportNodeManipulation_.reset();
             }
         }
@@ -4675,6 +4687,43 @@ namespace quantum::editor
         }
         ImGui::EndDisabled();
         ImGui::Unindent();
+        ImGui::Separator();
+
+        ImGui::Text("Procedural Wooden Run (M0)");
+        editorSecondaryText(
+            "Stations and dimensions use Core coordinate units. "
+            "Foundations use a flat elevation plane.");
+        ImGui::PushItemWidth(110.0F);
+        ImGui::InputDouble("Start Station", &woodenSupportRecipe_.startStation);
+        ImGui::InputDouble("End Station", &woodenSupportRecipe_.endStation);
+        ImGui::InputDouble("Bent Spacing", &woodenSupportRecipe_.bentSpacing);
+        ImGui::InputDouble("Bent Width", &woodenSupportRecipe_.bentWidth);
+        ImGui::InputDouble("Foundation Elevation",
+            &woodenSupportRecipe_.foundationElevation);
+        ImGui::InputDouble("Attachment Height Offset",
+            &woodenSupportRecipe_.attachmentVerticalOffset);
+        ImGui::InputDouble("Timber Size", &woodenSupportRecipe_.memberSize);
+        ImGui::PopItemWidth();
+        ImGui::Checkbox("Longitudinal Bracing",
+            &woodenSupportRecipe_.longitudinalBracing);
+        const bool regenerateWoodenRun = selectedSupport_.has_value()
+            && findStructure(selectedSupport_->structureId)
+                != supports.structures.end()
+            && findStructure(selectedSupport_->structureId)
+                ->generatedWoodenRun.has_value();
+        if (ImGui::Button(regenerateWoodenRun
+            ? "Regenerate Selected Wooden Run" : "Generate New Wooden Run"))
+        {
+            SupportEditCommand command;
+            command.type = SupportEditType::GenerateWoodenRun;
+            command.structureId = regenerateWoodenRun
+                ? selectedSupport_->structureId
+                : coaster::invalidSupportStructureId;
+            command.woodenRecipe = woodenSupportRecipe_;
+            supportEditCommand_ = command;
+        }
+        editorSecondaryText("Regeneration replaces the selected generated "
+            "structure; manual structures are retained.");
         ImGui::Separator();
 
         // The detail area follows the structure the current selection
@@ -11110,7 +11159,16 @@ ImGui::MenuItem(
         if (viewportDisplayBoundsDirty_ && centerlineVisualization_ != nullptr
             && !centerlineVisualization_->vertices.empty())
         {
-            const auto [minimum, maximum] = referenceCurveBounds(*centerlineVisualization_);
+            auto [minimum, maximum] = referenceCurveBounds(*centerlineVisualization_);
+            if (supportVisualization_ != nullptr)
+            {
+                for (const SupportVisualizationNode& node
+                    : supportVisualization_->nodes)
+                {
+                    minimum = glm::min(minimum, node.position);
+                    maximum = glm::max(maximum, node.position);
+                }
+            }
             // setBounds updates clipping/framing limits without changing user
             // pose. Refresh after transactions publish the new visualization.
             viewportCamera_.setBounds(minimum, maximum);
@@ -11302,6 +11360,7 @@ ImGui::MenuItem(
         const SupportVisualization& visualization) noexcept
     {
         supportVisualization_ = &visualization;
+        viewportDisplayBoundsDirty_ = true;
         if (selectedSupport_.has_value()
             && (authoredTrack_ == nullptr
                 || !supportSelectionExists(

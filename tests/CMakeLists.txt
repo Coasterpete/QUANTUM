@@ -2613,3 +2613,13 @@ add_dependencies(
     QuantumShaders
 )
 endif()
+add_executable(QuantumCoreWoodenSupportGeneratorTests
+    WoodenSupportGeneratorTests.cpp)
+target_link_libraries(QuantumCoreWoodenSupportGeneratorTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreWoodenSupportGeneratorTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreWoodenSupportGeneratorTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.WoodenSupportGenerator
+    COMMAND QuantumCoreWoodenSupportGeneratorTests)
+set_tests_properties(QuantumCore.WoodenSupportGenerator PROPERTIES
+    LABELS "core;coaster;supports;generator")

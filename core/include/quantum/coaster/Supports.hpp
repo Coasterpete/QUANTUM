@@ -148,6 +148,24 @@ namespace quantum::coaster
             const SupportMember&, const SupportMember&) = default;
     };
 
+    // A generated run owns one whole structure. Regeneration replaces only
+    // that structure; manual structures have no recipe.
+    struct WoodenSupportRunRecipe
+    {
+        double startStation = 0.0;
+        double endStation = 40.0;
+        double bentSpacing = 5.0;
+        double bentWidth = 4.0;
+        double foundationElevation = -10.0;
+        double attachmentVerticalOffset = -0.5;
+        double memberSize = 0.2;
+        bool longitudinalBracing = true;
+
+        [[nodiscard]] friend bool operator==(
+            const WoodenSupportRunRecipe&,
+            const WoodenSupportRunRecipe&) = default;
+    };
+
     struct SupportStructure
     {
         SupportStructureId id = invalidSupportStructureId;
@@ -155,6 +173,7 @@ namespace quantum::coaster
         std::vector<SupportNode> nodes;
         std::vector<SupportMember> members;
         SupportElementId nextElementId = 1;
+        std::optional<WoodenSupportRunRecipe> generatedWoodenRun;
 
         [[nodiscard]] friend bool operator==(
             const SupportStructure&, const SupportStructure&) = default;
@@ -295,5 +314,6 @@ namespace quantum::coaster
     // Geometric/document consistency only. This does not perform loads,
     // stress, buckling, foundation, or code-compliance analysis.
     void validateSupportMemberProfile(const SupportMemberProfile& profile);
+    void validateWoodenSupportRunRecipe(const WoodenSupportRunRecipe& recipe);
     void validateSupportCollection(const SupportCollection& collection);
 }

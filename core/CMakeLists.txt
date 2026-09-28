@@ -24,6 +24,7 @@ target_sources(
         src/PlanarArcRegion.cpp
         src/StaticMeshAsset.cpp
         src/Supports.cpp
+        src/WoodenSupportGenerator.cpp
         src/physics/CarPose.cpp
         src/physics/DynamicContactPhysics.cpp
         src/physics/TrainSolveDiagnostics.hpp
@@ -54,6 +55,7 @@ target_sources(
         include/quantum/coaster/RiderLocalGeometry.hpp
         include/quantum/coaster/StaticMeshAsset.hpp
         include/quantum/coaster/Supports.hpp
+        include/quantum/coaster/WoodenSupportGenerator.hpp
         include/quantum/coaster/TrackKinematics.hpp
         include/quantum/coaster/TrackTopology.hpp
         include/quantum/coaster/detail/CircuitCompletionDetail.hpp

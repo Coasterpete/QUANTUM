@@ -6,6 +6,7 @@
 #include <quantum/editor/AuthoredTrackEditTransaction.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/DocumentHistory.hpp>
+#include <quantum/coaster/WoodenSupportGenerator.hpp>
 #include <quantum/editor/DocumentState.hpp>
 #include <quantum/editor/EditorUi.hpp>
 #include <quantum/editor/FramePerformanceTelemetry.hpp>
@@ -2191,6 +2192,27 @@ editorUi.selectSection(restoredSelection, true);
                                         "Support member %u deleted.",
                                         requestedSupportCommand->elementId);
                                     break;
+                                case SupportEditType::GenerateWoodenRun:
+                                {
+                                    const auto replaceId =
+                                        requestedSupportCommand->structureId
+                                            == quantum::coaster::invalidSupportStructureId
+                                        ? std::nullopt
+                                        : std::optional{
+                                            requestedSupportCommand->structureId};
+                                    const auto generatedId = quantum::coaster::
+                                        generateWoodenSupportRun(candidate,
+                                            requestedSupportCommand->woodenRecipe,
+                                            replaceId);
+                                    postCommitSelection = {
+                                        generatedId,
+                                        quantum::editor::SupportSelectionKind::Structure,
+                                        quantum::coaster::invalidSupportElementId};
+                                    editLabel = "wooden run";
+                                    std::snprintf(detail.data(), detail.size(),
+                                        "Wooden support run %u generated.", generatedId);
+                                    break;
+                                }
                                 }
 
                                 quantum::editor::SupportVisualization
