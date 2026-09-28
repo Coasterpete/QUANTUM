@@ -148,6 +148,14 @@ namespace quantum::coaster
             const SupportMember&, const SupportMember&) = default;
     };
 
+    enum class TimberSupportFamily : std::uint8_t
+    {
+        TraditionalTimberBent,
+        ModernTwisterTimber,
+        PrefabricatedTimberLattice,
+        HybridTimberLattice
+    };
+
     // A generated run owns one whole structure. Regeneration replaces only
     // that structure; manual structures have no recipe.
     struct WoodenSupportRunRecipe
@@ -160,6 +168,9 @@ namespace quantum::coaster
         double attachmentVerticalOffset = -0.5;
         double memberSize = 0.2;
         bool longitudinalBracing = true;
+        TimberSupportFamily family = TimberSupportFamily::TraditionalTimberBent;
+        // Maximum vertical distance between connected framing levels.
+        double storyHeight = 24.0;
 
         [[nodiscard]] friend bool operator==(
             const WoodenSupportRunRecipe&,

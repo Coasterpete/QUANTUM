@@ -397,6 +397,22 @@ namespace
         track = requireState(history.redo(), "wooden run Redo missing");
         require(track.supports().structures.front().id == generatedId,
             "Redo must restore the same generated run");
+        coaster::WoodenSupportRunRecipe changed = recipe;
+        changed.family = coaster::TimberSupportFamily::HybridTimberLattice;
+        changed.storyHeight = 8.0;
+        editor::AuthoredTrackEditTransaction regeneration{track};
+        static_cast<void>(coaster::generateWoodenSupportRun(
+            regeneration.candidate(), changed, generatedId));
+        regeneration.commit(track);
+        history.record(track);
+        require(track.supports().structures.front().generatedWoodenRun == changed,
+            "regeneration transaction must publish the changed family");
+        track = requireState(history.undo(), "wooden regeneration Undo missing");
+        require(track.supports().structures.front().generatedWoodenRun == recipe,
+            "regeneration Undo must restore the original family");
+        track = requireState(history.redo(), "wooden regeneration Redo missing");
+        require(track.supports().structures.front().generatedWoodenRun == changed,
+            "regeneration Redo must restore the changed family");
     }
 }
 

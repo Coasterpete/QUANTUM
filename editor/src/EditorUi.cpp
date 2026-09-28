@@ -4689,10 +4689,33 @@ namespace quantum::editor
         ImGui::Unindent();
         ImGui::Separator();
 
-        ImGui::Text("Procedural Wooden Run (M0)");
+        ImGui::Text("Procedural Timber Supports");
         editorSecondaryText(
             "Stations and dimensions use Core coordinate units. "
             "Foundations use a flat elevation plane.");
+        constexpr const char* familyNames[] = {
+            "Traditional Timber Bent", "Modern Twister Timber",
+            "Prefabricated Timber Lattice", "Hybrid Timber Lattice"};
+        constexpr const char* familyDescriptions[] = {
+            "Regular two-post bents with conventional caps and story framing.",
+            "Close track-following bents with continuous longitudinal ties.",
+            "Regular three-post bents with repeated tower panels.",
+            "Wide two-post bents, story ledgers and selective diagonals."};
+        int familyIndex = static_cast<int>(woodenSupportRecipe_.family);
+        if (ImGui::Combo("Structural Family", &familyIndex, familyNames, 4))
+        {
+            woodenSupportRecipe_.family =
+                static_cast<coaster::TimberSupportFamily>(familyIndex);
+            constexpr double spacing[] = {5.0, 3.5, 6.0, 4.0};
+            constexpr double width[] = {4.0, 4.0, 5.0, 5.5};
+            constexpr double story[] = {24.0, 16.0, 18.0, 14.0};
+            constexpr double timber[] = {0.2, 0.2, 0.22, 0.28};
+            woodenSupportRecipe_.bentSpacing = spacing[familyIndex];
+            woodenSupportRecipe_.bentWidth = width[familyIndex];
+            woodenSupportRecipe_.storyHeight = story[familyIndex];
+            woodenSupportRecipe_.memberSize = timber[familyIndex];
+        }
+        editorSecondaryText(familyDescriptions[familyIndex]);
         ImGui::PushItemWidth(110.0F);
         ImGui::InputDouble("Start Station", &woodenSupportRecipe_.startStation);
         ImGui::InputDouble("End Station", &woodenSupportRecipe_.endStation);
@@ -4703,6 +4726,7 @@ namespace quantum::editor
         ImGui::InputDouble("Attachment Height Offset",
             &woodenSupportRecipe_.attachmentVerticalOffset);
         ImGui::InputDouble("Timber Size", &woodenSupportRecipe_.memberSize);
+        ImGui::InputDouble("Maximum Story Height", &woodenSupportRecipe_.storyHeight);
         ImGui::PopItemWidth();
         ImGui::Checkbox("Longitudinal Bracing",
             &woodenSupportRecipe_.longitudinalBracing);
@@ -4722,8 +4746,8 @@ namespace quantum::editor
             command.woodenRecipe = woodenSupportRecipe_;
             supportEditCommand_ = command;
         }
-        editorSecondaryText("Regeneration replaces the selected generated "
-            "structure; manual structures are retained.");
+        editorSecondaryText("Regeneration replaces edits inside the selected "
+            "generated structure. Other structures are retained.");
         ImGui::Separator();
 
         // The detail area follows the structure the current selection
@@ -11705,6 +11729,24 @@ ImGui::MenuItem(
             structureId, SupportSelectionKind::Structure,
             coaster::invalidSupportElementId};
         supportNodeManipulation_.reset();
+    }
+
+    void EditorUi::synchronizeSelectedWoodenSupportRecipe() noexcept
+    {
+        if (authoredTrack_ == nullptr || !selectedSupport_)
+        {
+            return;
+        }
+        const auto& structures = authoredTrack_->supports().structures;
+        const auto selected = std::find_if(structures.begin(), structures.end(),
+            [this](const coaster::SupportStructure& structure)
+            {
+                return structure.id == selectedSupport_->structureId;
+            });
+        if (selected != structures.end() && selected->generatedWoodenRun)
+        {
+            woodenSupportRecipe_ = *selected->generatedWoodenRun;
+        }
     }
 
     void EditorUi::selectSupportNode(

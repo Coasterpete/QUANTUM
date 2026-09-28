@@ -633,7 +633,24 @@ namespace quantum::coaster
                         {"foundationElevation", recipe.foundationElevation},
                         {"attachmentVerticalOffset", recipe.attachmentVerticalOffset},
                         {"memberSize", recipe.memberSize},
-                        {"longitudinalBracing", recipe.longitudinalBracing}};
+                        {"longitudinalBracing", recipe.longitudinalBracing},
+                        {"storyHeight", recipe.storyHeight},
+                        {"family", [family = recipe.family]() -> const char*
+                            {
+                                switch (family)
+                                {
+                                case TimberSupportFamily::TraditionalTimberBent:
+                                    return "TraditionalTimberBent";
+                                case TimberSupportFamily::ModernTwisterTimber:
+                                    return "ModernTwisterTimber";
+                                case TimberSupportFamily::PrefabricatedTimberLattice:
+                                    return "PrefabricatedTimberLattice";
+                                case TimberSupportFamily::HybridTimberLattice:
+                                    return "HybridTimberLattice";
+                                }
+                                throw std::invalid_argument(
+                                    "Unknown timber support family.");
+                            }()}};
                 }
                 structuresJson.push_back(std::move(structureJson));
             }
@@ -1311,7 +1328,8 @@ namespace quantum::coaster
                     requireNoUnknownFields(recipeJson,
                         {"startStation", "endStation", "bentSpacing", "bentWidth",
                          "foundationElevation", "attachmentVerticalOffset",
-                         "memberSize", "longitudinalBracing"}, recipePath);
+                         "memberSize", "longitudinalBracing", "family",
+                         "storyHeight"}, recipePath);
                     for (const char* field : {"startStation", "endStation",
                         "bentSpacing", "bentWidth", "foundationElevation",
                         "attachmentVerticalOffset", "memberSize"})
@@ -1324,7 +1342,7 @@ namespace quantum::coaster
                         throw std::runtime_error(
                             recipePath + ".longitudinalBracing: expected a boolean");
                     }
-                    structure.generatedWoodenRun = WoodenSupportRunRecipe{
+                    WoodenSupportRunRecipe recipe{
                         recipeJson["startStation"].get<double>(),
                         recipeJson["endStation"].get<double>(),
                         recipeJson["bentSpacing"].get<double>(),
@@ -1333,6 +1351,28 @@ namespace quantum::coaster
                         recipeJson["attachmentVerticalOffset"].get<double>(),
                         recipeJson["memberSize"].get<double>(),
                         recipeJson["longitudinalBracing"].get<bool>()};
+                    if (recipeJson.contains("family"))
+                    {
+                        requireString(recipeJson, "family", recipePath);
+                        const auto family = recipeJson["family"].get<std::string>();
+                        if (family == "TraditionalTimberBent")
+                            recipe.family = TimberSupportFamily::TraditionalTimberBent;
+                        else if (family == "ModernTwisterTimber")
+                            recipe.family = TimberSupportFamily::ModernTwisterTimber;
+                        else if (family == "PrefabricatedTimberLattice")
+                            recipe.family = TimberSupportFamily::PrefabricatedTimberLattice;
+                        else if (family == "HybridTimberLattice")
+                            recipe.family = TimberSupportFamily::HybridTimberLattice;
+                        else
+                            throw std::runtime_error(recipePath
+                                + ".family: unknown timber support family");
+                    }
+                    if (recipeJson.contains("storyHeight"))
+                    {
+                        requireNumber(recipeJson, "storyHeight", recipePath);
+                        recipe.storyHeight = recipeJson["storyHeight"].get<double>();
+                    }
+                    structure.generatedWoodenRun = recipe;
                 }
 
                 const json& nodes = structureJson["nodes"];
