@@ -1156,6 +1156,7 @@ editorUi.selectSection(restoredSelection, true);
                                     publishHistoryState(*restoredTrack,
                                         documentHistory.
                                             lastRestoreTrackStylePresentationImpact());
+                                    editorUi.synchronizeSelectedWoodenSupportRecipe();
                                     editorUi.synchronizeGround(authoredTrack.ground());
                                     const auto restoredImpact = documentHistory.
                                         lastRestoreTrackStylePresentationImpact();

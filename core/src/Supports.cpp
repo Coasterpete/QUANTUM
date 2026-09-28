@@ -781,7 +781,9 @@ namespace quantum::coaster
             || !std::isfinite(recipe.bentWidth) || recipe.bentWidth <= 0.0
             || !std::isfinite(recipe.foundationElevation)
             || !std::isfinite(recipe.attachmentVerticalOffset)
-            || !std::isfinite(recipe.memberSize) || recipe.memberSize <= 0.0)
+            || !std::isfinite(recipe.memberSize) || recipe.memberSize <= 0.0
+            || !std::isfinite(recipe.storyHeight) || recipe.storyHeight <= 0.0
+            || recipe.family > TimberSupportFamily::HybridTimberLattice)
         {
             throw std::invalid_argument("Invalid wooden support run recipe.");
         }

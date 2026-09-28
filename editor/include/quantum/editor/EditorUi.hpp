@@ -624,6 +624,9 @@ namespace quantum::editor
         // stable IDs.
         void selectSupportStructure(
             coaster::SupportStructureId structureId) noexcept;
+        // History restores may replace a generated structure while retaining
+        // its selection. Keep the recipe controls on the restored revision.
+        void synchronizeSelectedWoodenSupportRecipe() noexcept;
         void selectSupportNode(
             coaster::SupportStructureId structureId,
             coaster::SupportElementId nodeId,
