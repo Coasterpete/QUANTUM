@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,6 +40,8 @@ namespace quantum::coaster
         {
             // Levels run from foundation to track; each has one node per lane.
             std::vector<std::vector<SupportElementId>> levels;
+            // Hybrid's first story has a raised ledger above the footings.
+            std::vector<SupportElementId> lowerLedger;
         };
 
         [[nodiscard]] double nextSpacing(const WoodenSupportRunRecipe& recipe,
@@ -171,6 +174,7 @@ namespace quantum::coaster
             bases.reserve(rules.lanes.size());
             tops.reserve(rules.lanes.size());
             double maximumHeight = 0.0;
+            double minimumHeight = std::numeric_limits<double>::max();
             for (const double lane : rules.lanes)
             {
                 const auto top = resolveSupportTrackAttachment(states,
@@ -185,6 +189,8 @@ namespace quantum::coaster
                 tops.push_back(top.position);
                 maximumHeight = std::max(maximumHeight,
                     top.position.z - recipe.foundationElevation);
+                minimumHeight = std::min(minimumHeight,
+                    top.position.z - recipe.foundationElevation);
             }
             const double storiesNeeded = std::ceil(maximumHeight / recipe.storyHeight);
             if (!std::isfinite(storiesNeeded) || storiesNeeded > 64.0)
@@ -192,7 +198,11 @@ namespace quantum::coaster
                 throw std::invalid_argument(
                     "Wooden support run exceeds 64 framing stories.");
             }
-            const auto storyCount = static_cast<std::size_t>(storiesNeeded);
+            // Modern's lower longitudinal framing stays present on low runs.
+            const auto storyCount = recipe.family
+                == TimberSupportFamily::ModernTwisterTimber
+                ? std::max<std::size_t>(2, static_cast<std::size_t>(storiesNeeded))
+                : static_cast<std::size_t>(storiesNeeded);
 
             Bent bent;
             bent.levels.resize(storyCount + 1);
@@ -215,6 +225,20 @@ namespace quantum::coaster
                         level == 0));
                 }
             }
+            // Very short posts cannot fit a separate lower member and ledger.
+            if (recipe.family == TimberSupportFamily::HybridTimberLattice
+                && minimumHeight / static_cast<double>(storyCount) > 1e-4)
+            {
+                // The reference's first ledger is above the separate footings,
+                // roughly a quarter of the way up the first framed story.
+                const double fraction = 0.25 / static_cast<double>(storyCount);
+                for (std::size_t lane = 0; lane < rules.lanes.size(); ++lane)
+                {
+                    bent.lowerLedger.push_back(addNode(
+                        bases[lane] + fraction * (tops[lane] - bases[lane]),
+                        std::nullopt, false));
+                }
+            }
 
             for (std::size_t level = 1; level <= storyCount; ++level)
             {
@@ -222,11 +246,23 @@ namespace quantum::coaster
                 const auto& upper = bent.levels[level];
                 for (std::size_t lane = 0; lane < rules.lanes.size(); ++lane)
                 {
-                    addMember(lower[lane], upper[lane]);
+                    if (level == 1 && !bent.lowerLedger.empty())
+                    {
+                        addMember(lower[lane], bent.lowerLedger[lane]);
+                        addMember(bent.lowerLedger[lane], upper[lane]);
+                    }
+                    else
+                    {
+                        addMember(lower[lane], upper[lane]);
+                    }
                 }
                 for (std::size_t lane = 1; lane < rules.lanes.size(); ++lane)
                 {
                     addMember(upper[lane - 1], upper[lane]);
+                }
+                if (level == 1 && !bent.lowerLedger.empty())
+                {
+                    addMember(bent.lowerLedger.front(), bent.lowerLedger.back());
                 }
                 // The transverse bent is the repeated framed unit. Braces are
                 // selective; neighboring ledgers supply most of the lattice.
@@ -252,16 +288,30 @@ namespace quantum::coaster
                     addMember(lower[2], upper[1]);
                     break;
                 case TimberSupportFamily::HybridTimberLattice:
-                    if ((bentCount + level) % 2 == 0)
-                        addMember(lower.front(), upper.back());
+                {
+                    const auto& braceFoot = level == 1
+                        && !bent.lowerLedger.empty()
+                            ? bent.lowerLedger : lower;
+                    if (level % 2 == 1)
+                        addMember(braceFoot.front(), upper.back());
                     else
-                        addMember(lower.back(), upper.front());
+                        addMember(braceFoot.back(), upper.front());
                     break;
+                }
                 }
             }
 
             if (previous)
             {
+                if (!previous->lowerLedger.empty()
+                    && !bent.lowerLedger.empty())
+                {
+                    for (std::size_t lane = 0; lane < rules.lanes.size(); ++lane)
+                    {
+                        addMember(previous->lowerLedger[lane],
+                            bent.lowerLedger[lane]);
+                    }
+                }
                 for (std::size_t level = 0; level < bent.levels.size(); ++level)
                 {
                     const auto previousLevel = static_cast<std::size_t>(
@@ -303,10 +353,29 @@ namespace quantum::coaster
                                 : bentCount % 3 == 0;
                         if (braceBay)
                         {
-                            const std::size_t lane = (bentCount + level) % 2 == 0
-                                ? 0 : rules.lanes.size() - 1;
-                            addMember(previous->levels[previousLower][lane],
-                                bent.levels[level][lane]);
+                            if (recipe.family
+                                == TimberSupportFamily::PrefabricatedTimberLattice)
+                            {
+                                // Braced bays repeat as complete tower modules;
+                                // the other two bays remain open.
+                                addMember(previous->levels[previousLower].front(),
+                                    bent.levels[level].front());
+                                addMember(previous->levels[previousLower].back(),
+                                    bent.levels[level].back());
+                            }
+                            else
+                            {
+                                const std::size_t lane = (bentCount + level) % 2 == 0
+                                    ? 0 : rules.lanes.size() - 1;
+                                const auto& braceFoot = recipe.family
+                                    == TimberSupportFamily::HybridTimberLattice
+                                    && level == 1
+                                    && !previous->lowerLedger.empty()
+                                        ? previous->lowerLedger
+                                        : previous->levels[previousLower];
+                                addMember(braceFoot[lane],
+                                    bent.levels[level][lane]);
+                            }
                         }
                     }
                 }

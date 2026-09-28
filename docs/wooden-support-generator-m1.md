@@ -17,9 +17,9 @@ Topology rules determine how the bents and neighboring bays are connected.
 | Family | Procedural geometry | Observable construction cue |
 | --- | --- | --- |
 | Traditional Timber Bent | Regular two-post bents, caps and ledgers; M0 cross bracing for low runs and alternating single braces in tall stories | Conventional repeated bent framing with longitudinal ties |
-| Modern Twister Timber | Closer bent spacing through direction or bank changes, continuous ties on three post lanes, one alternating transverse brace per story and selected longitudinal braces | Closely repeated bents form a track-following continuous lattice, including low curved runs |
-| Prefabricated Timber Lattice | Regular three-post bents, paired panel braces, aligned story framing and a fixed bay rhythm | Ordered two/three-leg bent construction and repeated tall timber panels |
-| Hybrid Timber Lattice | Broad two-post bents, individual foundations, caps and ledgers, one alternating diagonal per story and mostly open longitudinal bays | Repeated one-story framed units build a deep timber lattice beneath independently chosen track |
+| Modern Twister Timber | Closer bent spacing through direction or bank changes, at least two framing tiers, continuous ties on three post lines, and selected transverse and longitudinal braces | Nearby bents and several track-following horizontal lines form a dense continuous structure even along low curved runs |
+| Prefabricated Timber Lattice | Evenly spaced three-post bents, aligned story ledgers, paired transverse panel braces, and braced longitudinal bays in repeating tower modules | Ordered two/three-leg bent construction, regular stacked panels, and longitudinal stays |
+| Hybrid Timber Lattice | Broad two-post bents on individual foundations, a raised first-story ledger, upper cap, one repeated diagonal per bent/story, and mostly open longitudinal bays | Simple one-story framed units connect into a deeper lattice beneath independently chosen track |
 
 These post arrangements, bracing patterns, spacing thresholds, spread factors
 and story limits are QUANTUM approximations of visible construction language.
@@ -43,7 +43,11 @@ track normal for foundation placement. Height above the explicit foundation
 plane determines the number of stories. Intermediate levels split long posts,
 add transverse framing and connect to neighboring bays. Posts, ledgers, caps
 and longitudinal ties form the primary framework; diagonals are secondary
-braces. The document retains one rectangular member profile for both roles.
+braces. Modern Twister uses a lower and upper framing tier even where its
+height alone would require only one story. Hybrid's first-story ledger sits
+one quarter of that story above the foundation, so its principal diagonal
+starts at the ledger rather than at the footing. The document retains one
+rectangular member profile for both roles.
 The generator's separate member-addition sites leave a seam for a later solid
 renderer without adding a member-role field in M1. A run is rejected if
 any top lane reaches the foundation, the tangent has no horizontal direction,
@@ -70,27 +74,34 @@ and regenerate each enter the existing transaction and Undo/Redo history path.
 
 - [Great Coasters International service/design material](https://greatcoasters.com/service)
   describes twisted layouts with high-speed direction changes. The
-  [Mystic Timbers construction photos](https://coasternation.com/exclusive-photos-details-construction-of-kings-islands-beloved-mystic-timbers/)
-  and [Gold Striker aerial construction view](https://www.coaster101.com/2013/03/06/gold-striker-construction-from-the-air/)
-  show closely repeated bents, upright post rhythms and horizontal ties behind
-  curved track. This informs Modern Twister's station density and longitudinal
-  continuity. Its selective diagonals avoid filling each opening.
+  [Mystic Timbers construction photos](https://coasternation.com/exclusive-photos-details-construction-of-kings-islands-beloved-mystic-timbers/),
+  [Gold Striker aerial construction view](https://www.coaster101.com/2013/03/06/gold-striker-construction-from-the-air/)
+  and [Gold Striker close views](https://norcalthrills.com/parks/cga/coasters/gold-striker/)
+  show closely repeated bents, upright post rhythms and multiple horizontal
+  lines following curved track. This informs Modern Twister's station density,
+  minimum two-tier framing and longitudinal continuity. Selected diagonals
+  leave openings between the repeated frames.
 - [Intamin's wooden coaster page](https://www.intamin.com/product/wooden-coaster/)
   establishes the prefabricated wooden-coaster context.
   [Cordes Holzbau's Colossos project](https://www.cordes-holzbau.de/en/projekt/colossos-wooden-roller-coaster-heide-park-soltau/),
   [ZÜBLIN Timber's Colossos project](https://www.zueblin-timber.com/en/projects/colossos-wooden-roller-coaster-soltau)
   and [El Toro construction journal](https://greatadventurehistory.com/ElToro.htm)
   document prepared components and erected two- and three-legged bents. The
-  regular three-post panel sequence approximates the visible tower order.
+  [Balder timber-framing account](https://www.swedishwood.com/inspiration/architecture/balder_rollercoaster/)
+  describes stacked transverse trusses, vertical posts split at story levels,
+  longitudinal stays and diagonals in selected directions. These observations
+  inform Prefabricated's regular story sequence and repeating braced bays;
+  its three post lines and brace interval remain simplified QUANTUM choices.
 - [Rocky Mountain Construction's hybrid system description](https://rockymtnconstruction.com/hybrid-coasters/)
   explicitly permits wood lattice, steel lattice or columns below steel track.
   [Steel Vengeance](https://rockymtnconstruction.com/roller-coaster/steel-vengeance/),
   [Hersheypark's Wildcat's Revenge account](https://www.hersheypark.com/plan-your-visit/blog/hersheypark-roller-coaster-guide-2026)
   and [Wildcat's Revenge photos](https://themetography.com/photographing-coasters-at-hersheypark-august-2023/)
   show the steel-on-timber context. The user-supplied one-story 3D reference
-  informed Hybrid's two-post bent, discrete foundations, single story diagonal,
-  upper cap and open bays. Repeated bents and stacked stories create depth
-  without full X bracing in every opening. This is not proprietary I-Box or
+  directly shows two-post bents on discrete foundations, a raised lower ledger,
+  single diagonals with the same direction in neighboring bents, upper caps,
+  longitudinal ties and open bays. Repeated bents and stacked stories create
+  depth without full X bracing in every opening. This is not proprietary I-Box or
   support engineering.
 - Traditional retains M0's simple two-post bent as its baseline. The visible
   repeated bents, caps, ties and selected tall-story diagonals follow
@@ -117,8 +128,9 @@ The first four captures use the same curved, banked ModernSteel track, station
 range, recipe dimensions, camera framing and foundation plane. Only the support
 family changes. The fifth uses a shorter, taller Traditional run to show its
 intermediate stories. The sixth shows a low curved Modern run with the track
-about 10–24 Core units above its foundation plane. All images were rendered by
-the Windows Editor capture harness.
+about 10–24 Core units above its foundation plane. The seventh isolates a
+one-story Hybrid run against the supplied reference. All images were rendered
+by the Windows Editor capture harness.
 
 - [Traditional Timber Bent](images/wooden-support-m1/traditional/editor-overview.png)
 - [Modern Twister Timber](images/wooden-support-m1/twister/editor-overview.png)
@@ -126,3 +138,4 @@ the Windows Editor capture harness.
 - [Hybrid Timber Lattice](images/wooden-support-m1/hybrid/editor-overview.png)
 - [Tall multi-story example](images/wooden-support-m1/tall/editor-overview.png)
 - [Low curved Modern Twister](images/wooden-support-m1/twister-low/editor-overview.png)
+- [One-story Hybrid Timber](images/wooden-support-m1/hybrid-low/editor-overview.png)

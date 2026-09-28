@@ -329,39 +329,106 @@ namespace
         recipe.storyHeight = 24.0;
         static_cast<void>(generateWoodenSupportRun(track, recipe));
         const auto& structure = track.supports().structures.front();
-        require(structure.nodes.size() == 20,
-            "one-story hybrid needs two foundations and two upper posts per bent");
+        require(structure.nodes.size() == 30,
+            "one-story hybrid needs footings, raised ledgers and caps per bent");
         for (std::size_t bent = 0; bent < 5; ++bent)
         {
             const auto& nodes = structure.nodes;
-            const auto baseLeft = nodes[bent * 4].id;
-            const auto baseRight = nodes[bent * 4 + 1].id;
-            const auto topLeft = nodes[bent * 4 + 2].id;
-            const auto topRight = nodes[bent * 4 + 3].id;
-            require(hasMember(structure, baseLeft, topLeft)
-                && hasMember(structure, baseRight, topRight)
+            const auto offset = bent * 6;
+            const auto baseLeft = nodes[offset].id;
+            const auto baseRight = nodes[offset + 1].id;
+            const auto topLeft = nodes[offset + 2].id;
+            const auto topRight = nodes[offset + 3].id;
+            const auto ledgerLeft = nodes[offset + 4].id;
+            const auto ledgerRight = nodes[offset + 5].id;
+            require(nodes[offset].foundation && nodes[offset + 1].foundation
+                && nodes[offset + 2].trackAttachment
+                && nodes[offset + 3].trackAttachment,
+                "hybrid needs individual footings and two attached upper posts");
+            require(hasMember(structure, baseLeft, ledgerLeft)
+                && hasMember(structure, ledgerLeft, topLeft)
+                && hasMember(structure, baseRight, ledgerRight)
+                && hasMember(structure, ledgerRight, topRight)
+                && hasMember(structure, ledgerLeft, ledgerRight)
                 && hasMember(structure, topLeft, topRight),
-                "hybrid primary posts and cap must be continuous");
-            const bool risingRight = hasMember(structure, baseLeft, topRight);
-            const bool risingLeft = hasMember(structure, baseRight, topLeft);
-            require(risingRight != risingLeft,
-                "each hybrid bent needs exactly one transverse story diagonal");
-            require(risingRight == (bent % 2 == 0),
-                "hybrid diagonal direction must alternate between bents");
+                "hybrid posts need a raised transverse ledger and top cap");
+            require(nodes[offset + 4].position.z > nodes[offset].position.z
+                && nodes[offset + 4].position.z < nodes[offset + 2].position.z,
+                "hybrid lower ledger must sit above the foundation");
+            require(hasMember(structure, ledgerLeft, topRight)
+                && !hasMember(structure, ledgerRight, topLeft)
+                && !hasMember(structure, baseLeft, topRight),
+                "one repeated diagonal should leave the hybrid bent open");
             if (bent > 0)
             {
-                require(hasMember(structure, nodes[(bent - 1) * 4 + 2].id,
+                require(hasMember(structure, nodes[(bent - 1) * 6 + 2].id,
                         topLeft)
-                    && hasMember(structure, nodes[(bent - 1) * 4 + 3].id,
-                        topRight),
-                    "hybrid upper longitudinal ties must connect adjacent bents");
+                    && hasMember(structure, nodes[(bent - 1) * 6 + 3].id,
+                        topRight)
+                    && hasMember(structure, nodes[(bent - 1) * 6 + 4].id,
+                        ledgerLeft)
+                    && hasMember(structure, nodes[(bent - 1) * 6 + 5].id,
+                        ledgerRight),
+                    "hybrid upper and lower ties must connect adjacent bents");
                 const bool leftBayBrace = hasMember(structure,
-                    nodes[(bent - 1) * 4].id, topLeft);
+                    nodes[(bent - 1) * 6 + 4].id, topLeft);
                 const bool rightBayBrace = hasMember(structure,
-                    nodes[(bent - 1) * 4 + 1].id, topRight);
+                    nodes[(bent - 1) * 6 + 5].id, topRight);
                 require((leftBayBrace ? 1 : 0) + (rightBayBrace ? 1 : 0)
                         == (bent == 2 ? 1 : 0),
                     "only selected hybrid longitudinal bays should be braced");
+            }
+        }
+    }
+
+    void modernLowRunHasConnectedFramingTiers()
+    {
+        AuthoredTrack track = elevatedTrack();
+        WoodenSupportRunRecipe recipe{5.0, 25.0, 5.0, 4.0,
+            0.0, -0.5, 0.2, true};
+        recipe.family = TimberSupportFamily::ModernTwisterTimber;
+        recipe.storyHeight = 24.0;
+        static_cast<void>(generateWoodenSupportRun(track, recipe));
+        const auto& structure = track.supports().structures.front();
+        require(structure.nodes.size() == 45,
+            "low modern bents need an intermediate connected framing tier");
+        for (std::size_t bent = 1; bent < 5; ++bent)
+        {
+            for (std::size_t lane = 0; lane < 3; ++lane)
+            {
+                require(hasMember(structure,
+                    structure.nodes[(bent - 1) * 9 + 3 + lane].id,
+                    structure.nodes[bent * 9 + 3 + lane].id),
+                    "modern intermediate ties must follow consecutive bents");
+            }
+        }
+    }
+
+    void prefabricatedBaysRepeatRegularModules()
+    {
+        AuthoredTrack track = elevatedTrack();
+        WoodenSupportRunRecipe recipe{5.0, 25.0, 5.0, 4.0,
+            0.0, -0.5, 0.2, true};
+        recipe.family = TimberSupportFamily::PrefabricatedTimberLattice;
+        recipe.storyHeight = 8.0;
+        static_cast<void>(generateWoodenSupportRun(track, recipe));
+        const auto& structure = track.supports().structures.front();
+        require(structure.nodes.size() == 60,
+            "prefabricated bents need regular three-post stacked stories");
+        for (std::size_t bent = 1; bent < 5; ++bent)
+        {
+            for (std::size_t story = 1; story <= 3; ++story)
+            {
+                const auto before = (bent - 1) * 12 + (story - 1) * 3;
+                const auto after = bent * 12 + story * 3;
+                for (const std::size_t lane : {0u, 2u})
+                {
+                    require(hasMember(structure,
+                        structure.nodes[before + lane].id,
+                        structure.nodes[after + lane].id)
+                            == (bent == 2),
+                        "prefabricated braces must align through selected bays");
+                }
             }
         }
     }
@@ -378,7 +445,9 @@ int main(const int argc, char* argv[])
         mixedFamiliesPreserveOtherStructures();
         rapidGeometryChangesTightenBents();
         hybridOneStoryUsesOpenFramedBays();
-        if (argc == 6 || argc == 7)
+        modernLowRunHasConnectedFramingTiers();
+        prefabricatedBaysRepeatRegularModules();
+        if (argc == 6 || argc == 7 || argc == 8)
         {
             const TimberSupportFamily families[] = {
                 TimberSupportFamily::TraditionalTimberBent,
@@ -390,9 +459,10 @@ int main(const int argc, char* argv[])
             {
                 AuthoredTrack comparison = createDefaultAuthoredTrack();
                 setSectionLength(comparison.section(0),
-                    index == 4 ? 40.0 : 60.0);
+                    index == 4 || index == 6 ? 40.0 : 60.0);
                 AuthoredStartPose pose = comparison.startPose();
-                pose.position.z = index == 4 ? 65.0 : index == 5 ? 25.0 : 45.0;
+                pose.position.z = index == 4 ? 65.0
+                    : index >= 5 ? 25.0 : 45.0;
                 comparison.setStartPose(pose);
                 WoodenSupportRunRecipe recipe{5.0, index == 4 ? 35.0 : 55.0,
                     5.0, 4.0,
@@ -410,6 +480,13 @@ int main(const int argc, char* argv[])
                     recipe.family = TimberSupportFamily::ModernTwisterTimber;
                     recipe.foundationElevation = 0.0;
                     recipe.storyHeight = 16.0;
+                }
+                if (index == 6)
+                {
+                    recipe.family = TimberSupportFamily::HybridTimberLattice;
+                    recipe.endStation = 35.0;
+                    recipe.foundationElevation = 0.0;
+                    recipe.storyHeight = 32.0;
                 }
                 static_cast<void>(generateWoodenSupportRun(comparison, recipe));
                 std::ofstream output(argv[index + 1]);
