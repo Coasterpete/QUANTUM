@@ -648,9 +648,38 @@ namespace quantum::coaster
                                 case TimberSupportFamily::HybridTimberLattice:
                                     return "HybridTimberLattice";
                                 }
-                                throw std::invalid_argument(
-                                    "Unknown timber support family.");
+                            throw std::invalid_argument(
+                                "Unknown timber support family.");
                             }()}};
+                }
+                // Written only when authored, so documents that never touched
+                // the M2A appearance panel keep their M1 byte layout.
+                if (structure.appearance)
+                {
+                    const auto& appearance = *structure.appearance;
+                    structureJson["appearance"] = {
+                        {"baseColorTint", {
+                            {"r", appearance.baseColorTint.x},
+                            {"g", appearance.baseColorTint.y},
+                            {"b", appearance.baseColorTint.z}}},
+                        {"roughnessMultiplier",
+                            appearance.roughnessMultiplier},
+                        {"normalStrength", appearance.normalStrength},
+                        {"textureScale", appearance.textureScale}};
+                }
+                if (structure.foundationAppearance)
+                {
+                    const auto& appearance = *structure.foundationAppearance;
+                    structureJson["foundationAppearance"] = {
+                        {"baseColorTint", {
+                            {"r", appearance.baseColorTint.x},
+                            {"g", appearance.baseColorTint.y},
+                            {"b", appearance.baseColorTint.z}}},
+                        {"roughness", appearance.roughness},
+                        {"padDimensions", {
+                            {"x", appearance.padDimensions.x},
+                            {"y", appearance.padDimensions.y}}},
+                        {"padDepth", appearance.padDepth}};
                 }
                 structuresJson.push_back(std::move(structureJson));
             }
@@ -1307,7 +1336,8 @@ namespace quantum::coaster
                 }
                 requireNoUnknownFields(structureJson,
                     {"id", "name", "nextElementId", "nodes", "members",
-                     "generatedWoodenRun"},
+                     "generatedWoodenRun", "appearance",
+                     "foundationAppearance"},
                     structurePath);
                 requireString(structureJson, "name", structurePath);
                 requireArray(structureJson, "nodes", structurePath);
@@ -1373,6 +1403,115 @@ namespace quantum::coaster
                         recipe.storyHeight = recipeJson["storyHeight"].get<double>();
                     }
                     structure.generatedWoodenRun = recipe;
+                }
+                if (structureJson.contains("appearance"))
+                {
+                    requireObject(structureJson, "appearance", structurePath);
+                    const json& appearanceJson = structureJson["appearance"];
+                    const std::string appearancePath =
+                        structurePath + ".appearance";
+                    requireNoUnknownFields(appearanceJson,
+                        {"baseColorTint", "roughnessMultiplier",
+                         "normalStrength", "textureScale"}, appearancePath);
+                    requireObject(appearanceJson, "baseColorTint",
+                        appearancePath);
+                    const json& tintJson = appearanceJson["baseColorTint"];
+                    const std::string tintPath =
+                        appearancePath + ".baseColorTint";
+                    requireNoUnknownFields(tintJson, {"r", "g", "b"}, tintPath);
+                    for (const char* channel : {"r", "g", "b"})
+                    {
+                        requireNumber(tintJson, channel, tintPath);
+                    }
+                    SupportAppearance appearance;
+                    appearance.baseColorTint = {
+                        tintJson["r"].get<float>(),
+                        tintJson["g"].get<float>(),
+                        tintJson["b"].get<float>()};
+                    // Every scalar defaults when absent, so a partially
+                    // written appearance block still loads deterministically.
+                    if (appearanceJson.contains("roughnessMultiplier"))
+                    {
+                        requireNumber(appearanceJson, "roughnessMultiplier",
+                            appearancePath);
+                        appearance.roughnessMultiplier =
+                            appearanceJson["roughnessMultiplier"].get<float>();
+                    }
+                    if (appearanceJson.contains("normalStrength"))
+                    {
+                        requireNumber(appearanceJson, "normalStrength",
+                            appearancePath);
+                        appearance.normalStrength =
+                            appearanceJson["normalStrength"].get<float>();
+                    }
+                    if (appearanceJson.contains("textureScale"))
+                    {
+                        requireNumber(appearanceJson, "textureScale",
+                            appearancePath);
+                        appearance.textureScale =
+                            appearanceJson["textureScale"].get<float>();
+                    }
+                    validateSupportAppearance(appearance);
+                    structure.appearance = appearance;
+                }
+                if (structureJson.contains("foundationAppearance"))
+                {
+                    requireObject(structureJson, "foundationAppearance",
+                        structurePath);
+                    const json& appearanceJson =
+                        structureJson["foundationAppearance"];
+                    const std::string appearancePath =
+                        structurePath + ".foundationAppearance";
+                    requireNoUnknownFields(appearanceJson,
+                        {"baseColorTint", "roughness", "padDimensions",
+                         "padDepth"}, appearancePath);
+                    requireObject(appearanceJson, "baseColorTint",
+                        appearancePath);
+                    const json& tintJson = appearanceJson["baseColorTint"];
+                    const std::string tintPath =
+                        appearancePath + ".baseColorTint";
+                    requireNoUnknownFields(tintJson, {"r", "g", "b"}, tintPath);
+                    for (const char* channel : {"r", "g", "b"})
+                    {
+                        requireNumber(tintJson, channel, tintPath);
+                    }
+                    SupportFoundationAppearance appearance;
+                    appearance.baseColorTint = {
+                        tintJson["r"].get<float>(),
+                        tintJson["g"].get<float>(),
+                        tintJson["b"].get<float>()};
+                    if (appearanceJson.contains("roughness"))
+                    {
+                        requireNumber(appearanceJson, "roughness",
+                            appearancePath);
+                        appearance.roughness =
+                            appearanceJson["roughness"].get<float>();
+                    }
+                    if (appearanceJson.contains("padDimensions"))
+                    {
+                        requireObject(appearanceJson, "padDimensions",
+                            appearancePath);
+                        const json& dimensionsJson =
+                            appearanceJson["padDimensions"];
+                        const std::string dimensionsPath =
+                            appearancePath + ".padDimensions";
+                        requireNoUnknownFields(dimensionsJson,
+                            {"x", "y"}, dimensionsPath);
+                        requireNumber(dimensionsJson, "x", dimensionsPath);
+                        requireNumber(dimensionsJson, "y", dimensionsPath);
+                        appearance.padDimensions = {
+                            dimensionsJson["x"].get<double>(),
+                            dimensionsJson["y"].get<double>()};
+                    }
+                    if (appearanceJson.contains("padDepth"))
+                    {
+                        requireNumber(appearanceJson, "padDepth",
+                            appearancePath);
+                        appearance.padDepth =
+                            appearanceJson["padDepth"].get<double>();
+                    }
+                    validateSupportFoundationAppearance(appearance);
+                    structure.foundationAppearance = appearance;
                 }
 
                 const json& nodes = structureJson["nodes"];

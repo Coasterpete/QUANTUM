@@ -13,6 +13,10 @@ namespace quantum::editor
         coaster::validateSupportCollection(supports);
 
         SupportVisualization visualization;
+        // Derived from the same validated structures the line stream reads, so
+        // the solid and technical views always agree.
+        visualization.solidPresentations =
+            coaster::buildSupportSolidPresentation(supports);
         std::size_t nodeCount = 0;
         std::size_t memberCount = 0;
         for (const coaster::SupportStructure& structure : supports.structures)

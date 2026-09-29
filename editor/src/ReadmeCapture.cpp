@@ -15,10 +15,14 @@ namespace quantum::editor
 {
     namespace
     {
-        constexpr std::array<std::string_view, 8> names{
+        constexpr std::array<std::string_view, 17> names{
             "editor-overview", "transition-editor", "geometry-regions",
             "track-start-gizmo", "force-diagnostics", "modern-steel",
-            "track-style-regions", "force-driven-authoring"
+            "track-style-regions", "force-driven-authoring",
+            "supports-traditional", "supports-twister",
+            "supports-prefabricated", "supports-hybrid",
+            "supports-closeup", "supports-tall", "supports-foundations",
+            "supports-tint-pine", "supports-tint-weathered"
         };
 
         void requireKeys(const nlohmann::json& object,
@@ -164,7 +168,8 @@ namespace quantum::editor
                 "sun_intensity", "ground", "ground_elevation", "ground_size",
                 "ground_roughness", "ground_metallic", "ground_tiling",
                 "ground_base_color", "ground_albedo", "ground_normal",
-                "ground_roughness_map"});
+                "ground_roughness_map", "solid_supports", "debug_lines",
+                "timber_tint"});
             const auto name = entry.at("name").get<std::string>();
             const auto found = std::find(names.begin(), names.end(), name);
             if (found == names.end())
@@ -260,6 +265,36 @@ namespace quantum::editor
                 groundTexture(entry, "ground_normal");
             scenario.groundRoughnessTexture =
                 groundTexture(entry, "ground_roughness_map");
+            for (const char* field : {"solid_supports", "debug_lines"})
+            {
+                if (entry.contains(field) && !entry[field].is_boolean())
+                    throw std::invalid_argument(
+                        std::string("Capture ") + field
+                        + " must be a boolean.");
+            }
+            scenario.supportSolidVisible = entry.value("solid_supports", true);
+            scenario.supportDebugLinesVisible =
+                entry.value("debug_lines", true);
+            if (entry.contains("timber_tint"))
+            {
+                const auto& tint = entry.at("timber_tint");
+                if (!tint.is_array() || tint.size() != 3)
+                    throw std::invalid_argument(
+                        "Capture timber_tint must be three numbers in [0, 1].");
+                for (std::size_t channel = 0; channel < 3; ++channel)
+                {
+                    if (!tint[channel].is_number())
+                        throw std::invalid_argument(
+                            "Capture timber_tint must be three numbers "
+                            "in [0, 1].");
+                    const float value = tint[channel].get<float>();
+                    if (!(value >= 0.0F && value <= 1.0F))
+                        throw std::invalid_argument(
+                            "Capture timber_tint must be three numbers "
+                            "in [0, 1].");
+                    scenario.supportTimberTint[channel] = value;
+                }
+            }
             if (!used.insert(scenario.kind).second)
                 throw std::invalid_argument("Duplicate capture scenario: " + name);
             scenario.document = resolvePath(base, entry.at("document"));

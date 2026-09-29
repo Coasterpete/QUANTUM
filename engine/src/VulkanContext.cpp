@@ -3,6 +3,7 @@
 #include <quantum/engine/Logging.hpp>
 #include <quantum/renderer/StaticMeshAssets.hpp>
 #include <quantum/renderer/EnvironmentMap.hpp>
+#include <quantum/renderer/SupportSolidGeometry.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 #include <quantum/renderer/ViewportAids.hpp>
 #include <SDL3/SDL_filesystem.h>
@@ -1310,6 +1311,9 @@ namespace quantum::renderer
         createSkyPipeline();
         createGroundSurfaceResources();
         createGroundSurfacePipeline();
+        // Solid Supports M2A depends on the environment descriptor set and on
+        // the shared viewport sample count, both established above.
+        createSupportSolidResources();
         createSynchronizationResources();
 
         quantum::logging::logMessagef(
@@ -2024,20 +2028,45 @@ namespace quantum::renderer
             &newPipeline
         );
 
-        vkDestroyShaderModule(device_, fragmentShader, nullptr);
-        vkDestroyShaderModule(device_, vertexShader, nullptr);
-
         if (result != VK_SUCCESS)
         {
+            vkDestroyShaderModule(device_, fragmentShader, nullptr);
+            vkDestroyShaderModule(device_, vertexShader, nullptr);
             throwVulkanError("vkCreateGraphicsPipelines", result);
+        }
+
+        // Technical support lines follow member centerlines, which lie inside
+        // the solid timber. They need a depth-free pass to remain visible when
+        // both display modes are enabled; the other viewport lines retain
+        // their usual depth-tested pipeline.
+        depthStencil.depthTestEnable = VK_FALSE;
+        depthStencil.depthWriteEnable = VK_FALSE;
+        VkPipeline newSupportDebugPipeline = VK_NULL_HANDLE;
+        const VkResult overlayResult = vkCreateGraphicsPipelines(
+            device_, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr,
+            &newSupportDebugPipeline);
+
+        vkDestroyShaderModule(device_, fragmentShader, nullptr);
+        vkDestroyShaderModule(device_, vertexShader, nullptr);
+        if (overlayResult != VK_SUCCESS)
+        {
+            vkDestroyPipeline(device_, newPipeline, nullptr);
+            throwVulkanError(
+                "vkCreateGraphicsPipelines for support debug overlay",
+                overlayResult);
         }
 
         if (graphicsPipeline_ != VK_NULL_HANDLE)
         {
             vkDestroyPipeline(device_, graphicsPipeline_, nullptr);
         }
+        if (supportDebugPipeline_ != VK_NULL_HANDLE)
+        {
+            vkDestroyPipeline(device_, supportDebugPipeline_, nullptr);
+        }
 
         graphicsPipeline_ = newPipeline;
+        supportDebugPipeline_ = newSupportDebugPipeline;
     }
 
     void VulkanContext::createTrackPipelines()
@@ -2542,6 +2571,460 @@ namespace quantum::renderer
         vkDestroyShaderModule(device_, vertex, nullptr);
     }
 
+    void VulkanContext::createSupportSolidPipeline()
+    {
+        // One shared push-constant block covers both solid pipelines. The
+        // foundation shader is the same program; it simply samples neutral
+        // maps and carries no timber tint.
+        const std::uint32_t pushConstantBytes = static_cast<std::uint32_t>(
+            sizeof(viewportViewProjection_) + 20 * sizeof(float));
+        const VkPushConstantRange ranges[] = {{
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            pushConstantBytes}};
+
+        // Vulkan only guarantees 128 bytes of push constants, and the solid
+        // support block is larger than that, so a conforming implementation
+        // may legitimately refuse to run this path.
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+        if (pushConstantBytes > properties.limits.maxPushConstantsSize)
+        {
+            throw std::length_error(
+                "Solid supports need "
+                + std::to_string(pushConstantBytes)
+                + " bytes of push constants, but the selected Vulkan device "
+                  "guarantees only "
+                + std::to_string(properties.limits.maxPushConstantsSize)
+                + "."
+            );
+        }
+
+        if (supportSolidPipelineLayout_ == VK_NULL_HANDLE)
+        {
+            VkPipelineLayoutCreateInfo layoutCreateInfo{};
+            layoutCreateInfo.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            layoutCreateInfo.pushConstantRangeCount = 1;
+            layoutCreateInfo.pPushConstantRanges = ranges;
+            layoutCreateInfo.setLayoutCount = 2;
+            const std::array setLayouts{
+                environmentDescriptorLayout_,
+                supportSolidTextureDescriptorLayout_};
+            layoutCreateInfo.pSetLayouts = setLayouts.data();
+            VkResult result = vkCreatePipelineLayout(
+                device_, &layoutCreateInfo, nullptr,
+                &supportSolidPipelineLayout_);
+            if (result != VK_SUCCESS)
+            {
+                throwVulkanError(
+                    "vkCreatePipelineLayout for solid supports", result);
+            }
+            result = vkCreatePipelineLayout(
+                device_, &layoutCreateInfo, nullptr,
+                &supportFoundationPipelineLayout_);
+            if (result != VK_SUCCESS)
+            {
+                throwVulkanError(
+                    "vkCreatePipelineLayout for support foundations", result);
+            }
+        }
+
+        const VkShaderModule vertexShader = createShaderModule(
+            device_, readSpirv(shaderPath("support.vert.spv")));
+        VkShaderModule fragmentShader = VK_NULL_HANDLE;
+        try
+        {
+            fragmentShader = createShaderModule(
+                device_, readSpirv(shaderPath("support.frag.spv")));
+
+            const std::array shaderStages{
+                VkPipelineShaderStageCreateInfo{
+                    VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                    nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT,
+                    vertexShader, "main", nullptr},
+                VkPipelineShaderStageCreateInfo{
+                    VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                    nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT,
+                    fragmentShader, "main", nullptr}};
+
+            // Binding 0 is the shared unit mesh, binding 1 the per-member
+            // instance transform, matching the existing hardware instancing
+            // convention.
+            const std::array bindings{
+                VkVertexInputBindingDescription{
+                    0, sizeof(SupportSolidVertex),
+                    VK_VERTEX_INPUT_RATE_VERTEX},
+                VkVertexInputBindingDescription{
+                    1, sizeof(coaster::SupportMemberInstance),
+                    VK_VERTEX_INPUT_RATE_INSTANCE}};
+            const std::array attributes{
+                VkVertexInputAttributeDescription{
+                    0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(SupportSolidVertex, position))},
+                VkVertexInputAttributeDescription{
+                    1, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(SupportSolidVertex, normal))},
+                VkVertexInputAttributeDescription{
+                    2, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(coaster::SupportMemberInstance, transform))},
+                VkVertexInputAttributeDescription{
+                    3, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(coaster::SupportMemberInstance, transform)
+                        + sizeof(glm::vec4))},
+                VkVertexInputAttributeDescription{
+                    4, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(coaster::SupportMemberInstance, transform)
+                        + 2 * sizeof(glm::vec4))},
+                VkVertexInputAttributeDescription{
+                    5, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    static_cast<std::uint32_t>(
+                        offsetof(coaster::SupportMemberInstance, transform)
+                        + 3 * sizeof(glm::vec4))}};
+
+            VkPipelineVertexInputStateCreateInfo vertexInput{};
+            vertexInput.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+            vertexInput.vertexBindingDescriptionCount =
+                static_cast<std::uint32_t>(bindings.size());
+            vertexInput.pVertexBindingDescriptions = bindings.data();
+            vertexInput.vertexAttributeDescriptionCount =
+                static_cast<std::uint32_t>(attributes.size());
+            vertexInput.pVertexAttributeDescriptions = attributes.data();
+
+            VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+            inputAssembly.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+            VkPipelineViewportStateCreateInfo viewportState{};
+            viewportState.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+            viewportState.viewportCount = 1;
+            viewportState.scissorCount = 1;
+
+            VkPipelineRasterizationStateCreateInfo rasterization{};
+            rasterization.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+            rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+            // Members interpenetrate freely at shared nodes, so the near and
+            // far faces of a post both exist. Culling none keeps interior
+            // faces out of the depth fight that back-face culling would
+            // otherwise not prevent.
+            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            rasterization.lineWidth = 1.0F;
+
+            VkPipelineMultisampleStateCreateInfo multisampling{};
+            multisampling.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+            multisampling.rasterizationSamples = viewportSamples_;
+
+            VkPipelineDepthStencilStateCreateInfo depthStencil{};
+            depthStencil.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+            depthStencil.depthTestEnable = VK_TRUE;
+            depthStencil.depthWriteEnable = VK_TRUE;
+            depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+            VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+            colorBlendAttachment.colorWriteMask =
+                VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+            VkPipelineColorBlendStateCreateInfo colorBlending{};
+            colorBlending.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            colorBlending.attachmentCount = 1;
+            colorBlending.pAttachments = &colorBlendAttachment;
+
+            constexpr std::array dynamicStates{
+                VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+            VkPipelineDynamicStateCreateInfo dynamicState{};
+            dynamicState.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            dynamicState.dynamicStateCount =
+                static_cast<std::uint32_t>(dynamicStates.size());
+            dynamicState.pDynamicStates = dynamicStates.data();
+
+            VkPipelineRenderingCreateInfo renderingCreateInfo{};
+            renderingCreateInfo.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+            renderingCreateInfo.colorAttachmentCount = 1;
+            renderingCreateInfo.pColorAttachmentFormats =
+                &viewportColorFormat;
+            renderingCreateInfo.depthAttachmentFormat = viewportDepthFormat;
+
+            for (auto& target : {std::pair{supportSolidPipelineLayout_,
+                                 &supportSolidPipeline_},
+                     std::pair{supportFoundationPipelineLayout_,
+                         &supportFoundationPipeline_}})
+            {
+                VkGraphicsPipelineCreateInfo createInfo{};
+                createInfo.sType =
+                    VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+                createInfo.pNext = &renderingCreateInfo;
+                createInfo.stageCount =
+                    static_cast<std::uint32_t>(shaderStages.size());
+                createInfo.pStages = shaderStages.data();
+                createInfo.pVertexInputState = &vertexInput;
+                createInfo.pInputAssemblyState = &inputAssembly;
+                createInfo.pViewportState = &viewportState;
+                createInfo.pRasterizationState = &rasterization;
+                createInfo.pMultisampleState = &multisampling;
+                createInfo.pDepthStencilState = &depthStencil;
+                createInfo.pColorBlendState = &colorBlending;
+                createInfo.pDynamicState = &dynamicState;
+                createInfo.layout = target.first;
+                const VkResult pipelineResult = vkCreateGraphicsPipelines(
+                    device_, VK_NULL_HANDLE, 1, &createInfo, nullptr,
+                    target.second);
+                if (pipelineResult != VK_SUCCESS)
+                {
+                    throwVulkanError(
+                        target.second == &supportSolidPipeline_
+                            ? "vkCreateGraphicsPipelines for solid supports"
+                            : "vkCreateGraphicsPipelines for support "
+                              "foundations",
+                        pipelineResult);
+                }
+            }
+        }
+        catch (...)
+        {
+            vkDestroyShaderModule(device_, fragmentShader, nullptr);
+            vkDestroyShaderModule(device_, vertexShader, nullptr);
+            throw;
+        }
+        vkDestroyShaderModule(device_, fragmentShader, nullptr);
+        vkDestroyShaderModule(device_, vertexShader, nullptr);
+
+        uploadSupportSolidMeshes();
+    }
+
+    // Shared by the ground surface and the solid support pass, which differ
+    // only in which image slot they publish into.
+    void VulkanContext::uploadSolidSupportTextureImage(
+        const GroundTextureImage& source,
+        const VkFormat format,
+        const std::size_t slot)
+    {
+        const auto candidate = [this, &source, format]() -> SolidSupportTextureImageResource
+        {
+            // A local candidate keeps a failed upload from destroying an image
+            // that is already published and in use.
+            GroundTextureImageResource uploaded;
+            uploadGroundTextureImage(source, format, uploaded);
+            return {uploaded.image, uploaded.allocation, uploaded.view};
+        }();
+
+        waitForFrameCompletion();
+
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.sampler = supportSolidTextureSampler_;
+        imageInfo.imageView = candidate.view;
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = supportSolidTextureDescriptorSet_;
+        write.dstBinding = static_cast<std::uint32_t>(slot);
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &imageInfo;
+        vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+
+        SolidSupportTextureImageResource& published =
+            supportSolidTextureImages_[slot];
+        destroySolidSupportTextureImage(published);
+        published = candidate;
+    }
+
+    void VulkanContext::destroySolidSupportTextureImage(
+        SolidSupportTextureImageResource& image) noexcept
+    {
+        if (image.view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(device_, image.view, nullptr);
+            image.view = VK_NULL_HANDLE;
+        }
+        if (image.image != VK_NULL_HANDLE)
+        {
+            vmaDestroyImage(allocator_, image.image, image.allocation);
+            image.image = VK_NULL_HANDLE;
+            image.allocation = VK_NULL_HANDLE;
+        }
+    }
+
+    namespace
+    {
+        [[nodiscard]] std::uint32_t supportSolidMeshIndex(
+            const coaster::SupportMemberMeshKind mesh) noexcept
+        {
+            return mesh == coaster::SupportMemberMeshKind::Circular ? 1u : 0u;
+        }
+    }
+
+    void VulkanContext::uploadSupportSolidMeshes()
+    {
+        for (std::size_t index = 0; index < supportSolidMeshes_.size(); ++index)
+        {
+            SupportSolidMeshResource& resource = supportSolidMeshes_[index];
+            if (resource.uploaded)
+            {
+                continue;
+            }
+            const SupportSolidMesh mesh = createSupportSolidMesh(
+                index == 1
+                    ? coaster::SupportMemberMeshKind::Circular
+                    : coaster::SupportMemberMeshKind::Rectangular);
+
+            const CreatedBuffer vertices = createHostVisibleBuffer(allocator_,
+                std::span<const SupportSolidVertex>{mesh.vertices},
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                "support solid vertex upload");
+            const CreatedBuffer indices = createHostVisibleBuffer(allocator_,
+                std::span<const std::uint32_t>{mesh.triangleIndices},
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                "support solid index upload");
+
+            resource.vertexBuffer = vertices.buffer;
+            resource.vertexAllocation = vertices.allocation;
+            resource.triangleIndexBuffer = indices.buffer;
+            resource.triangleIndexAllocation = indices.allocation;
+            resource.vertexCount = vertices.elementCount;
+            resource.triangleIndexCount = indices.elementCount;
+            resource.uploaded = true;
+        }
+    }
+
+    void VulkanContext::uploadSupportSolidInstances(
+        const std::span<const coaster::SupportSolidPresentation> presentations)
+    {
+        std::vector<coaster::SupportMemberInstance> instances;
+        std::vector<SupportSolidDrawBatch> candidateBatches;
+        std::vector<SupportFoundationDrawBatch> candidateFoundationBatches;
+
+        // Foundation pads reuse the rectangular unit mesh, so they live in the
+        // same contiguous instance stream and keep drawing to two batch lists.
+        for (const coaster::SupportSolidPresentation& presentation
+            : presentations)
+        {
+            for (const coaster::SupportSolidBatch& batch
+                : presentation.batches)
+            {
+                if (batch.instances.empty())
+                {
+                    continue;
+                }
+                candidateBatches.push_back({
+                    supportSolidMeshIndex(batch.mesh),
+                    static_cast<std::uint32_t>(instances.size()),
+                    static_cast<std::uint32_t>(batch.instances.size()),
+                    presentation.appearance});
+                instances.insert(instances.end(), batch.instances.begin(),
+                    batch.instances.end());
+            }
+
+            if (presentation.foundations.empty())
+            {
+                continue;
+            }
+            const std::uint32_t first = static_cast<std::uint32_t>(
+                instances.size());
+            for (const coaster::SupportFoundationPad& pad
+                : presentation.foundations)
+            {
+                // M1 places foundation nodes on the foundation elevation
+                // plane. Centre the world-aligned pad on that node so half
+                // its thickness stays visible above the ground surface.
+                coaster::SupportMemberInstance instance;
+                const auto width = static_cast<float>(pad.padDimensions.x);
+                const auto depth = static_cast<float>(pad.padDimensions.y);
+                const auto thickness = static_cast<float>(pad.padDepth);
+                instance.transform = glm::mat4{1.0F};
+                instance.transform[0] = glm::vec4{width, 0.0F, 0.0F, 0.0F};
+                instance.transform[1] = glm::vec4{0.0F, depth, 0.0F, 0.0F};
+                instance.transform[2] = glm::vec4{
+                    0.0F, 0.0F, thickness, 0.0F};
+                instance.transform[3] = glm::vec4{
+                    static_cast<float>(pad.position.x),
+                    static_cast<float>(pad.position.y),
+                    static_cast<float>(pad.position.z),
+                    1.0F};
+                instances.push_back(instance);
+            }
+            candidateFoundationBatches.push_back({first,
+                static_cast<std::uint32_t>(presentation.foundations.size()),
+                presentation.foundationAppearance});
+        }
+
+        if (instances.size() > std::numeric_limits<std::uint32_t>::max())
+        {
+            throw std::length_error(
+                "Solid support instance count exceeds Vulkan's 32-bit draw "
+                "range.");
+        }
+
+        // The candidate is built and uploaded before any live handle moves,
+        // so a rejected publication leaves the current solid presentation
+        // exactly as it was.
+        CreatedBuffer candidate;
+        if (!instances.empty())
+        {
+            candidate = createHostVisibleBuffer(allocator_,
+                std::span<const coaster::SupportMemberInstance>{instances},
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                "support solid instance upload");
+        }
+        try
+        {
+            reserveDeferredBufferRetirements(
+                supportSolidInstanceBuffer_ != VK_NULL_HANDLE ? 1 : 0);
+        }
+        catch (...)
+        {
+            if (candidate.buffer != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(
+                    allocator_, candidate.buffer, candidate.allocation);
+            }
+            throw;
+        }
+
+        deferBufferRetirement(supportSolidInstanceBuffer_,
+            supportSolidInstanceAllocation_, supportSolidInstanceCapacity_);
+        supportSolidInstanceBuffer_ = candidate.buffer;
+        supportSolidInstanceAllocation_ = candidate.allocation;
+        supportSolidInstanceMappedData_ = candidate.mappedData;
+        supportSolidInstanceCapacity_ = candidate.capacity;
+        supportSolidDrawBatches_ = std::move(candidateBatches);
+        supportFoundationDrawBatches_ = std::move(candidateFoundationBatches);
+    }
+
+    void VulkanContext::updateSupportSolidPresentation(
+        const std::span<const coaster::SupportSolidPresentation> presentations)
+    {
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::logic_error(
+                "VulkanContext cannot update the solid support presentation "
+                "before initialization.");
+        }
+        uploadSupportSolidInstances(presentations);
+        lastFrameCompletionWaitMilliseconds_ = 0.0;
+    }
+
+    void VulkanContext::setSupportDisplay(const bool solidVisible,
+        const bool debugLinesVisible)
+    {
+        supportSolidVisible_ = solidVisible;
+        supportDebugLinesVisible_ = debugLinesVisible;
+    }
+
     void VulkanContext::createViewportTarget(
         const std::uint32_t width,
         const std::uint32_t height)
@@ -3011,10 +3494,12 @@ namespace quantum::renderer
 
         if (sampleCountChanged)
         {
-            for (VkPipeline* const pipeline : {
-                &graphicsPipeline_, &trackShadedPipeline_, &trackEdgePipeline_,
-                &hardwareShadedPipeline_, &hardwareEdgePipeline_,
-                &skyPipeline_, &groundPipeline_})
+        for (VkPipeline* const pipeline : {
+            &graphicsPipeline_, &supportDebugPipeline_,
+            &trackShadedPipeline_, &trackEdgePipeline_,
+            &hardwareShadedPipeline_, &hardwareEdgePipeline_,
+            &skyPipeline_, &groundPipeline_, &supportSolidPipeline_,
+            &supportFoundationPipeline_})
             {
                 if (*pipeline != VK_NULL_HANDLE)
                 {
@@ -3026,11 +3511,14 @@ namespace quantum::renderer
             quantum::logging::logMessagef(
                 quantum::logging::LogLevel::Info, "VK",
                 "Viewport sample count changed to %u",
-                viewportSamples_ == VK_SAMPLE_COUNT_4_BIT ? 4u : 1u);
+            viewportSamples_ == VK_SAMPLE_COUNT_4_BIT ? 4u : 1u);
             createGraphicsPipeline();
             createTrackPipelines();
             createSkyPipeline();
             createGroundSurfacePipeline();
+            // The unit meshes are immutable and survive an MSAA switch, so
+            // only the pipelines are rebuilt.
+            createSupportSolidPipeline();
         }
 
         if (width != 0 && height != 0)
@@ -4106,6 +4594,132 @@ namespace quantum::renderer
                 vkCmdDrawIndexed(commandBuffer, groundIndexCount_, 1, 0, 0, 0);
             }
 
+            // Solid supports draw after the ground and before the track so the
+            // timber is depth-tested against the terrain it stands on. The
+            // debug-line overlay stays independent and draws later, on top.
+            if (supportSolidVisible_
+                && (!supportSolidDrawBatches_.empty()
+                    || !supportFoundationDrawBatches_.empty()))
+            {
+                // Two vertex buffers are bound per solid draw: the shared unit
+                // mesh and the shared instance stream. Vulkan reads one offset
+                // per bound buffer, so this array must match that count
+                // exactly.
+                constexpr std::array<VkDeviceSize, 2> solidVertexOffsets{0, 0};
+                const auto pushSupportDraw = [this, commandBuffer](
+                    const VkPipelineLayout layout,
+                    const std::array<float, 4>& baseColor,
+                    const float roughness, const float normalStrength,
+                    const float textureScale, const bool foundation)
+                {
+                    const std::array<float, 4> cameraExposure{
+                        viewportCameraPosition_.x, viewportCameraPosition_.y,
+                        viewportCameraPosition_.z, exposure_};
+                    const std::array<float, 4> sun{
+                        sunlightDirection_.x, sunlightDirection_.y,
+                        sunlightDirection_.z, sunlightIntensity_};
+                    const std::array<float, 4> surface{
+                        roughness, normalStrength, environmentIntensity_,
+                        environmentAvailable_
+                            ? environmentRotationRadians_ : -1.0F};
+                    const std::array<float, 4> timber{
+                        textureScale, foundation ? 1.0F : 0.0F, 0.0F, 0.0F};
+                    constexpr VkShaderStageFlags stages =
+                        VK_SHADER_STAGE_VERTEX_BIT
+                        | VK_SHADER_STAGE_FRAGMENT_BIT;
+                    vkCmdPushConstants(commandBuffer, layout, stages, 0,
+                        sizeof(viewportViewProjection_),
+                        viewportViewProjection_.data());
+                    vkCmdPushConstants(commandBuffer, layout, stages,
+                        sizeof(viewportViewProjection_), sizeof(baseColor),
+                        baseColor.data());
+                    vkCmdPushConstants(commandBuffer, layout, stages,
+                        sizeof(viewportViewProjection_) + sizeof(baseColor),
+                        sizeof(cameraExposure), cameraExposure.data());
+                    vkCmdPushConstants(commandBuffer, layout, stages,
+                        sizeof(viewportViewProjection_) + sizeof(baseColor)
+                            + sizeof(cameraExposure),
+                        sizeof(sun), sun.data());
+                    vkCmdPushConstants(commandBuffer, layout, stages,
+                        sizeof(viewportViewProjection_) + sizeof(baseColor)
+                            + sizeof(cameraExposure) + sizeof(sun),
+                        sizeof(surface), surface.data());
+                    vkCmdPushConstants(commandBuffer, layout, stages,
+                        sizeof(viewportViewProjection_) + sizeof(baseColor)
+                            + sizeof(cameraExposure) + sizeof(sun)
+                            + sizeof(surface),
+                        sizeof(timber), timber.data());
+                };
+
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    supportSolidPipelineLayout_, 0, 1,
+                    &environmentDescriptorSet_, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    supportSolidPipelineLayout_, 1, 1,
+                    &supportSolidTextureDescriptorSet_, 0, nullptr);
+                vkCmdBindPipeline(commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    supportSolidPipeline_);
+                for (const SupportSolidDrawBatch& batch
+                    : supportSolidDrawBatches_)
+                {
+                    const SupportSolidMeshResource& mesh =
+                        supportSolidMeshes_.at(batch.meshIndex);
+                    if (!mesh.uploaded || batch.instanceCount == 0)
+                    {
+                        continue;
+                    }
+                    const std::array buffers{
+                        mesh.vertexBuffer, supportSolidInstanceBuffer_};
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 2,
+                        buffers.data(), solidVertexOffsets.data());
+                    vkCmdBindIndexBuffer(commandBuffer, mesh.triangleIndexBuffer,
+                        0, VK_INDEX_TYPE_UINT32);
+                    pushSupportDraw(supportSolidPipelineLayout_,
+                        {batch.appearance.baseColorTint.x,
+                            batch.appearance.baseColorTint.y,
+                            batch.appearance.baseColorTint.z, 1.0F},
+                        batch.appearance.roughnessMultiplier,
+                        batch.appearance.normalStrength,
+                        batch.appearance.textureScale, false);
+                    vkCmdDrawIndexed(commandBuffer, mesh.triangleIndexCount,
+                        batch.instanceCount, 0, 0, batch.firstInstance);
+                }
+
+                if (!supportFoundationDrawBatches_.empty())
+                {
+                    vkCmdBindPipeline(commandBuffer,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        supportFoundationPipeline_);
+                    for (const SupportFoundationDrawBatch& batch
+                        : supportFoundationDrawBatches_)
+                    {
+                        if (batch.instanceCount == 0)
+                        {
+                            continue;
+                        }
+                        const SupportSolidMeshResource& mesh =
+                            supportSolidMeshes_.at(0);
+                        const std::array buffers{
+                            mesh.vertexBuffer, supportSolidInstanceBuffer_};
+                        vkCmdBindVertexBuffers(commandBuffer, 0, 2,
+                            buffers.data(), solidVertexOffsets.data());
+                        vkCmdBindIndexBuffer(commandBuffer,
+                            mesh.triangleIndexBuffer, 0,
+                            VK_INDEX_TYPE_UINT32);
+                        pushSupportDraw(supportFoundationPipelineLayout_,
+                            {batch.appearance.baseColorTint.x,
+                                batch.appearance.baseColorTint.y,
+                                batch.appearance.baseColorTint.z, 1.0F},
+                            batch.appearance.roughness, 0.0F, 1.0F, true);
+                        vkCmdDrawIndexed(commandBuffer, mesh.triangleIndexCount,
+                            batch.instanceCount, 0, 0, batch.firstInstance);
+                    }
+                }
+            }
+
             if (drawShadedTrack && trackTriangleIndexCount_ > 0)
             {
                 vkCmdBindDescriptorSets(commandBuffer,
@@ -4321,8 +4935,14 @@ namespace quantum::renderer
                 }
             }
 
-            if (supportVertexCount_ > 0)
+            if (supportDebugLinesVisible_ && supportVertexCount_ > 0)
             {
+                if (supportSolidVisible_)
+                {
+                    vkCmdBindPipeline(commandBuffer,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        supportDebugPipeline_);
+                }
                 constexpr std::array<float, 4> noHighlight{
                     1.0F, 0.82F, 0.12F, 0.0F};
                 vkCmdPushConstants(
@@ -4338,6 +4958,12 @@ namespace quantum::renderer
                 vkCmdDraw(
                     commandBuffer, supportVertexCount_,
                     1, 0, 0);
+                if (supportSolidVisible_)
+                {
+                    vkCmdBindPipeline(commandBuffer,
+                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        graphicsPipeline_);
+                }
             }
 
             const DynamicLineFrameBuffer& trainPreviewFrameBuffer =
@@ -5068,11 +5694,17 @@ namespace quantum::renderer
                 vkDestroyPipeline(device_, graphicsPipeline_, nullptr);
                 graphicsPipeline_ = VK_NULL_HANDLE;
             }
+            if (supportDebugPipeline_ != VK_NULL_HANDLE)
+            {
+                vkDestroyPipeline(device_, supportDebugPipeline_, nullptr);
+                supportDebugPipeline_ = VK_NULL_HANDLE;
+            }
 
             for (VkPipeline* const pipeline : {
                 &trackShadedPipeline_, &trackEdgePipeline_,
                 &hardwareShadedPipeline_, &hardwareEdgePipeline_,
-                &groundPipeline_})
+                &groundPipeline_, &supportSolidPipeline_,
+                &supportFoundationPipeline_})
             {
                 if (*pipeline != VK_NULL_HANDLE)
                 {
@@ -5108,6 +5740,11 @@ namespace quantum::renderer
                     nullptr);
                 groundPipelineLayout_ = VK_NULL_HANDLE;
             }
+            // The solid support textures, unit meshes, and instance stream hold
+            // VMA allocations and its pipeline layouts reference the
+            // environment descriptor layout, so this runs before both the
+            // environment teardown and the allocator.
+            destroySupportSolidResources();
             destroyEnvironmentResources();
             // The ground images, descriptors, and quad buffers hold VMA
             // allocations, so they are released before the allocator below.

@@ -234,6 +234,39 @@ add_custom_target(QUANTUMGroundAssets ALL
     DEPENDS ${quantum_ground_asset_outputs})
 add_dependencies(QUANTUM QUANTUMGroundAssets)
 
+# Solid Supports M2A resolves assets://materials/timber/... beneath the runtime
+# asset root. Only the three maps the solid timber shader samples are staged;
+# the reserved AO, height, and edge sources ship through the repository and the
+# install rule below, not into the editor's working asset directory, so nothing
+# implies they are consumed.
+set(quantum_timber_asset_files
+    pinewood_basecolor_neutral.png
+    pinewood_normal.png
+    pinewood_roughness.png
+)
+set(quantum_timber_asset_outputs)
+foreach(timber_asset_file IN LISTS quantum_timber_asset_files)
+    set(timber_asset_source
+        "${PROJECT_SOURCE_DIR}/assets/materials/timber/pine/${timber_asset_file}")
+    set(timber_asset_destination
+        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/materials/timber/pine/${timber_asset_file}")
+    add_custom_command(
+        OUTPUT "${timber_asset_destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/materials/timber/pine"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${timber_asset_source}"
+            "${timber_asset_destination}"
+        DEPENDS "${timber_asset_source}"
+        COMMENT "Deploying QUANTUM timber asset ${timber_asset_file}"
+        VERBATIM
+    )
+    list(APPEND quantum_timber_asset_outputs "${timber_asset_destination}")
+endforeach()
+add_custom_target(QUANTUMTimberAssets ALL
+    DEPENDS ${quantum_timber_asset_outputs})
+add_dependencies(QUANTUM QUANTUMTimberAssets)
+
 add_custom_command(
     TARGET QUANTUM
     POST_BUILD
@@ -297,6 +330,23 @@ foreach(ground_asset_file IN LISTS quantum_ground_asset_files)
     install(
         FILES "${PROJECT_SOURCE_DIR}/assets/ground/${ground_asset_file}"
         DESTINATION assets/ground
+        COMPONENT Runtime
+    )
+endforeach()
+
+# The full user-authored timber set ships, including the height and edge
+# sources that M2A intentionally does not read. They are kept together so a
+# future material-authoring pass can use them without re-acquiring the set.
+foreach(timber_asset_file IN ITEMS
+    ${quantum_timber_asset_files}
+    pinewood_ao.png
+    pinewood_height.png
+    pinewood_edge.png
+    README.md)
+    install(
+        FILES
+            "${PROJECT_SOURCE_DIR}/assets/materials/timber/pine/${timber_asset_file}"
+        DESTINATION assets/materials/timber/pine
         COMPONENT Runtime
     )
 endforeach()

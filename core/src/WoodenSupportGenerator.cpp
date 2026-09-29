@@ -112,6 +112,14 @@ namespace quantum::coaster
             ? allocateSupportStructureId(supports) : replacement->id;
         structure.name = "Wooden Run " + std::to_string(structure.id);
         structure.generatedWoodenRun = recipe;
+        // Regeneration replaces topology, not appearance. Carrying the
+        // authored tint forward is what lets a user regenerate a structure and
+        // keep the timber color they chose.
+        if (replacement != supports.structures.end())
+        {
+            structure.appearance = replacement->appearance;
+            structure.foundationAppearance = replacement->foundationAppearance;
+        }
         const SupportMemberProfile timber{
             SupportMemberProfileShape::Rectangular,
             {recipe.memberSize, recipe.memberSize}, 0.0};

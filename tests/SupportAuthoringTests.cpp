@@ -7,11 +7,16 @@
 #include <quantum/editor/SupportVisualization.hpp>
 
 #include <optional>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 
 namespace
 {
@@ -416,10 +421,111 @@ namespace
     }
 }
 
+    // The Support Appearance panel edits a generated run through the same
+    // transaction, history, and serialization path as any other support edit,
+    // so its three guarantees are verified here instead of by hand.
+    void appearanceEditingUsesTransactionsHistoryAndSerialization()
+    {
+        coaster::AuthoredTrack track = coaster::createNewDocument();
+        coaster::AuthoredStartPose pose = track.startPose();
+        pose.position.z = 20.0;
+        track.setStartPose(pose);
+        editor::DocumentHistory history;
+        history.reset(track);
+        const coaster::WoodenSupportRunRecipe recipe{
+            0.0, 20.0, 5.0, 4.0, 0.0, -0.5, 0.2, true};
+        editor::AuthoredTrackEditTransaction generated{track};
+        const auto structureId = coaster::generateWoodenSupportRun(
+            generated.candidate(), recipe);
+        generated.commit(track);
+        history.record(track);
+        require(!track.supports().structures.front().appearance.has_value(),
+            "a freshly generated run must resolve to the default appearance");
+
+        // The panel builds a candidate collection, applies the setters, and
+        // publishes it with setSupports, so the test repeats exactly that.
+        const auto editAppearance = [&](const auto& mutate)
+        {
+            editor::AuthoredTrackEditTransaction transaction{track};
+            coaster::SupportCollection candidate =
+                transaction.candidate().supports();
+            mutate(candidate, structureId);
+            transaction.candidate().setSupports(candidate);
+            transaction.commit(track);
+            history.record(track);
+        };
+        coaster::SupportAppearance tinted;
+        tinted.baseColorTint = {0.35F, 0.24F, 0.16F};
+        coaster::SupportFoundationAppearance concrete;
+        concrete.padDepth = 0.9F;
+        const auto memberCountBefore =
+            track.supports().structures.front().members.size();
+        editAppearance([&](coaster::SupportCollection& candidate,
+                            const coaster::SupportStructureId id)
+        {
+            coaster::setSupportAppearance(candidate, id, tinted);
+            coaster::setSupportFoundationAppearance(
+                candidate, id, concrete);
+        });
+
+        const auto& edited = track.supports().structures.front();
+        require(edited.appearance.has_value()
+                && edited.appearance->baseColorTint
+                    == tinted.baseColorTint
+                && edited.foundationAppearance.has_value()
+                && edited.foundationAppearance->padDepth == concrete.padDepth,
+            "an accepted appearance edit must publish both appearance fields");
+        require(edited.generatedWoodenRun == recipe
+                && edited.members.size() == memberCountBefore,
+            "an appearance edit must not disturb the generated recipe or the "
+            "member count");
+
+        track = requireState(history.undo(), "appearance Undo missing");
+        require(!track.supports().structures.front().appearance.has_value()
+                && !track.supports().structures.front()
+                    .foundationAppearance.has_value(),
+            "Undo must restore the default appearance, not merely the default "
+            "tint");
+        track = requireState(history.redo(), "appearance Redo missing");
+        require(track.supports().structures.front().appearance
+                    ->baseColorTint == tinted.baseColorTint
+                && track.supports().structures.front()
+                    .foundationAppearance->padDepth == concrete.padDepth,
+            "Redo must reapply the authored appearance");
+
+        // Save and reopen: the reopened document must resolve to the same
+        // appearance, which is what File > Save and File > Open rely on.
+        const std::string saved = snapshot(track);
+        const auto reopened = coaster::deserializeCoasterDocument(saved);
+        if (!reopened)
+        {
+            throw std::runtime_error(
+                "the saved document must reopen: " + reopened.error());
+        }
+        require(reopened->supports().structures.front().appearance
+                    ->baseColorTint == tinted.baseColorTint
+                && reopened->supports().structures.front()
+                    .foundationAppearance->padDepth == concrete.padDepth,
+            "a reopened document must keep the authored appearance");
+    }
 int main()
 {
-    connectCheckClassifiesEveryCase();
-    transactionPublishesManualGraphAndRecordsHistory();
-    anchorAndConnectionAuthoringUsesTransactionsAndHistory();
-    woodenRunUsesDocumentHistory();
+#if defined(_MSC_VER) && defined(_DEBUG)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
+    try
+    {
+        connectCheckClassifiesEveryCase();
+        transactionPublishesManualGraphAndRecordsHistory();
+        anchorAndConnectionAuthoringUsesTransactionsAndHistory();
+        woodenRunUsesDocumentHistory();
+        appearanceEditingUsesTransactionsHistoryAndSerialization();
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "Support authoring test failure: " << error.what()
+            << '\n';
+        return 1;
+    }
 }

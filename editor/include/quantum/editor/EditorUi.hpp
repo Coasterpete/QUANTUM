@@ -190,6 +190,38 @@ namespace quantum::editor
         bool continuous = false;
     };
 
+    // Which authored support appearance fields one command publishes.
+    // Appearance is per structure and independent of the generator family, so
+    // changing it never regenerates topology.
+    enum class SupportAppearanceEdit : std::uint8_t
+    {
+        Timber,
+        Foundation,
+        // Publishes both drafts at once, used by Reset.
+        Both
+    };
+
+    // One-shot appearance edit requested by the Support Appearance panel.
+    struct SupportAppearanceCommand
+    {
+        SupportAppearanceEdit target = SupportAppearanceEdit::Timber;
+        coaster::SupportStructureId structureId =
+            coaster::invalidSupportStructureId;
+        coaster::SupportAppearance timber;
+        coaster::SupportFoundationAppearance foundation;
+        // Continuous numeric-drag flag for history coalescing.
+        bool continuous = false;
+    };
+
+    // Solid timber and the technical line overlay are independent so both can
+    // be inspected at once. These are viewport presentation, not document
+    // state, so they are not part of the Undo history.
+    struct SupportDisplaySettings
+    {
+        bool solidVisible = true;
+        bool debugLinesVisible = true;
+    };
+
     // One-shot support topology commands requested by the Supports
     // workspace / Connect Nodes workflow. Application applies each command to
     // an AuthoredTrackEditTransaction candidate; all IDs are Core-allocated.
@@ -597,6 +629,24 @@ namespace quantum::editor
         // command is accepted or rejected.
         [[nodiscard]] std::optional<SupportEditCommand>
         takeSupportEditCommand() noexcept;
+        // Appearance edits for the structure the workspace is showing. Returns
+        // and clears a pending command; the Application layer applies it
+        // through an AuthoredTrackEditTransaction so it participates in Undo.
+        [[nodiscard]] std::optional<SupportAppearanceCommand>
+        takeSupportAppearanceCommand() noexcept;
+        // Re-reads the committed structure's appearance after a rejection, so
+        // the panel never keeps a value the document refused.
+        void synchronizeSupportAppearance(
+            const coaster::SupportStructure& structure) noexcept;
+        // Re-reads the appearance of whatever structure is currently selected,
+        // so switching selection or a node/member selection cannot leave a
+        // stale draft behind.
+        void syncSupportAppearanceDraft() noexcept;
+        // Viewport presentation toggles. takeSupportDisplaySettings returns and
+        // clears a settings change the workspace made this frame; it is pushed
+        // to the renderer directly because it is not document state.
+        [[nodiscard]] std::optional<SupportDisplaySettings>
+        takeSupportDisplaySettings() noexcept;
         // Anchor and member-end connection commands.
         [[nodiscard]] std::optional<SupportAnchorCommand>
         takeSupportAnchorCommand() noexcept;
@@ -788,6 +838,7 @@ void drawSimulationTelemetry();
         void drawViewportTrackAnchors();
         void drawViewportSupports();
         void drawSupportWorkspace();
+        void drawSupportAppearancePanel();
         void drawTrackDevices();
         void drawDeviceAccelerationProfileEditor(
             coaster::TrackDevice& device, bool& commit);
@@ -914,6 +965,25 @@ void drawSimulationTelemetry();
         // Transient Connect Nodes workflow state. It is editor memory only
         // and is never serialized.
         std::optional<SupportEditCommand> supportEditCommand_;
+        // Draft appearance for the structure the workspace is showing, plus the
+        // one-shot command that publishes it to the document.
+        coaster::SupportAppearance supportAppearanceDraft_;
+        // Dear ImGui's color widget edits a vec4, while the document stores a
+        // three-channel tint, so the widget runs against a scratch buffer that
+        // keeps its alpha at 1.
+        glm::vec4 supportAppearanceTintBuffer_{1.0F};
+        coaster::SupportFoundationAppearance
+            supportFoundationAppearanceDraft_;
+        std::optional<SupportAppearanceCommand> supportAppearanceCommand_;
+        // The structure the drafts above were read from, so the workspace only
+        // reloads them when the shown structure actually changes.
+        coaster::SupportStructureId supportAppearanceDraftStructureId_ =
+            coaster::invalidSupportStructureId;
+        // Set when the workspace changed a display toggle this frame. Pushed to
+        // the renderer outside the document transaction because it is viewport
+        // presentation rather than document state.
+        std::optional<SupportDisplaySettings> pendingSupportDisplaySettings_;
+        SupportDisplaySettings supportDisplaySettings_;
         coaster::WoodenSupportRunRecipe woodenSupportRecipe_;
         enum class SupportConnectState : std::uint8_t
         {

@@ -735,6 +735,110 @@ namespace quantum::coaster
         }
     }
 
+    SupportStructure& findMutableSupportStructure(
+        SupportCollection& collection,
+        const SupportStructureId structureId)
+    {
+        const auto structure = std::find_if(
+            collection.structures.begin(), collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+        return *structure;
+    }
+
+    void setSupportAppearance(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportAppearance& appearance)
+    {
+        validateSupportAppearance(appearance);
+        SupportCollection candidate = collection;
+        findMutableSupportStructure(candidate, structureId).appearance =
+            appearance;
+        validateSupportCollection(candidate);
+        collection = std::move(candidate);
+    }
+
+    void setSupportFoundationAppearance(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportFoundationAppearance& appearance)
+    {
+        validateSupportFoundationAppearance(appearance);
+        SupportCollection candidate = collection;
+        findMutableSupportStructure(candidate, structureId)
+            .foundationAppearance = appearance;
+        validateSupportCollection(candidate);
+        collection = std::move(candidate);
+    }
+
+    void validateSupportAppearance(const SupportAppearance& appearance)
+    {
+        for (const float channel : {appearance.baseColorTint.x,
+            appearance.baseColorTint.y, appearance.baseColorTint.z})
+        {
+            if (!std::isfinite(channel) || channel < 0.0F || channel > 1.0F)
+            {
+                throw std::invalid_argument(
+                    "Support base color tint channels must be finite and "
+                    "within [0, 1].");
+            }
+        }
+        const auto positive = [](const float value, const char* name)
+        {
+            if (!std::isfinite(value) || value <= 0.0F)
+            {
+                throw std::invalid_argument(
+                    std::string("Support ") + name
+                    + " must be finite and positive.");
+            }
+        };
+        positive(appearance.roughnessMultiplier, "roughness multiplier");
+        positive(appearance.normalStrength, "normal strength");
+        positive(appearance.textureScale, "texture scale");
+    }
+
+    void validateSupportFoundationAppearance(
+        const SupportFoundationAppearance& appearance)
+    {
+        for (const float channel : {appearance.baseColorTint.x,
+            appearance.baseColorTint.y, appearance.baseColorTint.z})
+        {
+            if (!std::isfinite(channel) || channel < 0.0F || channel > 1.0F)
+            {
+                throw std::invalid_argument(
+                    "Support foundation tint channels must be finite and "
+                    "within [0, 1].");
+            }
+        }
+        if (!std::isfinite(appearance.roughness)
+            || appearance.roughness <= 0.0F || appearance.roughness > 1.0F)
+        {
+            throw std::invalid_argument(
+                "Support foundation roughness must be finite and within (0, 1].");
+        }
+        // Zero is the documented default: the pad is then derived from the
+        // cross-section of the members the foundation carries. Only negative
+        // or non-finite values are rejected.
+        if (!std::isfinite(appearance.padDimensions.x)
+            || !std::isfinite(appearance.padDimensions.y)
+            || appearance.padDimensions.x < 0.0
+            || appearance.padDimensions.y < 0.0
+            || !std::isfinite(appearance.padDepth)
+            || appearance.padDepth < 0.0)
+        {
+            throw std::invalid_argument(
+                "Support foundation pad dimensions and depth must be finite "
+                "and nonnegative.");
+        }
+    }
+
     void validateSupportMemberProfile(const SupportMemberProfile& profile)
     {
         switch (profile.shape)
@@ -799,6 +903,15 @@ namespace quantum::coaster
             if (structure.generatedWoodenRun)
             {
                 validateWoodenSupportRunRecipe(*structure.generatedWoodenRun);
+            }
+            if (structure.appearance)
+            {
+                validateSupportAppearance(*structure.appearance);
+            }
+            if (structure.foundationAppearance)
+            {
+                validateSupportFoundationAppearance(
+                    *structure.foundationAppearance);
             }
             if (structure.id == invalidSupportStructureId)
             {

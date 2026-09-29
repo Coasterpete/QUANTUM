@@ -1,5 +1,6 @@
 #pragma once
 
+#include <quantum/coaster/SupportSolidGeometry.hpp>
 #include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/renderer/FrameSynchronizationTelemetry.hpp>
 #include <quantum/renderer/GroundSurface.hpp>
@@ -155,7 +156,19 @@ namespace quantum::renderer
         virtual void setTrackPresentationMode(TrackPresentationMode mode) = 0;
         virtual void updateTrainPreviewVertices(
             std::span<const LineVertex> vertices) = 0;
+        // Replaces the Editor's renderer-neutral support-member line stream.
+        // This stays available as the technical overlay and is independent of
+        // the solid presentation below.
         virtual void updateSupportVertices(std::span<const LineVertex> vertices) = 0;
+        // Replaces the solid timber presentation. The renderer owns the unit
+        // meshes, the shared instance stream, and the timber textures; the
+        // caller keeps ownership of the authored document.
+        virtual void updateSupportSolidPresentation(
+            std::span<const coaster::SupportSolidPresentation> presentations) = 0;
+        // Solid and debug-line display are independent so a user can inspect
+        // both presentation and authored topology at once.
+        virtual void setSupportDisplay(bool solidVisible,
+            bool debugLinesVisible) = 0;
         virtual void setViewportElementVisibility(bool gridVisible,
             std::uint32_t curveVisibilityMask) = 0;
         virtual void setTrackCurveHighlight(std::uint32_t firstVertex,

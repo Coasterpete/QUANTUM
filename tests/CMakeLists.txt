@@ -229,6 +229,21 @@ if(QUANTUM_ENABLE_ENGINE)
         "${PROJECT_SOURCE_DIR}")
     set_tests_properties(QuantumEngine.StaticMeshAssets PROPERTIES
         LABELS "engine;renderer;assets;hardware")
+
+    # Supports M2A: shared unit meshes and the bundled timber texture set.
+    add_executable(QuantumEngineSupportSolidRendererTests
+        SupportSolidRendererTests.cpp)
+    target_link_libraries(QuantumEngineSupportSolidRendererTests PRIVATE
+        Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEngineSupportSolidRendererTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineSupportSolidRendererTests PROPERTIES
+        CXX_EXTENSIONS OFF)
+    add_dependencies(QuantumEngineSupportSolidRendererTests QuantumShaders)
+    add_test(NAME QuantumEngine.SupportSolidRenderer
+        COMMAND QuantumEngineSupportSolidRendererTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEngine.SupportSolidRenderer PROPERTIES
+        LABELS "engine;renderer;supports;assets;appearance")
 endif()
 
 if(QUANTUM_ENABLE_EDITOR)
@@ -2623,3 +2638,17 @@ add_test(NAME QuantumCore.WoodenSupportGenerator
     COMMAND QuantumCoreWoodenSupportGeneratorTests)
 set_tests_properties(QuantumCore.WoodenSupportGenerator PROPERTIES
     LABELS "core;coaster;supports;generator")
+
+# Supports M2A: solid member transforms, orientation, appearance, and
+# persistence. Renderer-side unit mesh and texture tests live in the engine
+# suite below.
+add_executable(QuantumCoreSupportSolidGeometryTests
+    SupportSolidGeometryTests.cpp)
+target_link_libraries(QuantumCoreSupportSolidGeometryTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreSupportSolidGeometryTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreSupportSolidGeometryTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.SupportSolidGeometry
+    COMMAND QuantumCoreSupportSolidGeometryTests)
+set_tests_properties(QuantumCore.SupportSolidGeometry PROPERTIES
+    LABELS "core;coaster;supports;appearance;rendering")

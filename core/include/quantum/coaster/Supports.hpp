@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -156,6 +157,63 @@ namespace quantum::coaster
         HybridTimberLattice
     };
 
+    // Authored presentation data for one support structure. It is
+    // deliberately independent of TimberSupportFamily: generator topology
+    // decides how a structure stands up, this decides how its members look.
+    // Two structures generated from the same recipe can therefore carry
+    // different appearances, and the same structure keeps its appearance
+    // across regeneration.
+    //
+    // The timber base-color map is authored as neutral grayscale detail, so
+    // baseColorTint is the dominant timber color and the texture supplies
+    // grain, knots, and local brightness variation rather than hue.
+    //
+    // textureScale is the length in Core coordinate units that one repeat of
+    // the timber maps spans. It is applied to object-space UVs, which keeps
+    // grain physically sized across long posts, short braces, and ledgers
+    // alike.
+    struct SupportAppearance
+    {
+        // sRGB, matching TrackMaterial and GroundAppearance so every surface
+        // in the scene is decoded through the same conversion path.
+        glm::vec3 baseColorTint{0.78F, 0.64F, 0.47F};
+        float roughnessMultiplier = 1.0F;
+        float normalStrength = 1.0F;
+        float textureScale = 1.0F;
+
+        [[nodiscard]] friend bool operator==(
+            const SupportAppearance&, const SupportAppearance&) = default;
+    };
+
+    // Foundation footings are rendered as neutral concrete rather than
+    // timber. They are presentation only: the Foundation node position stays
+    // authoritative and no footing dimension is derived from structural
+    // loads.
+    struct SupportFoundationAppearance
+    {
+        glm::vec3 baseColorTint{0.62F, 0.62F, 0.60F};
+        float roughness = 0.92F;
+        // Footing footprint and depth are expressed in Core coordinate units,
+        // matching SupportMemberProfile::outerDimensions. Zero means the
+        // renderer derives a pad from the member cross-section.
+        glm::dvec2 padDimensions{0.0, 0.0};
+        double padDepth = 0.0;
+
+        [[nodiscard]] friend bool operator==(
+            const SupportFoundationAppearance&,
+            const SupportFoundationAppearance&) = default;
+    };
+
+    // Rejects a non-finite component, a tint channel outside [0, 1], a
+    // non-positive or non-finite roughness/normal/texture scale, or a negative
+    // or non-finite foundation dimension. Zero foundation pad dimensions and
+    // depth are valid and mean "derive the footing from the members this
+    // foundation carries". Callers validate before publication so a rejected
+    // value can never half-apply.
+    void validateSupportAppearance(const SupportAppearance& appearance);
+    void validateSupportFoundationAppearance(
+        const SupportFoundationAppearance& appearance);
+
     // A generated run owns one whole structure. Regeneration replaces only
     // that structure; manual structures have no recipe.
     struct WoodenSupportRunRecipe
@@ -185,6 +243,10 @@ namespace quantum::coaster
         std::vector<SupportMember> members;
         SupportElementId nextElementId = 1;
         std::optional<WoodenSupportRunRecipe> generatedWoodenRun;
+        // Absent in documents written before Supports M2A, which resolve to
+        // the conservative default timber appearance.
+        std::optional<SupportAppearance> appearance;
+        std::optional<SupportFoundationAppearance> foundationAppearance;
 
         [[nodiscard]] friend bool operator==(
             const SupportStructure&, const SupportStructure&) = default;
@@ -307,6 +369,22 @@ namespace quantum::coaster
         SupportStructureId structureId,
         SupportElementId memberId,
         SupportMemberEnd end);
+
+    // Appearance metadata uses the structure's existing stable identity and
+    // never allocates an ID. Setting one replaces only that field, so timber
+    // and foundation appearance stay independent of each other and of the
+    // generator recipe. Each call validates its input and the finished
+    // collection; on rejection the collection is left exactly unchanged.
+    // Throws std::invalid_argument for an unknown structure or a malformed
+    // appearance.
+    void setSupportAppearance(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        const SupportAppearance& appearance);
+    void setSupportFoundationAppearance(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        const SupportFoundationAppearance& appearance);
 
     // Returns a canonical package-relative identifier for a connector asset
     // below assets://support/. File-backed connectors must use the .glb

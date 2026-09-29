@@ -53,11 +53,16 @@ namespace quantum::editor
     // Editor-owned projection of committed support graph data. Double-
     // precision metadata remains authoritative for picking; float vertices
     // are only the renderer upload stream.
+    //
+    // solidPresentations is produced from the same resolved node positions as
+    // the line stream, so the solid and technical views can never disagree
+    // about where a member runs.
     struct SupportVisualization
     {
         std::vector<renderer::LineVertex> memberVertices;
         std::vector<SupportVisualizationNode> nodes;
         std::vector<SupportVisualizationMember> members;
+        std::vector<coaster::SupportSolidPresentation> solidPresentations;
     };
 
     [[nodiscard]] SupportVisualization createSupportVisualization(

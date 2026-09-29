@@ -21,13 +21,37 @@ namespace quantum::editor
         ForceDiagnostics,
         ModernSteel,
         TrackStyleRegions,
-        ForceDrivenAuthoring
+        ForceDrivenAuthoring,
+        // Supports M2A. These name the nine documentation views rather than
+        // a workflow: one per structural family, a timber close-up, a tall
+        // structure, the concrete foundations, and the same structure in two
+        // tints. Each maps to its own output filename, so a manifest can
+        // request all of them at once.
+        SupportsSolidTraditional,
+        SupportsSolidTwister,
+        SupportsSolidPrefabricated,
+        SupportsSolidHybrid,
+        SupportsSolidCloseUp,
+        SupportsSolidTall,
+        SupportsSolidFoundations,
+        SupportsSolidTintPine,
+        SupportsSolidTintWeathered
     };
 
     // Presentation only. Documents are supplied by the developer and never edited.
     struct ReadmeCaptureScenario
     {
         ReadmeCaptureKind kind = ReadmeCaptureKind::EditorOverview;
+        // Solid Supports presentation. Both default to the interactive
+        // editor's state so an existing manifest keeps producing its current
+        // appearance.
+        bool supportSolidVisible = true;
+        bool supportDebugLinesVisible = true;
+        // Authored timber tint override for this capture only, in sRGB. A
+        // negative component means "leave the document's value alone", which
+        // is what lets a capture photograph the shipped default instead of
+        // baking a color into the shared document.
+        std::array<float, 3> supportTimberTint{-1.0F, -1.0F, -1.0F};
         std::filesystem::path document;
         std::size_t region = 0;
         bool focusSelected = false;
