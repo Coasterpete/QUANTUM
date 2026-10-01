@@ -80,8 +80,44 @@ namespace quantum::editor
                 sdlError("SDL_SavePNG");
         }
 
+        // Applies a capture-only tint to a private copy of the loaded support
+        // visualization. The supplied document is never edited, and the
+        // presentation is rebuilt through the same path the editor uses so a
+        // capture cannot photograph something the editor could not draw.
+        SupportVisualization captureSupports(
+            const ReadmeCaptureScenario& scenario, LoadedCapture& loaded)
+        {
+            const bool tintSupplied =
+                scenario.supportTimberTint[0] >= 0.0F
+                || scenario.supportTimberTint[1] >= 0.0F
+                || scenario.supportTimberTint[2] >= 0.0F;
+            if (!tintSupplied)
+            {
+                return std::move(loaded.supports);
+            }
+
+            coaster::SupportCollection supports = loaded.track.supports();
+            for (coaster::SupportStructure& structure : supports.structures)
+            {
+                coaster::SupportAppearance appearance =
+                    structure.appearance.value_or(coaster::SupportAppearance{});
+                for (std::size_t channel = 0; channel < 3; ++channel)
+                {
+                    if (scenario.supportTimberTint[channel] >= 0.0F)
+                    {
+                        appearance.baseColorTint[channel] =
+                            scenario.supportTimberTint[channel];
+                    }
+                }
+                structure.appearance = appearance;
+            }
+            loaded.track.setSupports(supports);
+            return createSupportVisualization(
+                loaded.track, loaded.centerline.samples);
+        }
+
         void captureScenario(const ReadmeCaptureManifest& manifest,
-            const ReadmeCaptureScenario& scenario, const LoadedCapture& loaded)
+            const ReadmeCaptureScenario& scenario, LoadedCapture& loaded)
         {
             std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
                 SDL_CreateWindow("QUANTUM README capture", manifest.width, manifest.height,
@@ -94,14 +130,21 @@ namespace quantum::editor
             vulkan.initialize(window.get(), loaded.centerline.vertices,
                 loaded.centerline.verticesPerCurve,
                 loaded.centerline.renderableTrack, true);
-            vulkan.updateSupportVertices(loaded.supports.memberVertices);
+            const SupportVisualization capturedSupports =
+                captureSupports(scenario, loaded);
+            vulkan.updateSupportVertices(
+                capturedSupports.memberVertices);
+            vulkan.updateSupportSolidPresentation(
+                capturedSupports.solidPresentations);
+            vulkan.setSupportDisplay(scenario.supportSolidVisible,
+                scenario.supportDebugLinesVisible);
             EditorUi ui;
             ui.initialize(window.get(), vulkan, loaded.track,
                 loaded.centerline.minimumPosition, loaded.centerline.maximumPosition, &scenario);
             ui.installFrameRenderCallback(vulkan);
             ui.setCenterlineSections(loaded.centerline.sectionSlices);
             ui.setCenterlineVisualization(loaded.centerline);
-            ui.setSupportVisualization(loaded.supports);
+            ui.setSupportVisualization(capturedSupports);
             ui.setRiderLoadHistory(loaded.loads);
 
             // The capture runner owns the same preview status publication as
@@ -186,7 +229,8 @@ namespace quantum::editor
         try
         {
             for (std::size_t index = 0; index < manifest.scenarios.size(); ++index)
-                captureScenario(manifest, manifest.scenarios[index], loaded[index]);
+                captureScenario(manifest, manifest.scenarios[index],
+                    loaded[index]);
         }
         catch (...)
         {

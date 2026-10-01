@@ -2,6 +2,7 @@
 #include <quantum/coaster/WoodenSupportGenerator.hpp>
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -43,6 +44,114 @@ namespace
                 return (member.startNodeId == a && member.endNodeId == b)
                     || (member.startNodeId == b && member.endNodeId == a);
             });
+    }
+
+    void storyCorrespondence(const double firstHeight, const double lastHeight)
+    {
+        for (const TimberSupportFamily family : {
+            TimberSupportFamily::TraditionalTimberBent,
+            TimberSupportFamily::ModernTwisterTimber,
+            TimberSupportFamily::PrefabricatedTimberLattice,
+            TimberSupportFamily::HybridTimberLattice})
+        {
+            AuthoredTrack track = createNewDocument();
+            AuthoredStartPose pose = track.startPose();
+            const bool hybrid = family == TimberSupportFamily::HybridTimberLattice;
+            pose.position.z = firstHeight + (hybrid ? 2.5 : 0.0);
+            pose.orientation = glm::angleAxis(-std::asin((lastHeight - firstHeight) / 5.0),
+                glm::dvec3{0.0, 1.0, 0.0});
+            track.setStartPose(pose);
+            const AuthoredTrack source = track;
+            WoodenSupportRunRecipe recipe{0.0, 5.0, 5.0, 4.0,
+                0.0, 0.0, 0.2, true};
+            recipe.family = family;
+            recipe.storyHeight = 10.0;
+            // This fixture verifies the existing equal-elevation matcher;
+            // connected-tower post intersections have their own accuracy tests.
+            if (hybrid)
+                recipe.hybridArchetype = HybridFramingArchetype::SimpleBent;
+            static_cast<void>(generateWoodenSupportRun(track, recipe));
+            const auto& structure = track.supports().structures.front();
+            const auto states = integrateAuthoredTrackKinematics(source, 0.25);
+            const double splitX = resolveSupportTrackAttachment(states, {2.5, 0.0, 0.0}).position.x;
+            bool firstHasExtraRow = false;
+            bool lastHasExtraRow = false;
+            for (const auto& member : structure.members)
+            {
+                if (member.role != SupportMemberRole::LedgerCap)
+                {
+                    continue;
+                }
+                const auto node = std::find_if(structure.nodes.begin(), structure.nodes.end(),
+                    [&](const SupportNode& value) { return value.id == member.startNodeId; });
+                if (std::abs(node->position.z - 20.0) < 1e-9)
+                {
+                    (node->position.x < splitX ? firstHasExtraRow : lastHasExtraRow) = true;
+                }
+            }
+            require(firstHasExtraRow == (firstHeight > 20.0)
+                && lastHasExtraRow == (lastHeight > 20.0),
+                "fixtures must contain the requested two- and three-story framing, including the unmatched row");
+            std::set<SupportElementId> starts;
+            std::set<SupportElementId> ends;
+            std::size_t terminalTies = 0;
+            std::size_t commonTies = 0;
+            for (const auto& member : structure.members)
+            {
+                if (member.role != SupportMemberRole::LongitudinalTie
+                    && member.role != SupportMemberRole::TrackSupport)
+                {
+                    continue;
+                }
+                const auto node = [&](const SupportElementId id) -> const SupportNode&
+                {
+                    return *std::find_if(structure.nodes.begin(), structure.nodes.end(),
+                        [id](const SupportNode& value) { return value.id == id; });
+                };
+                const auto& a = node(member.startNodeId);
+                const auto& b = node(member.endNodeId);
+                require(a.position.x < splitX && b.position.x > splitX,
+                    "a longitudinal tie must connect neighboring bents");
+                require(starts.insert(a.id).second && ends.insert(b.id).second,
+                    "row correspondence must be one-to-one, without duplicated/fanned ties");
+                const bool shoulder = hybrid
+                    && std::abs(a.position.z - firstHeight) < 1e-9
+                    && std::abs(b.position.z - lastHeight) < 1e-9;
+                if (member.role == SupportMemberRole::TrackSupport
+                    || a.trackAttachment || b.trackAttachment || shoulder)
+                {
+                    require(a.trackAttachment.has_value() == b.trackAttachment.has_value()
+                        && (std::abs(a.position.z - firstHeight) < 1e-9
+                            || (hybrid && std::abs(a.position.z - firstHeight - 2.5) < 1e-9))
+                        && (std::abs(b.position.z - lastHeight) < 1e-9
+                            || (hybrid && std::abs(b.position.z - lastHeight - 2.5) < 1e-9)),
+                        "terminal rows must connect to terminal rows, never interior ledgers");
+                    ++terminalTies;
+                }
+                else
+                {
+                    require(std::abs(a.position.z - b.position.z) < 1e-9,
+                        "shared interior framing must connect at actual equal elevations");
+                    if (std::abs(a.position.z - 10.0) < 1e-9)
+                    {
+                        ++commonTies;
+                    }
+                    require(std::abs(a.position.z - 20.0) > 1e-9,
+                        "the unmatched 20-unit row must terminate at its own bent");
+                }
+            }
+            const std::size_t lanes = family == TimberSupportFamily::ModernTwisterTimber
+                || family == TimberSupportFamily::PrefabricatedTimberLattice ? 3 : 2;
+            require(terminalTies == lanes * (hybrid ? 2 : 1) && commonTies == lanes,
+                "equal and changing story counts need one common row and one terminal connection per lane");
+            AuthoredTrack second = source;
+            static_cast<void>(generateWoodenSupportRun(second, recipe));
+            require(second.supports() == track.supports(),
+                "story transitions must generate deterministically");
+            static_cast<void>(generateWoodenSupportRun(track, recipe, structure.id));
+            require(second.supports() == track.supports(),
+                "regeneration must reproduce story transitions exactly");
+        }
     }
 
     void deterministicConnectedRun()
@@ -329,51 +438,55 @@ namespace
         recipe.storyHeight = 24.0;
         static_cast<void>(generateWoodenSupportRun(track, recipe));
         const auto& structure = track.supports().structures.front();
-        require(structure.nodes.size() == 30,
-            "one-story hybrid needs footings, raised ledgers and caps per bent");
+        require(structure.nodes.size() == 40,
+            "one-story hybrid needs footings, shoulders, track interfaces and raised ledgers");
         for (std::size_t bent = 0; bent < 5; ++bent)
         {
             const auto& nodes = structure.nodes;
-            const auto offset = bent * 6;
+            const auto offset = bent * 8;
             const auto baseLeft = nodes[offset].id;
             const auto baseRight = nodes[offset + 1].id;
-            const auto topLeft = nodes[offset + 2].id;
-            const auto topRight = nodes[offset + 3].id;
-            const auto ledgerLeft = nodes[offset + 4].id;
-            const auto ledgerRight = nodes[offset + 5].id;
+            const auto shoulderLeft = nodes[offset + 2].id;
+            const auto shoulderRight = nodes[offset + 3].id;
+            const auto topLeft = nodes[offset + 4].id;
+            const auto topRight = nodes[offset + 5].id;
+            const auto ledgerLeft = nodes[offset + 6].id;
+            const auto ledgerRight = nodes[offset + 7].id;
             require(nodes[offset].foundation && nodes[offset + 1].foundation
-                && nodes[offset + 2].trackAttachment
-                && nodes[offset + 3].trackAttachment,
+                && nodes[offset + 4].trackAttachment
+                && nodes[offset + 5].trackAttachment,
                 "hybrid needs individual footings and two attached upper posts");
             require(hasMember(structure, baseLeft, ledgerLeft)
-                && hasMember(structure, ledgerLeft, topLeft)
+                && hasMember(structure, ledgerLeft, shoulderLeft)
+                && hasMember(structure, shoulderLeft, topLeft)
                 && hasMember(structure, baseRight, ledgerRight)
-                && hasMember(structure, ledgerRight, topRight)
+                && hasMember(structure, ledgerRight, shoulderRight)
+                && hasMember(structure, shoulderRight, topRight)
                 && hasMember(structure, ledgerLeft, ledgerRight)
                 && hasMember(structure, topLeft, topRight),
                 "hybrid posts need a raised transverse ledger and top cap");
-            require(nodes[offset + 4].position.z > nodes[offset].position.z
-                && nodes[offset + 4].position.z < nodes[offset + 2].position.z,
+            require(nodes[offset + 6].position.z > nodes[offset].position.z
+                && nodes[offset + 6].position.z < nodes[offset + 2].position.z,
                 "hybrid lower ledger must sit above the foundation");
-            require(hasMember(structure, ledgerLeft, topRight)
-                && !hasMember(structure, ledgerRight, topLeft)
+            require(hasMember(structure, ledgerLeft, shoulderRight)
+                && !hasMember(structure, ledgerRight, shoulderLeft)
                 && !hasMember(structure, baseLeft, topRight),
                 "one repeated diagonal should leave the hybrid bent open");
             if (bent > 0)
             {
-                require(hasMember(structure, nodes[(bent - 1) * 6 + 2].id,
+                require(hasMember(structure, nodes[(bent - 1) * 8 + 4].id,
                         topLeft)
-                    && hasMember(structure, nodes[(bent - 1) * 6 + 3].id,
+                    && hasMember(structure, nodes[(bent - 1) * 8 + 5].id,
                         topRight)
-                    && hasMember(structure, nodes[(bent - 1) * 6 + 4].id,
+                    && hasMember(structure, nodes[(bent - 1) * 8 + 6].id,
                         ledgerLeft)
-                    && hasMember(structure, nodes[(bent - 1) * 6 + 5].id,
+                    && hasMember(structure, nodes[(bent - 1) * 8 + 7].id,
                         ledgerRight),
                     "hybrid upper and lower ties must connect adjacent bents");
                 const bool leftBayBrace = hasMember(structure,
-                    nodes[(bent - 1) * 6 + 4].id, topLeft);
+                    nodes[(bent - 1) * 8 + 6].id, shoulderLeft);
                 const bool rightBayBrace = hasMember(structure,
-                    nodes[(bent - 1) * 6 + 5].id, topRight);
+                    nodes[(bent - 1) * 8 + 7].id, shoulderRight);
                 require((leftBayBrace ? 1 : 0) + (rightBayBrace ? 1 : 0)
                         == (bent == 2 ? 1 : 0),
                     "only selected hybrid longitudinal bays should be braced");
@@ -438,6 +551,9 @@ int main(const int argc, char* argv[])
 {
     try
     {
+        storyCorrespondence(18.0, 19.0);
+        storyCorrespondence(19.0, 21.0);
+        storyCorrespondence(21.0, 19.0);
         deterministicConnectedRun();
         curvedBankedAndPreserved();
         familyTopologiesAndTallStories();

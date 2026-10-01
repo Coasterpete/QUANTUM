@@ -23,6 +23,7 @@ target_sources(
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
         src/StaticMeshAsset.cpp
+        src/SupportSolidGeometry.cpp
         src/Supports.cpp
         src/WoodenSupportGenerator.cpp
         src/physics/CarPose.cpp
@@ -54,6 +55,7 @@ target_sources(
         include/quantum/coaster/RiderLoads.hpp
         include/quantum/coaster/RiderLocalGeometry.hpp
         include/quantum/coaster/StaticMeshAsset.hpp
+        include/quantum/coaster/SupportSolidGeometry.hpp
         include/quantum/coaster/Supports.hpp
         include/quantum/coaster/WoodenSupportGenerator.hpp
         include/quantum/coaster/TrackKinematics.hpp

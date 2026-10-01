@@ -1,5 +1,11 @@
 # Wooden Support Generator M0
 
+> Historical M0 milestone. Its two-post, square-section topology description
+> predates M1 families and the completed [Hybrid M2A work](supports-m2a-solid-rendering.md).
+> Current generation uses roles, role-specific sections and actual-elevation
+> stories; Hybrid also has authored orientation, mounting and local choices.
+> Saved M0 geometry still loads without regeneration.
+
 The Supports workspace can generate a wooden run over an authored track
 station interval. Stations and dimensions use Core coordinate units. The
 recipe sets bent spacing and width, a flat foundation elevation, a vertical

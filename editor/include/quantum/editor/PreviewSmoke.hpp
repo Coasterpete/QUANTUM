@@ -50,6 +50,12 @@ namespace quantum::editor
         bool enableGpuValidation = false;
         bool captureFrameTrace = false;
         std::optional<PreviewSmokeRegionStyleEdit> regionStyleEdit;
+        // Supports M2A performance probe. Drives the real Support Appearance
+        // panel through the real editor command pipeline so a measurement
+        // reflects the production publication and instance-upload path, and
+        // compares solid timber against the legacy line overlay at the same
+        // camera and document.
+        bool supportPerformance = false;
         // Developer-only screenshot capture from the real application. The
         // Editor workspace and the Simulator have separate presentation, and
         // the Simulator owns the SimulationPreview, so only this harness can

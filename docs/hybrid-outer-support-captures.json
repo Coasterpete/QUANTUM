@@ -1,0 +1,63 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "settle_frames": 24,
+  "overwrite": true,
+  "output_directory": "images/hybrid-outer-support",
+  "scenarios": [
+    {
+      "name": "supports-hybrid",
+      "document": "../build/hybrid-outer-support/low-none.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 4], "yaw": -1.02, "pitch": 0.18, "distance": 38, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-foundations",
+      "document": "../build/hybrid-outer-support/low-left.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 4], "yaw": -1.02, "pitch": 0.18, "distance": 38, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-tint-pine",
+      "document": "../build/hybrid-outer-support/tall-none.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 19], "yaw": -1.02, "pitch": 0.10, "distance": 65, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-tall",
+      "document": "../build/hybrid-outer-support/tall-both.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 19], "yaw": -1.02, "pitch": 0.10, "distance": 65, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-closeup",
+      "document": "../build/hybrid-outer-support/tall-both.quantum",
+      "region": 0,
+      "camera": {"focus": [15, -7.1, 16], "yaw": -2.15, "pitch": 0.20, "distance": 12, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-tint-weathered",
+      "document": "../build/hybrid-outer-support/tall-both.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 19], "yaw": -3.10, "pitch": 0.03, "distance": 70, "projection": "Orthographic"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    }
+  ]
+}

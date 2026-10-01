@@ -1,0 +1,48 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "settle_frames": 24,
+  "overwrite": true,
+  "output_directory": "images/hybrid-topology",
+  "scenarios": [
+    {
+      "name": "supports-hybrid",
+      "document": "../build/hybrid-topology/simple.quantum",
+      "region": 0,
+      "zoom": 1.0,
+      "ground": false,
+      "environment": false,
+      "sky_visible": false,
+      "sun_intensity": 5.5,
+      "environment_intensity": 0.7,
+      "solid_supports": true,
+      "debug_lines": false
+    },
+    {
+      "name": "supports-tall",
+      "document": "../build/hybrid-topology/towers.quantum",
+      "region": 0,
+      "zoom": 0.75,
+      "ground": false,
+      "environment": false,
+      "sky_visible": false,
+      "sun_intensity": 5.5,
+      "environment_intensity": 0.7,
+      "solid_supports": true,
+      "debug_lines": false
+    },
+    {
+      "name": "supports-closeup",
+      "document": "../build/hybrid-topology/staggered.quantum",
+      "region": 0,
+      "zoom": 0.80,
+      "ground": false,
+      "environment": false,
+      "sky_visible": false,
+      "sun_intensity": 5.5,
+      "environment_intensity": 0.7,
+      "solid_supports": true,
+      "debug_lines": false
+    }
+  ]
+}

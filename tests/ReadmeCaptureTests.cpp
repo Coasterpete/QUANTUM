@@ -78,6 +78,28 @@ namespace
         noMsaa["scenarios"][0]["zoom"] = 0.5;
         require(load(noMsaa).scenarios.front().zoom == 0.5,
             "Capture zoom override was ignored.");
+        auto closeup = base;
+        closeup["scenarios"][0]["camera"] = {
+            {"focus", {1, 2, 3}}, {"yaw", .5}, {"pitch", .2},
+            {"distance", 12}, {"projection", "Orthographic"}};
+        const auto camera = load(closeup).scenarios.front();
+        require(camera.cameraPose && camera.cameraPose->focus == glm::dvec3(1, 2, 3)
+            && camera.cameraPose->distance == 12 && camera.cameraPose->yaw == .5
+            && camera.cameraProjection == ViewportProjection::Orthographic,
+            "Structural close-up camera must preserve its explicit pose.");
+        closeup["scenarios"][0]["support_node_handles"] = false;
+        require(!load(closeup).scenarios.front().supportNodeHandlesVisible,
+            "Capture-only node handle visibility must be respected.");
+        closeup["scenarios"][0]["support_node_handles"] = "off";
+        rejects([&] { (void)load(closeup); }, "Invalid handle visibility accepted.");
+        closeup["scenarios"][0]["support_node_handles"] = false;
+        for (const auto& [field, value] : std::vector<std::pair<std::string, json>>{
+            {"focus", {1, 2}}, {"yaw", "north"}, {"distance", 0}, {"projection", "Unknown"}})
+        {
+            auto invalid = closeup;
+            invalid["scenarios"][0]["camera"][field] = value;
+            rejects([&] { (void)load(invalid); }, "Invalid close-up camera accepted.");
+        }
         require(manifest.scenarios.front().document == std::filesystem::weakly_canonical(fixture),
             "Document must resolve relative to manifest, not working directory.");
         require(readmeCaptureOutputPath(manifest, manifest.scenarios.front())

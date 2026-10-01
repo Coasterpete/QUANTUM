@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -70,6 +71,55 @@ namespace quantum::coaster
             const SupportMemberEndPlacement&) = default;
     };
 
+    enum class SupportMemberMountingMode : std::uint8_t
+    {
+        Face,
+        TerminalSeat
+    };
+
+    // Signed axes of the supporting post frame: X follows the post chain away
+    // from its foundation, Y follows its directed orientationReference, and Z
+    // completes that basis. These are not the mounted member's local axes.
+    enum class SupportMemberMountingFace : std::uint8_t
+    {
+        PositiveY,
+        NegativeY,
+        PositiveZ,
+        NegativeZ,
+        PositiveX,
+        NegativeX
+    };
+
+    enum class SupportMemberMountingLayer : std::uint8_t
+    {
+        Direct,
+        // Clear the actual outer surface of incident same-face ledgers/ties.
+        OutsideLedger
+    };
+
+    enum class SupportMemberEndCoverage : std::uint8_t
+    {
+        Node,
+        OutsideSupport
+    };
+
+    // Member-body placement intent, independent of connector localPlacement.
+    // The host is the incident PrimaryPost chain (the lower segment at a story
+    // junction). Distances are Core units; no world offset is stored. Section
+    // edits therefore recompute both contact clearance and end coverage.
+    struct SupportMemberMounting
+    {
+        SupportMemberMountingMode mode = SupportMemberMountingMode::Face;
+        SupportMemberMountingFace face = SupportMemberMountingFace::PositiveZ;
+        SupportMemberMountingLayer layer = SupportMemberMountingLayer::Direct;
+        double separation = 0.0;
+        SupportMemberEndCoverage coverage = SupportMemberEndCoverage::Node;
+        double overhang = 0.0;
+
+        [[nodiscard]] friend bool operator==(
+            const SupportMemberMounting&, const SupportMemberMounting&) = default;
+    };
+
     // Persistent authored connection metadata for one member end. No separate
     // connection ID exists: identity derives from (structureId, memberId,
     // SupportMemberEnd), so deleting a member removes both end connections.
@@ -79,6 +129,7 @@ namespace quantum::coaster
             SupportMemberEndTreatment::MiteredCut;
         std::optional<StaticMeshAssetReference> asset;
         std::optional<SupportMemberEndPlacement> localPlacement;
+        std::optional<SupportMemberMounting> mounting;
 
         [[nodiscard]] friend bool operator==(
             const SupportMemberEndConnection&,
@@ -135,12 +186,89 @@ namespace quantum::coaster
             const SupportNode&, const SupportNode&) = default;
     };
 
+    // Structural role of a timber member. This is authored semantics, not
+    // inferred geometry: a shallow brace and a shallow ledger can share an
+    // angle but never share a role. Roles exist so primary posts,
+    // transverse ledgers/caps, longitudinal ties, diagonals, and demonstrated
+    // track-support members can carry appropriate independent sections.
+    //
+    // The first accuracy target is the existing RMC/Hybrid reference material
+    // (two-post bents on discrete foundations, a raised lower ledger, one
+    // repeated diagonal per bent/story, upper caps, longitudinal ties, and
+    // mostly open bays). Ledger and cap share one role for now because both
+    // are transverse horizontals; a future split is additive if the reference
+    // demands distinct cap sizing. TrackSupport requires an established
+    // stringer/support function; row height alone is insufficient. Transverse
+    // caps remain LedgerCap and upper post connections remain PrimaryPost.
+    enum class SupportMemberRole : std::uint8_t
+    {
+        // Documents written before roles existed, plus manually authored
+        // members that never picked a role. Serialized as an absent field.
+        Unspecified,
+        // Primary post segments, including upright inner posts and inclined
+        // outer supports; inclination alone does not make a member a brace.
+        PrimaryPost,
+        // Transverse horizontals: intermediate story ledgers, the top-story
+        // cap, and the Hybrid raised lower ledger.
+        LedgerCap,
+        // Longitudinal structural ties, including Hybrid upper/lower ties
+        // and the other families' current ground-level foundation ties.
+        LongitudinalTie,
+        // Any diagonal: transverse bent braces and selected longitudinal bay
+        // braces alike. Both are secondary bracing, not primary framing.
+        Brace,
+        // Members with a demonstrated track-support/stringer function.
+        // The simple Hybrid generator currently creates upper ties instead.
+        TrackSupport
+    };
+
+    // Intended rectangular-section alignment of a member inside its
+    // structural frame. This is authored intent, not inferred geometry: a
+    // transverse bent diagonal and a longitudinal bay diagonal can share the
+    // Brace role yet lie in different planes, so the plane lives here rather
+    // than in a proliferation of near-duplicate roles.
+    //
+    // Hybrid members name their structural context. The solid frame consumes
+    // the optional geometry-derived reference; the enum chooses a fallback
+    // when that reference is absent or parallel to an edited member axis.
+    enum class SupportMemberOrientation : std::uint8_t
+    {
+        // Renderer fallback (world-Z projected, world-X for verticals).
+        // Used by manual/legacy members and every non-Hybrid generator path.
+        Generic,
+        // Hybrid primary post lines: section faces aligned to the bent frame.
+        BentPost,
+        // Hybrid transverse horizontals (ledgers, caps, raised lower ledger).
+        BentTransverse,
+        // Hybrid longitudinal ties, including the upper attachment row.
+        RunLongitudinal,
+        // Hybrid diagonals lying in the transverse bent plane.
+        BentDiagonal,
+        // Hybrid diagonals lying in a longitudinal run-vertical plane.
+        RunDiagonal
+    };
+
+    // Authored structural roll/frame evidence for one member: the directed
+    // cross-section reference its bent was framed with, expressed in document
+    // coordinates. This is evidence, not a re-derivation: moving a member's
+    // endpoints preserves it, and only an explicit orientation edit replaces
+    // it. The Hybrid generator constructs it deterministically from actual
+    // rows, incident posts and member-specific triangles --
+    // normalization keeps the direction, never flips the vector to enforce a
+    // generic sign convention. Absent means "use the orientation-enum
+    // fallback", which keeps legacy, manual, and non-Hybrid members compact
+    // and byte-identical.
+    using SupportMemberOrientationReference = std::optional<glm::dvec3>;
+
     struct SupportMember
     {
         SupportElementId id = invalidSupportElementId;
         SupportElementId startNodeId = invalidSupportElementId;
         SupportElementId endNodeId = invalidSupportElementId;
         SupportMemberProfile profile;
+        SupportMemberRole role = SupportMemberRole::Unspecified;
+        SupportMemberOrientation orientation = SupportMemberOrientation::Generic;
+        SupportMemberOrientationReference orientationReference;
         std::optional<SupportMemberEndConnection> startConnection;
         std::optional<SupportMemberEndConnection> endConnection;
 
@@ -156,6 +284,131 @@ namespace quantum::coaster
         HybridTimberLattice
     };
 
+    // QUANTUM framing choices, not manufacturer engineering categories.
+    enum class HybridFramingArchetype : std::uint8_t
+    {
+        Automatic,
+        SimpleBent,
+        ConnectedTowers
+    };
+
+    enum class HybridLongitudinalBracing : std::uint8_t
+    {
+        Open,
+        SingleDiagonal
+    };
+
+    // First/last name the directed bent's post lanes, not screen or world axes.
+    enum class HybridDiagonalDirection : std::uint8_t
+    {
+        LowerFirstToUpperLast,
+        LowerLastToUpperFirst
+    };
+
+    struct HybridTransversePanelChoice
+    {
+        std::uint32_t towerIndex = 0;
+        std::uint32_t panelIndex = 0;
+        // +/- Z of the foundation-directed post frame are the bent faces.
+        SupportMemberMountingFace face = SupportMemberMountingFace::PositiveZ;
+        HybridDiagonalDirection direction = HybridDiagonalDirection::LowerFirstToUpperLast;
+
+        [[nodiscard]] friend bool operator==(
+            const HybridTransversePanelChoice&, const HybridTransversePanelChoice&) = default;
+    };
+
+    struct HybridLongitudinalPanelChoice
+    {
+        std::uint32_t bayIndex = 0;
+        std::uint32_t panelIndex = 0;
+        std::uint32_t laneIndex = 0;
+        HybridLongitudinalBracing bracing = HybridLongitudinalBracing::Open;
+
+        [[nodiscard]] friend bool operator==(
+            const HybridLongitudinalPanelChoice&, const HybridLongitudinalPanelChoice&) = default;
+    };
+
+    // Local additions around the unchanged two-post core. Left/right follow
+    // the negative/positive unbanked lateral direction in station order.
+    enum class HybridOuterSupportSides : std::uint8_t
+    {
+        None,
+        Left,
+        Right,
+        Both
+    };
+
+    struct HybridOuterSupportChoice
+    {
+        std::uint32_t towerIndex = 0;
+        HybridOuterSupportSides sides = HybridOuterSupportSides::None;
+        // Authored Core-unit distances outward from the corresponding inner
+        // post, at the foundation and lower-frame shoulder. No width/height
+        // rule chooses these values; the defaults are visual approximations.
+        double foundationOutset = 4.0;
+        double topOutset = 1.0;
+
+        [[nodiscard]] friend bool operator==(
+            const HybridOuterSupportChoice&, const HybridOuterSupportChoice&) = default;
+    };
+
+    // Authored presentation data for one support structure. It is
+    // deliberately independent of TimberSupportFamily: generator topology
+    // decides how a structure stands up, this decides how its members look.
+    // Two structures generated from the same recipe can therefore carry
+    // different appearances, and the same structure keeps its appearance
+    // across regeneration.
+    //
+    // The timber base-color map is authored as neutral grayscale detail, so
+    // baseColorTint is the dominant timber color and the texture supplies
+    // grain, knots, and local brightness variation rather than hue.
+    //
+    // textureScale is the length in Core coordinate units that one repeat of
+    // the timber maps spans. It is applied to object-space UVs, which keeps
+    // grain physically sized across long posts, short braces, and ledgers
+    // alike.
+    struct SupportAppearance
+    {
+        // sRGB, matching TrackMaterial and GroundAppearance so every surface
+        // in the scene is decoded through the same conversion path.
+        glm::vec3 baseColorTint{0.78F, 0.64F, 0.47F};
+        float roughnessMultiplier = 1.0F;
+        float normalStrength = 1.0F;
+        float textureScale = 1.0F;
+
+        [[nodiscard]] friend bool operator==(
+            const SupportAppearance&, const SupportAppearance&) = default;
+    };
+
+    // Foundation footings are rendered as neutral concrete rather than
+    // timber. They are presentation only: the Foundation node position stays
+    // authoritative and no footing dimension is derived from structural
+    // loads.
+    struct SupportFoundationAppearance
+    {
+        glm::vec3 baseColorTint{0.62F, 0.62F, 0.60F};
+        float roughness = 0.92F;
+        // Footing footprint and depth are expressed in Core coordinate units,
+        // matching SupportMemberProfile::outerDimensions. Zero means the
+        // renderer derives a pad from the member cross-section.
+        glm::dvec2 padDimensions{0.0, 0.0};
+        double padDepth = 0.0;
+
+        [[nodiscard]] friend bool operator==(
+            const SupportFoundationAppearance&,
+            const SupportFoundationAppearance&) = default;
+    };
+
+    // Rejects a non-finite component, a tint channel outside [0, 1], a
+    // non-positive or non-finite roughness/normal/texture scale, or a negative
+    // or non-finite foundation dimension. Zero foundation pad dimensions and
+    // depth are valid and mean "derive the footing from the members this
+    // foundation carries". Callers validate before publication so a rejected
+    // value can never half-apply.
+    void validateSupportAppearance(const SupportAppearance& appearance);
+    void validateSupportFoundationAppearance(
+        const SupportFoundationAppearance& appearance);
+
     // A generated run owns one whole structure. Regeneration replaces only
     // that structure; manual structures have no recipe.
     struct WoodenSupportRunRecipe
@@ -167,10 +420,23 @@ namespace quantum::coaster
         double foundationElevation = -10.0;
         double attachmentVerticalOffset = -0.5;
         double memberSize = 0.2;
+        // Legacy run-wide policy for SimpleBent and the other families.
+        // ConnectedTowers uses only its explicit local panel choices below.
         bool longitudinalBracing = true;
         TimberSupportFamily family = TimberSupportFamily::TraditionalTimberBent;
         // Maximum vertical distance between connected framing levels.
         double storyHeight = 24.0;
+        HybridFramingArchetype hybridArchetype = HybridFramingArchetype::Automatic;
+        // Sparse explicit overrides in station order, with zero-based panels
+        // bottom-up. Transverse panels start at the raised lower ledger.
+        // ConnectedTowers run panels lie between consecutive local tie rows;
+        // laneIndex selects one post-side plane. Omitted run panels are Open.
+        // Choices for absent panels remain dormant in the recipe, not remapped.
+        std::vector<HybridTransversePanelChoice> hybridTransversePanels;
+        std::vector<HybridLongitudinalPanelChoice> hybridLongitudinalPanels;
+        // Omitted towers have no outer lines. Absent tower indices remain
+        // dormant, like the local panel choices above.
+        std::vector<HybridOuterSupportChoice> hybridOuterSupports;
 
         [[nodiscard]] friend bool operator==(
             const WoodenSupportRunRecipe&,
@@ -185,6 +451,10 @@ namespace quantum::coaster
         std::vector<SupportMember> members;
         SupportElementId nextElementId = 1;
         std::optional<WoodenSupportRunRecipe> generatedWoodenRun;
+        // Absent in documents written before Supports M2A, which resolve to
+        // the conservative default timber appearance.
+        std::optional<SupportAppearance> appearance;
+        std::optional<SupportFoundationAppearance> foundationAppearance;
 
         [[nodiscard]] friend bool operator==(
             const SupportStructure&, const SupportStructure&) = default;
@@ -259,7 +529,10 @@ namespace quantum::coaster
         SupportStructureId structureId,
         SupportElementId startNodeId,
         SupportElementId endNodeId,
-        const SupportMemberProfile& profile = defaultSupportMemberProfile());
+        const SupportMemberProfile& profile = defaultSupportMemberProfile(),
+        SupportMemberRole role = SupportMemberRole::Unspecified,
+        SupportMemberOrientation orientation = SupportMemberOrientation::Generic,
+        SupportMemberOrientationReference orientationReference = std::nullopt);
     // Removes exactly one member, preserving every node. Throws
     // std::invalid_argument for an unknown member ID.
     void removeSupportMember(
@@ -307,6 +580,35 @@ namespace quantum::coaster
         SupportStructureId structureId,
         SupportElementId memberId,
         SupportMemberEnd end);
+    // Explicit orientation edits. Setting normalizes (direction preserved)
+    // and stores the reference; moving endpoints never touches it. Clearing
+    // restores the enum fallback. Throws std::invalid_argument for unknown
+    // members or malformed references.
+    void setSupportMemberOrientationReference(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId memberId,
+        const glm::dvec3& reference);
+    void clearSupportMemberOrientationReference(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        SupportElementId memberId);
+
+    // Appearance metadata uses the structure's existing stable identity and
+    // never allocates an ID. Setting one replaces only that field, so timber
+    // and foundation appearance stay independent of each other and of the
+    // generator recipe. Each call validates its input and the finished
+    // collection; on rejection the collection is left exactly unchanged.
+    // Throws std::invalid_argument for an unknown structure or a malformed
+    // appearance.
+    void setSupportAppearance(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        const SupportAppearance& appearance);
+    void setSupportFoundationAppearance(
+        SupportCollection& collection,
+        SupportStructureId structureId,
+        const SupportFoundationAppearance& appearance);
 
     // Returns a canonical package-relative identifier for a connector asset
     // below assets://support/. File-backed connectors must use the .glb
@@ -321,10 +623,35 @@ namespace quantum::coaster
         const SupportMemberEndConnection& connection);
     void validateSupportMemberEndConnection(
         const SupportMemberEndConnection& connection);
+    void validateSupportMemberMounting(const SupportMemberMounting& mounting);
 
     // Geometric/document consistency only. This does not perform loads,
     // stress, buckling, foundation, or code-compliance analysis.
     void validateSupportMemberProfile(const SupportMemberProfile& profile);
+    void validateSupportMemberRole(SupportMemberRole role);
+    void validateSupportMemberOrientation(SupportMemberOrientation orientation);
+
+    // Normalizes an authored orientation reference to unit length, preserving
+    // its direction exactly: no sign canonicalization is applied, so a
+    // generator-built directed frame round-trips bit-identically. Throws
+    // std::invalid_argument for a non-finite or zero-length vector.
+    [[nodiscard]] glm::dvec3 normalizeSupportMemberOrientationReference(
+        const glm::dvec3& reference);
+    // Absent references are valid (enum fallback). A present reference must
+    // be finite and unit-length within 1e-9; writers normalize, so stored
+    // state that is not unit is rejected rather than repaired.
+    void validateSupportMemberOrientationReference(
+        const SupportMemberOrientationReference& reference);
+
+    // Role-specific rectangular timber sections derived from the recipe's
+    // nominal member size. These are visual presentation proportions informed
+    // by the RMC/Hybrid reference language (posts read heaviest, braces
+    // lightest), not structural sizing or load analysis. Posts keep the square
+    // nominal section so foundation pads derived from the carried section stay
+    // stable; every other role is a distinct non-square rectangle.
+    [[nodiscard]] SupportMemberProfile timberProfileForRole(
+        SupportMemberRole role,
+        double memberSize);
     void validateWoodenSupportRunRecipe(const WoodenSupportRunRecipe& recipe);
     void validateSupportCollection(const SupportCollection& collection);
 }

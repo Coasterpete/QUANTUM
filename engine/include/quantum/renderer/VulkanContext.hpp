@@ -130,6 +130,15 @@ namespace quantum::renderer
         // Replaces the Editor's renderer-neutral support-member line stream.
         void updateSupportVertices(std::span<const LineVertex> vertices);
 
+        // Replaces the solid timber presentation. Rebuilds the shared
+        // instance stream and its per-appearance draw batches; the unit meshes
+        // and timber textures are uploaded once and retained.
+        void updateSupportSolidPresentation(
+            std::span<const coaster::SupportSolidPresentation> presentations
+        ) override;
+        void setSupportDisplay(bool solidVisible,
+            bool debugLinesVisible) override;
+
         // Host-side draw skipping for the viewport reference elements.
         // Idempotent; intended to be pushed every frame from the editor's
         // authoritative settings like the view-projection matrix.
@@ -180,6 +189,26 @@ namespace quantum::renderer
         [[nodiscard]] bool shaderFloat64Enabled() const noexcept;
 
     private:
+        // One sampler-bound image, owned as a unit. The ground surface and the
+        // solid support pass both keep one of these per texture slot, and both
+        // release them through the same destroy-then-null order.
+        struct GroundTextureImageResource
+        {
+            VkImage image = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkImageView view = VK_NULL_HANDLE;
+        };
+
+        // Solid Supports M2A owns its textures, descriptors, pipeline, unit
+        // meshes, and instance stream here, following the same
+        // candidate-then-publish lifetime rules as the ground surface.
+        struct SolidSupportTextureImageResource
+        {
+            VkImage image = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            VkImageView view = VK_NULL_HANDLE;
+        };
+
         FrameRenderCallback frameRenderCallback_ = nullptr;
         void* frameRenderUserData_ = nullptr;
         void selectPhysicalDevice();
@@ -194,6 +223,19 @@ namespace quantum::renderer
         void createTrackPipelines();
         void createSkyPipeline();
         void createGroundSurfacePipeline();
+        void createSupportSolidResources();
+        void destroySupportSolidResources() noexcept;
+        void createSupportSolidPipeline();
+        // Uploads one bundled timber map into its permanent slot. The caller
+        // owns the all-or-nothing cleanup, so this releases only what it
+        // created on failure.
+        void uploadSolidSupportTextureImage(const GroundTextureImage& source,
+            VkFormat format, std::size_t slot);
+        void destroySolidSupportTextureImage(
+            SolidSupportTextureImageResource& image) noexcept;
+        void uploadSupportSolidMeshes();
+        void uploadSupportSolidInstances(
+            std::span<const coaster::SupportSolidPresentation> presentations);
         void createEnvironmentResources();
         void destroyEnvironmentResources() noexcept;
         // One uploaded IBL set for one bundled sky. Vulkan owns the images;
@@ -252,15 +294,6 @@ namespace quantum::renderer
         [[nodiscard]] StaticMeshGpuHandle uploadStaticMeshOnce(
             const StaticMeshAsset& asset);
 
-        // Ground Surface M0 owns its textures, descriptors, pipeline, and
-        // quad buffers here. Vulkan owns their lifetime; the renderer-neutral
-        // settings and CPU mesh generator stay in GroundSurface.hpp.
-        struct GroundTextureImageResource
-        {
-            VkImage image = VK_NULL_HANDLE;
-            VmaAllocation allocation = VK_NULL_HANDLE;
-            VkImageView view = VK_NULL_HANDLE;
-        };
         // Both take a caller-owned resource, never a slot's published one.
         // uploadGroundTextureImage releases only what it created, and
         // replaceGroundTexture is candidate-then-publish: it builds a local
@@ -326,8 +359,64 @@ namespace quantum::renderer
         VkPipeline hardwareEdgePipeline_ = VK_NULL_HANDLE;
         VkPipelineLayout skyPipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline skyPipeline_ = VK_NULL_HANDLE;
+        VkPipeline supportDebugPipeline_ = VK_NULL_HANDLE;
         VkPipelineLayout groundPipelineLayout_ = VK_NULL_HANDLE;
         VkPipeline groundPipeline_ = VK_NULL_HANDLE;
+        VkPipelineLayout supportSolidPipelineLayout_ = VK_NULL_HANDLE;
+        VkPipeline supportSolidPipeline_ = VK_NULL_HANDLE;
+        VkPipelineLayout supportFoundationPipelineLayout_ = VK_NULL_HANDLE;
+        VkPipeline supportFoundationPipeline_ = VK_NULL_HANDLE;
+        VkDescriptorSetLayout supportSolidTextureDescriptorLayout_ =
+            VK_NULL_HANDLE;
+        VkDescriptorPool supportSolidTextureDescriptorPool_ = VK_NULL_HANDLE;
+        VkDescriptorSet supportSolidTextureDescriptorSet_ = VK_NULL_HANDLE;
+        VkSampler supportSolidTextureSampler_ = VK_NULL_HANDLE;
+        // Albedo, normal, roughness in that order. Identifiers are recorded so
+        // a missing or unreadable map is reported once rather than retried
+        // every frame.
+        std::array<SolidSupportTextureImageResource, 3>
+            supportSolidTextureImages_{};
+        std::array<std::string, 3> supportSolidTextureIdentifiers_{};
+        // Rectangular and circular unit meshes, uploaded once and shared by
+        // every instance.
+        struct SupportSolidMeshResource
+        {
+            VkBuffer vertexBuffer = VK_NULL_HANDLE;
+            VmaAllocation vertexAllocation = VK_NULL_HANDLE;
+            VkBuffer triangleIndexBuffer = VK_NULL_HANDLE;
+            VmaAllocation triangleIndexAllocation = VK_NULL_HANDLE;
+            std::uint32_t vertexCount = 0;
+            std::uint32_t triangleIndexCount = 0;
+            bool uploaded = false;
+        };
+
+        std::array<SupportSolidMeshResource, 2> supportSolidMeshes_{};
+        VkBuffer supportSolidInstanceBuffer_ = VK_NULL_HANDLE;
+        VmaAllocation supportSolidInstanceAllocation_ = VK_NULL_HANDLE;
+        void* supportSolidInstanceMappedData_ = nullptr;
+        VkDeviceSize supportSolidInstanceCapacity_ = 0;
+        // One entry per non-empty batch. Instances stay contiguous in the
+        // shared buffer; a batch only selects a mesh and an instance range.
+        struct SupportSolidDrawBatch
+        {
+            std::uint32_t meshIndex = 0;
+            std::uint32_t firstInstance = 0;
+            std::uint32_t instanceCount = 0;
+            coaster::SupportAppearance appearance;
+        };
+
+        std::vector<SupportSolidDrawBatch> supportSolidDrawBatches_;
+        // One entry per structure that owns at least one foundation pad.
+        struct SupportFoundationDrawBatch
+        {
+            std::uint32_t firstInstance = 0;
+            std::uint32_t instanceCount = 0;
+            coaster::SupportFoundationAppearance appearance;
+        };
+
+        std::vector<SupportFoundationDrawBatch> supportFoundationDrawBatches_;
+        bool supportSolidVisible_ = true;
+        bool supportDebugLinesVisible_ = true;
         VkDescriptorSetLayout groundTextureDescriptorLayout_ = VK_NULL_HANDLE;
         VkDescriptorPool groundTextureDescriptorPool_ = VK_NULL_HANDLE;
         VkDescriptorSet groundTextureDescriptorSet_ = VK_NULL_HANDLE;

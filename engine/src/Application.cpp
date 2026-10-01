@@ -221,13 +221,28 @@ namespace quantum::engine
 {
     namespace
     {
+        // Publishes one resolved support visualization to both renderer
+        // presentations. The solid timber stream and the technical line
+        // stream are derived from the same object. Publish the newer solid
+        // path first so its rejected upload leaves the existing line view
+        // alone; the document is committed only after both uploads succeed.
+        void publishSupportsToRenderer(
+            quantum::renderer::Renderer& renderer,
+            const quantum::editor::SupportVisualization& supports)
+        {
+            renderer.updateSupportSolidPresentation(
+                supports.solidPresentations);
+            renderer.updateSupportVertices(supports.memberVertices);
+        }
+
         // Composes the user-facing summary of a rejected authored edit. Every
         // field Core reported is kept, so an infeasible force-driven section
         // states its reason and where it happened instead of a generic
         // failure. Distances are whole-track coordinate units.
         [[nodiscard]] std::string describeTrackGenerationFailure(
             const quantum::coaster::TrackGenerationFailure& failure)
-        {            std::string description =
+        {
+            std::string description =
                 quantum::coaster::trackGenerationFailureReasonToString(
                     failure.reason);
             description += ": ";
@@ -270,6 +285,12 @@ namespace quantum::engine
         // The scripted force-driven authoring sequence, in the order a user
         // performs it. Developer smoke only; it injects editor intents and
         // lets the ordinary pipeline do the work.
+        // Supports M2A performance probe. The display toggles are the only
+        // thing that changes between measurement windows, so a frame-time
+        // difference is the solid timber pass itself.
+        inline constexpr std::uint64_t supportPerformanceSolidBeginFrame = 160;
+        inline constexpr std::uint64_t supportPerformanceLinesBeginFrame = 280;
+
         enum class ForceDrivenAuthoringStep
         {
             CreateRegion,
@@ -513,8 +534,7 @@ namespace quantum::engine
                     centerline.renderableTrack,
                     captureImages
                 );
-                renderer.updateSupportVertices(
-                    supportVisualization.memberVertices);
+                publishSupportsToRenderer(renderer, supportVisualization);
                 // M2: batched GPU sampling for SimulationPreview (8 bogies per pose)
                 gpuContext.emplace(vulkan);
                 if (!gpuContext->gpuAvailable())
@@ -893,8 +913,7 @@ namespace quantum::engine
                         restoredCenterline.verticesPerCurve);
                     renderer.updateRenderableTrack(
                         restoredCenterline.renderableTrack);
-                    renderer.updateSupportVertices(
-                        restoredSupports.memberVertices);
+                    publishSupportsToRenderer(renderer, restoredSupports);
 
                     const std::size_t restoredSelection = std::min(
                         editorUi.selectedSection(),
@@ -1001,6 +1020,8 @@ editorUi.selectSection(restoredSelection, true);
                 std::string previewForceDrivenSnapshot;
                 double previewForceDrivenFirstDomainEnd = 0.0;
                 double previewForceDrivenSegmentCount = 0.0;
+                std::size_t previewSupportMemberCount = 0;
+                std::size_t previewSupportFoundationCount = 0;
 
                 while (running)
                 {
@@ -1124,6 +1145,53 @@ editorUi.selectSection(restoredSelection, true);
                         // Undo and Redo of the scripted authoring sequence are
                         // requested exactly as the toolbar buttons request
                         // them; the ordinary history restore path runs below.
+                        // Supports M2A performance probe. Only the two display
+                        // toggles change, so any frame-time difference is the
+                        // solid timber pass itself.
+                        if (previewSmokeOptions != nullptr
+                            && previewSmokeOptions->supportPerformance
+                            && renderedFrameId >= 60)
+                        {
+                            previewSupportMemberCount = 0;
+                            previewSupportFoundationCount = 0;
+                            for (const auto& presentation
+                                : supportVisualization.solidPresentations)
+                            {
+                                previewSupportMemberCount
+                                    += presentation.memberCount();
+                                previewSupportFoundationCount
+                                    += presentation.foundations.size();
+                            }
+                            if (renderedFrameId == 60)
+                            {
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Info,
+                                    "SUPPORT",
+                                    "PERF members=%zu foundations=%zu",
+                                    previewSupportMemberCount,
+                                    previewSupportFoundationCount);
+                            }
+                            // Three fixed frame windows: warm-up, solid
+                            // timber, then the line overlay alone. Each window
+                            // is long enough that the collector's own average
+                            // frame time is representative, and only the two
+                            // display toggles differ between them.
+                            if (renderedFrameId == 60)
+                            {
+                                renderer.setSupportDisplay(true, false);
+                            }
+                            else if (renderedFrameId
+                                == supportPerformanceSolidBeginFrame)
+                            {
+                                renderer.setSupportDisplay(true, true);
+                            }
+                            else if (renderedFrameId
+                                == supportPerformanceLinesBeginFrame)
+                            {
+                                renderer.setSupportDisplay(false, true);
+                            }
+                        }
+
                         if (previewSmokeOptions != nullptr
                             && previewSmokeOptions->forceDrivenAuthoring
                             && renderedFrameId >= 60
@@ -1335,8 +1403,8 @@ editorUi.selectSection(restoredSelection, true);
                                     );
                                     renderer.updateRenderableTrack(
                                         centerline.renderableTrack);
-                                    renderer.updateSupportVertices(
-                                        supportVisualization.memberVertices);
+                                        publishSupportsToRenderer(
+                                            renderer, supportVisualization);
                                     editorUi.updateWindowTitle(
                                         documentState.windowTitle()
                                     );
@@ -1376,8 +1444,8 @@ editorUi.selectSection(restoredSelection, true);
                                                 loaded->centerline.verticesPerCurve);
                                             renderer.updateRenderableTrack(
                                                 loaded->centerline.renderableTrack);
-                                            renderer.updateSupportVertices(
-                                                loaded->supports.memberVertices);
+                                            publishSupportsToRenderer(
+                                                renderer, loaded->supports);
                                             authoredTrack =
                                                 std::move(loaded->track);
                                             centerlineCache.setTrackStyle(
@@ -1979,6 +2047,18 @@ editorUi.selectSection(restoredSelection, true);
                             editorUi.takeSupportAnchorCommand();
                         const auto requestedSupportConnectionCommand =
                             editorUi.takeSupportMemberEndConnectionCommand();
+                        const auto requestedSupportAppearanceCommand =
+                            editorUi.takeSupportAppearanceCommand();
+                        // Solid/Debug Lines are viewport presentation, not
+                        // document state, so they bypass the transaction and
+                        // the Undo history entirely.
+                        if (const auto display =
+                            editorUi.takeSupportDisplaySettings())
+                        {
+                            renderer.setSupportDisplay(
+                                display->solidVisible,
+                                display->debugLinesVisible);
+                        }
 
                         // Continuous handle drags queue a changed-value or
                         // changed-boundary edit every motion frame; both
@@ -2000,6 +2080,9 @@ editorUi.selectSection(restoredSelection, true);
                                 && requestedSupportEdit->continuous)
                             || (requestedSupportAnchorCommand.has_value()
                                 && requestedSupportAnchorCommand
+                                    ->continuous)
+                            || (requestedSupportAppearanceCommand.has_value()
+                                && requestedSupportAppearanceCommand
                                     ->continuous);
                         // A paused pointer can produce no changed value for
                         // one or more frames while the same drag is still
@@ -2009,6 +2092,97 @@ editorUi.selectSection(restoredSelection, true);
                             && !editorUi.documentDragActive())
                         {
                             documentHistory.endContinuousEdit();
+                        }
+
+                        if (requestedSupportAppearanceCommand.has_value())
+                        {
+                            const auto& appearance =
+                                *requestedSupportAppearanceCommand;
+                            try
+                            {
+                                quantum::editor::AuthoredTrackEditTransaction
+                                    appearanceTransaction{authoredTrack};
+                                // setSupports takes the whole collection and
+                                // validates it, so appearance edits go through
+                                // the same authoritative path as any other
+                                // support mutation.
+                                quantum::coaster::SupportCollection candidate =
+                                    appearanceTransaction.candidate().supports();
+                                if (appearance.target
+                                    != quantum::editor::
+                                        SupportAppearanceEdit::Foundation)
+                                {
+                                    quantum::coaster::setSupportAppearance(
+                                        candidate, appearance.structureId,
+                                        appearance.timber);
+                                }
+                                if (appearance.target
+                                    != quantum::editor::
+                                        SupportAppearanceEdit::Timber)
+                                {
+                                    quantum::coaster::
+                                        setSupportFoundationAppearance(
+                                            candidate, appearance.structureId,
+                                            appearance.foundation);
+                                }
+                                appearanceTransaction.candidate().setSupports(
+                                    candidate);
+                                quantum::editor::SupportVisualization
+                                    candidateVisualization = quantum::editor::
+                                        createSupportVisualization(
+                                            appearanceTransaction.candidate(),
+                                            centerline.samples);
+
+                                // Appearance only changes the material, but the
+                                // solid stream is rebuilt from the same upload
+                                // path so both views stay consistent. The
+                                // upload drains in-flight users before the
+                                // document is replaced.
+                                publishSupportsToRenderer(
+                                    renderer, candidateVisualization);
+                                appearanceTransaction.commit(authoredTrack);
+                                supportVisualization =
+                                    std::move(candidateVisualization);
+                                editorUi.setSupportVisualization(
+                                    supportVisualization);
+                                documentHistory.record(
+                                    authoredTrack, appearance.continuous);
+                                synchronizeDirtyState();
+                                if (!appearance.continuous)
+                                {
+                                    quantum::logging::logMessagef(
+                                        quantum::logging::LogLevel::Info,
+                                        "EDIT",
+                                        "Support %u appearance updated.",
+                                        appearance.structureId);
+                                }
+                            }
+                            catch (const std::exception& error)
+                            {
+                                // Resynchronize from the committed document so
+                                // the panel cannot keep a rejected value.
+                                const auto current = std::ranges::find_if(
+                                    authoredTrack.supports().structures,
+                                    [&appearance](
+                                        const quantum::coaster::
+                                            SupportStructure& structure)
+                                    {
+                                        return structure.id
+                                            == appearance.structureId;
+                                    });
+                                if (current
+                                    != authoredTrack.supports().structures.end())
+                                {
+                                    editorUi.synchronizeSupportAppearance(
+                                        *current);
+                                }
+                                editorUi.noteSupportEditFailure(error.what());
+                                quantum::logging::logMessagef(
+                                    quantum::logging::LogLevel::Warning,
+                                    "EDIT",
+                                    "Support appearance edit rejected: %s",
+                                    error.what());
+                            }
                         }
 
                         if (requestedSupportEdit.has_value())
@@ -2031,8 +2205,8 @@ editorUi.selectSection(restoredSelection, true);
                                 // The retained upload drains in-flight users;
                                 // publication occurs only after the candidate
                                 // visualization and GPU update both succeed.
-                                renderer.updateSupportVertices(
-                                    candidateSupports.memberVertices);
+                                publishSupportsToRenderer(
+                                    renderer, candidateSupports);
                                 supportTransaction.commit(authoredTrack);
                                 supportVisualization =
                                     std::move(candidateSupports);
@@ -2224,8 +2398,8 @@ editorUi.selectSection(restoredSelection, true);
                                 // The retained upload drains in-flight users;
                                 // publication occurs only after the candidate
                                 // visualization and GPU update both succeed.
-                                renderer.updateSupportVertices(
-                                    candidateSupports.memberVertices);
+                                publishSupportsToRenderer(
+                                    renderer, candidateSupports);
                                 supportTransaction.commit(authoredTrack);
                                 supportVisualization =
                                     std::move(candidateSupports);
@@ -2365,8 +2539,8 @@ editorUi.selectSection(restoredSelection, true);
                                     candidateSupports = quantum::editor::
                                         createSupportVisualization(
                                             candidate, centerline.samples);
-                                renderer.updateSupportVertices(
-                                    candidateSupports.memberVertices);
+                                publishSupportsToRenderer(
+                                    renderer, candidateSupports);
                                 supportTransaction.commit(authoredTrack);
                                 supportVisualization =
                                     std::move(candidateSupports);
@@ -3323,8 +3497,8 @@ editorUi.selectSection(restoredSelection, true);
                                 telemetry.frameFenceWaitMilliseconds +=
                                     renderer.lastFrameCompletionWaitMilliseconds();
                                 phaseBegin = PerformanceClock::now();
-                                renderer.updateSupportVertices(
-                                    candidateSupports.memberVertices);
+                                publishSupportsToRenderer(
+                                    renderer, candidateSupports);
                                 telemetry.supportUploadMilliseconds =
                                     std::chrono::duration<double, std::milli>(
                                         PerformanceClock::now()
@@ -3890,8 +4064,8 @@ editorUi.selectSection(restoredSelection, true);
                                         candidateCenterline.verticesPerCurve);
                                     renderer.updateRenderableTrack(
                                         candidateCenterline.renderableTrack);
-                                    renderer.updateSupportVertices(
-                                        candidateSupports.memberVertices);
+                                        publishSupportsToRenderer(
+                                            renderer, candidateSupports);
                                     applicationBlockingEvents
                                         .trackBufferMutation = true;
 
