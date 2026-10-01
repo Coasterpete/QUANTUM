@@ -1,0 +1,63 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "settle_frames": 24,
+  "overwrite": true,
+  "output_directory": "images/hybrid-local-bracing",
+  "scenarios": [
+    {
+      "name": "supports-hybrid",
+      "document": "../build/hybrid-local-bracing/open.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 19], "yaw": -1.32, "pitch": 0.10, "distance": 65, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-tall",
+      "document": "../build/hybrid-local-bracing/mixed.quantum",
+      "region": 0,
+      "camera": {"focus": [15, 0, 19], "yaw": -1.32, "pitch": 0.10, "distance": 65, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-foundations",
+      "document": "../build/hybrid-local-bracing/face-variants.quantum",
+      "region": 0,
+      "camera": {"focus": [0, 0, 19], "yaw": -2.82, "pitch": 0.03, "distance": 53, "projection": "Orthographic"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-tint-pine",
+      "document": "../build/hybrid-local-bracing/face-variants.quantum",
+      "region": 0,
+      "camera": {"focus": [0, 0, 19], "yaw": -0.65, "pitch": 0.03, "distance": 53, "projection": "Orthographic"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-closeup",
+      "document": "../build/hybrid-local-bracing/mixed.quantum",
+      "region": 0,
+      "camera": {"focus": [15, -2.5, 8], "yaw": -2.15, "pitch": 0.26, "distance": 4.5, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    },
+    {
+      "name": "supports-tint-weathered",
+      "document": "../build/hybrid-local-bracing/face-variants.quantum",
+      "region": 0,
+      "camera": {"focus": [0, -2.5, 24], "yaw": -0.65, "pitch": 0.18, "distance": 4.5, "projection": "Perspective"},
+      "ground": false, "environment": false, "sky_visible": false,
+      "sun_intensity": 5.5, "environment_intensity": 0.7,
+      "solid_supports": true, "debug_lines": false, "support_node_handles": false
+    }
+  ]
+}

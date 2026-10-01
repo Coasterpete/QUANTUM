@@ -402,9 +402,11 @@ namespace
         track = requireState(history.redo(), "wooden run Redo missing");
         require(track.supports().structures.front().id == generatedId,
             "Redo must restore the same generated run");
+        const auto originalSupports = track.supports();
         coaster::WoodenSupportRunRecipe changed = recipe;
         changed.family = coaster::TimberSupportFamily::HybridTimberLattice;
         changed.storyHeight = 8.0;
+        changed.hybridArchetype = coaster::HybridFramingArchetype::ConnectedTowers;
         editor::AuthoredTrackEditTransaction regeneration{track};
         static_cast<void>(coaster::generateWoodenSupportRun(
             regeneration.candidate(), changed, generatedId));
@@ -412,12 +414,17 @@ namespace
         history.record(track);
         require(track.supports().structures.front().generatedWoodenRun == changed,
             "regeneration transaction must publish the changed family");
+        const auto hybridSupports = track.supports();
         track = requireState(history.undo(), "wooden regeneration Undo missing");
         require(track.supports().structures.front().generatedWoodenRun == recipe,
             "regeneration Undo must restore the original family");
+        require(track.supports() == originalSupports,
+            "Undo must restore the complete original support graph");
         track = requireState(history.redo(), "wooden regeneration Redo missing");
         require(track.supports().structures.front().generatedWoodenRun == changed,
             "regeneration Redo must restore the changed family");
+        require(track.supports() == hybridSupports,
+            "Redo must restore Hybrid framing, roles, references and foundations exactly");
     }
 }
 

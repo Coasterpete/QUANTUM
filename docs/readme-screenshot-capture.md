@@ -3,6 +3,10 @@
 This developer-only workflow renders the real QUANTUM editor and saves its
 complete client area as PNG. It does not author or edit track content.
 Normal startup without capture arguments is unchanged.
+The original five README views below remain supported. Supports M2A also uses
+named support views, optional camera poses and node-handle visibility; see
+[Hybrid mounting captures](hybrid-member-mounting.md) and
+[final integration validation](hybrid-m2a-final-validation.md).
 
 ## Run
 
@@ -18,7 +22,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Screenshot capture failed; see the error outpu
 
 **First supply a document.** `readme-captures.json` is an intentionally incomplete
 template: replace `USER-AUTHORED.quantum` and choose the appropriate region indices.
-There is no tracked, approved screenshot document in this milestone. The command
+The original README template does not include a tracked screenshot document. The command
 fails clearly if the fixture is missing; it never falls back to generated content.
 You can keep a local manifest under `build/` and pass its path instead.
 
@@ -59,16 +63,21 @@ The JSON template contains only presentation choices needed by these five shots:
 | `settle_frames` | Optional consecutive stable-size frames before readback; default 16, range 8–600 |
 | `output_directory` | Required output directory, created if missing |
 | `overwrite` | Optional, defaults false; explicitly true allows replacing existing screenshot files |
-| `scenarios` | One to five distinct entries using the names above |
+| `scenarios` | One to seventeen distinct named entries; the original five views above and later presets, including the nine `supports-*` views |
 | scenario `document` | Required existing document, loaded by the production deserializer and solve/load acceptance paths |
 | scenario `region` | Required **zero-based** region index (UI region 3 is index 2) |
 | scenario `framing` | Optional `all` (default) or `selected`, using existing Frame All / Focus camera behavior |
 | scenario `tool` | Optional `move` (default) or `rotate`, only for `track-start-gizmo` |
+| scenario `camera` | Optional existing-camera pose: finite `focus` `[x,y,z]`, `yaw`/`pitch` in radians, positive `distance`, optional `projection` (`Perspective` by default or `Orthographic`) |
+| scenario `support_node_handles` | Optional boolean, true by default; false hides support node markers for capture only |
+| scenario `solid_supports`, `debug_lines` | Optional booleans controlling support solids and logical centerlines; both default true |
 
 Each entry requires `name`, `document`, and `region`. Each scenario may use a
-different supplied document. Camera orientation is the existing Perspective
-preset at 45 degrees; projection, grid/curve visibility, anchor state and panel
-layout are fixed by the preset, not a general UI scripting language. Output names
+different supplied document. Without `camera`, orientation uses the existing
+Perspective preset at 45 degrees and ordinary framing. An explicit pose uses the
+normal camera's Perspective/Orthographic projection; it does not alter geometry.
+Grid/curve visibility, anchor state and panel layout follow the named preset.
+This is not a general UI scripting language. Output names
 are fixed to the scenario names. Existing directories/symlinks and paths aliasing
 the manifest or a supplied document cannot be overwritten as screenshot files.
 `overwrite: true` in the example is deliberate so approved inputs can be rerun.
@@ -153,9 +162,10 @@ write may leave a partial output file; rerun after fixing the cause.
 
 Core math, physics, serialization semantics, normal authored-edit workflows,
 camera semantics, shaders, and `Application::run` are unchanged. Focused tests
-plus native renderer validation are sufficient for this opt-in presentation seam;
-the expensive full numerical suite is not part of this milestone. Release and
-cross-driver validation remain optional follow-up checks.
+plus native renderer validation were the original verification for this opt-in
+presentation seam. Frozen Hybrid M2A subsequently completed the full Debug and
+Release suites, as recorded in the final integration report linked above.
+Cross-driver pixel equivalence remains unverified.
 
 ## Later README refresh
 

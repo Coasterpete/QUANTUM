@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -76,6 +77,34 @@ namespace quantum::coaster
             return profile.outerDimensions;
         }
 
+        // Support function of the cross-section in the requested direction.
+        // A brace's broad face can be Y while a ledger's is Z; neither gets a
+        // hard-coded thickness axis. Circular sections use the ellipse radius.
+        [[nodiscard]] double sectionHalfExtent(const SupportMemberProfile& profile,
+            const SupportMemberFrame& frame, const glm::dvec3& normal)
+        {
+            const auto section = crossSection(profile);
+            const double y = section.x * glm::dot(normal, frame.axisY);
+            const double z = section.y * glm::dot(normal, frame.axisZ);
+            return 0.5 * (profile.shape == SupportMemberProfileShape::Circular
+                ? std::hypot(y, z) : std::abs(y) + std::abs(z));
+        }
+
+        [[nodiscard]] glm::dvec3 mountingNormal(const SupportMemberMountingFace face,
+            const SupportMemberFrame& host)
+        {
+            switch (face)
+            {
+            case SupportMemberMountingFace::PositiveY: return host.axisY;
+            case SupportMemberMountingFace::NegativeY: return -host.axisY;
+            case SupportMemberMountingFace::PositiveZ: return host.axisZ;
+            case SupportMemberMountingFace::NegativeZ: return -host.axisZ;
+            case SupportMemberMountingFace::PositiveX: return host.axisX;
+            case SupportMemberMountingFace::NegativeX: return -host.axisX;
+            }
+            throw std::invalid_argument("Unknown support mounting face.");
+        }
+
         // The unit meshes are unit-cube and unit-diameter, so the basis
         // columns carry the member's length, width, and depth directly.
         [[nodiscard]] glm::mat4 memberTransform(
@@ -125,12 +154,21 @@ namespace quantum::coaster
 
     SupportMemberFrame resolveSupportMemberFrame(
         const glm::dvec3& start,
-        const glm::dvec3& end)
+        const glm::dvec3& end,
+        const SupportMemberOrientation orientation,
+        const SupportMemberOrientationReference& orientationReference)
     {
         if (!isFinite(start) || !isFinite(end))
         {
             throw std::invalid_argument(
                 "Support member endpoints must be finite.");
+        }
+        validateSupportMemberOrientation(orientation);
+        if (orientationReference.has_value()
+            && !isFinite(*orientationReference))
+        {
+            throw std::invalid_argument(
+                "Support member orientation reference must be finite.");
         }
 
         SupportMemberFrame frame;
@@ -144,37 +182,289 @@ namespace quantum::coaster
 
         frame.axisX = delta / frame.length;
 
-        // The cross-section reference is world +Z projected off the member
-        // axis. For any member that is not essentially vertical this is well
-        // conditioned, continuous in the axis, and gives neighbouring members
-        // the same orientation -- which is what stops a bent's posts from
-        // randomly rolling against each other.
-        if (std::abs(frame.axisX.z) > supportMemberVerticalTolerance)
-        {
-            frame.axisY = glm::dvec3(1.0, 0.0, 0.0);
-            frame.usedVerticalFallback = true;
-        }
-        else
-        {
-            frame.axisY = glm::dvec3(0.0, 0.0, 1.0);
-        }
+        // Ordered reference preferences. Generic is the historical angle
+        // branch, preserved exactly for legacy and manual members. Authored
+        // planes name their reference directly: posts take the vertical
+        // branch whatever their batter, everything else takes world +Z.
+        const bool genericVertical =
+            orientation == SupportMemberOrientation::Generic
+            && std::abs(frame.axisX.z) > supportMemberVerticalTolerance;
+        const bool preferVertical = orientation
+                == SupportMemberOrientation::BentPost
+            || genericVertical;
+        glm::dvec3 reference = preferVertical
+            ? glm::dvec3(1.0, 0.0, 0.0)
+            : glm::dvec3(0.0, 0.0, 1.0);
 
-        // Gram-Schmidt against the exact longitudinal axis. axisY is
+        // Gram-Schmidt against the exact longitudinal axis. The reference is
         // recomputed rather than reused so a fallback that happens to be
         // parallel still yields a valid basis.
-        frame.axisY = frame.axisY
-            - frame.axisX * glm::dot(frame.axisX, frame.axisY);
-        const double perpendicularLength = glm::length(frame.axisY);
-        if (perpendicularLength <= minimumSupportMemberLength)
+        auto project = [&](const glm::dvec3& candidate) -> bool
         {
-            throw std::invalid_argument(
-                "Support member orientation is degenerate.");
+            frame.axisY = candidate
+                - frame.axisX * glm::dot(frame.axisX, candidate);
+            const double perpendicularLength = glm::length(frame.axisY);
+            if (perpendicularLength <= minimumSupportMemberLength)
+            {
+                return false;
+            }
+            frame.axisY /= perpendicularLength;
+            return true;
+        };
+
+        // An authored reference wins outright: it is the directed bent frame
+        // the member was generated with, so banked bents resolve in their
+        // actual structural frame. A reference numerically parallel to the
+        // member axis (stale after an edit) falls back deterministically
+        // instead of corrupting the presentation.
+        bool usedAuthoredReference = false;
+        if (orientationReference.has_value()
+            && project(*orientationReference))
+        {
+            usedAuthoredReference = true;
         }
-        frame.axisY /= perpendicularLength;
+        else if (!project(reference))
+        {
+            // The member runs parallel to its orientation reference (a
+            // misauthored plane, or a stale authored vector after an edit).
+            // Mirror once; bare Generic keeps its historical failure instead
+            // so old documents resolve exactly as before.
+            if (orientation == SupportMemberOrientation::Generic
+                && !orientationReference.has_value())
+            {
+                throw std::invalid_argument(
+                    "Support member orientation is degenerate.");
+            }
+            reference = preferVertical ? glm::dvec3(0.0, 0.0, 1.0)
+                                       : glm::dvec3(1.0, 0.0, 0.0);
+            if (!project(reference))
+            {
+                throw std::invalid_argument(
+                    "Support member orientation is degenerate.");
+            }
+        }
+        frame.usedVerticalFallback = !usedAuthoredReference
+            && reference.x > 0.5;
         // Right-handed completion, so the local basis always maps +Y x +Z to
         // +X and triangle winding is preserved for every member.
         frame.axisZ = glm::cross(frame.axisX, frame.axisY);
         return frame;
+    }
+
+    std::vector<SupportMemberPlacement> resolveSupportMemberPlacements(
+        const SupportStructure& structure)
+    {
+        const NodeLookup nodes = buildNodeLookup(structure);
+        std::vector<SupportMemberPlacement> placements;
+        placements.reserve(structure.members.size());
+        bool hasMounting = false;
+        for (const auto& member : structure.members)
+        {
+            validateSupportMemberProfile(member.profile);
+            const auto& start = requireNode(nodes, member.startNodeId);
+            const auto& end = requireNode(nodes, member.endNodeId);
+            placements.push_back({member.id, start, end,
+                resolveSupportMemberFrame(start, end, member.orientation, member.orientationReference)});
+            for (const auto* connection : {&member.startConnection, &member.endConnection})
+                if (*connection && (*connection)->mounting) hasMounting = true;
+        }
+        // The historical path is returned without arithmetic on endpoints.
+        if (!hasMounting) return placements;
+
+        using IncidentLookup = std::unordered_map<SupportElementId, std::vector<std::size_t>>;
+        IncidentLookup posts;
+        IncidentLookup ledgers;
+        for (std::size_t i = 0; i < structure.members.size(); ++i)
+        {
+            const auto& member = structure.members[i];
+            for (const auto node : {member.startNodeId, member.endNodeId})
+            {
+                if (member.role == SupportMemberRole::PrimaryPost) posts[node].push_back(i);
+                // Run-side braces must also clear incident horizontal ties on
+                // their selected post face, using each tie's resolved envelope.
+                if (member.role == SupportMemberRole::LedgerCap
+                    || member.role == SupportMemberRole::LongitudinalTie) ledgers[node].push_back(i);
+            }
+        }
+        // Orient each post chain away from its foundation using connectivity,
+        // not world height or the mounted member's endpoint order. Unanchored
+        // manual chains use their lowest node ID as a deterministic root.
+        std::unordered_map<SupportElementId, std::size_t> depth;
+        const auto walk = [&](const SupportElementId root)
+        {
+            if (depth.contains(root) || !posts.contains(root)) return;
+            std::vector<SupportElementId> queue{root};
+            depth.emplace(root, 0);
+            for (std::size_t head = 0; head < queue.size(); ++head)
+            {
+                const auto node = queue[head];
+                for (const auto index : posts.at(node))
+                {
+                    const auto& post = structure.members[index];
+                    const auto next = post.startNodeId == node ? post.endNodeId : post.startNodeId;
+                    if (depth.emplace(next, depth.at(node) + 1).second) queue.push_back(next);
+                }
+            }
+        };
+        std::vector<SupportElementId> orderedNodes;
+        for (const auto& node : structure.nodes) orderedNodes.push_back(node.id);
+        std::sort(orderedNodes.begin(), orderedNodes.end());
+        for (const auto& node : structure.nodes) if (node.foundation) walk(node.id);
+        for (const auto node : orderedNodes) walk(node);
+
+        std::vector<SupportMemberFrame> postFrames(placements.size());
+        for (std::size_t i = 0; i < structure.members.size(); ++i)
+        {
+            const auto& post = structure.members[i];
+            if (post.role != SupportMemberRole::PrimaryPost) continue;
+            if ((post.startConnection && post.startConnection->mounting)
+                || (post.endConnection && post.endConnection->mounting))
+                throw std::invalid_argument("Mounting hosts must remain on their logical post chains.");
+            const bool forward = depth.at(post.startNodeId) < depth.at(post.endNodeId);
+            postFrames[i] = resolveSupportMemberFrame(
+                forward ? placements[i].start : placements[i].end,
+                forward ? placements[i].end : placements[i].start,
+                post.orientation, post.orientationReference);
+        }
+        const auto hostAt = [&](const SupportElementId node) -> std::size_t
+        {
+            const auto found = posts.find(node);
+            if (found == posts.end())
+                throw std::invalid_argument("Mounted support endpoint has no incident primary post.");
+            std::optional<std::size_t> lower;
+            for (const auto index : found->second)
+            {
+                const auto& post = structure.members[index];
+                const auto other = post.startNodeId == node ? post.endNodeId : post.startNodeId;
+                if (depth.at(other) < depth.at(node))
+                {
+                    if (lower) throw std::invalid_argument("Mounted endpoint has ambiguous supporting post branches.");
+                    lower = index;
+                }
+            }
+            if (lower) return *lower;
+            if (found->second.size() != 1)
+                throw std::invalid_argument("Mounted endpoint has ambiguous supporting post branches.");
+            return found->second.front();
+        };
+        std::vector<std::array<glm::dvec3, 2>> mountedEndpoints(placements.size());
+        const auto resolve = [&](const std::size_t index)
+        {
+            const auto& member = structure.members[index];
+            auto& placement = placements[index];
+            const std::array<SupportElementId, 2> ids{member.startNodeId, member.endNodeId};
+            const std::array<const std::optional<SupportMemberEndConnection>*, 2> connections{
+                &member.startConnection, &member.endConnection};
+            std::array<const SupportMemberMounting*, 2> mounting{};
+            std::array<glm::dvec3, 2> normals{};
+            std::array<double, 2> faceDistance{};
+            std::array<std::size_t, 2> hosts{};
+            const std::array<glm::dvec3, 2> logical{
+                requireNode(nodes, ids[0]), requireNode(nodes, ids[1])};
+            for (std::size_t end = 0; end < 2; ++end)
+            {
+                if (!*connections[end] || !(*connections[end])->mounting) continue;
+                mounting[end] = &*(*connections[end])->mounting;
+                const auto& intent = *mounting[end];
+                validateSupportMemberMounting(intent);
+                hosts[end] = hostAt(ids[end]);
+                const auto& host = postFrames[hosts[end]];
+                if (host.length <= minimumSupportMemberLength)
+                    throw std::invalid_argument("Mounting requires a nondegenerate supporting post.");
+                normals[end] = mountingNormal(intent.face, host);
+                if (intent.mode == SupportMemberMountingMode::TerminalSeat)
+                {
+                    const bool positive = intent.face == SupportMemberMountingFace::PositiveX;
+                    const auto& post = structure.members[hosts[end]];
+                    const auto other = post.startNodeId == ids[end] ? post.endNodeId : post.startNodeId;
+                    if (posts.at(ids[end]).size() != 1
+                        || positive != (depth.at(ids[end]) > depth.at(other)))
+                        throw std::invalid_argument("A terminal seat must face out of a terminal post end.");
+                }
+                else
+                    faceDistance[end] = sectionHalfExtent(structure.members[hosts[end]].profile,
+                        host, normals[end]);
+                if (intent.layer == SupportMemberMountingLayer::OutsideLedger)
+                {
+                    const auto row = ledgers.find(ids[end]);
+                    if (row != ledgers.end()) for (const auto ledgerIndex : row->second)
+                    {
+                        if (ledgerIndex == index) continue;
+                        const auto& ledger = structure.members[ledgerIndex];
+                        const std::size_t ledgerEnd = ledger.startNodeId == ids[end] ? 0 : 1;
+                        const auto& connection = ledgerEnd == 0 ? ledger.startConnection : ledger.endConnection;
+                        if (!connection || !connection->mounting) continue;
+                        const auto& ledgerIntent = *connection->mounting;
+                        if (ledgerIntent.mode != SupportMemberMountingMode::Face
+                            || ledgerIntent.face != intent.face) continue;
+                        if (ledgerIntent.layer != SupportMemberMountingLayer::Direct)
+                            throw std::invalid_argument("OutsideLedger requires directly mounted incident ledgers.");
+                        const double outer = glm::dot(mountedEndpoints[ledgerIndex][ledgerEnd]
+                            - logical[end], normals[end]) + sectionHalfExtent(ledger.profile,
+                                placements[ledgerIndex].frame, normals[end]);
+                        faceDistance[end] = std::max(faceDistance[end], outer);
+                    }
+                }
+                faceDistance[end] += intent.separation;
+            }
+            auto frame = resolveSupportMemberFrame(logical[0], logical[1], member.orientation,
+                member.orientationReference);
+            std::array<glm::dvec3, 2> physical = logical;
+            // Different host normals change the final member axis. Re-evaluate
+            // its projected half-section against that axis until contact
+            // distances agree, instead of using a stale logical-frame width.
+            bool converged = false;
+            for (int iteration = 0; iteration < 64; ++iteration)
+            {
+                auto next = logical;
+                for (std::size_t end = 0; end < 2; ++end)
+                    if (mounting[end]) next[end] += normals[end] * (faceDistance[end]
+                        + sectionHalfExtent(member.profile, frame, normals[end]));
+                const double error = std::max(glm::length(next[0] - physical[0]),
+                    glm::length(next[1] - physical[1]));
+                physical = next;
+                frame = resolveSupportMemberFrame(physical[0], physical[1], member.orientation,
+                    member.orientationReference);
+                if (error <= 1e-11) { converged = true; break; }
+            }
+            if (!converged) throw std::invalid_argument("Support mounting contact resolution did not converge.");
+            mountedEndpoints[index] = physical;
+            for (std::size_t end = 0; end < 2; ++end)
+            {
+                if (!mounting[end]) continue;
+                double extension = mounting[end]->overhang;
+                if (mounting[end]->coverage == SupportMemberEndCoverage::OutsideSupport)
+                {
+                    const auto& host = postFrames[hosts[end]];
+                    const auto section = crossSection(structure.members[hosts[end]].profile);
+                    const double y = std::abs(glm::dot(frame.axisX, host.axisY));
+                    const double z = std::abs(glm::dot(frame.axisX, host.axisZ));
+                    // Cover the supporting side plane most aligned with the
+                    // member axis. Division accounts for a skewed connection.
+                    if (std::max(y, z) <= minimumSupportMemberLength)
+                        throw std::invalid_argument("End coverage requires a member crossing a supporting side face.");
+                    extension += y >= z ? 0.5 * section.x / y : 0.5 * section.y / z;
+                }
+                physical[end] += (end == 0 ? -frame.axisX : frame.axisX) * extension;
+            }
+            placement.start = physical[0];
+            placement.end = physical[1];
+            placement.frame = resolveSupportMemberFrame(physical[0], physical[1], member.orientation,
+                member.orientationReference);
+        };
+        // Direct contacts first; the outer brace layer reads their resolved
+        // ledger envelopes. This fixed dependency order needs no joint manager.
+        for (const auto layer : {SupportMemberMountingLayer::Direct, SupportMemberMountingLayer::OutsideLedger})
+            for (std::size_t i = 0; i < structure.members.size(); ++i)
+            {
+                const auto& member = structure.members[i];
+                const bool outer = (member.startConnection && member.startConnection->mounting
+                    && member.startConnection->mounting->layer == SupportMemberMountingLayer::OutsideLedger)
+                    || (member.endConnection && member.endConnection->mounting
+                    && member.endConnection->mounting->layer == SupportMemberMountingLayer::OutsideLedger);
+                if (outer == (layer == SupportMemberMountingLayer::OutsideLedger)) resolve(i);
+            }
+        return placements;
     }
 
     SupportSolidPresentation buildSupportSolidPresentation(
@@ -191,7 +481,7 @@ namespace quantum::coaster
         validateSupportFoundationAppearance(
             presentation.foundationAppearance);
 
-        const NodeLookup nodes = buildNodeLookup(structure);
+        const auto placements = resolveSupportMemberPlacements(structure);
 
         std::vector<SupportMemberInstance> rectangular;
         std::vector<SupportMemberInstance> circular;
@@ -211,12 +501,14 @@ namespace quantum::coaster
             }
         }
 
-        for (const SupportMember& member : structure.members)
+        for (std::size_t index = 0; index < structure.members.size(); ++index)
         {
+            const SupportMember& member = structure.members[index];
             validateSupportMemberProfile(member.profile);
-            const SupportMemberFrame frame = resolveSupportMemberFrame(
-                requireNode(nodes, member.startNodeId),
-                requireNode(nodes, member.endNodeId));
+            validateSupportMemberOrientation(member.orientation);
+            validateSupportMemberOrientationReference(
+                member.orientationReference);
+            const SupportMemberFrame& frame = placements[index].frame;
             if (frame.length <= minimumSupportMemberLength)
             {
                 // The generator already rejects these, so reaching one here

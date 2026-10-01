@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace quantum::editor
@@ -48,15 +49,16 @@ namespace quantum::editor
             coaster::invalidSupportElementId;
         glm::dvec3 startPosition{0.0};
         glm::dvec3 endPosition{0.0};
+        coaster::SupportMemberFrame frame;
+        coaster::SupportMemberProfile profile;
     };
 
     // Editor-owned projection of committed support graph data. Double-
     // precision metadata remains authoritative for picking; float vertices
     // are only the renderer upload stream.
     //
-    // solidPresentations is produced from the same resolved node positions as
-    // the line stream, so the solid and technical views can never disagree
-    // about where a member runs.
+    // Member picking metadata follows resolved physical placement. Node
+    // handles and memberVertices remain on the logical structural graph.
     struct SupportVisualization
     {
         std::vector<renderer::LineVertex> memberVertices;
@@ -67,6 +69,9 @@ namespace quantum::editor
 
     [[nodiscard]] SupportVisualization createSupportVisualization(
         const coaster::SupportCollection& supports);
+
+    [[nodiscard]] std::optional<std::pair<glm::dvec3, glm::dvec3>> supportVisualizationBounds(
+        const SupportVisualization& visualization);
 
     // Resolves active track attachments from the current solved path before
     // deriving the existing visualization. Unattached and foundation nodes

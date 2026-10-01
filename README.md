@@ -287,7 +287,7 @@ Near-term development is expected to continue along several complementary tracks
 
 - Editable force-target profiles and endpoint-constrained force solving
 - Interior/shared-anchor constraints and terminal pose constraints
-- Expanded support authoring (gizmo movement, node snapping, procedural generation, final member meshes)
+- Expanded support authoring (panel-selection UI and detailed joints); gizmo movement, node snapping, procedural timber generation and solid members are implemented in [Supports M2A](docs/supports-m2a-solid-rendering.md).
 
 ## Physics and simulation
 

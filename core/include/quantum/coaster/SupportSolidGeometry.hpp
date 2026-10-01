@@ -6,6 +6,7 @@
 #include <glm/vec3.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace quantum::coaster
@@ -120,18 +121,54 @@ namespace quantum::coaster
     // conditioned instead of collapsing.
     inline constexpr double supportMemberVerticalTolerance = 0.9995;
 
-    // Local +X is the start-to-end direction. Local +Y is world +Z projected
-    // off that axis, so a member's cross-section keeps a stable "up" and
-    // neighbouring members in a bent agree on orientation. A vertical member
-    // instead uses world +X, because world +Z is parallel to its own axis.
+    // Derived geometry only, in member order. Logical nodes and connectivity
+    // are untouched. Both the renderer and editor consume this resolution.
+    struct SupportMemberPlacement
+    {
+        SupportElementId memberId = invalidSupportElementId;
+        glm::dvec3 start{0.0};
+        glm::dvec3 end{0.0};
+        SupportMemberFrame frame;
+    };
+
+    [[nodiscard]] std::vector<SupportMemberPlacement> resolveSupportMemberPlacements(
+        const SupportStructure& structure);
+
+    // Local +X is the start-to-end direction. Local +Y is a reference
+    // direction projected off that axis, so a member's cross-section keeps a
+    // stable "up" and neighbouring members in a bent agree on orientation.
     // Local +Z completes a right-handed basis.
     //
-    // Throws std::invalid_argument for a non-finite endpoint. A degenerate
-    // pair returns length 0 with the default identity axes; callers must skip
-    // such a frame.
+    // The reference is selected by authored evidence, never inferred from the
+    // member angle: Generic keeps the historical angle-based branch exactly
+    // (world +Z, or world +X within supportMemberVerticalTolerance of
+    // vertical), so legacy and manual documents resolve bit-identically.
+    // BentPost always prefers world +X, the vertical-branch reference, which
+    // removes the threshold discontinuity for battered posts straddling the
+    // tolerance. Every other authored plane prefers world +Z, which places
+    // transverse members upright, longitudinal ties upright, and diagonals
+    // coherently inside their containing plane. A member parallel to its
+    // preferred reference (a misauthored plane) falls back to the mirror
+    // reference once before failing; Generic keeps its historical failure.
+    //
+    // A present orientationReference (the Hybrid generator's directed bent
+    // frame, or an explicit authoring edit) overrides the plane-derived
+    // reference above: it is used directly, direction preserved, so banked
+    // bents resolve in their actual structural frame instead of a global
+    // world axis. A reference numerically parallel to the member axis does
+    // not corrupt the document -- resolution falls back deterministically to
+    // the orientation-derived reference instead.
+    //
+    // Throws std::invalid_argument for a non-finite endpoint, an unknown
+    // orientation, a non-finite reference, or a degenerate projection. A
+    // degenerate pair returns length 0 with the default identity axes;
+    // callers must skip such a frame.
     [[nodiscard]] SupportMemberFrame resolveSupportMemberFrame(
         const glm::dvec3& start,
-        const glm::dvec3& end);
+        const glm::dvec3& end,
+        SupportMemberOrientation orientation = SupportMemberOrientation::Generic,
+        const SupportMemberOrientationReference& orientationReference =
+            std::nullopt);
 
     // Builds the solid presentation for one already-resolved structure. Node
     // positions must already have active track attachments resolved; this

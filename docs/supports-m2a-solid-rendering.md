@@ -1,21 +1,164 @@
 # Supports M2A — Solid Timber Rendering
 
-Supports M2A renders the M1 wooden support topology as solid, physically based
-timber members. The generator's topology remains authoritative; this milestone
-only changes how that topology is presented.
+Supports M2A renders authored support graphs as solid, physically based timber
+members. The initial renderer-only implementation is now accompanied by the
+completed Hybrid accuracy, local bracing, mounting and outer-support work.
+Hybrid M2A is frozen: integration cleanup adds no new framing or visual features.
+The generator owns logical topology and member intent; Core resolves physical
+placement before editor presentation and renderer upload.
+See [final integration validation](hybrid-m2a-final-validation.md) for the complete
+Debug/Release matrix, runtime smoke, capture review and cleanup inventory.
 
 > **This is visual structural representation, not structural engineering.**
 > Nothing here performs load analysis, stress or buckling checks, code
 > compliance, footing design, or automatic timber sizing. Footing pads are a
 > presentation proportion chosen so a footing reads as a footing, nothing more.
 
+## Generator accuracy corrections (2026-09-30)
+
+This section supersedes the original renderer-only M2A and M1 descriptions.
+The current implementation retains
+explicit `SupportMemberRole`, `SupportMemberOrientation` and optional
+`orientationReference`; the existing solid-frame resolver consumes the reference.
+
+Shared interior framing rows now use foundation elevation plus integer multiples
+of `storyHeight`, below the lowest upper endpoint. A sorted two-pointer merge
+matches equal actual elevations within 1e-6 Core units, advancing both rows after
+a match. Foundation rows correspond separately; terminal caps correspond once.
+In the simple archetype, unmatched ledgers terminate at their own bent. The last common row and the two
+terminal caps bound a stepped upper transition bay. Selected longitudinal braces
+use those same matched boundaries, so no row is rounded onto multiple other rows.
+Modern's existing low-run two-tier rule remains pending its separate review;
+its added half-height row corresponds only when actual elevations match.
+
+Hybrid keeps an upright two-post core per framed unit; optional outer primary
+lines supplement it. Lower rows are horizontal, centered over
+the footing row with upright posts beneath an unbanked
+horizontal shoulder. The shoulder sits below the lowest track attachment by
+`0.25 * min(storyHeight, minimumAttachmentHeightAboveFoundation)`. Only the upper
+post connections and cap reach the rider-frame attachment row. The clearance,
+raised quarter-first-story ledger, section proportions, repeated tower-face
+diagonals and simple-archetype every-third-bay brace selection remain procedural approximations;
+none establishes manufacturer hardware dimensions or structural adequacy.
+
+Hybrid post references use the actual bounding row vectors. Caps, ledgers and
+ties use the actual supporting post at the member's start. Transverse brace
+references are normals to the triangle formed by the brace and its lower row;
+longitudinal brace references use the brace and the post-side segment between
+matched panel boundaries. Each reference is projected off its own member axis
+and normalized without a sign flip. Nonplanar panels deliberately use that local
+triangle, not a fictitious whole-bent or averaged bay plane. References stay
+authored on endpoint edits; regeneration recomputes them. Already-unit references
+are stable across save/load normalization.
+
+In SimpleBent, both shoulder and attachment-row Hybrid longitudinal connections are
+`LongitudinalTie`. This generator does not demonstrate a track stringer function,
+so it emits no Hybrid `TrackSupport` members. The role remains supported for
+authored members and existing documents. Mounting shifts physical endpoints as
+described below; detailed joint cuts, steel track-interface hardware and
+cantilevers are not modeled. Unmatched story
+termination and the upper connection geometry remain conservative procedural
+representations, not engineered transition details.
+
+All four generators now assign roles and role-specific sections. The shared
+elevation/correspondence correction also applies to all families. Traditional,
+Modern Twister and Prefabricated retain their existing family organization and
+Generic orientation fallback; their dedicated accuracy review remains pending.
+
+### Hybrid connected-tower topology (direct-reference correction)
+
+The user-supplied orthographic and perspective references show repeated paired
+post frames, open connecting bays and staggered local horizontal connections.
+They establish a framing language, not measured RMC dimensions or a universal
+number of transverse post lanes.
+
+`WoodenSupportRunRecipe::hybridArchetype` now supports `SimpleBent`,
+`ConnectedTowers` and `Automatic`. Explicit choices persist as an optional recipe
+field. Missing fields load as Automatic; saved member geometry is not regenerated
+on load. There is no new UI. Automatic selects ConnectedTowers for the whole run
+if any sampled tower needs more than one lower-frame story; otherwise it selects
+SimpleBent. This isolated QUANTUM heuristic is replaceable by authored regions,
+graph decisions or local geometry rules. It is not an authentic height threshold.
+
+SimpleBent preserves the existing two-post organization, raised ledger and
+actual-elevation story correspondence. It can also be selected for tall runs.
+ConnectedTowers assembles neighboring two-post towers within one structure.
+Each tower retains its own transverse rows, cap, story count and face diagonals.
+Actual interior story elevations still use foundation elevation plus multiples
+of storyHeight; varying tower heights terminate these rows independently.
+Arbitrary per-tower story origins are not implemented.
+
+For connected towers, each neighboring bay derives horizontal tie elevations
+from the preceding tower's interior story rows. Terminal caps stay local, avoiding
+an additional near-cap tie beside a short terminal story. Alternating bays offset those
+elevations downward by 0.35 storyHeight. The unshifted bays also connect at a
+raised lower-ledger height available within both posts. Shifted bays omit that
+baseline connection. Elevations outside the receiving lower post's height are
+omitted, never rounded or fanned onto another row. Each accepted tie uses equal
+physical endpoint elevations. The offset and bay schedule are visual procedural
+approximations of the orthographic pattern.
+
+A tie can meet a post between transverse rows. Its generated node splits the
+incident PrimaryPost into two collinear members; existing equal-height nodes are
+reused, including points from the other neighboring bay. No transverse ledger
+is created for these intersections. The new post segments retain their profile
+and BentPost reference; LongitudinalTie members use the Hybrid tie profile and
+derive their RunLongitudinal reference from the actual incident post. Junctions
+are ordinary document geometry and survive serialization and Undo/Redo.
+
+Both archetypes now use upright lower posts (base spread equals upper width),
+without mandatory 1.5 base splay. Upper post links alone reach banked attachments.
+Selected tower faces repeat single diagonals in one direction through their
+stories. This is a local procedural choice, not a universal prohibition on other
+brace patterns. ConnectedTowers leaves all connecting bays free of longitudinal
+diagonals by default, including when longitudinalBracing is true. Explicit
+local panel choices can add a single run diagonal; SimpleBent retains its
+optional every-third-bay approximation. Upper attachment ties retain their own
+geometry and may slope; they are distinct from the horizontal lower connections.
+
+Focused Debug verification covers both archetypes, independent rising/falling
+stories, intermediate post junctions, unchanged transverse ledgers, no duplicated
+or fanned ties, upright posts, deterministic regeneration, profiles, actual
+orientation references on curved/banked runs, persistence and exact Undo/Redo.
+The three Windows editor acceptance captures are generated by
+`hybrid-topology-captures.json` after exporting their documents with
+`QuantumCoreHybridTimberAccuracyTests` and three output document paths.
+
+- [Simple Hybrid](images/hybrid-topology/supports-hybrid.png)
+- [Connected towers](images/hybrid-topology/supports-tall.png)
+- [Staggered connection close-up](images/hybrid-topology/supports-closeup.png)
+
+### Final local choices and outer supports
+
+[Local bracing](hybrid-local-bracing.md) provides sparse ConnectedTowers
+longitudinal Open/SingleDiagonal choices and transverse face/direction overrides.
+Panels use actual local tie or story boundaries; absent selections stay dormant
+when a recipe changes. There is no panel-selection UI or universal brace schedule.
+
+[Outer supports](hybrid-outer-support.md) can add independently founded inclined
+PrimaryPost chains on selected tower sides, around the unchanged upright inner
+pair. Ledger extensions meet these chains at existing transverse elevations.
+Explicit base/top outsets determine inclination; Automatic never selects outer
+supports. These are primary framing lines, not role-inferred diagonal braces.
+
 ## Architecture
 
+Newly generated Hybrid members now resolve physical face mounting before the
+instance transform. Legacy members without mounting metadata retain centered
+placement. See [Hybrid member mounting](hybrid-member-mounting.md) for the exact
+optional member-end schema, frame signs, layering, overhang and verification.
+
 ```
-AuthoredTrack (Core, unchanged M1 topology)
+AuthoredTrack (Core, logical support graph and persisted intent)
   └─ SupportCollection / SupportStructure / SupportMember / SupportNode
-       ├─ SupportAppearance            (new: tint, roughness, normal, scale)
-       └─ SupportFoundationAppearance  (new: concrete color, pad size)
+       ├─ role / orientation / orientationReference / end mounting
+       ├─ generatedWoodenRun recipe and local Hybrid choices
+       ├─ SupportAppearance            (tint, roughness, normal, scale)
+       └─ SupportFoundationAppearance  (concrete color, pad size)
+
+resolveSupportMemberPlacements()  Core, derived endpoints and member frames
+  └─ editor picking, highlights and bounds use physical geometry
+       (node handles and technical lines retain logical geometry)
 
 buildSupportSolidPresentation()   Core, renderer-neutral
   └─ SupportSolidPresentation { appearance, batches[], foundations[] }
@@ -30,32 +173,38 @@ Renderer::updateSupportSolidPresentation()
        └─ one instanced draw call per (structure × profile shape)
 ```
 
-Everything new lives behind the existing seams. No M1 structure was replaced,
-and the existing line renderer is untouched.
+The existing graph, transaction/history and renderer publication seams remain.
+Generation and explicit regeneration author the current graph; loading never
+regenerates saved geometry. The technical line stream retains logical endpoints.
 
 ### Why a new Core module
 
 `SupportSolidGeometry.hpp` sits beside `Supports.hpp` in Core rather than in
-the engine, because a member's transform is a pure function of its endpoint
-positions and its `SupportMemberProfile`. That makes the geometry testable
+the engine, because placement is derived from logical endpoints, profiles,
+orientation evidence and incident-post mounting intent. That makes geometry testable
 without a GPU, and it keeps the renderer responsible only for GPU resources —
 the same split `TrackStyle.cpp` already uses for track and hardware geometry.
 
-### What was deliberately *not* added
+### Member semantics and compatibility
 
-**No `SupportMemberRole` enum.** §6 of the brief permits deferring it, and
-deferring is the right call here. M2A renders every member identically, so a
-persisted role field would be schema churn with no consumer: it would need
-textual serialization, backward-compatible defaults, and history/equality
-coverage, all to store a value nothing reads. Inferring roles from geometric
-angle instead was also rejected, because angle is not a reliable proxy for
-structural role — a shallow brace and a shallow ledger are geometrically
-similar but structurally different.
+`SupportMemberRole` explicitly records Unspecified, PrimaryPost, LedgerCap,
+LongitudinalTie, Brace or TrackSupport. Generation uses roles for section
+selection; mounting uses PrimaryPost hosts and ledger/tie envelopes. Roles are
+never inferred from angle. Hybrid generates upper ties rather than claiming a
+demonstrated TrackSupport/stringer function. Legacy/manual members default to
+Unspecified, and that field is omitted when saved.
 
-The generator/render seam is structured so roles can be added later: members
-already carry an explicit `SupportMemberProfile`, and the renderer already
-groups by profile shape through `SupportSolidBatch`. Adding a role later means
-adding a field and a batch grouping, not restructuring the pipeline.
+`SupportMemberOrientation` names Generic, BentPost, BentTransverse,
+RunLongitudinal, BentDiagonal or RunDiagonal. Hybrid assigns these contexts;
+other generated families retain Generic. Optional `orientationReference`
+stores directed, normalized cross-section evidence in document coordinates.
+Endpoint edits preserve it; regeneration re-authors it from geometry. The
+renderer still groups by profile shape, without role-specific GPU batches.
+
+End connections optionally persist mounting intent independently of connector
+`localPlacement`. Missing mounting preserves centered physical endpoints.
+Derived frames, offsets and instance matrices are never document state. The
+existing equality, serialization and whole-document history cover all intent.
 
 ## Unit-mesh and instance strategy
 
@@ -82,7 +231,7 @@ A draw batch selects a mesh plus an instance range; no batch owns buffers.
 
 ## Member transform strategy
 
-`memberTransform()` places the unit box centred between the two nodes:
+`memberTransform()` places the unit box between resolved physical endpoints:
 
 ```
 transform[0] = axisX * length
@@ -91,9 +240,10 @@ transform[2] = axisZ * depth
 transform[3] = midpoint(start, end)
 ```
 
-Because the box spans exactly `[start, end]`, a member terminates at its
-authored nodes with no floating ends and no gap at a shared node. Members
-interpenetrate freely at a node, which §19 of the brief explicitly accepts.
+The box spans exactly `[start, end]`. Without mounting these are logical node
+positions. Hybrid face contacts, layer clearances, support coverage and overhang
+are resolved first, so physical endpoints can differ from logical nodes.
+Square-ended solids still approximate joints and can intersect at corners.
 
 The basis is orthonormal apart from its per-axis extents, so the vertex shader
 removes those extents to get a pure rotation. That keeps normals correct for a
@@ -102,39 +252,26 @@ transpose alone would not.
 
 ### Rectangular orientation rule
 
-Roll is **not** authored, so it is derived deterministically:
+1. Local **+X** is the resolved start-to-end axis, normalized.
+2. Local **+Y** is the authored reference projected off +X and normalized,
+   preserving its sign; local **+Z** completes the right-handed basis.
+3. An absent or axis-parallel reference uses the orientation enum fallback.
+   BentPost prefers world +X; other authored contexts prefer world +Z and can
+   try the alternate reference if their projection degenerates.
+4. Generic without a reference retains the historical world +Z rule, switching
+   to world +X when `abs(axisX.z) > supportMemberVerticalTolerance` (0.9995).
 
-1. Local **+X** is start-to-end, normalized.
-2. Local **+Y** is world **+Z** projected off that axis (Gram-Schmidt).
-3. Local **+Z** completes a right-handed basis.
-
-If a member's axis is within `supportMemberVerticalTolerance` (cosine
-0.9995, about 2° ) of world +Z, world +Z is parallel to its own axis and the
-reference collapses, so local +Y falls back to world **+X** instead.
-
-Why this rule:
-
-- **Deterministic.** Same endpoints always give the same frame.
-- **No random roll between neighbours.** Two near-parallel posts in the same
-  bent agree on which way their cross-section faces, because both project the
-  same world reference. A `lookAt` basis would flip unpredictably here.
-- **Continuous.** A member rotating gradually through orientations does not
-  jump. A test asserts the cross-section axes stay within 0.1° of each other
-  across a small axis change.
-- **Keeps grain usable.** The cross-section keeps a stable "up" for
-  non-vertical members, which is what makes the projection below coherent.
-
-Verified against vertical posts, horizontal ledgers, shallow diagonals, steep
-diagonals, and near-vertical diagonals. The rule is exposed as
-`resolveSupportMemberFrame()` so tests and future authoring tools agree with
-the renderer instead of duplicating it.
+That Generic threshold is not globally continuous. Hybrid references and the
+BentPost fallback avoid relying on that angle branch for authored post roll.
+Nonplanar panels use member-local geometric triangles rather than an averaged
+plane. `resolveSupportMemberFrame()` is shared by placement and presentation.
 
 ### Profile interpretation
 
 | Shape | Width | Depth | Length |
 | --- | --- | --- | --- |
-| Rectangular | `outerDimensions.x` | `outerDimensions.y` | node-to-node distance |
-| Circular | `outerDimensions.x` (diameter) | same | node-to-node distance |
+| Rectangular | `outerDimensions.x` | `outerDimensions.y` | resolved endpoint distance |
+| Circular | `outerDimensions.x` (diameter) | same | resolved endpoint distance |
 
 `validateSupportMemberProfile` already requires a circular profile to have
 equal outer dimensions, so the diameter applies to both cross-section axes.
@@ -341,6 +478,9 @@ pipeline.
 
 ## Performance observations
 
+Historical measurements from the initial renderer-only M2A implementation;
+these are not a benchmark of the completed Hybrid topology or mounting resolver.
+
 Measured in a successful four-second Release `--dev-preview-smoke
 --support-performance --frame-trace` run at 1920×1080 with 4× MSAA.
 The display flags change at frames 60, 160, and 280. Dense fixture:
@@ -374,6 +514,11 @@ fixture above is 273 members, and §22's "thousands to tens of thousands"
 regime is untested.
 
 ## Documentation screenshots
+
+The images in this section are historical renderer-only acceptance captures.
+Current Hybrid framing, mounting, local bracing and outer-support captures are
+linked above; these older images remain useful for material, tint and
+technical-display examples.
 
 All images are real captures from the Windows Vulkan editor. The nine feature
 views use the `--capture-screenshots` manifest in
@@ -464,9 +609,11 @@ GPU leaks in the log.
    M2B concern.
 6. **Circular-member seams** are not hidden by UVs; a round post shows a
    longitudinal texture seam.
-7. **No member roles** — see the architecture section for why.
+7. **Family-specific accuracy** beyond Hybrid remains pending its own milestone.
 8. **No carpentry.** No mortise-and-tenon, lap joints, bolts, straps, plates,
-   or saddles. Members overlap at shared nodes, which §19 accepts.
+   or saddles. Legacy centered members can overlap at shared nodes. Newly
+   generated Hybrid members use semantic face mounting and layer separation;
+   exact cut contact surfaces remain unmodeled.
 9. **Footing pads are sub-pixel** when the camera frames a whole coaster. This
    is a framing consequence, not a rendering fault: the pads draw, and the
    foundation capture frames a low track so they read clearly.
@@ -494,17 +641,19 @@ or sky asset was modified — verified by inspecting the diff for
 | `QuantumCore.SupportSolidGeometry` | rectangular transform vs endpoints and profile, length, width/depth, vertical/horizontal/diagonal orientation, right-handedness, determinism, no random roll, continuity, degenerate skipping, circular profiles, draw-call count, foundations, default appearance, family independence, regeneration preserving appearance, save/load round trip, old-document defaults, validation rejection, all four M1 families, curved/banked stability |
 | `QuantumEngine.SupportSolidRenderer` | unit box closedness, per-face winding, shared corners, unit cylinder sizing and tessellation, mesh determinism, timber identifier grammar, asset path resolution, bundled base color is grayscale |
 
-All existing M1 support-generator tests are preserved unchanged; no M1 topology
-expectation was loosened.
+The original renderer suites remain. The completed work also adds role,
+HybridTimberAccuracy, orientation/reference/frame, mounting, local bracing and
+outer-support suites. Generator expectations were updated for actual-elevation
+correspondence and the completed Hybrid topology; this is no longer an unchanged
+M1 topology test set.
 
 ## M1 topology impact
 
-One change to `generateWoodenSupportRun`: on regeneration it now carries
-`appearance` and `foundationAppearance` forward from the replaced structure.
-This is required by §9 ("appearance survives regeneration where expected") and
-is not a topology change — node positions, member counts, bent spacing, story
-generation, foundations, track attachments, diagonal selection, and
-longitudinal ties are all byte-identical. A test asserts regeneration preserves
-node count, member count, and every node position exactly.
-
-No other M1 behavior was touched.
+The initial renderer-only change preserved M1 topology and carried appearance
+through regeneration. That historical scope was superseded by the completed
+Hybrid corrections described above: upright lower frames, separate banked upper
+attachments, connected-tower post junctions, local bracing and outer primary
+lines. Shared roles, sections and actual-elevation correspondence also affect
+new generation in the other families; their accuracy passes remain deferred.
+Loading old documents preserves saved geometry. Explicit regeneration uses the
+current recipe rules and preserves structure appearance and identity.

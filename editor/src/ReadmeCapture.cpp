@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
 #include <set>
 #include <stdexcept>
@@ -169,13 +170,49 @@ namespace quantum::editor
                 "ground_roughness", "ground_metallic", "ground_tiling",
                 "ground_base_color", "ground_albedo", "ground_normal",
                 "ground_roughness_map", "solid_supports", "debug_lines",
-                "timber_tint"});
+                "timber_tint", "camera", "support_node_handles"});
             const auto name = entry.at("name").get<std::string>();
             const auto found = std::find(names.begin(), names.end(), name);
             if (found == names.end())
                 throw std::invalid_argument("Unknown capture scenario: " + name);
             ReadmeCaptureScenario scenario;
             scenario.kind = static_cast<ReadmeCaptureKind>(found - names.begin());
+            if (entry.contains("support_node_handles") && !entry["support_node_handles"].is_boolean())
+                throw std::invalid_argument("Capture support_node_handles must be a boolean.");
+            scenario.supportNodeHandlesVisible = entry.value("support_node_handles", true);
+            if (entry.contains("camera"))
+            {
+                const auto& camera = entry["camera"];
+                requireKeys(camera, {"focus", "yaw", "pitch", "distance", "projection"});
+                if (!camera.contains("focus") || !camera["focus"].is_array()
+                    || camera["focus"].size() != 3)
+                    throw std::invalid_argument("Capture camera focus must contain three numbers.");
+                ViewportCameraPose pose;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (!camera["focus"][axis].is_number())
+                        throw std::invalid_argument("Capture camera focus must contain three numbers.");
+                    pose.focus[axis] = camera["focus"][axis].get<double>();
+                    if (!std::isfinite(pose.focus[axis]))
+                        throw std::invalid_argument("Capture camera focus must be finite.");
+                }
+                for (const char* field : {"yaw", "pitch", "distance"})
+                    if (!camera.contains(field) || !camera[field].is_number())
+                        throw std::invalid_argument(std::string("Capture camera requires numeric ") + field);
+                pose.yaw = camera["yaw"].get<double>();
+                pose.pitch = camera["pitch"].get<double>();
+                pose.distance = camera["distance"].get<double>();
+                if (!std::isfinite(pose.yaw) || !std::isfinite(pose.pitch)
+                    || !std::isfinite(pose.distance) || pose.distance <= 0.0)
+                    throw std::invalid_argument("Capture camera pose must be finite with positive distance.");
+                if (camera.contains("projection") && !camera["projection"].is_string())
+                    throw std::invalid_argument("Capture camera projection must be textual.");
+                const auto projection = camera.value("projection", std::string("Perspective"));
+                if (projection == "Orthographic") scenario.cameraProjection = ViewportProjection::Orthographic;
+                else if (projection != "Perspective")
+                    throw std::invalid_argument("Unknown capture camera projection.");
+                scenario.cameraPose = pose;
+            }
             if (entry.contains("msaa") && !entry["msaa"].is_boolean())
                 throw std::invalid_argument("Capture msaa must be a boolean.");
             scenario.msaaEnabled = entry.value("msaa", true);

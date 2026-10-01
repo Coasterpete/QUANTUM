@@ -317,7 +317,7 @@ collection is independent of track generation, physics, rendering, and editor
 state. It contains ordinary `SupportStructure` values made from positioned
 `SupportNode` values and endpoint-connected `SupportMember` values. The same
 low-level graph represents steel columns, A-frames, V-frames, towers, wooden
-bents, and braced wooden runs. Manual authoring and future procedural
+bents, and braced wooden runs. Manual authoring and procedural
 generation therefore produce the same persistent types; there is no separate
 procedural-support object model.
 
@@ -338,6 +338,18 @@ rejects non-finite node coordinates, zero or duplicate IDs, dangling or
 self-connected members, unsupported or degenerate profiles, illegal wall
 thickness, and allocator counters that could reuse an ID. This is document
 consistency validation, not structural engineering analysis.
+
+Members additionally carry explicit `SupportMemberRole`,
+`SupportMemberOrientation` and optional directed `orientationReference`.
+Roles select generated sections and identify mounting hosts; orientation and
+reference control cross-section alignment independently of member angle.
+Hybrid generation authors references from actual local geometry. Endpoint
+edits preserve them; explicit regeneration recomputes them. Legacy defaults
+are Unspecified/Generic with no reference, and saved geometry is never
+regenerated merely by loading. A generated run owns its recipe in the same
+structure; Hybrid supports SimpleBent/ConnectedTowers, sparse local panel
+choices and selected outer inclined primary chains. Interior story matching
+uses actual elevations. See [Supports M2A](supports-m2a-solid-rendering.md).
 
 Format version 1 is extended additively with an optional root `supports`
 object containing `nextStructureId` and the ordered `structures` array. Each
@@ -374,8 +386,9 @@ follow-terrain behavior additive in a later format-compatible milestone.
 Format version 1 adds optional `trackAttachment` and `foundation` objects to a
 serialized support node. Nodes without either field retain the M0/M1 behavior,
 unknown nested fields are rejected, and no transient editor or resolved-world
-cache is persisted. Origin/generator metadata, materials, final member meshes,
-terrain, manual anchor tools, and structural analysis remain later milestones.
+cache is persisted. Generated-run recipes and optional timber/foundation
+appearance are persisted on the structure. Terrain and structural analysis
+remain later milestones; solid support geometry is derived presentation.
 
 Each member may additionally own a member-end connection at either end. A
 connection is family-neutral member metadata identified by the stable
@@ -383,7 +396,7 @@ connection is family-neutral member metadata identified by the stable
 and is deleted with the member. A connection names one of nine `treatment`s
 (`MiteredCut`, `EndCap`, `Plate`, `Flange`, `Splice`, `Saddle`, `Clamp`, `Base`,
 `Footing`) and optionally carries a logical connector static-mesh asset
-reference and a local `placement` (position/orientation/scale). No splice
+reference and a local `localPlacement` (position/orientation/scale). No splice
 pairing, node-level joint/gusset objects, or tapered member segments are added;
 a `Splice` marker exists for future pairing work. Mutations and deserialization
 canonicalize the placement quaternion (finite, nonzero, unit, canonical sign)
@@ -392,6 +405,14 @@ round-trips are deterministic. `Saddle`/`Clamp` require the endpoint node to
 carry a `TrackAttachment`; `Base`/`Footing` require a `Foundation`; the others
 are unconstrained. Validation is consistency checking only and applies to
 stored document state.
+
+An end connection can also own optional `mounting`: signed incident-post face,
+direct/outside-ledger layer, separation, axial coverage and overhang, or a
+terminal seat. This is member-body intent, independent of connector placement.
+Core's `resolveSupportMemberPlacements` directs post chains from foundations,
+resolves each endpoint's contact and layer envelope, then derives physical
+endpoints and frames without changing logical nodes. Missing mounting retains
+centered placement. Exact joint cuts and connector hardware are not modeled.
 
 Connector assets are renderer-neutral logical strings validated by the same
 generic static-mesh-identifier grammar as track hardware, but pinned below a
@@ -413,28 +434,34 @@ identity, while converting each member to one pair of float `LineVertex`
 values for rendering. Authored vector order defines deterministic conversion
 order. Empty collections produce empty visualization and draw streams.
 
-The renderer treats support members as an ordinary renderer-neutral line
-stream and draws them through the existing viewport line pipeline. Updates
+The technical renderer draws logical support centerlines through the existing
+viewport line pipeline. Solid presentation uses Core-resolved physical
+placements, shared box/cylinder unit meshes, timber materials and instanced
+draws; foundation pads derive from foundation nodes and carried sections.
+The editor uses those same placements for member picking, highlights and
+bounds, while node handles remain logical. Neither physical transforms nor
+GPU resources are document state. Updates
 follow the retained track-curve buffer pattern: candidate allocation happens
 first, publication replaces the active handle without draining the frame, and
 the displaced allocation is reclaimed only after its owning frame-slot fence
 completes. Only a successful upload may precede document commit. Empty updates
 logically clear the draw.
-Node markers and selected/hovered member
-emphasis are image-clipped ImGui overlays; M0B deliberately has no support
-mesh, material, profile shading, or support-specific graphics pipeline.
+Node markers and selected/hovered member emphasis remain image-clipped ImGui
+overlays. Independent solid/technical-line display controls are viewport state.
 
 Support selection is Editor-only state and is separate from authored-region
 and track-anchor selection. Nodes use screen-space marker-distance picking;
-members use projected segment distance. Nodes have priority over members,
+members test the oriented solid and retain projected physical-segment pixel
+tolerance. Nodes have priority over members,
 which have priority over existing track selection. Equal hits prefer screen
 distance, depth, then the lower stable structure and element IDs. Selection is
 re-resolved after document replacement and survives only while both IDs and
 the selected kind remain present.
 
-The Support Workspace displays the selected structure and element. Node XYZ
-is the only editable M0B property; member endpoints and profile data are
-read-only. A node edit targets stable IDs through
+The Support Workspace displays the selected structure and element, with node,
+member/profile, connection, appearance and generated-run authoring. Hybrid
+local panel/outer-support choices currently use the recipe/API/document seam;
+there is no dedicated panel/tower-selection UI. A node edit targets stable IDs through
 `AuthoredTrack::setSupportNodePosition`, prepares and uploads candidate support
 visualization, then commits through `AuthoredTrackEditTransaction`. Accepted
 states enter the existing whole-document `DocumentHistory`, so Undo/Redo needs
@@ -1899,9 +1926,10 @@ architectural commitments:
 - editable force-target profiles and endpoint-constrained force solving;
 - expanded authored track-style geometry families, configurable rail/heartline geometry, and final rail meshing systems;
 - direct deformation or control-point editing in the 3D viewport;
-- manual support creation/deletion and gizmo movement, node snapping,
-  foundations, track/support attachments, procedural generation, final member
-  meshes/materials, and structural analysis;
+- support panel/tower-selection UI, detailed joints, terrain-dependent
+  foundations and structural analysis; manual creation/deletion, gizmo movement,
+  node snapping, track attachments, procedural timber generation and solid
+  member/material presentation are already implemented;
 - connector compliance, slack, springs, damping, and train whip;
 - suspension/compliance, gaps/preload, friction/slip, and physically resolved
   individual-wheel load sharing beyond the rigid representative allocation;

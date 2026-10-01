@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <limits>
 #include <ranges>
 #include <stdexcept>
 
@@ -13,8 +15,8 @@ namespace quantum::editor
         coaster::validateSupportCollection(supports);
 
         SupportVisualization visualization;
-        // Derived from the same validated structures the line stream reads, so
-        // the solid and technical views always agree.
+        // Solids consume physical placement; the technical line stream below
+        // continues to display authoritative logical graph connectivity.
         visualization.solidPresentations =
             coaster::buildSupportSolidPresentation(supports);
         std::size_t nodeCount = 0;
@@ -32,6 +34,7 @@ namespace quantum::editor
             0.32F, 0.66F, 0.78F, 1.0F};
         for (const coaster::SupportStructure& structure : supports.structures)
         {
+            const auto placements = coaster::resolveSupportMemberPlacements(structure);
             for (const coaster::SupportNode& node : structure.nodes)
             {
                 visualization.nodes.push_back({
@@ -39,8 +42,10 @@ namespace quantum::editor
                     node.position});
             }
 
-            for (const coaster::SupportMember& member : structure.members)
+            for (std::size_t index = 0; index < structure.members.size(); ++index)
             {
+                const auto& member = structure.members[index];
+                const auto& placement = placements[index];
                 const auto start = std::find_if(
                     structure.nodes.begin(), structure.nodes.end(),
                     [&member](const coaster::SupportNode& node)
@@ -64,8 +69,10 @@ namespace quantum::editor
                     {structure.id, SupportSelectionKind::Member, member.id},
                     member.startNodeId,
                     member.endNodeId,
-                    start->position,
-                    end->position});
+                    placement.start,
+                    placement.end,
+                    placement.frame,
+                    member.profile});
                 visualization.memberVertices.push_back({
                     static_cast<float>(start->position.x),
                     static_cast<float>(start->position.y),
@@ -80,6 +87,47 @@ namespace quantum::editor
         }
 
         return visualization;
+    }
+
+    std::optional<std::pair<glm::dvec3, glm::dvec3>> supportVisualizationBounds(
+        const SupportVisualization& visualization)
+    {
+        glm::dvec3 minimum{std::numeric_limits<double>::infinity()};
+        glm::dvec3 maximum{-std::numeric_limits<double>::infinity()};
+        const auto include = [&](const glm::dvec3& point)
+        {
+            minimum = glm::min(minimum, point);
+            maximum = glm::max(maximum, point);
+        };
+        for (const auto& node : visualization.nodes) include(node.position);
+        for (const auto& member : visualization.members)
+        {
+            const auto& frame = member.frame;
+            if (frame.length <= coaster::minimumSupportMemberLength) continue;
+            const auto section = member.profile.outerDimensions;
+            glm::dvec3 extent;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const double y = frame.axisY[axis] * section.x;
+                const double z = frame.axisZ[axis] * section.y;
+                extent[axis] = 0.5 * (std::abs(frame.axisX[axis]) * frame.length
+                    + (member.profile.shape == coaster::SupportMemberProfileShape::Circular
+                        ? std::hypot(y, z) : std::abs(y) + std::abs(z)));
+            }
+            include(frame.origin - extent);
+            include(frame.origin + extent);
+        }
+        for (const auto& presentation : visualization.solidPresentations)
+            for (const auto& pad : presentation.foundations)
+            {
+                const glm::dvec3 extent{pad.padDimensions.x * 0.5,
+                    pad.padDimensions.y * 0.5, pad.padDepth * 0.5};
+                include(pad.position - extent);
+                include(pad.position + extent);
+            }
+        if (visualization.nodes.empty() && visualization.members.empty()
+            && minimum.x == std::numeric_limits<double>::infinity()) return std::nullopt;
+        return std::pair{minimum, maximum};
     }
 
     SupportVisualization createSupportVisualization(

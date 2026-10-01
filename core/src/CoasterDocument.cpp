@@ -523,12 +523,73 @@ namespace quantum::coaster
             throw std::runtime_error("Unknown support member-end treatment.");
         }
 
+        [[nodiscard]] const char* supportMemberRoleToString(
+            const SupportMemberRole role)
+        {
+            switch (role)
+            {
+            case SupportMemberRole::Unspecified: return "Unspecified";
+            case SupportMemberRole::PrimaryPost: return "PrimaryPost";
+            case SupportMemberRole::LedgerCap: return "LedgerCap";
+            case SupportMemberRole::LongitudinalTie: return "LongitudinalTie";
+            case SupportMemberRole::Brace: return "Brace";
+            case SupportMemberRole::TrackSupport: return "TrackSupport";
+            }
+            throw std::runtime_error("Unknown support member role.");
+        }
+
+        [[nodiscard]] const char* supportMemberOrientationToString(
+            const SupportMemberOrientation orientation)
+        {
+            switch (orientation)
+            {
+            case SupportMemberOrientation::Generic: return "Generic";
+            case SupportMemberOrientation::BentPost: return "BentPost";
+            case SupportMemberOrientation::BentTransverse:
+                return "BentTransverse";
+            case SupportMemberOrientation::RunLongitudinal:
+                return "RunLongitudinal";
+            case SupportMemberOrientation::BentDiagonal: return "BentDiagonal";
+            case SupportMemberOrientation::RunDiagonal: return "RunDiagonal";
+            }
+            throw std::runtime_error(
+                "Unknown support member orientation.");
+        }
+
+        const char* supportMountingFaceName(const SupportMemberMountingFace face)
+        {
+            switch (face)
+            {
+            case SupportMemberMountingFace::PositiveY: return "PositiveY";
+            case SupportMemberMountingFace::NegativeY: return "NegativeY";
+            case SupportMemberMountingFace::PositiveZ: return "PositiveZ";
+            case SupportMemberMountingFace::NegativeZ: return "NegativeZ";
+            case SupportMemberMountingFace::PositiveX: return "PositiveX";
+            case SupportMemberMountingFace::NegativeX: return "NegativeX";
+            }
+            throw std::runtime_error("Unknown support mounting face.");
+        }
+
         json serializeSupportMemberEndConnection(
             const SupportMemberEndConnection& connection)
         {
             json result{
                 {"treatment", supportMemberEndTreatmentToString(
                     connection.treatment)}};
+            if (connection.mounting)
+            {
+                const auto& mounting = *connection.mounting;
+                result["mounting"] = {
+                    {"mode", mounting.mode == SupportMemberMountingMode::Face
+                        ? "Face" : "TerminalSeat"},
+                    {"face", supportMountingFaceName(mounting.face)},
+                    {"layer", mounting.layer == SupportMemberMountingLayer::Direct
+                        ? "Direct" : "OutsideLedger"},
+                    {"separation", mounting.separation},
+                    {"coverage", mounting.coverage == SupportMemberEndCoverage::Node
+                        ? "Node" : "OutsideSupport"},
+                    {"overhang", mounting.overhang}};
+            }
             if (connection.asset.has_value())
             {
                 result["asset"] = {
@@ -601,6 +662,36 @@ namespace quantum::coaster
                                 {"x", member.profile.outerDimensions.x},
                                 {"y", member.profile.outerDimensions.y}}},
                             {"wallThickness", member.profile.wallThickness}}}};
+                    // Absent means Unspecified, so M1/M2A documents without
+                    // roles keep their byte layout and manual members that
+                    // never picked a role stay compact.
+                    if (member.role != SupportMemberRole::Unspecified)
+                    {
+                        memberJson["role"] =
+                            supportMemberRoleToString(member.role);
+                    }
+                    // Absent means Generic, mirroring the role pattern: only
+                    // Hybrid members name a structural plane today, so legacy,
+                    // manual, and non-Hybrid documents stay byte-identical.
+                    if (member.orientation
+                        != SupportMemberOrientation::Generic)
+                    {
+                        memberJson["orientation"] =
+                            supportMemberOrientationToString(
+                                member.orientation);
+                    }
+                    // Absent means no authored evidence: the enum fallback
+                    // applies, so legacy, manual, and non-Hybrid members stay
+                    // byte-identical.
+                    if (member.orientationReference.has_value())
+                    {
+                        const glm::dvec3& reference =
+                            *member.orientationReference;
+                        memberJson["orientationReference"] = {
+                            {"x", reference.x},
+                            {"y", reference.y},
+                            {"z", reference.z}};
+                    }
                     if (member.startConnection.has_value())
                     {
                         memberJson["startConnection"] =
@@ -651,6 +742,49 @@ namespace quantum::coaster
                             throw std::invalid_argument(
                                 "Unknown timber support family.");
                             }()}};
+                    if (recipe.hybridArchetype != HybridFramingArchetype::Automatic)
+                    {
+                        structureJson["generatedWoodenRun"]["hybridArchetype"] =
+                            recipe.hybridArchetype == HybridFramingArchetype::SimpleBent
+                                ? "SimpleBent" : "ConnectedTowers";
+                    }
+                    if (!recipe.hybridTransversePanels.empty())
+                    {
+                        auto& panels = structureJson["generatedWoodenRun"]["hybridTransversePanels"];
+                        panels = json::array();
+                        for (const auto& choice : recipe.hybridTransversePanels)
+                            panels.push_back({{"towerIndex", choice.towerIndex}, {"panelIndex", choice.panelIndex},
+                                {"face", choice.face == SupportMemberMountingFace::PositiveZ ? "PositiveZ" : "NegativeZ"},
+                                {"direction", choice.direction == HybridDiagonalDirection::LowerFirstToUpperLast
+                                    ? "LowerFirstToUpperLast" : "LowerLastToUpperFirst"}});
+                    }
+                    if (!recipe.hybridLongitudinalPanels.empty())
+                    {
+                        auto& panels = structureJson["generatedWoodenRun"]["hybridLongitudinalPanels"];
+                        panels = json::array();
+                        for (const auto& choice : recipe.hybridLongitudinalPanels)
+                            panels.push_back({{"bayIndex", choice.bayIndex}, {"panelIndex", choice.panelIndex},
+                                {"laneIndex", choice.laneIndex},
+                                {"bracing", choice.bracing == HybridLongitudinalBracing::Open ? "Open" : "SingleDiagonal"}});
+                    }
+                    if (!recipe.hybridOuterSupports.empty())
+                    {
+                        auto& choices = structureJson["generatedWoodenRun"]["hybridOuterSupports"];
+                        choices = json::array();
+                        for (const auto& choice : recipe.hybridOuterSupports)
+                        {
+                            const char* sides = "None";
+                            switch (choice.sides)
+                            {
+                            case HybridOuterSupportSides::None: break;
+                            case HybridOuterSupportSides::Left: sides = "Left"; break;
+                            case HybridOuterSupportSides::Right: sides = "Right"; break;
+                            case HybridOuterSupportSides::Both: sides = "Both"; break;
+                            }
+                            choices.push_back({{"towerIndex", choice.towerIndex}, {"sides", sides},
+                                {"foundationOutset", choice.foundationOutset}, {"topOutset", choice.topOutset}});
+                        }
+                    }
                 }
                 // Written only when authored, so documents that never touched
                 // the M2A appearance panel keep their M1 byte layout.
@@ -1203,7 +1337,7 @@ namespace quantum::coaster
         {
             requireNoUnknownFields(
                 object,
-                {"treatment", "asset", "localPlacement"},
+                {"treatment", "asset", "localPlacement", "mounting"},
                 path);
             requireString(object, "treatment", path);
 
@@ -1302,6 +1436,44 @@ namespace quantum::coaster
                 connection.localPlacement = placementValue;
             }
 
+            if (object.contains("mounting"))
+            {
+                requireObject(object, "mounting", path);
+                const json& value = object["mounting"];
+                const std::string mountingPath = path + ".mounting";
+                requireNoUnknownFields(value,
+                    {"mode", "face", "layer", "separation", "coverage", "overhang"},
+                    mountingPath);
+                SupportMemberMounting mounting;
+                for (const char* field : {"mode", "face", "layer", "coverage"})
+                    if (value.contains(field)) requireString(value, field, mountingPath);
+                const auto mode = value.value("mode", std::string("Face"));
+                if (mode == "Face") mounting.mode = SupportMemberMountingMode::Face;
+                else if (mode == "TerminalSeat") mounting.mode = SupportMemberMountingMode::TerminalSeat;
+                else throw std::runtime_error(mountingPath + ".mode: unknown mounting mode");
+                const auto face = value.value("face", std::string("PositiveZ"));
+                if (face == "PositiveY") mounting.face = SupportMemberMountingFace::PositiveY;
+                else if (face == "NegativeY") mounting.face = SupportMemberMountingFace::NegativeY;
+                else if (face == "PositiveZ") mounting.face = SupportMemberMountingFace::PositiveZ;
+                else if (face == "NegativeZ") mounting.face = SupportMemberMountingFace::NegativeZ;
+                else if (face == "PositiveX") mounting.face = SupportMemberMountingFace::PositiveX;
+                else if (face == "NegativeX") mounting.face = SupportMemberMountingFace::NegativeX;
+                else throw std::runtime_error(mountingPath + ".face: unknown signed mounting face");
+                const auto layer = value.value("layer", std::string("Direct"));
+                if (layer == "Direct") mounting.layer = SupportMemberMountingLayer::Direct;
+                else if (layer == "OutsideLedger") mounting.layer = SupportMemberMountingLayer::OutsideLedger;
+                else throw std::runtime_error(mountingPath + ".layer: unknown mounting layer");
+                const auto coverage = value.value("coverage", std::string("Node"));
+                if (coverage == "Node") mounting.coverage = SupportMemberEndCoverage::Node;
+                else if (coverage == "OutsideSupport") mounting.coverage = SupportMemberEndCoverage::OutsideSupport;
+                else throw std::runtime_error(mountingPath + ".coverage: unknown end coverage");
+                for (const char* field : {"separation", "overhang"})
+                    if (value.contains(field)) requireNumber(value, field, mountingPath);
+                mounting.separation = value.value("separation", 0.0);
+                mounting.overhang = value.value("overhang", 0.0);
+                connection.mounting = mounting;
+            }
+
             // Deserialization canonicalizes like the mutation API, so the
             // loaded state satisfies the collection's stored-data invariants
             // (finite, unit, sign-canonical placement quaternion).
@@ -1359,7 +1531,8 @@ namespace quantum::coaster
                         {"startStation", "endStation", "bentSpacing", "bentWidth",
                          "foundationElevation", "attachmentVerticalOffset",
                          "memberSize", "longitudinalBracing", "family",
-                         "storyHeight"}, recipePath);
+                         "storyHeight", "hybridArchetype", "hybridTransversePanels",
+                         "hybridLongitudinalPanels", "hybridOuterSupports"}, recipePath);
                     for (const char* field : {"startStation", "endStation",
                         "bentSpacing", "bentWidth", "foundationElevation",
                         "attachmentVerticalOffset", "memberSize"})
@@ -1401,6 +1574,96 @@ namespace quantum::coaster
                     {
                         requireNumber(recipeJson, "storyHeight", recipePath);
                         recipe.storyHeight = recipeJson["storyHeight"].get<double>();
+                    }
+                    if (recipeJson.contains("hybridArchetype"))
+                    {
+                        requireString(recipeJson, "hybridArchetype", recipePath);
+                        const auto archetype = recipeJson["hybridArchetype"].get<std::string>();
+                        if (archetype == "Automatic")
+                            recipe.hybridArchetype = HybridFramingArchetype::Automatic;
+                        else if (archetype == "SimpleBent")
+                            recipe.hybridArchetype = HybridFramingArchetype::SimpleBent;
+                        else if (archetype == "ConnectedTowers")
+                            recipe.hybridArchetype = HybridFramingArchetype::ConnectedTowers;
+                        else
+                            throw std::runtime_error(recipePath + ".hybridArchetype: unknown framing archetype");
+                    }
+                    const auto readPanelIndex = [](const json& panel, const char* field,
+                        const std::string& path) -> std::uint32_t
+                    {
+                        requireInteger(panel, field, path);
+                        if (panel[field] < 0 || panel[field] > std::numeric_limits<std::uint32_t>::max())
+                            throw std::runtime_error(path + "." + field + ": panel index is out of range");
+                        return panel[field].get<std::uint32_t>();
+                    };
+                    if (recipeJson.contains("hybridTransversePanels"))
+                    {
+                        requireArray(recipeJson, "hybridTransversePanels", recipePath);
+                        for (const auto& panel : recipeJson["hybridTransversePanels"])
+                        {
+                            const std::string path = recipePath + ".hybridTransversePanels["
+                                + std::to_string(recipe.hybridTransversePanels.size()) + "]";
+                            if (!panel.is_object()) throw std::runtime_error(path + ": expected an object");
+                            requireNoUnknownFields(panel, {"towerIndex", "panelIndex", "face", "direction"}, path);
+                            HybridTransversePanelChoice choice;
+                            choice.towerIndex = readPanelIndex(panel, "towerIndex", path);
+                            choice.panelIndex = readPanelIndex(panel, "panelIndex", path);
+                            requireString(panel, "face", path);
+                            if (panel["face"] == "PositiveZ") choice.face = SupportMemberMountingFace::PositiveZ;
+                            else if (panel["face"] == "NegativeZ") choice.face = SupportMemberMountingFace::NegativeZ;
+                            else throw std::runtime_error(path + ".face: expected a signed bent face");
+                            requireString(panel, "direction", path);
+                            if (panel["direction"] == "LowerFirstToUpperLast")
+                                choice.direction = HybridDiagonalDirection::LowerFirstToUpperLast;
+                            else if (panel["direction"] == "LowerLastToUpperFirst")
+                                choice.direction = HybridDiagonalDirection::LowerLastToUpperFirst;
+                            else throw std::runtime_error(path + ".direction: unknown diagonal direction");
+                            recipe.hybridTransversePanels.push_back(choice);
+                        }
+                    }
+                    if (recipeJson.contains("hybridLongitudinalPanels"))
+                    {
+                        requireArray(recipeJson, "hybridLongitudinalPanels", recipePath);
+                        for (const auto& panel : recipeJson["hybridLongitudinalPanels"])
+                        {
+                            const std::string path = recipePath + ".hybridLongitudinalPanels["
+                                + std::to_string(recipe.hybridLongitudinalPanels.size()) + "]";
+                            if (!panel.is_object()) throw std::runtime_error(path + ": expected an object");
+                            requireNoUnknownFields(panel, {"bayIndex", "panelIndex", "laneIndex", "bracing"}, path);
+                            HybridLongitudinalPanelChoice choice;
+                            choice.bayIndex = readPanelIndex(panel, "bayIndex", path);
+                            choice.panelIndex = readPanelIndex(panel, "panelIndex", path);
+                            choice.laneIndex = readPanelIndex(panel, "laneIndex", path);
+                            requireString(panel, "bracing", path);
+                            if (panel["bracing"] == "Open") choice.bracing = HybridLongitudinalBracing::Open;
+                            else if (panel["bracing"] == "SingleDiagonal") choice.bracing = HybridLongitudinalBracing::SingleDiagonal;
+                            else throw std::runtime_error(path + ".bracing: unknown longitudinal bracing choice");
+                            recipe.hybridLongitudinalPanels.push_back(choice);
+                        }
+                    }
+                    if (recipeJson.contains("hybridOuterSupports"))
+                    {
+                        requireArray(recipeJson, "hybridOuterSupports", recipePath);
+                        for (const auto& outer : recipeJson["hybridOuterSupports"])
+                        {
+                            const std::string path = recipePath + ".hybridOuterSupports["
+                                + std::to_string(recipe.hybridOuterSupports.size()) + "]";
+                            if (!outer.is_object()) throw std::runtime_error(path + ": expected an object");
+                            requireNoUnknownFields(outer, {"towerIndex", "sides", "foundationOutset", "topOutset"}, path);
+                            HybridOuterSupportChoice choice;
+                            choice.towerIndex = readPanelIndex(outer, "towerIndex", path);
+                            requireString(outer, "sides", path);
+                            if (outer["sides"] == "None") choice.sides = HybridOuterSupportSides::None;
+                            else if (outer["sides"] == "Left") choice.sides = HybridOuterSupportSides::Left;
+                            else if (outer["sides"] == "Right") choice.sides = HybridOuterSupportSides::Right;
+                            else if (outer["sides"] == "Both") choice.sides = HybridOuterSupportSides::Both;
+                            else throw std::runtime_error(path + ".sides: unknown outer support selection");
+                            requireNumber(outer, "foundationOutset", path);
+                            requireNumber(outer, "topOutset", path);
+                            choice.foundationOutset = outer["foundationOutset"].get<double>();
+                            choice.topOutset = outer["topOutset"].get<double>();
+                            recipe.hybridOuterSupports.push_back(choice);
+                        }
                     }
                     structure.generatedWoodenRun = recipe;
                 }
@@ -1579,7 +1842,8 @@ namespace quantum::coaster
                             memberPath + ": expected a JSON object");
                     }
                     requireNoUnknownFields(memberJson,
-                        {"id", "startNodeId", "endNodeId", "profile",
+                        {"id", "startNodeId", "endNodeId", "profile", "role",
+                         "orientation", "orientationReference",
                          "startConnection", "endConnection"},
                         memberPath);
                     requireObject(memberJson, "profile", memberPath);
@@ -1593,6 +1857,102 @@ namespace quantum::coaster
                             memberJson, "endNodeId", memberPath),
                         deserializeSupportMemberProfile(
                             memberJson["profile"], memberPath + ".profile")};
+                    // Absent role means Unspecified for M1/M2A documents.
+                    if (memberJson.contains("role"))
+                    {
+                        requireString(memberJson, "role", memberPath);
+                        const std::string role =
+                            memberJson["role"].get<std::string>();
+                        if (role == "Unspecified")
+                        {
+                            member.role = SupportMemberRole::Unspecified;
+                        }
+                        else if (role == "PrimaryPost")
+                        {
+                            member.role = SupportMemberRole::PrimaryPost;
+                        }
+                        else if (role == "LedgerCap")
+                        {
+                            member.role = SupportMemberRole::LedgerCap;
+                        }
+                        else if (role == "LongitudinalTie")
+                        {
+                            member.role = SupportMemberRole::LongitudinalTie;
+                        }
+                        else if (role == "Brace")
+                        {
+                            member.role = SupportMemberRole::Brace;
+                        }
+                        else if (role == "TrackSupport")
+                        {
+                            member.role = SupportMemberRole::TrackSupport;
+                        }
+                        else
+                        {
+                            throw std::runtime_error(
+                                memberPath + ".role: unknown support member "
+                                "role '" + role + "'");
+                        }
+                    }
+                    // Absent orientation means Generic: the renderer fallback
+                    // used by legacy, manual, and non-Hybrid members.
+                    if (memberJson.contains("orientation"))
+                    {
+                        requireString(memberJson, "orientation", memberPath);
+                        const std::string orientation =
+                            memberJson["orientation"].get<std::string>();
+                        if (orientation == "Generic")
+                        {
+                            member.orientation =
+                                SupportMemberOrientation::Generic;
+                        }
+                        else if (orientation == "BentPost")
+                        {
+                            member.orientation =
+                                SupportMemberOrientation::BentPost;
+                        }
+                        else if (orientation == "BentTransverse")
+                        {
+                            member.orientation =
+                                SupportMemberOrientation::BentTransverse;
+                        }
+                        else if (orientation == "RunLongitudinal")
+                        {
+                            member.orientation =
+                                SupportMemberOrientation::RunLongitudinal;
+                        }
+                        else if (orientation == "BentDiagonal")
+                        {
+                            member.orientation =
+                                SupportMemberOrientation::BentDiagonal;
+                        }
+                        else if (orientation == "RunDiagonal")
+                        {
+                            member.orientation =
+                                SupportMemberOrientation::RunDiagonal;
+                        }
+                        else
+                        {
+                            throw std::runtime_error(
+                                memberPath
+                                + ".orientation: unknown support member "
+                                + "orientation '" + orientation + "'");
+                        }
+                    }
+                    // Absent references fall back to the orientation enum.
+                    // A present reference is normalized without changing its
+                    // direction: the generator's directed bent frame must
+                    // survive the round trip exactly, never sign-flipped.
+                    if (memberJson.contains("orientationReference"))
+                    {
+                        requireObject(
+                            memberJson, "orientationReference", memberPath);
+                        member.orientationReference =
+                            normalizeSupportMemberOrientationReference(
+                                deserializeDvec3(
+                                    memberJson["orientationReference"],
+                                    memberPath + ".orientationReference"));
+                    }
                     if (memberJson.contains("startConnection"))
                     {
                         requireObject(memberJson, "startConnection", memberPath);

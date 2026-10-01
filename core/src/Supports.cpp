@@ -1,10 +1,14 @@
 #include <quantum/coaster/Supports.hpp>
 
+#include <glm/geometric.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -386,7 +390,10 @@ namespace quantum::coaster
         const SupportStructureId structureId,
         const SupportElementId startNodeId,
         const SupportElementId endNodeId,
-        const SupportMemberProfile& profile)
+        const SupportMemberProfile& profile,
+        const SupportMemberRole role,
+        const SupportMemberOrientation orientation,
+        SupportMemberOrientationReference orientationReference)
     {
         auto structure = std::find_if(
             collection.structures.begin(),
@@ -446,8 +453,17 @@ namespace quantum::coaster
         }
 
         const SupportElementId id = allocateSupportElementId(*structure);
+        validateSupportMemberRole(role);
+        validateSupportMemberOrientation(orientation);
+        if (orientationReference.has_value())
+        {
+            orientationReference =
+                normalizeSupportMemberOrientationReference(
+                    *orientationReference);
+        }
         structure->members.push_back({
-            id, startNodeId, endNodeId, profile});
+            id, startNodeId, endNodeId, profile, role, orientation,
+            orientationReference});
         validateSupportCollection(collection);
         return id;
     }
@@ -587,7 +603,46 @@ namespace quantum::coaster
             normalized.localPlacement = canonicalPlacement(
                 *normalized.localPlacement);
         }
+        if (normalized.mounting)
+        {
+            validateSupportMemberMounting(*normalized.mounting);
+        }
         return normalized;
+    }
+
+    void validateSupportMemberMounting(const SupportMemberMounting& mounting)
+    {
+        const bool side = mounting.face == SupportMemberMountingFace::PositiveY
+            || mounting.face == SupportMemberMountingFace::NegativeY
+            || mounting.face == SupportMemberMountingFace::PositiveZ
+            || mounting.face == SupportMemberMountingFace::NegativeZ;
+        const bool end = mounting.face == SupportMemberMountingFace::PositiveX
+            || mounting.face == SupportMemberMountingFace::NegativeX;
+        if (!((mounting.mode == SupportMemberMountingMode::Face && side)
+            || (mounting.mode == SupportMemberMountingMode::TerminalSeat && end)))
+        {
+            throw std::invalid_argument("Support mounting mode requires a compatible signed face.");
+        }
+        if (mounting.layer != SupportMemberMountingLayer::Direct
+            && mounting.layer != SupportMemberMountingLayer::OutsideLedger)
+        {
+            throw std::invalid_argument("Support mounting layer is not supported.");
+        }
+        if (mounting.coverage != SupportMemberEndCoverage::Node
+            && mounting.coverage != SupportMemberEndCoverage::OutsideSupport)
+        {
+            throw std::invalid_argument("Support mounting end coverage is not supported.");
+        }
+        if (!std::isfinite(mounting.separation) || mounting.separation < 0.0
+            || !std::isfinite(mounting.overhang) || mounting.overhang < 0.0)
+        {
+            throw std::invalid_argument("Support mounting separation and overhang must be finite and nonnegative.");
+        }
+        if (mounting.mode == SupportMemberMountingMode::TerminalSeat
+            && mounting.layer != SupportMemberMountingLayer::Direct)
+        {
+            throw std::invalid_argument("A terminal seat cannot use a face mounting layer.");
+        }
     }
 
     void validateSupportMemberEndConnection(
@@ -610,6 +665,10 @@ namespace quantum::coaster
                 "Support member-end treatment is not supported.");
         }
 
+        if (connection.mounting)
+        {
+            validateSupportMemberMounting(*connection.mounting);
+        }
         if (connection.asset.has_value())
         {
             const StaticMeshAssetReference& asset = *connection.asset;
@@ -733,6 +792,55 @@ namespace quantum::coaster
         {
             member.endConnection.reset();
         }
+    }
+
+    void setSupportMemberOrientationReference(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId memberId,
+        const glm::dvec3& reference)
+    {
+        validateSupportCollection(collection);
+        const glm::dvec3 normalized =
+            normalizeSupportMemberOrientationReference(reference);
+
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        findSupportMember(*structure, memberId).orientationReference =
+            normalized;
+        validateSupportCollection(collection);
+    }
+
+    void clearSupportMemberOrientationReference(
+        SupportCollection& collection,
+        const SupportStructureId structureId,
+        const SupportElementId memberId)
+    {
+        validateSupportCollection(collection);
+
+        auto structure = std::find_if(
+            collection.structures.begin(),
+            collection.structures.end(),
+            [structureId](const SupportStructure& value)
+            {
+                return value.id == structureId;
+            });
+        if (structure == collection.structures.end())
+        {
+            throw std::invalid_argument("Unknown support structure ID.");
+        }
+
+        findSupportMember(*structure, memberId).orientationReference.reset();
     }
 
     SupportStructure& findMutableSupportStructure(
@@ -875,6 +983,122 @@ namespace quantum::coaster
         }
     }
 
+    void validateSupportMemberRole(const SupportMemberRole role)
+    {
+        switch (role)
+        {
+        case SupportMemberRole::Unspecified:
+        case SupportMemberRole::PrimaryPost:
+        case SupportMemberRole::LedgerCap:
+        case SupportMemberRole::LongitudinalTie:
+        case SupportMemberRole::Brace:
+        case SupportMemberRole::TrackSupport:
+            return;
+        }
+        throw std::invalid_argument(
+            "Support member role is not supported.");
+    }
+
+    void validateSupportMemberOrientation(
+        const SupportMemberOrientation orientation)
+    {
+        switch (orientation)
+        {
+        case SupportMemberOrientation::Generic:
+        case SupportMemberOrientation::BentPost:
+        case SupportMemberOrientation::BentTransverse:
+        case SupportMemberOrientation::RunLongitudinal:
+        case SupportMemberOrientation::BentDiagonal:
+        case SupportMemberOrientation::RunDiagonal:
+            return;
+        }
+        throw std::invalid_argument(
+            "Support member orientation is not supported.");
+    }
+
+    glm::dvec3 normalizeSupportMemberOrientationReference(
+        const glm::dvec3& reference)
+    {
+        if (!finite(reference))
+        {
+            throw std::invalid_argument(
+                "A member orientation reference must be finite.");
+        }
+        const double length = glm::length(reference);
+        if (!std::isfinite(length) || length <= 0.0)
+        {
+            throw std::invalid_argument(
+                "A member orientation reference must be nonzero.");
+        }
+        // Direction is preserved exactly: unlike placement quaternions, where
+        // q and -q encode the same rotation, flipping a reference vector
+        // would silently mirror the directed bent frame that produced it.
+        // Keep already-unit references stable across document round trips.
+        // Repeated division by a length one rounding step from 1 changes bits.
+        if (std::abs(length - 1.0) <= 4.0 * std::numeric_limits<double>::epsilon())
+        {
+            return reference;
+        }
+        return reference / length;
+    }
+
+    void validateSupportMemberOrientationReference(
+        const SupportMemberOrientationReference& reference)
+    {
+        if (!reference.has_value())
+        {
+            return;
+        }
+        if (!finite(*reference))
+        {
+            throw std::invalid_argument(
+                "A member orientation reference must be finite.");
+        }
+        const double length = glm::length(*reference);
+        if (!std::isfinite(length)
+            || std::abs(length - 1.0) > 1.0e-9)
+        {
+            throw std::invalid_argument(
+                "A stored member orientation reference must be normalized.");
+        }
+    }
+
+    SupportMemberProfile timberProfileForRole(
+        const SupportMemberRole role,
+        const double memberSize)
+    {
+        if (!std::isfinite(memberSize) || memberSize <= 0.0)
+        {
+            throw std::invalid_argument(
+                "Timber member size must be finite and positive.");
+        }
+        // Visual presentation proportions only, keyed to the RMC/Hybrid
+        // reference language: posts read heaviest, braces lightest. Posts keep
+        // the nominal square so footing pads derived from the carried section
+        // keep their M1/M2A footprint.
+        switch (role)
+        {
+        case SupportMemberRole::PrimaryPost:
+        case SupportMemberRole::Unspecified:
+            return {SupportMemberProfileShape::Rectangular,
+                {memberSize, memberSize}, 0.0};
+        case SupportMemberRole::LedgerCap:
+            return {SupportMemberProfileShape::Rectangular,
+                {memberSize * 0.9, memberSize * 0.7}, 0.0};
+        case SupportMemberRole::LongitudinalTie:
+            return {SupportMemberProfileShape::Rectangular,
+                {memberSize * 0.8, memberSize * 0.6}, 0.0};
+        case SupportMemberRole::Brace:
+            return {SupportMemberProfileShape::Rectangular,
+                {memberSize * 0.6, memberSize * 0.5}, 0.0};
+        case SupportMemberRole::TrackSupport:
+            return {SupportMemberProfileShape::Rectangular,
+                {memberSize * 0.85, memberSize * 0.65}, 0.0};
+        }
+        throw std::invalid_argument(
+            "Support member role is not supported.");
+    }
+
     void validateWoodenSupportRunRecipe(const WoodenSupportRunRecipe& recipe)
     {
         if (!std::isfinite(recipe.startStation)
@@ -887,9 +1111,44 @@ namespace quantum::coaster
             || !std::isfinite(recipe.attachmentVerticalOffset)
             || !std::isfinite(recipe.memberSize) || recipe.memberSize <= 0.0
             || !std::isfinite(recipe.storyHeight) || recipe.storyHeight <= 0.0
-            || recipe.family > TimberSupportFamily::HybridTimberLattice)
+            || recipe.family > TimberSupportFamily::HybridTimberLattice
+            || recipe.hybridArchetype > HybridFramingArchetype::ConnectedTowers
+            || (recipe.family != TimberSupportFamily::HybridTimberLattice
+                && recipe.hybridArchetype != HybridFramingArchetype::Automatic))
         {
             throw std::invalid_argument("Invalid wooden support run recipe.");
+        }
+        if (recipe.family != TimberSupportFamily::HybridTimberLattice
+            && (!recipe.hybridTransversePanels.empty() || !recipe.hybridLongitudinalPanels.empty()))
+            throw std::invalid_argument("Local Hybrid panels require the Hybrid support family.");
+        std::set<std::pair<std::uint32_t, std::uint32_t>> transversePanels;
+        for (const auto& choice : recipe.hybridTransversePanels)
+        {
+            if ((choice.face != SupportMemberMountingFace::PositiveZ
+                    && choice.face != SupportMemberMountingFace::NegativeZ)
+                || choice.direction > HybridDiagonalDirection::LowerLastToUpperFirst
+                || !transversePanels.emplace(choice.towerIndex, choice.panelIndex).second)
+                throw std::invalid_argument("Invalid or duplicate Hybrid transverse panel choice.");
+        }
+        std::set<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>> longitudinalPanels;
+        for (const auto& choice : recipe.hybridLongitudinalPanels)
+        {
+            if (choice.laneIndex > 1 || choice.bracing > HybridLongitudinalBracing::SingleDiagonal
+                || !longitudinalPanels.emplace(choice.bayIndex, choice.panelIndex, choice.laneIndex).second)
+                throw std::invalid_argument("Invalid or duplicate Hybrid longitudinal panel choice.");
+        }
+        if (recipe.family != TimberSupportFamily::HybridTimberLattice
+            && !recipe.hybridOuterSupports.empty())
+            throw std::invalid_argument("Local outer supports require the Hybrid support family.");
+        std::set<std::uint32_t> outerSupportTowers;
+        for (const auto& choice : recipe.hybridOuterSupports)
+        {
+            if (choice.sides > HybridOuterSupportSides::Both
+                || !std::isfinite(choice.foundationOutset) || !std::isfinite(choice.topOutset)
+                || choice.topOutset <= 1e-6
+                || choice.foundationOutset <= choice.topOutset + 1e-6
+                || !outerSupportTowers.emplace(choice.towerIndex).second)
+                throw std::invalid_argument("Invalid or duplicate Hybrid outer support choice.");
         }
     }
 
@@ -998,6 +1257,10 @@ namespace quantum::coaster
                 }
 
                 validateSupportMemberProfile(member.profile);
+                validateSupportMemberRole(member.role);
+                validateSupportMemberOrientation(member.orientation);
+                validateSupportMemberOrientationReference(
+                    member.orientationReference);
 
                 const auto validateMemberEndConnection =
                     [&structure](

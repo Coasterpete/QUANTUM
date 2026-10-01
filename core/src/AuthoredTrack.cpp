@@ -1101,11 +1101,15 @@ namespace quantum::coaster
         const SupportStructureId structureId,
         const SupportElementId startNodeId,
         const SupportElementId endNodeId,
-        const SupportMemberProfile& profile)
+        const SupportMemberProfile& profile,
+        const SupportMemberRole role,
+        const SupportMemberOrientation orientation,
+        SupportMemberOrientationReference orientationReference)
     {
         SupportCollection candidate = supports_;
         const SupportElementId id = quantum::coaster::createSupportMember(
-            candidate, structureId, startNodeId, endNodeId, profile);
+            candidate, structureId, startNodeId, endNodeId, profile, role,
+            orientation, std::move(orientationReference));
         supports_ = std::move(candidate);
         return id;
     }
@@ -1182,6 +1186,27 @@ namespace quantum::coaster
         SupportCollection candidate = supports_;
         quantum::coaster::clearSupportMemberEndConnection(
             candidate, structureId, memberId, end);
+        supports_ = std::move(candidate);
+    }
+
+    void AuthoredTrack::setSupportMemberOrientationReference(
+        const SupportStructureId structureId,
+        const SupportElementId memberId,
+        const glm::dvec3& reference)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::setSupportMemberOrientationReference(
+            candidate, structureId, memberId, reference);
+        supports_ = std::move(candidate);
+    }
+
+    void AuthoredTrack::clearSupportMemberOrientationReference(
+        const SupportStructureId structureId,
+        const SupportElementId memberId)
+    {
+        SupportCollection candidate = supports_;
+        quantum::coaster::clearSupportMemberOrientationReference(
+            candidate, structureId, memberId);
         supports_ = std::move(candidate);
     }
 

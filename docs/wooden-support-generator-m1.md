@@ -1,5 +1,14 @@
 # Wooden Support Generator M1
 
+> Historical M1 milestone and captures. The line-only renderer, shared square
+> profile, absent member roles and interpolated story levels described below
+> have been superseded by [Supports M2A](supports-m2a-solid-rendering.md).
+> Current generation assigns roles and role-specific sections in every family
+> and matches interior stories by actual elevation. Hybrid additionally authors
+> orientation/reference, face mounting, SimpleBent/ConnectedTowers, local panel
+> choices and optional outer primary supports. Saved M1 geometry remains intact
+> on load; explicit regeneration applies current rules.
+
 QUANTUM generates real-world-informed procedural geometry based on observable
 timber coaster support construction. The generator produces an editable
 `SupportStructure`, not a structural analysis or an exact reproduction of a

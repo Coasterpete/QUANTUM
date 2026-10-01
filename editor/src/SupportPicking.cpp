@@ -2,6 +2,8 @@
 
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 
+#include <glm/geometric.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -56,6 +58,56 @@ namespace
         double distance = 0.0;
         double parameter = 0.0;
     };
+
+    [[nodiscard]] std::optional<double> solidHit(
+        const quantum::editor::SupportVisualizationMember& member,
+        const quantum::editor::ViewportRay& ray)
+    {
+        const auto& frame = member.frame;
+        if (frame.length <= quantum::coaster::minimumSupportMemberLength) return std::nullopt;
+        const glm::dvec3 offset = ray.origin - frame.origin;
+        const glm::dvec3 origin{glm::dot(offset, frame.axisX),
+            glm::dot(offset, frame.axisY), glm::dot(offset, frame.axisZ)};
+        const glm::dvec3 direction{glm::dot(ray.direction, frame.axisX),
+            glm::dot(ray.direction, frame.axisY), glm::dot(ray.direction, frame.axisZ)};
+        double near = 0.0;
+        double far = std::numeric_limits<double>::infinity();
+        const auto slab = [&](const int axis, const double half) -> bool
+        {
+            if (std::abs(direction[axis]) <= 1e-12) return std::abs(origin[axis]) <= half;
+            const double a = (-half - origin[axis]) / direction[axis];
+            const double b = (half - origin[axis]) / direction[axis];
+            near = std::max(near, std::min(a, b));
+            far = std::min(far, std::max(a, b));
+            return near <= far;
+        };
+        if (!slab(0, frame.length * 0.5)) return std::nullopt;
+        if (member.profile.shape == quantum::coaster::SupportMemberProfileShape::Rectangular)
+        {
+            if (!slab(1, member.profile.outerDimensions.x * 0.5)
+                || !slab(2, member.profile.outerDimensions.y * 0.5)) return std::nullopt;
+        }
+        else
+        {
+            const double radius = member.profile.outerDimensions.x * 0.5;
+            const double a = direction.y * direction.y + direction.z * direction.z;
+            const double b = origin.y * direction.y + origin.z * direction.z;
+            const double c = origin.y * origin.y + origin.z * origin.z - radius * radius;
+            if (a <= 1e-24)
+            {
+                if (c > 0.0) return std::nullopt;
+            }
+            else
+            {
+                const double discriminant = b * b - a * c;
+                if (discriminant < 0.0) return std::nullopt;
+                near = std::max(near, (-b - std::sqrt(discriminant)) / a);
+                far = std::min(far, (-b + std::sqrt(discriminant)) / a);
+                if (near > far) return std::nullopt;
+            }
+        }
+        return near;
+    }
 
     [[nodiscard]] SegmentDistance pointSegmentDistance(
         const glm::dvec2& point,
@@ -144,8 +196,19 @@ namespace quantum::editor
         }
 
         std::optional<SupportPickResult> bestMember;
+        const auto ray = camera.viewportRay(normalizedPointer.x, normalizedPointer.y, aspectRatio);
         for (const SupportVisualizationMember& member : visualization.members)
         {
+            if (const auto hit = solidHit(member, ray))
+            {
+                const auto point = projectViewportPoint(camera, ray.origin + *hit * ray.direction, aspectRatio);
+                if (point)
+                {
+                    const SupportPickResult candidate{member.selection, 0.0, point->depth};
+                    if (!bestMember || better(candidate, *bestMember)) bestMember = candidate;
+                    continue;
+                }
+            }
             const auto start = projectViewportPoint(
                 camera, member.startPosition, aspectRatio);
             const auto end = projectViewportPoint(

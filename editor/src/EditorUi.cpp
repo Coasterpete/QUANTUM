@@ -7256,7 +7256,12 @@ namespace quantum::editor
         if (captureScenario_ != nullptr && (initialViewportFramePending_ || aspectChanged))
         {
             // Fit using the actual docked viewport aspect, including startup layout changes.
-            if (captureScenario_->focusSelected)
+            if (captureScenario_->cameraPose)
+            {
+                viewportCamera_.setProjection(captureScenario_->cameraProjection);
+                viewportCamera_.setPose(*captureScenario_->cameraPose);
+            }
+            else if (captureScenario_->focusSelected)
                 focusSelectedSection();
             else
                 viewportCamera_.frame(aspectRatio);
@@ -10684,7 +10689,8 @@ ImGui::MenuItem(
 
     void EditorUi::drawViewportSupports()
     {
-        if (supportVisualization_ == nullptr)
+        if (supportVisualization_ == nullptr
+            || (captureScenario_ != nullptr && !captureScenario_->supportNodeHandlesVisible))
         {
             return;
         }
@@ -11341,11 +11347,10 @@ ImGui::MenuItem(
             auto [minimum, maximum] = referenceCurveBounds(*centerlineVisualization_);
             if (supportVisualization_ != nullptr)
             {
-                for (const SupportVisualizationNode& node
-                    : supportVisualization_->nodes)
+                if (const auto bounds = supportVisualizationBounds(*supportVisualization_))
                 {
-                    minimum = glm::min(minimum, node.position);
-                    maximum = glm::max(maximum, node.position);
+                    minimum = glm::min(minimum, bounds->first);
+                    maximum = glm::max(maximum, bounds->second);
                 }
             }
             // setBounds updates clipping/framing limits without changing user

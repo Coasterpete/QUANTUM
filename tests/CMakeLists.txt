@@ -2639,9 +2639,106 @@ add_test(NAME QuantumCore.WoodenSupportGenerator
 set_tests_properties(QuantumCore.WoodenSupportGenerator PROPERTIES
     LABELS "core;coaster;supports;generator")
 
+# Structural roles: explicit member semantics with role-specific rectangular
+# timber sections, persisted backward-compatibly. Solid presentation still
+# groups by profile shape, so no renderer change is required.
+add_executable(QuantumCoreSupportMemberRoleTests
+    SupportMemberRoleTests.cpp)
+target_link_libraries(QuantumCoreSupportMemberRoleTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreSupportMemberRoleTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreSupportMemberRoleTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.SupportMemberRole
+    COMMAND QuantumCoreSupportMemberRoleTests)
+set_tests_properties(QuantumCore.SupportMemberRole PROPERTIES
+    LABELS "core;coaster;supports;roles")
+
+# Hybrid Timber Lattice accuracy: bent archetypes, single-diagonal topology,
+# role/orientation assignment, Hybrid-only sections, and compatibility.
+add_executable(QuantumCoreHybridTimberAccuracyTests
+    HybridTimberAccuracyTests.cpp)
+target_link_libraries(QuantumCoreHybridTimberAccuracyTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreHybridTimberAccuracyTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreHybridTimberAccuracyTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.HybridTimberAccuracy
+    COMMAND QuantumCoreHybridTimberAccuracyTests)
+set_tests_properties(QuantumCore.HybridTimberAccuracy PROPERTIES
+    LABELS "core;coaster;supports;hybrid;accuracy")
+
+# Authored orientation references: directed bent-frame evidence per member,
+# never sign-flipped, never re-derived on endpoint moves. Hybrid-only
+# population; absent everywhere else.
+add_executable(QuantumCoreSupportOrientationReferenceTests
+    SupportOrientationReferenceTests.cpp)
+target_link_libraries(QuantumCoreSupportOrientationReferenceTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreSupportOrientationReferenceTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreSupportOrientationReferenceTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.SupportOrientationReference
+    COMMAND QuantumCoreSupportOrientationReferenceTests)
+set_tests_properties(QuantumCore.SupportOrientationReference PROPERTIES
+    LABELS "core;coaster;supports;orientation;reference")
+
+# Orientation consumption: authored Hybrid planes select the solid-frame
+# reference explicitly; Generic keeps the legacy fallback bit-identically.
+add_executable(QuantumCoreSupportOrientationFrameTests
+    SupportOrientationFrameTests.cpp)
+target_link_libraries(QuantumCoreSupportOrientationFrameTests PRIVATE Quantum::Core)
+target_compile_features(QuantumCoreSupportOrientationFrameTests PRIVATE cxx_std_23)
+set_target_properties(QuantumCoreSupportOrientationFrameTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumCore.SupportOrientationFrame
+    COMMAND QuantumCoreSupportOrientationFrameTests)
+set_tests_properties(QuantumCore.SupportOrientationFrame PROPERTIES
+    LABELS "core;coaster;supports;orientation;solid")
+
 # Supports M2A: solid member transforms, orientation, appearance, and
 # persistence. Renderer-side unit mesh and texture tests live in the engine
 # suite below.
+if(QUANTUM_ENABLE_EDITOR)
+add_executable(QuantumEditorSupportMountingTests
+    SupportMountingTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportPicking.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/SupportVisualization.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportCamera.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/ViewportTrackAnchors.cpp)
+target_include_directories(QuantumEditorSupportMountingTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorSupportMountingTests PRIVATE Quantum::Core Quantum::Engine)
+target_compile_features(QuantumEditorSupportMountingTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorSupportMountingTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEditor.SupportMounting COMMAND QuantumEditorSupportMountingTests)
+set_tests_properties(QuantumEditor.SupportMounting PROPERTIES
+    LABELS "editor;core;coaster;supports;mounting;hybrid")
+add_executable(QuantumEditorHybridLocalBracingTests
+    HybridLocalBracingTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp)
+target_include_directories(QuantumEditorHybridLocalBracingTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorHybridLocalBracingTests PRIVATE Quantum::Core)
+target_compile_features(QuantumEditorHybridLocalBracingTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorHybridLocalBracingTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEditor.HybridLocalBracing COMMAND QuantumEditorHybridLocalBracingTests)
+set_tests_properties(QuantumEditor.HybridLocalBracing PROPERTIES
+    LABELS "editor;core;coaster;supports;mounting;hybrid")
+add_executable(QuantumEditorHybridOuterSupportTests
+    HybridOuterSupportTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp)
+target_include_directories(QuantumEditorHybridOuterSupportTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorHybridOuterSupportTests PRIVATE Quantum::Core)
+target_compile_features(QuantumEditorHybridOuterSupportTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorHybridOuterSupportTests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEditor.HybridOuterSupport COMMAND QuantumEditorHybridOuterSupportTests)
+set_tests_properties(QuantumEditor.HybridOuterSupport PROPERTIES
+    LABELS "editor;core;coaster;supports;mounting;hybrid")
+endif()
+
 add_executable(QuantumCoreSupportSolidGeometryTests
     SupportSolidGeometryTests.cpp)
 target_link_libraries(QuantumCoreSupportSolidGeometryTests PRIVATE Quantum::Core)

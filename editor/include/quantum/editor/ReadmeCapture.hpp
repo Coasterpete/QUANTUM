@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/editor/ViewportCamera.hpp>
 
 #include <array>
 #include <filesystem>
@@ -47,6 +48,7 @@ namespace quantum::editor
         // appearance.
         bool supportSolidVisible = true;
         bool supportDebugLinesVisible = true;
+        bool supportNodeHandlesVisible = true;
         // Authored timber tint override for this capture only, in sRGB. A
         // negative component means "leave the document's value alone", which
         // is what lets a capture photograph the shipped default instead of
@@ -67,6 +69,10 @@ namespace quantum::editor
         bool skyVisible = true;
         float sunIntensity = 3.0F;
         double zoom = 1.0;
+        // Optional reproducible close-up pose for structural visual acceptance.
+        // Uses the editor's normal camera; no document/rendering override.
+        std::optional<ViewportCameraPose> cameraPose;
+        ViewportProjection cameraProjection = ViewportProjection::Perspective;
         // Ground Surface M0 presentation. Unspecified fields keep the same
         // defaults the interactive editor starts with, so an existing manifest
         // keeps producing the pre-ground appearance only when ground is false.

@@ -295,7 +295,12 @@ namespace quantum::coaster
             SupportElementId startNodeId,
             SupportElementId endNodeId,
             const SupportMemberProfile& profile =
-                defaultSupportMemberProfile());
+                defaultSupportMemberProfile(),
+            SupportMemberRole role = SupportMemberRole::Unspecified,
+            SupportMemberOrientation orientation =
+                SupportMemberOrientation::Generic,
+            SupportMemberOrientationReference orientationReference =
+                std::nullopt);
         void removeSupportMember(
             SupportStructureId structureId,
             SupportElementId memberId);
@@ -321,6 +326,13 @@ namespace quantum::coaster
             SupportStructureId structureId,
             SupportElementId memberId,
             SupportMemberEnd end);
+        void setSupportMemberOrientationReference(
+            SupportStructureId structureId,
+            SupportElementId memberId,
+            const glm::dvec3& reference);
+        void clearSupportMemberOrientationReference(
+            SupportStructureId structureId,
+            SupportElementId memberId);
 
         [[nodiscard]] std::size_t sectionCount() const noexcept;
 
