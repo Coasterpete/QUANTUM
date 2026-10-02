@@ -12,6 +12,7 @@ add_executable(
     src/EditorStyle.cpp
     src/EditorUi.cpp
     src/EditorUiPerformanceTelemetry.cpp
+    src/EditorUiSimulationTelemetry.cpp
     src/PlatformDialogs.cpp
     src/PreviewSmoke.cpp
     src/RegionSummary.cpp
