@@ -112,6 +112,60 @@ namespace
             "a rejected length edit must leave generated track unchanged");
     }
 
+    void discardedCandidateOwnsIndependentRegionData()
+    {
+        AuthoredTrack committed = quantum::coaster::createNewDocument();
+        const auto generatedBefore =
+            quantum::coaster::integrateAuthoredTrack(committed, 1.0);
+
+        {
+            AuthoredTrackEditTransaction transaction{committed};
+            quantum::coaster::setSectionLength(
+                transaction.candidate().section(0), 45.0);
+            transaction.candidate().duplicateSection(0);
+
+            require(transaction.candidate().sectionCount() == 2
+                    && transaction.candidate().section(0).rateProfileRegion()
+                        .rateProfiles.pitch.segments.back()
+                        .transition.domainEnd == 45.0,
+                "candidate edits must change its own nested region data");
+            require(committed.sectionCount() == 1
+                    && committed.section(0).length == 60.0
+                    && committed.section(0).rateProfileRegion()
+                        .rateProfiles.pitch.segments.back()
+                        .transition.domainEnd == 60.0,
+                "candidate containers must not share editable document data");
+        }
+
+        require(committed.sectionCount() == 1,
+            "discarding a valid candidate must not commit it");
+        requireSameGeneratedTrack(generatedBefore, committed,
+            "discarding a candidate must preserve committed geometry");
+    }
+
+    void acceptedStructuralCandidateExposesSelectionAfterCommit()
+    {
+        AuthoredTrack committed = quantum::coaster::createNewDocument();
+        AuthoredTrackEditTransaction transaction{committed};
+        transaction.candidate().duplicateSection(0);
+        transaction.stageSelectionAfterCommit(1);
+        static_cast<void>(quantum::coaster::integrateAuthoredTrack(
+            transaction.candidate(), 1.0));
+
+        require(!transaction.committed()
+                && !transaction.selectionAfterCommit().has_value()
+                && committed.sectionCount() == 1,
+            "successful generation alone must not accept document or selection");
+
+        transaction.commit(committed);
+
+        require(transaction.committed() && committed.sectionCount() == 2,
+            "commit must accept the candidate document");
+        require(transaction.selectionAfterCommit() == 1
+                && *transaction.selectionAfterCommit() < committed.sectionCount(),
+            "staged selection must become available in the accepted document");
+    }
+
     void rejectedPlanarArcRadiusRestoresCommittedBuffers()
     {
         AuthoredTrack committed = quantum::coaster::createNewDocument();
@@ -235,6 +289,8 @@ int main()
     try
     {
         rejectedSectionLengthRestoresCommittedBuffer();
+        discardedCandidateOwnsIndependentRegionData();
+        acceptedStructuralCandidateExposesSelectionAfterCommit();
         rejectedPlanarArcRadiusRestoresCommittedBuffers();
         rejectedStructuralCandidateDoesNotPublishSelection();
         shorteningPastAttachmentRejectsCandidate();
