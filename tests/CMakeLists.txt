@@ -2106,6 +2106,21 @@ set_tests_properties(
     PROPERTIES
         LABELS "editor;document;history;transaction"
 )
+
+add_executable(QuantumEditorWorkspaceCompositionTests
+    WorkspaceCompositionTests.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/DocumentHistory.cpp
+    ${PROJECT_SOURCE_DIR}/editor/src/TrackStylePresentation.cpp)
+target_include_directories(QuantumEditorWorkspaceCompositionTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/editor/include)
+target_link_libraries(QuantumEditorWorkspaceCompositionTests PRIVATE Quantum::Core)
+target_compile_features(QuantumEditorWorkspaceCompositionTests PRIVATE cxx_std_23)
+set_target_properties(QuantumEditorWorkspaceCompositionTests PROPERTIES
+    CXX_EXTENSIONS OFF)
+add_test(NAME QuantumEditor.WorkspaceComposition
+    COMMAND QuantumEditorWorkspaceCompositionTests)
+set_tests_properties(QuantumEditor.WorkspaceComposition PROPERTIES
+    LABELS "editor;workspace;document;history")
 endif()
 
 add_executable(

@@ -12,6 +12,7 @@
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
+#include <quantum/editor/WorkspaceComposition.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
 #include <quantum/renderer/EnvironmentAssets.hpp>
 
@@ -771,12 +772,6 @@ namespace quantum::editor
         void applyPreviewSmokeCameraOrbit() noexcept;
 
     private:
-        enum class WorkspaceMode : std::uint8_t
-        {
-            Editor,
-            Simulator
-        };
-
         void drawSimulator(renderer::VulkanContext& vulkan);
         enum class CameraGesture
         {
@@ -1095,6 +1090,7 @@ bool canUndo_ = false;
         bool simulationAvailable_ = false;
         std::string simulationError_;
         WorkspaceMode workspaceMode_ = WorkspaceMode::Editor;
+        EditorWorkspace editorWorkspace_ = defaultEditorWorkspace;
 
         static constexpr std::size_t performanceHistoryCapacity = 720;
         std::array<FramePerformanceSample, performanceHistoryCapacity>
