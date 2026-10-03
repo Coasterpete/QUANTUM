@@ -94,6 +94,7 @@ if(QUANTUM_ENABLE_ENGINE)
             glslangValidator
     )
     find_package(SDL3 CONFIG REQUIRED)
+    find_package(Jolt CONFIG REQUIRED)
     find_package(VulkanMemoryAllocator CONFIG REQUIRED)
     if(QUANTUM_ENABLE_EDITOR)
         find_package(imgui CONFIG REQUIRED)

@@ -1,4 +1,5 @@
 #include <quantum/editor/SimulationPreview.hpp>
+#include <quantum/physics/RigidBodyWorld.hpp>
 
 #include <quantum/coaster/TrainConfiguration.hpp>
 #include <quantum/coaster/TrackTopology.hpp>
@@ -594,6 +595,13 @@ namespace quantum::editor
                         - physics::defaultFixedTimeStepSeconds);
                 ++stepCount;
 
+                // The train commits first; the independent world shares this
+                // accepted fixed tick, including a final boundary-stop tick.
+                if (rigidBodyWorld_)
+                {
+                    rigidBodyWorld_->stepFixed();
+                }
+
                 if (result.telemetry.boundaryIntervention)
                 {
                     frameTelemetry_.boundaryStopped = true;
@@ -773,6 +781,12 @@ namespace quantum::editor
             frameTelemetry_.accumulatorRemainingMilliseconds =
                 accumulatorSeconds_ * 1000.0;
         }
+    }
+
+    void SimulationPreview::setRigidBodyWorld(
+        physics::RigidBodyWorld* const world) noexcept
+    {
+        rigidBodyWorld_ = world;
     }
 
     bool SimulationPreview::isAvailable() const noexcept

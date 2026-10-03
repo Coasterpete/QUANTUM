@@ -15,6 +15,7 @@
 #include <quantum/editor/RegionSelection.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/SimulationPreview.hpp>
+#include <quantum/physics/RigidBodyWorld.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
@@ -586,7 +587,10 @@ namespace quantum::engine
                     documentHistory.canUndo(),
                     documentHistory.canRedo());
 
+                // Declared first so the borrowed world outlives the preview.
+                quantum::physics::RigidBodyWorld rigidBodyWorld;
                 quantum::editor::SimulationPreview simulationPreview;
+                simulationPreview.setRigidBodyWorld(&rigidBodyWorld);
                 simulationPreview.setGpuContext(
                     gpuContext.has_value() ? &*gpuContext : nullptr);
                 if (previewSmokeOptions != nullptr

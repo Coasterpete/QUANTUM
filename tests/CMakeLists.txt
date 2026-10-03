@@ -1,4 +1,11 @@
 if(QUANTUM_ENABLE_ENGINE)
+    add_executable(QuantumEngineRigidBodyWorldTests RigidBodyWorldTests.cpp)
+    target_link_libraries(QuantumEngineRigidBodyWorldTests PRIVATE Quantum::Engine)
+    target_compile_features(QuantumEngineRigidBodyWorldTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineRigidBodyWorldTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEngine.RigidBodyWorld COMMAND QuantumEngineRigidBodyWorldTests)
+    set_tests_properties(QuantumEngine.RigidBodyWorld PROPERTIES LABELS "engine;physics;rigid-body")
+
     add_executable(
         QuantumEngineLoggingTests
         LoggingTests.cpp
