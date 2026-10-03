@@ -47,6 +47,7 @@ namespace
     // layout while preserving normal Dear ImGui persistence thereafter.
     constexpr char editorLayoutIniFileName[] = "imgui-layout-v2.ini";
     constexpr char editorDockspaceName[] = "QuantumEditorDockSpace";
+    constexpr char trainDockspaceName[] = "QuantumTrainDockSpace";
     // Display names can change; these suffixes retain the existing window
     // IDs and their persisted docking placements.
     constexpr char trackWorkspaceWindowName[] =
@@ -4591,6 +4592,29 @@ namespace
         ImGui::DockBuilderDockWindow("Transition Editor Input", bottomId);
         ImGui::DockBuilderFinish(dockspaceId);
     }
+
+    void buildDefaultTrainDockLayout(
+        const ImGuiID dockspaceId, const ImVec2 dockspaceSize)
+    {
+        ImGui::DockBuilderRemoveNode(dockspaceId);
+        ImGui::DockBuilderAddNode(dockspaceId,
+            ImGuiDockNodeFlags_DockSpace
+                | ImGuiDockNodeFlags_PassthruCentralNode);
+        ImGui::DockBuilderSetNodeSize(dockspaceId, dockspaceSize);
+        ImGuiID centerId = dockspaceId;
+        ImGuiID leftId = 0;
+        ImGuiID rightId = 0;
+        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, 0.23F,
+            &leftId, &centerId);
+        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Right, 0.30F,
+            &rightId, &centerId);
+        ImGui::DockBuilderDockWindow("Train Configuration", leftId);
+        ImGui::DockBuilderDockWindow(
+            quantum::editor::trainCoasterSetupWindowName, leftId);
+        ImGui::DockBuilderDockWindow("Train Preview", centerId);
+        ImGui::DockBuilderDockWindow("Train Physical Definition", rightId);
+        ImGui::DockBuilderFinish(dockspaceId);
+    }
 }
 
 namespace quantum::editor
@@ -7127,6 +7151,7 @@ namespace quantum::editor
         const float presentationScale = editorPresentationScale();
 
         if (workspaceMode_ == WorkspaceMode::Editor
+            && editorWorkspace_ == EditorWorkspace::Track
             && supportTrackPickActive_
             && ImGui::IsKeyPressed(ImGuiKey_Escape))
         {
@@ -7142,6 +7167,7 @@ namespace quantum::editor
 
         const bool supportManipulationCaptured =
             workspaceMode_ == WorkspaceMode::Editor
+            && editorWorkspace_ == EditorWorkspace::Track
             && updateSupportNodeManipulation(
                 viewportHovered,
                 pixelWidth,
@@ -7152,6 +7178,7 @@ namespace quantum::editor
             == SupportConnectState::WaitingForSecondNode;
         const bool startPoseManipulationCaptured =
             workspaceMode_ == WorkspaceMode::Editor
+            && editorWorkspace_ == EditorWorkspace::Track
             && (supportManipulationCaptured
                 || (!supportConnectWaiting
                     && !supportTrackPickActive_
@@ -7181,6 +7208,7 @@ namespace quantum::editor
         // hovered; popup/modal blocking and clicks on the toolbar therefore
         // remain UI input even while WantCaptureMouse is true for the editor.
         if (workspaceMode_ == WorkspaceMode::Editor
+            && editorWorkspace_ == EditorWorkspace::Track
             && viewportHovered
             && !io.AppFocusLost
             && !startPoseManipulationCaptured
@@ -7589,6 +7617,7 @@ namespace quantum::editor
         drawList->PushClipRect(imageMinimum, imageMaximum, true);
 
         if (workspaceMode_ == WorkspaceMode::Editor
+            && editorWorkspace_ == EditorWorkspace::Track
             && centerlineVisualization_ != nullptr)
         {
             const auto project = [&](const renderer::LineVertex& vertex) -> std::optional<ImVec2>
@@ -7748,8 +7777,11 @@ namespace quantum::editor
         if (workspaceMode_ == WorkspaceMode::Editor)
         {
             drawSimulationTelemetry();
-            drawViewportTrackAnchors();
-            drawViewportSupports();
+            if (editorWorkspace_ == EditorWorkspace::Track)
+            {
+                drawViewportTrackAnchors();
+                drawViewportSupports();
+            }
         }
         drawList->PopClipRect();
     }
@@ -8261,12 +8293,19 @@ namespace quantum::editor
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Workspace: Track"))
+        const char* const workspaceLabel = editorWorkspace_ == EditorWorkspace::Track
+            ? "Workspace: Track" : "Workspace: Train";
+        if (ImGui::BeginMenu(workspaceLabel))
         {
             if (ImGui::MenuItem("Track", nullptr,
                 editorWorkspace_ == EditorWorkspace::Track))
             {
                 editorWorkspace_ = EditorWorkspace::Track;
+            }
+            if (ImGui::MenuItem("Train", nullptr,
+                editorWorkspace_ == EditorWorkspace::Train))
+            {
+                editorWorkspace_ = EditorWorkspace::Train;
             }
             ImGui::EndMenu();
         }
@@ -8304,15 +8343,16 @@ namespace quantum::editor
                 frameWholeTrack();
             }
             ImGui::Separator();
-            ImGui::MenuItem("Force Diagnostics", nullptr,
-                &riderLoadDiagnosticsWindowOpen_);
-ImGui::MenuItem(
-                "Performance Telemetry",
-                nullptr,
-                &performanceTelemetryWindowOpen_);
+            if (editorWorkspace_ == EditorWorkspace::Track)
+            {
+                ImGui::MenuItem("Force Diagnostics", nullptr,
+                    &riderLoadDiagnosticsWindowOpen_);
+                ImGui::MenuItem("Performance Telemetry", nullptr,
+                    &performanceTelemetryWindowOpen_);
+            }
             ImGui::MenuItem("Coaster Setup", nullptr,
                 &coasterSetupWindowOpen_);
-            if (ImGui::MenuItem(
+            if (editorWorkspace_ == EditorWorkspace::Track && ImGui::MenuItem(
                 "Viewport Settings",
                 nullptr,
                 &viewportSettingsWindowOpen_
@@ -8333,7 +8373,8 @@ ImGui::MenuItem(
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Preferences"))
+        if (editorWorkspace_ == EditorWorkspace::Track
+            && ImGui::BeginMenu("Preferences"))
         {
             if (ImGui::MenuItem(
                 "Transition Editor Input",
@@ -8712,6 +8753,18 @@ ImGui::MenuItem(
         // transition. As before, that request takes effect on the next frame.
         const auto editorComposition = editorWorkspaceComposition(
             workspaceMode_, editorWorkspace_);
+        const ImGuiID trackDockspaceId = ImGui::GetID(editorDockspaceName);
+        const ImGuiID trainDockspaceId = ImGui::GetID(trainDockspaceName);
+        // ImGui otherwise detaches windows when their dockspace is not
+        // submitted. Keep both frontend layouts alive through Simulator too.
+        if (editorComposition != EditorWorkspace::Track
+            && ImGui::DockBuilderGetNode(trackDockspaceId) != nullptr)
+            ImGui::DockSpace(trackDockspaceId, ImVec2{0.0F, 0.0F},
+                ImGuiDockNodeFlags_KeepAliveOnly);
+        if (editorComposition != EditorWorkspace::Train
+            && ImGui::DockBuilderGetNode(trainDockspaceId) != nullptr)
+            ImGui::DockSpace(trainDockspaceId, ImVec2{0.0F, 0.0F},
+                ImGuiDockNodeFlags_KeepAliveOnly);
         if (!editorComposition.has_value())
         {
             drawSimulator(vulkan);
@@ -8799,7 +8852,9 @@ ImGui::MenuItem(
         // Build/submit the dockspace before any dockable window. Windows that
         // call Begin first cannot join a layout created later in the frame and
         // would remain floating until manually moved.
-        const ImGuiID dockspaceId = ImGui::GetID(editorDockspaceName);
+        const bool trainComposition = *editorComposition == EditorWorkspace::Train;
+        const ImGuiID dockspaceId = trainComposition
+            ? trainDockspaceId : trackDockspaceId;
         const bool defaultLayoutRequired =
             resetDockLayoutPending_
             || ImGui::DockBuilderGetNode(dockspaceId) == nullptr;
@@ -8843,10 +8898,18 @@ ImGui::MenuItem(
                     == ReadmeCaptureKind::TrackStyleRegions)
                     bottomFraction = 0.12F;
             }
-            buildDefaultDockLayout(
-                dockspaceId, defaultDockspaceSize, bottomFraction);
+            if (trainComposition)
+            {
+                buildDefaultTrainDockLayout(dockspaceId, defaultDockspaceSize);
+                trainCoasterSetupInitialDockPending_ = true;
+            }
+            else
+            {
+                buildDefaultDockLayout(
+                    dockspaceId, defaultDockspaceSize, bottomFraction);
+                coasterSetupInitialDockPending_ = true;
+            }
             resetDockLayoutPending_ = false;
-            coasterSetupInitialDockPending_ = true;
         }
 
         // Coaster Setup is shared editor UI, independent of the workspace.
@@ -8855,21 +8918,25 @@ ImGui::MenuItem(
         // docked explicitly here, into the left node it shares with the Track
         // Workspace. The flag is only consumed on a frame that actually reaches
         // Begin, so the request can never be consumed by a later window.
-        if (coasterSetupInitialDockPending_
+        bool& setupInitialDockPending = trainComposition
+            ? trainCoasterSetupInitialDockPending_ : coasterSetupInitialDockPending_;
+        const bool focusTrainConfiguration = trainComposition && defaultLayoutRequired;
+        if (setupInitialDockPending
             && coasterSetupWindowOpen_ && authoredTrack_ != nullptr)
         {
             ImGuiWindow* trackWorkspaceWindow = ImGui::FindWindowByName(
-                trackWorkspaceWindowName);
+                trainComposition ? "Train Configuration" : trackWorkspaceWindowName);
             if (trackWorkspaceWindow != nullptr
                 && trackWorkspaceWindow->DockId != 0)
             {
                 ImGui::SetNextWindowDockID(
                     trackWorkspaceWindow->DockId, ImGuiCond_Always);
-                coasterSetupInitialDockPending_ = false;
+                setupInitialDockPending = false;
             }
         }
         CoasterSetupWindowEdits setupEdits = drawCoasterSetupWindow(
-            authoredTrack_, &coasterSetupWindowOpen_, fonts_);
+            authoredTrack_, &coasterSetupWindowOpen_, fonts_,
+            trainComposition ? trainCoasterSetupWindowName : coasterSetupWindowName);
         if (setupEdits.coasterSetup.has_value())
         {
             pendingCoasterSetupEdit_ = std::move(*setupEdits.coasterSetup);
@@ -8887,39 +8954,42 @@ ImGui::MenuItem(
         pendingTrackConfigurationReset_ |=
             setupEdits.resetTrackConfiguration;
 
-        if (*editorComposition != EditorWorkspace::Track)
+        if (trainComposition)
         {
-            throw std::logic_error("Unsupported editor workspace composition.");
+            drawTrainWorkspace();
+            if (focusTrainConfiguration)
+                ImGui::SetWindowFocus("Train Configuration");
         }
+        else
+        {
+            // Supporting panes remain part of Track's existing composition.
+            showTransitionEditorInputSettings(
+                transitionEditorInputSettings_,
+                &inputSettingsWindowOpen_
+            );
 
-        // Track composition: submit the existing supporting panes, viewport,
-        // Track Workspace, region editors, and Force Diagnostics below.
-        showTransitionEditorInputSettings(
-            transitionEditorInputSettings_,
-            &inputSettingsWindowOpen_
-        );
+            showViewportSettingsWindow(
+                viewportSettings_,
+                pendingGroundEdit_,
+                &viewportSettingsWindowOpen_,
+                vulkan.capabilities().viewportMsaa4,
+                vulkan.capabilities().hdrEnvironment,
+                window_,
+                vulkan
+            );
 
-        showViewportSettingsWindow(
-            viewportSettings_,
-            pendingGroundEdit_,
-            &viewportSettingsWindowOpen_,
-            vulkan.capabilities().viewportMsaa4,
-            vulkan.capabilities().hdrEnvironment,
-            window_,
-            vulkan
-        );
-
-        drawPerformanceTelemetry();
+            drawPerformanceTelemetry();
+        }
 
         constexpr ImGuiWindowFlags viewportWindowFlags =
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
         const bool viewportContentVisible = ImGui::Begin(
-            "3D Viewport",
+            trainComposition ? "Train Preview" : "3D Viewport",
             nullptr,
             viewportWindowFlags
         );
 
-        if (viewportContentVisible)
+        if (viewportContentVisible && !trainComposition)
         {
             const ImGuiStyle& toolbarStyle = ImGui::GetStyle();
             const float toolbarWidth = ImGui::GetContentRegionAvail().x;
@@ -9291,6 +9361,12 @@ ImGui::MenuItem(
                 ImGui::EndPopup();
             }
             ImGui::Spacing();
+        }
+
+        if (viewportContentVisible)
+        {
+            if (trainComposition)
+                drawTrainViewportToolbar();
 
             const ImVec2 availableSize = ImGui::GetContentRegionAvail();
             const ImVec2 framebufferScale =
@@ -9342,6 +9418,12 @@ ImGui::MenuItem(
         }
 
         ImGui::End();
+
+        if (trainComposition)
+        {
+            ImGui::Render();
+            return;
+        }
 
         if (captureScenario_ == nullptr
             || authoredTrack_->section(selectedSection_).kind == coaster::RegionKind::RateProfiles)
@@ -11660,6 +11742,7 @@ std::optional<coaster::LayoutMode>
         simulationPlaybackState_ = SimulationPlaybackState::Stopped;
         simulationSpeedMps_ = 0.0;
         simulationError_ = error;
+        trainPreviewInspection_.reset();
     }
 
     void EditorUi::recordFramePerformance(

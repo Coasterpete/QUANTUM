@@ -11,6 +11,7 @@ add_executable(
     src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
+    src/EditorUiTrain.cpp
     src/EditorUiPerformanceTelemetry.cpp
     src/EditorUiSimulationTelemetry.cpp
     src/EditorUiSupportAppearance.cpp
@@ -46,6 +47,7 @@ add_executable(
     include/quantum/editor/RiderLoadDiagnostics.hpp
     include/quantum/editor/SimulationPreview.hpp
     include/quantum/editor/TransitionEditorModel.hpp
+    include/quantum/editor/TrainPreviewInspection.hpp
     include/quantum/editor/TrackStylePresentation.hpp
     include/quantum/editor/TransitionTypePresets.hpp
     include/quantum/editor/ViewportCamera.hpp

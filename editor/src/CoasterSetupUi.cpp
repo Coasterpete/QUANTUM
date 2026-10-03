@@ -39,10 +39,26 @@ namespace quantum::editor
         }
     }
 
+    bool drawCarsPerTrainInput(coaster::CoasterSetup& draft)
+    {
+        int carsPerTrain = static_cast<int>(draft.carsPerTrain);
+        if (!ImGui::InputInt("Cars per train", &carsPerTrain, 1, 2))
+            return false;
+        const auto count = static_cast<std::uint32_t>(std::clamp(
+            carsPerTrain,
+            static_cast<int>(coaster::minimumCarsPerTrain),
+            static_cast<int>(coaster::maximumCarsPerTrain)));
+        if (count == draft.carsPerTrain)
+            return false;
+        draft.carsPerTrain = count;
+        return true;
+    }
+
     CoasterSetupWindowEdits drawCoasterSetupWindow(
         const coaster::AuthoredTrack* const authoredTrack,
         bool* const open,
-        const EditorFonts& fonts)
+        const EditorFonts& fonts,
+        const char* const windowName)
     {
         if (open == nullptr || !*open || authoredTrack == nullptr)
         {
@@ -60,7 +76,7 @@ namespace quantum::editor
         CoasterSetupWindowEdits edits;
 
         if (!ImGui::Begin(
-                coasterSetupWindowName,
+                windowName,
                 open,
                 ImGuiWindowFlags_AlwaysAutoResize))
         {
@@ -273,17 +289,7 @@ namespace quantum::editor
         {
             ImGui::TextDisabled("Restraint option: not applicable");
         }
-        int carsPerTrain = static_cast<int>(draft.carsPerTrain);
-        if (ImGui::InputInt("Cars per train", &carsPerTrain, 1, 2))
-        {
-            carsPerTrain = std::clamp(
-                carsPerTrain,
-                static_cast<int>(coaster::minimumCarsPerTrain),
-                static_cast<int>(coaster::maximumCarsPerTrain));
-            draft.carsPerTrain =
-                static_cast<std::uint32_t>(carsPerTrain);
-            changed = true;
-        }
+        changed |= drawCarsPerTrainInput(draft);
         editorSecondaryTextWrapped(
             "Simulation Preview uses this car count with its current repeated-car "
             "physics definition. Rider positions remain car-loadout data, not "

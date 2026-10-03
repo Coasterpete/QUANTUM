@@ -16,6 +16,12 @@ namespace quantum::editor
 {
     inline constexpr char coasterSetupWindowName[] =
         "Coaster Setup###COASTER SETUP";
+    inline constexpr char trainCoasterSetupWindowName[] =
+        "Coaster Setup###TRAIN COASTER SETUP";
+
+    // Both workspace surfaces edit a transient setup candidate with the same
+    // control. Application remains responsible for acceptance and history.
+    [[nodiscard]] bool drawCarsPerTrainInput(coaster::CoasterSetup& draft);
 
     struct CoasterSetupWindowEdits
     {
@@ -32,5 +38,6 @@ namespace quantum::editor
     drawCoasterSetupWindow(
         const coaster::AuthoredTrack* authoredTrack,
         bool* open,
-        const EditorFonts& fonts);
+        const EditorFonts& fonts,
+        const char* windowName = coasterSetupWindowName);
 }

@@ -826,6 +826,25 @@ namespace quantum::editor
         return trainDefinition_;
     }
 
+    std::optional<TrainPreviewInspection>
+    SimulationPreview::trainInspection() const
+    {
+        if (!isAvailable() || trainDefinition_.cars.empty())
+            return std::nullopt;
+
+        TrainPreviewInspection inspection;
+        inspection.carCount = trainDefinition_.cars.size();
+        inspection.repeatedCar = trainDefinition_.cars.front();
+        inspection.loadedCarMassKilograms = physics::totalCarMassKilograms(
+            inspection.repeatedCar.car, inspection.repeatedCar.loadout);
+        inspection.totalTrainMassKilograms = pose_->totalLoadedMassKilograms();
+        if (!trainDefinition_.connections.empty())
+            inspection.connectorLengthMeters =
+                trainDefinition_.connections.front().rigidLengthMeters;
+        inspection.resistance = trainDefinition_.resistance;
+        return inspection;
+    }
+
     const physics::TrainDynamicsState*
     SimulationPreview::dynamicsState() const noexcept
     {

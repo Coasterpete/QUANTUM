@@ -316,6 +316,75 @@ namespace
             "four boxes, eight bogie markers, and three connectors");
     }
 
+    void resolvedTrainInspectionUsesAcceptedPreview()
+    {
+        SimulationPreview preview;
+        require(!preview.trainInspection(),
+            "A fresh unavailable preview must not publish inspection data");
+        auto track = straightTrack();
+        for (const auto count : {4U, 5U, 4U, 5U, 1U})
+        {
+            auto setup = track.coasterSetup();
+            setup.carsPerTrain = count;
+            track.setCoasterSetup(setup);
+            require(preview.rebuild(track), "Inspection fixture must rebuild");
+            auto inspection = preview.trainInspection();
+            require(inspection.has_value(), "Accepted preview must publish inspection");
+            const auto& definition = preview.trainDefinition();
+            const auto& car = definition.cars.front().car;
+            const auto& loadout = definition.cars.front().loadout;
+            require(inspection->carCount == definition.cars.size()
+                    && inspection->carCount == preview.pose()->carCount()
+                    && inspection->carCount == count,
+                "Inspection, accepted definition, pose and saved count must agree");
+            const auto& inspectedCar = inspection->repeatedCar.car;
+            require(inspectedCar.dryMassKilograms == car.dryMassKilograms
+                    && inspectedCar.bodyDimensionsMeters == car.bodyDimensionsMeters
+                    && inspectedCar.dryCenterOfGravityMeters == car.dryCenterOfGravityMeters
+                    && inspectedCar.frontHitchPositionMeters == car.frontHitchPositionMeters
+                    && inspectedCar.rearHitchPositionMeters == car.rearHitchPositionMeters
+                    && inspectedCar.aerodynamicDragAreaSquareMeters == car.aerodynamicDragAreaSquareMeters
+                    && inspection->repeatedCar.loadout.massKilograms == loadout.massKilograms
+                    && inspection->repeatedCar.loadout.centerOfMassMeters == loadout.centerOfMassMeters,
+                "Inspected physical car and loadout must be actual preview inputs");
+            require(inspectedCar.bogies.size() == car.bogies.size(),
+                "Inspected bogie count must match preview");
+            for (std::size_t index = 0; index < car.bogies.size(); ++index)
+                require(inspectedCar.bogies[index].referencePositionMeters
+                        == car.bogies[index].referencePositionMeters,
+                    "Inspected bogie references must match preview");
+            requireNear(inspection->loadedCarMassKilograms,
+                preview.pose()->cars().front().loadedMassKilograms(), 0.0,
+                "Loaded car mass must agree with Core pose");
+            requireNear(inspection->totalTrainMassKilograms,
+                preview.pose()->totalLoadedMassKilograms(), 0.0,
+                "Total train mass must agree with Core pose");
+            require(inspection->connectorLengthMeters.has_value() == (count > 1),
+                "A one-car preview must safely represent absent connectors");
+            if (count > 1)
+                requireNear(*inspection->connectorLengthMeters,
+                    definition.connections.front().rigidLengthMeters, 0.0,
+                    "Inspected connector must match preview");
+            const auto& resistance = inspection->resistance;
+            require(resistance.constantMechanicalForceNewtons == definition.resistance.constantMechanicalForceNewtons
+                    && resistance.linearResistanceCoefficientNewtonSecondsPerMeter == definition.resistance.linearResistanceCoefficientNewtonSecondsPerMeter
+                    && resistance.airDensityKilogramsPerCubicMeter == definition.resistance.airDensityKilogramsPerCubicMeter
+                    && resistance.dragAreaSquareMeters == definition.resistance.dragAreaSquareMeters
+                    && resistance.rollingResistanceCoefficient == definition.resistance.rollingResistanceCoefficient,
+                "All inspected resistance coefficients must match preview");
+            inspection->repeatedCar.car.dryMassKilograms = 123.0;
+            require(preview.trainDefinition().cars.front().car.dryMassKilograms
+                    == car.dryMassKilograms && car.dryMassKilograms != 123.0,
+                "Inspection must be a value copy, not mutable preview access");
+        }
+        quantum::coaster::setSectionLength(track.section(0), 1.0);
+        require(!preview.rebuild(track) && !preview.error().empty()
+                && !preview.trainInspection(),
+            "Failed rebuild must suppress inspection rather than publish retained inputs");
+        require(preview.rebuild(straightTrack()) && preview.trainInspection(),
+            "Inspection must recover with the next accepted preview");
+    }
+
     void authoredCarCountConfiguresPreviewConsist()
     {
         auto track = straightTrack(60.0, 7.25);
@@ -1144,6 +1213,7 @@ int main()
         spikeRollbackInterpolation();
         initializesFromAuthoredPhysicalSettings();
         authoredCarCountConfiguresPreviewConsist();
+        resolvedTrainInspectionUsesAcceptedPreview();
         rebuildUsesNewInitialSpeedAndResetsPlayback();
         playbackUsesFixedStepsAndResetIsDeterministic();
         catchUpIsBounded();

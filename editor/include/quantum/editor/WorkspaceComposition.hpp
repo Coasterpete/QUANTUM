@@ -14,7 +14,8 @@ namespace quantum::editor
 
     enum class EditorWorkspace : std::uint8_t
     {
-        Track
+        Track,
+        Train
     };
 
     inline constexpr EditorWorkspace defaultEditorWorkspace =

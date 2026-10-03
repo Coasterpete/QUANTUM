@@ -10,6 +10,7 @@
 #include <quantum/editor/FramePerformanceTelemetry.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
+#include <quantum/editor/TrainPreviewInspection.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/editor/WorkspaceComposition.hpp>
@@ -754,6 +755,8 @@ namespace quantum::editor
 
         // Called when simulation is unavailable (e.g., track too short).
         void setSimulationUnavailable(const std::string& error);
+        void setTrainPreviewInspection(
+            std::optional<TrainPreviewInspection> inspection);
 
         // Adds one completed rendered-frame sample to the optional compact
         // performance panel. Recording is fixed-capacity and allocation-free.
@@ -833,6 +836,8 @@ void drawSimulationTelemetry();
         void drawViewportTrackAnchors();
         void drawViewportSupports();
         void drawSupportWorkspace();
+        void drawTrainWorkspace();
+        void drawTrainViewportToolbar();
         void drawSupportAppearancePanel();
         void drawTrackDevices();
         void drawDeviceAccelerationProfileEditor(
@@ -1089,6 +1094,7 @@ bool canUndo_ = false;
         double simulationSpeedMps_ = 0.0;
         bool simulationAvailable_ = false;
         std::string simulationError_;
+        std::optional<TrainPreviewInspection> trainPreviewInspection_;
         WorkspaceMode workspaceMode_ = WorkspaceMode::Editor;
         EditorWorkspace editorWorkspace_ = defaultEditorWorkspace;
 
@@ -1104,6 +1110,7 @@ bool canUndo_ = false;
         // ImGui does not reliably honor that pending request for Coaster Setup,
         // so it is re-docked explicitly once, on the first frame where it does.
         bool coasterSetupInitialDockPending_ = false;
+        bool trainCoasterSetupInitialDockPending_ = false;
         FrameBlockingEvents frameBlockingEvents_;
     };
 }
