@@ -398,11 +398,22 @@ namespace quantum::engine
         SDL_SetLogPriority(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_WARN);
 #endif
 
+        SDL_Rect usableBounds{};
+        if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usableBounds))
+        {
+            const std::string error = SDL_GetError();
+            SDL_Quit();
+            throw std::runtime_error("SDL_GetDisplayUsableBounds failed: " + error);
+        }
+        // SDL reports usable bounds in native window coordinates. Leave room
+        // for the desktop/taskbar on both small and high-resolution displays.
+        const int initialWidth = static_cast<int>(usableBounds.w * 0.90F);
+        const int initialHeight = static_cast<int>(usableBounds.h * 0.88F);
         SDL_Window* window = SDL_CreateWindow(
             "QUANTUM",
-            1600,
-            900,
-            SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE
+            initialWidth,
+            initialHeight,
+            SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
         );
 
         if (window == nullptr)

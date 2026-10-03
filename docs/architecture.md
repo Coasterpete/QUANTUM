@@ -102,16 +102,22 @@ OpenEXR. That decision, the reasons, and the deferred runtime EXR work are
 recorded in [`ground-surface-m0.md`](ground-surface-m0.md), along with the two
 Vulkan defects found and fixed during the milestone.
 
-A new session selects DaySky through the explicit
-`defaultEnvironmentAssetIdentifier` constant rather than the first entry of the
-bundled-sky registry, so the default cannot change when a sky is added or the
-registry is reordered. A fresh session also leaves the ground's three texture
-identifiers empty, so the built-in neutral maps apply instead of the synthetic
-`test-ground-*.png` diagnostics, and the reference grid starts hidden. Clearing a
-ground map republishes that slot's neutral fallback rather than leaving the
-previously bound map in place. These presentation defaults, and the workspace
-changes made alongside them, are recorded in
-[`ground-surface-m0-1.md`](ground-surface-m0-1.md).
+A new session uses an empty environment identifier: a blue-gray clear color,
+the existing sun, and the shaders' constant ambient branch. The environment
+cache owns tiny neutral cube/BRDF images so every declared sampler remains
+valid without preprocessing an HDRI at startup. Selecting an optional bundled
+sky still uses the same HDR/IBL preparation, cache, descriptor publication, and
+frame-completion wait. `defaultEnvironmentAssetIdentifier` identifies DaySky
+for explicit HDR enable/capture requests; it does not select the startup sky.
+
+`newDocumentGroundAppearance()` supplies new documents and explicit Reset
+Ground with a neutral gray-green material, roughness 0.92, and 120 repeats
+across a 1200-unit quad. Texture identifiers stay empty, using neutral maps;
+the reference grid starts hidden. Historical `GroundAppearance{}` defaults
+remain the missing-field compatibility fallback for older documents. Clearing
+a ground map republishes that slot's neutral fallback. See
+[`ui-theme-m0.md`](ui-theme-m0.md) for the current housekeeping defaults and
+[`ground-surface-m0-1.md`](ground-surface-m0-1.md) for the earlier milestone.
 
 
 The deliberately small Blender/GLB contract and asset lifetime boundary are
@@ -754,7 +760,7 @@ retains the selected `EditorWorkspace` independently from `WorkspaceMode::Editor
 the dedicated Simulator mode does not replace that selection or own another
 document. The main menu identifies the current workspace as `Workspace: Track`
 or `Workspace: Train`. Returning from Simulator restores that selection.
-A main menu and provisional COMMAND toolbar
+A main menu and compact workspace command strip
 sit above the dockspace. The default docked shell contains `COASTER SETUP` and
 `TRACK WORKSPACE` on the left, the texture-backed `3D Viewport` in the centre,
 `Support Workspace`, `Track Devices`, and `Viewport Settings` on the right, a
@@ -765,8 +771,15 @@ editor appropriate to the selected region.
 `EditorUi::beginFrame` routes the dedicated Simulator first. Editor frames
 submit the menu, toolbar, and dockspace, draw shared Coaster Setup, then select
 the selected pane composition and finish with `ImGui::Render`. Train submits
-Train Configuration, Train Physical Definition, and Train Preview. The latter
-shares the existing viewport texture, camera, and SimulationPreview diagnostic
+Train Configuration, Train Summary, and Train Preview. A fresh/reset Train
+layout adapts Legacy M165's Configuration-left, Preview-primary, Summary-bottom
+composition. The visible Summary retains `Train Physical Definition` as its
+stable ImGui ID. Authored car count, accepted-preview readouts, and collapsible
+backend defaults have distinct headings; backend values remain read only.
+The command strip groups existing Track creation/edit/device/analysis actions
+or Train setup/preview/analysis actions. Buttons issue the same pending requests
+as menus and shortcuts or focus existing panes; no command owner was added.
+The preview shares the existing viewport texture, camera, and SimulationPreview diagnostic
 geometry; Track authoring gestures are active only in Track. Train's car-count
 input uses the same pending Coaster Setup edit and Application transaction/history
 path as shared Coaster Setup. Physical inspection is a copied value published
@@ -784,7 +797,8 @@ window/dockspace IDs. Train has its own IDs in the same ini file; both inactive
 dockspaces are submitted with `KeepAliveOnly`, including during Simulator.
 Coaster Setup uses one implementation/open flag/edit path with a window ID per
 layout. Reset Workspace Layout rebuilds only the composition shown that frame.
-See [`recovery-m1b-train-workspace.md`](recovery-m1b-train-workspace.md) and
+See [`ui-theme-m0.md`](ui-theme-m0.md),
+[`recovery-m1b-train-workspace.md`](recovery-m1b-train-workspace.md), and
 [`ground-surface-m0-1.md`](ground-surface-m0-1.md).
 
 ### Shared region selection
@@ -889,12 +903,31 @@ bounds include the generated rail and heartline offsets for Frame All, Focus
 and clipping, so those offsets cannot escape the frame on very short tracks.
 They refresh after visualization changes without moving the user camera.
 
-The Editor uses three static Overpass faces from the official v3.0.5 release:
-Regular at 14 logical pixels, SemiBold headings at 15, and Mono Regular technical
-values at 14. CMake deploys these with their license and provenance. ImGui's atlas
-owns the fonts; EditorFonts only borrows handles until context shutdown. DPI
-scales fonts and viewport drawing/picking dimensions together. Missing bundled
-fonts retain an explicit startup error.
+The Editor uses three existing static faces: Overpass Regular at 15 logical
+pixels, Red Hat Mono SemiBold headings at 16, and Red Hat Mono Regular technical
+values at 15. CMake deploys these with their licenses and provenance. ImGui's atlas
+owns the fonts; EditorFonts only borrows handles until context shutdown.
+Automatic UI scaling divides SDL display/content scale by pixel density to
+obtain the logical ImGui scale. Display-change notifications refresh it;
+Preferences offers a session-only Auto/100/125/150/175/200% override. Base style
+sizes are reapplied before scaling, and FontScaleDpi is assigned once instead
+of also enabling ImGui's automatic font-only scale. ImGui 1.92 rasterizes the
+requested font sizes/densities through its existing Vulkan texture update path.
+Missing bundled fonts retain an explicit startup error.
+
+UI scale is independent of drawable extent. Viewport targets still round
+logical content size times DisplayFramebufferScale to the nearest native pixel;
+swapchain sizing still uses SDL_GetWindowSizeInPixels. Vulkan target ownership,
+resize handling, MSAA, and picking conventions are unchanged. Startup window
+size uses 90% of the primary display's usable width and 88% of its usable height,
+with SDL's high-pixel-density flag, rather than a fixed 1600x900 window.
+
+UI Theme M0 keeps the centralized palette and ImGui assignments in
+`EditorStyle.hpp/.cpp`: navy/blue-gray surfaces, pale blue text, and blue/cyan
+interactions. Semantic success/warning/error and engineering data colors remain
+independent. Authored sRGB bytes still convert to linear inputs for presentation
+through the sRGB swapchain. Theme changes do not change docking identities or
+workspace/document ownership.
 
 ### Semantic viewport region anchors
 

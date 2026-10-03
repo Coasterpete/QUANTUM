@@ -44,8 +44,8 @@ namespace
     {
         using namespace palette;
         const std::array colors{
-            background, panel, panelRaised, frame, frameHovered, frameActive,
-            border, separator, textPrimary, textSecondary, textDisabled,
+            background, menu, toolbar, panel, panelRaised, frame, frameHovered, frameActive,
+            border, borderStrong, separator, textPrimary, textSecondary, textDisabled, textHeading,
             accent, accentHovered, accentActive, accentMuted, selection,
             selectionHovered, selectionActive, success, warning, error,
             viewportAnchor, viewportSelected, viewportHovered, viewportRing,
@@ -73,6 +73,21 @@ namespace
             "disabled text became effectively invisible");
         require(contrastRatio(textPrimary, selection) >= 7.0F,
             "selected-row neutral text lost contrast against its accent fill");
+        for (const ImVec4& surface : {panel, panelRaised, frame, frameHovered,
+            frameActive, selection, selectionHovered, selectionActive})
+            require(contrastRatio(textPrimary, surface) >= 4.5F,
+                "body text must remain readable on interactive surfaces");
+        require(contrastRatio(textHeading, panel) >= 7.0F
+                && contrastRatio(textSecondary, panelRaised) >= 4.5F,
+            "headings and secondary text must retain readable contrast");
+        require(accent.z > accent.y && accent.y > accent.x
+                && accentHovered.z > accentHovered.x,
+            "general interaction identity must remain blue/cyan");
+        require(sameColor(success, fromSrgb(116, 201, 139))
+                && sameColor(warning, fromSrgb(235, 185, 91))
+                && sameColor(error, fromSrgb(255, 146, 140))
+                && sameColor(normalGChannel, fromSrgb(0, 230, 130)),
+            "status and engineering data colors must retain their meaning");
 
         require(sameColor(viewportSelected, fromSrgb(153, 239, 232)),
             "technical viewport selection must retain its cyan semantic color");
@@ -179,9 +194,8 @@ namespace
     void neutralSceneDefaults()
     {
         const ViewportSettings settings;
-        require(settings.environmentAsset
-                == quantum::renderer::defaultEnvironmentAssetIdentifier,
-            "fresh Editor sessions use the explicit DaySky environment");
+        require(settings.environmentAsset.empty(),
+            "fresh Editor sessions use neutral background and constant ambient");
         require(settings.groundSurface.enabled,
             "fresh Editor sessions keep the physical ground enabled");
         require(settings.groundSurface.albedoTexture.empty()
@@ -190,6 +204,39 @@ namespace
             "fresh Editor sessions use neutral built-in ground maps");
         require(!settings.gridVisible,
             "fresh Editor sessions hide the diagnostic reference grid");
+    }
+
+    void displayScaleAndPixelExtent()
+    {
+        for (const float scale : {1.0F, 1.25F, 1.5F, 1.75F, 2.0F})
+        {
+            require(editorLogicalUiScale(scale, 1.0F) == scale,
+                "Windows content scale must apply once in pixel coordinates");
+            require(editorLogicalUiScale(scale, scale) == 1.0F,
+                "framebuffer density must not enlarge logical controls twice");
+            applyEditorUiScale(scale);
+            const float padding = ImGui::GetStyle().WindowPadding.x;
+            applyEditorUiScale(scale);
+            require(ImGui::GetStyle().WindowPadding.x == padding
+                    && padding == std::floor(9.0F * scale)
+                    && editorPresentationScale() == scale,
+                "font and spacing scale must not accumulate across refreshes");
+            require(editorLogicalUiScale(2.0F, 1.0F, scale) == scale,
+                "manual UI override replaces automatic content scale");
+        }
+        require(contentPixelDimension(801.25F, 1.5F) == 1202
+                && contentPixelDimension(800.0F, 2.0F) == 1600
+                && contentPixelDimension(800.0F, 1.0F) == 800,
+            "viewport target must use drawable pixels independently of UI scale");
+        require(contentPixelDimension(0.0F, 2.0F) == 0
+                && contentPixelDimension(-10.0F, 1.0F) == 0,
+            "hidden or collapsed viewport must not create a target");
+        bool rejected = false;
+        try { static_cast<void>(editorLogicalUiScale(1.0F, 0.0F)); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected, "invalid pixel density must not silently reach UI sizing");
+        applyQuantumStyle();
+        ImGui::GetStyle().FontScaleDpi = 1.0F;
     }
 
     void translatedGrid()
@@ -320,9 +367,10 @@ namespace
             unsigned char* pixels = nullptr;
             int width = 0, height = 0;
             io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-            require(pixels && width > 0 && height > 0, "static OTF faces must rasterize");
+            require(pixels && width > 0 && height > 0, "bundled static font faces must rasterize");
             require(io.FontDefault == fonts.normal && io.Fonts->Fonts.Size == 3,
                 "only the three atlas-owned faces must load");
+            displayScaleAndPixelExtent();
             for (auto* font : {fonts.normal, fonts.header, fonts.technical})
             for (const ImWchar glyph : {ImWchar('0'), ImWchar('9'), ImWchar('+'), ImWchar('-'),
                 ImWchar('.'), ImWchar('/'), ImWchar(0x00B0), ImWchar(0x2212), ImWchar(0x2014)})
@@ -335,7 +383,9 @@ namespace
                 ImGui::PushFont(fonts.technical, editorTechnicalFontSize);
                 require(std::abs(ImGui::CalcTextSize("111.111").x - ImGui::CalcTextSize("888.888").x) < 0.01F,
                     "technical digits must align");
-                require(std::abs(ImGui::GetFontSize() - editorTechnicalFontSize * scale) < 0.01F,
+                // ImGui rounds the final scaled font size to a whole pixel.
+                const float expectedSize = std::floor(editorTechnicalFontSize * scale + 0.5F);
+                require(std::abs(ImGui::GetFontSize() - expectedSize) < 0.01F,
                     "font scale must apply exactly once");
                 require(viewportStyle::anchorRingRadius * editorPresentationScale()
                     <= viewportTrackAnchorHitRadiusPixels * editorPresentationScale(),

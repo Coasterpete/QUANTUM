@@ -3,6 +3,9 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cstdio>
+#include <string>
 #include <utility>
 
 namespace quantum::editor
@@ -13,123 +16,165 @@ namespace quantum::editor
         trainPreviewInspection_ = std::move(inspection);
     }
 
+    namespace
+    {
+        void trainTitle(const char* title, const EditorFonts& fonts)
+        {
+            ImGui::PushFont(fonts.header, editorHeaderFontSize);
+            ImGui::TextColored(palette::textHeading, "%s", title);
+            ImGui::PopFont();
+            ImGui::Spacing();
+        }
+
+        void trainValue(const EditorFonts& fonts, const char* label,
+            const char* value, const char* unit)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            editorSecondaryText("%s", label);
+            ImGui::TableNextColumn();
+            ImGui::PushFont(fonts.technical, editorTechnicalFontSize);
+            const float width = ImGui::CalcTextSize(value).x;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()
+                + std::max(0.0F, ImGui::GetContentRegionAvail().x - width));
+            ImGui::TextUnformatted(value);
+            ImGui::PopFont();
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s", unit);
+        }
+
+        void trainNumber(const EditorFonts& fonts, const char* label,
+            const double value, const char* unit, const int precision = 2)
+        {
+            char text[64]{};
+            std::snprintf(text, sizeof(text), "%.*f", precision, value);
+            trainValue(fonts, label, text, unit);
+        }
+
+        bool beginTrainValues(const char* id)
+        {
+            if (!ImGui::BeginTable(id, 3, ImGuiTableFlags_SizingStretchProp))
+                return false;
+            ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn("Unit", ImGuiTableColumnFlags_WidthFixed);
+            return true;
+        }
+    }
+
     void EditorUi::drawTrainWorkspace()
     {
         if (ImGui::Begin("Train Configuration"))
         {
-            editorHeading("Consist", fonts_);
+            trainTitle("TRAIN CONFIGURATION", fonts_);
+            ImGui::TextColored(palette::accent, "AUTHORED / editable");
             if (authoredTrack_ != nullptr)
             {
-                // Start from committed setup, or this frame's shared setup
-                // candidate. Neither surface retains a second car-count value.
+                // Borrow the committed setup or this frame's shared candidate.
+                // Application still accepts it through document transactions.
                 auto draft = pendingCoasterSetupEdit_.value_or(
                     authoredTrack_->coasterSetup());
                 if (drawCarsPerTrainInput(draft))
                     pendingCoasterSetupEdit_ = std::move(draft);
-                editorSecondaryTextWrapped(
-                    "Cars per train is saved in Coaster Setup. Accepted edits "
-                    "use document Undo/Redo. The preview repeats one physical car.");
+                editorSecondaryTextWrapped("Saved in Coaster Setup. Document Undo/Redo.");
             }
+            ImGui::Spacing();
             if (ImGui::Button("Open Coaster Setup"))
             {
                 coasterSetupWindowOpen_ = true;
                 ImGui::SetWindowFocus(trainCoasterSetupWindowName);
             }
-
-            ImGui::Separator();
-            editorHeading("Diagnostic preview", fonts_);
-            if (simulationAvailable_)
+            ImGui::Spacing();
+            editorHeading("Accepted preview", fonts_);
+            ImGui::TextDisabled("RESOLVED / read only");
+            if (simulationAvailable_ && trainPreviewInspection_)
             {
-                const char* const state = simulationPlaybackState_
-                    == SimulationPlaybackState::Playing ? "Playing"
-                    : simulationPlaybackState_ == SimulationPlaybackState::Paused
-                        ? "Paused" : "Stopped";
-                ImGui::Text("Status: %s", state);
-                ImGui::Text("Speed: %.2f m/s", simulationSpeedMps_);
-                if (trainPreviewInspection_)
-                    ImGui::Text("Resolved cars: %zu", trainPreviewInspection_->carCount);
+                ImGui::TextColored(palette::success, "Preview ready");
+                if (beginTrainValues("Configuration readouts"))
+                {
+                    trainNumber(fonts_, "Resolved cars", static_cast<double>(
+                        trainPreviewInspection_->carCount), "cars", 0);
+                    trainNumber(fonts_, "Loaded train mass",
+                        trainPreviewInspection_->totalTrainMassKilograms, "kg", 1);
+                    ImGui::EndTable();
+                }
             }
             else
             {
-                ImGui::TextColored(palette::warning, "Status: Unavailable");
+                ImGui::TextColored(palette::warning, "Preview unavailable");
                 if (!simulationError_.empty())
                     ImGui::TextWrapped("%s", simulationError_.c_str());
             }
-            ImGui::BeginDisabled(!simulationAvailable_
-                || simulationPlaybackState_ == SimulationPlaybackState::Playing);
-            if (ImGui::Button("Play"))
-                pendingSimulationControl_ = SimulationControlType::Play;
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!simulationAvailable_
-                || simulationPlaybackState_ != SimulationPlaybackState::Playing);
-            if (ImGui::Button("Pause"))
-                pendingSimulationControl_ = SimulationControlType::Pause;
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!simulationAvailable_);
-            if (ImGui::Button("Reset"))
-                pendingSimulationControl_ = SimulationControlType::Reset;
-            ImGui::EndDisabled();
-            editorSecondaryTextWrapped(
-                "Boxes, bogie markers, and connector lines share the existing "
-                "Simulation Preview with Track and Simulator.");
+            ImGui::Spacing();
+            editorSecondaryTextWrapped("One backend car definition is repeated across the consist.");
         }
         ImGui::End();
 
-        if (ImGui::Begin("Train Physical Definition"))
+        // The suffix retains Recovery M1B's persisted window identity.
+        if (ImGui::Begin("Train Summary###Train Physical Definition"))
         {
-            editorHeading("Resolved preview inputs", fonts_);
-            editorSecondaryTextWrapped(
-                "Read only. Physical car, loadout, connectors, and resistance "
-                "are backend defaults, not saved in this document. Coaster "
-                "Setup's style and restraint metadata do not select a different "
-                "physical car yet.");
+            trainTitle("TRAIN SUMMARY", fonts_);
+            ImGui::TextDisabled("RESOLVED / accepted preview");
             if (!simulationAvailable_ || !trainPreviewInspection_)
-            {
-                ImGui::TextDisabled("No accepted preview definition is available.");
-            }
+                ImGui::TextDisabled("No accepted preview definition.");
             else
             {
                 const auto& inspection = *trainPreviewInspection_;
                 const auto& car = inspection.repeatedCar.car;
                 const auto& loadout = inspection.repeatedCar.loadout;
-                ImGui::Text("Repeated cars: %zu", inspection.carCount);
-                ImGui::Text("Dry mass / car: %.1f kg", car.dryMassKilograms);
-                ImGui::Text("Load mass / car: %.1f kg", loadout.massKilograms);
-                ImGui::Text("Total mass / car: %.1f kg", inspection.loadedCarMassKilograms);
-                ImGui::Text("Total train mass: %.1f kg", inspection.totalTrainMassKilograms);
-                ImGui::Separator();
-                ImGui::TextWrapped("Local physical axes: +X forward, +Y lateral, +Z up. Dimensions and positions are in metres.");
-                const auto vectorText = [](const char* label, const glm::dvec3& value)
+                if (beginTrainValues("Resolved summary"))
                 {
-                    ImGui::Text("%s: (%.2f, %.2f, %.2f)",
-                        label, value.x, value.y, value.z);
-                };
-                vectorText("Body dimensions", car.bodyDimensionsMeters);
-                vectorText("Dry centre of gravity", car.dryCenterOfGravityMeters);
-                vectorText("Load centre of mass", loadout.centerOfMassMeters);
-                for (std::size_t index = 0; index < car.bogies.size(); ++index)
-                {
-                    ImGui::Text("Bogie %zu reference", index + 1);
-                    vectorText("  Position", car.bogies[index].referencePositionMeters);
+                    trainNumber(fonts_, "Cars", static_cast<double>(inspection.carCount), "cars", 0);
+                    trainNumber(fonts_, "Loaded mass / car", inspection.loadedCarMassKilograms, "kg", 1);
+                    trainNumber(fonts_, "Total train mass", inspection.totalTrainMassKilograms, "kg", 1);
+                    if (inspection.connectorLengthMeters)
+                        trainNumber(fonts_, "Connector length", *inspection.connectorLengthMeters, "m");
+                    ImGui::EndTable();
                 }
-                vectorText("Front hitch", car.frontHitchPositionMeters);
-                vectorText("Rear hitch", car.rearHitchPositionMeters);
-                if (inspection.connectorLengthMeters)
-                    ImGui::Text("Connector length: %.2f m", *inspection.connectorLengthMeters);
-                else
-                    ImGui::TextDisabled("Connector: not applicable to one car");
-                ImGui::Separator();
-                editorHeading("Resistance (whole train)", fonts_);
-                const auto& resistance = inspection.resistance;
-                ImGui::Text("Mechanical force: %.1f N", resistance.constantMechanicalForceNewtons);
-                ImGui::Text("Linear coefficient: %.1f N s/m",
-                    resistance.linearResistanceCoefficientNewtonSecondsPerMeter);
-                ImGui::Text("Air density: %.3f kg/m^3", resistance.airDensityKilogramsPerCubicMeter);
-                ImGui::Text("Aggregate drag area: %.2f m^2", resistance.dragAreaSquareMeters);
-                ImGui::Text("Rolling coefficient: %.3f", resistance.rollingResistanceCoefficient);
-                ImGui::Text("Per-car drag area: %.2f m^2", car.aerodynamicDragAreaSquareMeters);
+                ImGui::Spacing();
+                if (ImGui::CollapsingHeader("Physical definition / backend defaults"))
+                {
+                    ImGui::TextDisabled("READ ONLY / not authored in this document");
+                    if (beginTrainValues("Physical defaults"))
+                    {
+                        trainNumber(fonts_, "Dry mass / car", car.dryMassKilograms, "kg", 1);
+                        trainNumber(fonts_, "Load mass / car", loadout.massKilograms, "kg", 1);
+                        const auto vector = [&](const char* label, const glm::dvec3& value)
+                        {
+                            char text[96]{};
+                            std::snprintf(text, sizeof(text), "%.2f / %.2f / %.2f", value.x, value.y, value.z);
+                            trainValue(fonts_, label, text, "m");
+                        };
+                        vector("Body dimensions", car.bodyDimensionsMeters);
+                        vector("Dry centre of gravity", car.dryCenterOfGravityMeters);
+                        vector("Load centre of mass", loadout.centerOfMassMeters);
+                        for (std::size_t index = 0; index < car.bogies.size(); ++index)
+                        {
+                            const std::string label = "Bogie " + std::to_string(index + 1);
+                            vector(label.c_str(), car.bogies[index].referencePositionMeters);
+                        }
+                        vector("Front hitch", car.frontHitchPositionMeters);
+                        vector("Rear hitch", car.rearHitchPositionMeters);
+                        ImGui::EndTable();
+                    }
+                    editorSecondaryTextWrapped("Local axes: +X forward / +Y lateral / +Z up.");
+                    editorSecondaryTextWrapped("Style and restraint metadata do not yet select a physical car.");
+                }
+                if (ImGui::CollapsingHeader("Resistance / backend defaults"))
+                {
+                    ImGui::TextDisabled("READ ONLY / whole train unless marked per car");
+                    if (beginTrainValues("Resistance defaults"))
+                    {
+                        const auto& resistance = inspection.resistance;
+                        trainNumber(fonts_, "Mechanical force", resistance.constantMechanicalForceNewtons, "N", 1);
+                        trainNumber(fonts_, "Linear coefficient", resistance.linearResistanceCoefficientNewtonSecondsPerMeter, "N s/m", 1);
+                        trainNumber(fonts_, "Air density", resistance.airDensityKilogramsPerCubicMeter, "kg/m^3", 3);
+                        trainNumber(fonts_, "Aggregate drag area", resistance.dragAreaSquareMeters, "m^2");
+                        trainNumber(fonts_, "Rolling coefficient", resistance.rollingResistanceCoefficient, "", 3);
+                        trainNumber(fonts_, "Drag area / car", car.aerodynamicDragAreaSquareMeters, "m^2");
+                        ImGui::EndTable();
+                    }
+                }
             }
         }
         ImGui::End();
@@ -137,17 +182,26 @@ namespace quantum::editor
 
     void EditorUi::drawTrainViewportToolbar()
     {
-        if (ImGui::Button("Frame All"))
-            frameWholeTrack();
+        trainTitle("TRAIN PREVIEW", fonts_);
+        const char* state = simulationPlaybackState_ == SimulationPlaybackState::Playing
+            ? "Playing" : simulationPlaybackState_ == SimulationPlaybackState::Paused
+                ? "Paused" : "Stopped";
+        ImGui::TextColored(simulationAvailable_ ? palette::success : palette::warning,
+            "%s", simulationAvailable_ ? state : "Unavailable");
         ImGui::SameLine();
-        if (ImGui::Button("View"))
-            ImGui::OpenPopup("Train View");
+        ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
+        ImGui::Text("%.2f m/s", simulationSpeedMps_);
+        ImGui::PopFont();
+        ImGui::SameLine();
+        if (ImGui::Button("View")) ImGui::OpenPopup("Train View");
         if (ImGui::BeginPopup("Train View"))
         {
             showViewportViewMenuItems();
             showViewportAxisMenuItems();
             ImGui::EndPopup();
         }
-        editorSecondaryTextWrapped("Diagnostic train preview | right-drag to look, Alt+right-drag to orbit, middle-drag to pan, wheel to zoom.");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Diagnostic car boxes, bogies and connectors. Right-drag: look; Alt+right-drag: orbit; middle-drag: pan; wheel: zoom.");
+        ImGui::Spacing();
     }
 }

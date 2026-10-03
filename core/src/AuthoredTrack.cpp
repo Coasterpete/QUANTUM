@@ -868,6 +868,9 @@ namespace quantum::coaster
     {
         AuthoredTrack track;
         track.appendSection();
+        // New documents use a restrained matte surface. Historical missing-
+        // ground defaults remain in GroundAppearance for load compatibility.
+        track.setGround(newDocumentGroundAppearance());
         return track;
     }
 

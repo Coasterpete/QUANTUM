@@ -1871,41 +1871,6 @@ namespace
         }
     }
 
-    std::uint32_t contentPixelDimension(
-        const float logicalDimension,
-        const float framebufferScale)
-    {
-        if (!std::isfinite(logicalDimension)
-            || !std::isfinite(framebufferScale)
-            || logicalDimension <= 0.0F
-            || framebufferScale <= 0.0F)
-        {
-            return 0;
-        }
-
-        const double pixels = std::floor(
-            static_cast<double>(logicalDimension)
-                * static_cast<double>(framebufferScale)
-            + 0.5
-        );
-
-        if (pixels < 1.0)
-        {
-            return 0;
-        }
-
-        if (pixels
-            > static_cast<double>(std::numeric_limits<std::uint32_t>::max()))
-        {
-            throw std::length_error(
-                "The Editor viewport content size exceeds a 32-bit pixel "
-                "dimension."
-            );
-        }
-
-        return static_cast<std::uint32_t>(pixels);
-    }
-
     void logViewportSettings(
         const quantum::editor::ViewportSettings& settings)
     {
@@ -1958,10 +1923,10 @@ namespace
 
     // The environment combo is built from the renderer's bundled-sky registry,
     // so adding a sky is a data change rather than an editor code change. Index
-    // 0 is always "None".
+    // 0 is always the neutral background without an HDR environment.
     std::string environmentComboNames()
     {
-        std::string names = "None";
+        std::string names = "Neutral";
         for (const quantum::renderer::EnvironmentAsset& asset :
             quantum::renderer::bundledEnvironmentAssets())
         {
@@ -2004,6 +1969,7 @@ namespace
     void showViewportSettingsWindow(
         quantum::editor::ViewportSettings& settings,
         std::optional<std::pair<quantum::coaster::GroundAppearance, bool>>& pendingGroundEdit,
+        const quantum::editor::EditorFonts& fonts,
         bool* const open,
         const bool msaaAvailable,
         const bool environmentAvailable,
@@ -2024,6 +1990,11 @@ namespace
             return;
         }
 
+        // Reserve the longest label's width in a narrow dock instead of using
+        // ImGui's default two-thirds field width.
+        ImGui::PushItemWidth(std::max(75.0F, ImGui::GetContentRegionAvail().x
+            - ImGui::CalcTextSize("Shift Speed Multiplier").x
+            - ImGui::GetStyle().ItemInnerSpacing.x));
         bool committed = false;
 
         const char* const presentationNames[]{
@@ -2122,7 +2093,7 @@ namespace
             committed = true;
         }
 
-        ImGui::SeparatorText("Outdoor Lighting");
+        quantum::editor::editorHeading("Outdoor Lighting", fonts);
         committed = ImGui::SliderFloat("Sun Azimuth",
             &settings.sunAzimuthDegrees, -180.0F, 180.0F, "%.0f deg")
             || committed;
@@ -2148,6 +2119,7 @@ namespace
                 environmentIndex);
             committed = true;
         }
+        ImGui::BeginDisabled(settings.environmentAsset.empty());
         committed = ImGui::SliderFloat("Environment Rotation",
             &settings.environmentRotationDegrees, 0.0F, 360.0F,
             "%.0f deg") || committed;
@@ -2156,6 +2128,7 @@ namespace
             || committed;
         committed = ImGui::Checkbox("Show Sky", &settings.skyVisible)
             || committed;
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
         if (!environmentAvailable)
             ImGui::TextDisabled("HDR pipeline unavailable; constant ambient is active.");
@@ -2166,7 +2139,7 @@ namespace
                 "Selected sky unavailable: %s", status.detail.c_str());
         }
 
-        ImGui::SeparatorText("Ground Surface");
+        quantum::editor::editorHeading("Ground Surface", fonts);
 
         quantum::renderer::GroundSurfaceSettings& ground =
             settings.groundSurface;
@@ -2244,14 +2217,13 @@ namespace
             const std::string display = identifier->empty()
                 ? "built-in fallback"
                 : "assets/" + identifier->substr(9);
-            quantum::editor::editorSecondaryText(
+            quantum::editor::editorSecondaryTextWrapped(
                 "Ground %s: %s", groundMapLabels[slot], display.c_str());
             if (const auto status = vulkan.groundTextureLoadStatus(
                     *identifier))
             {
                 const bool loaded = status->state
                     == quantum::renderer::GroundTextureLoadState::Loaded;
-                ImGui::SameLine();
                 ImGui::TextColored(loaded
                         ? quantum::editor::palette::success
                         : quantum::editor::palette::error,
@@ -2269,14 +2241,14 @@ namespace
                 "Ground is hidden; its settings apply when re-enabled.");
         if (ImGui::Button("Reset Ground to Defaults"))
         {
-            ground = {};
+            ground = quantum::coaster::newDocumentGroundAppearance();
             groundChanged = true;
         }
         if (groundChanged)
             pendingGroundEdit = std::pair{ground,
                 ImGui::IsMouseDown(ImGuiMouseButton_Left)};
 
-        ImGui::SeparatorText("Reference Elements");
+        quantum::editor::editorHeading("Reference Elements", fonts);
 
         committed = ImGui::Checkbox(
             "Ground Grid", &settings.gridVisible
@@ -2299,101 +2271,8 @@ namespace
             logViewportSettings(settings);
         }
 
+        ImGui::PopItemWidth();
         ImGui::End();
-    }
-
-    float showCommandArea(
-        ImGuiViewport* const mainViewport,
-        const quantum::editor::EditorIcons& icons,
-        std::optional<quantum::editor::FileOperationType>&
-            pendingFileOperation,
-        std::optional<quantum::editor::HistoryOperationType>&
-            pendingHistoryOperation,
-        const bool canUndo,
-        const bool canRedo)
-    {
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float iconButtonExtent = icons.metrics(
-            quantum::editor::EditorIcon::Open).buttonExtent;
-        const float height = style.WindowPadding.y * 2.0F
-            + ImGui::GetTextLineHeight()
-            + style.ItemSpacing.y
-            + std::max(ImGui::GetFrameHeight(), iconButtonExtent);
-        constexpr ImGuiWindowFlags windowFlags =
-            ImGuiWindowFlags_NoDocking
-            | ImGuiWindowFlags_NoTitleBar
-            | ImGuiWindowFlags_NoResize
-            | ImGuiWindowFlags_NoMove
-            | ImGuiWindowFlags_NoScrollbar
-            | ImGuiWindowFlags_NoSavedSettings;
-
-        const bool visible = ImGui::BeginViewportSideBar(
-            "##QuantumCommandArea",
-            mainViewport,
-            ImGuiDir_Up,
-            height,
-            windowFlags
-        );
-
-        if (visible)
-        {
-            ImGui::TextUnformatted("Commands");
-
-            if (ImGui::Button(
-                "New", {buttonWidth("New"), iconButtonExtent}))
-            {
-                pendingFileOperation =
-                    quantum::editor::FileOperationType::New;
-            }
-            itemTooltip("Create a new coaster document (Ctrl+N)");
-            ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
-            if (icons.button(
-                quantum::editor::EditorIcon::Open,
-                "##OpenDocument",
-                "Open a coaster document (Ctrl+O)"))
-            {
-                pendingFileOperation =
-                    quantum::editor::FileOperationType::Open;
-            }
-            ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
-            if (icons.button(
-                quantum::editor::EditorIcon::Save,
-                "##SaveDocument",
-                "Save the current coaster document (Ctrl+S)"))
-            {
-                pendingFileOperation =
-                    quantum::editor::FileOperationType::Save;
-            }
-            ImGui::SameLine(0.0F, style.ItemSpacing.x * 1.5F);
-            if (icons.button(
-                quantum::editor::EditorIcon::Undo,
-                "##UndoDocumentEdit",
-                canUndo ? "Undo the last document edit (Ctrl+Z)"
-                    : "No document edit to undo",
-                false,
-                canUndo
-            ))
-            {
-                pendingHistoryOperation =
-                    quantum::editor::HistoryOperationType::Undo;
-            }
-            ImGui::SameLine(0.0F, style.ItemInnerSpacing.x);
-            if (icons.button(
-                quantum::editor::EditorIcon::Redo,
-                "##RedoDocumentEdit",
-                canRedo ? "Redo the last document edit (Ctrl+Y)"
-                    : "No document edit to redo",
-                false,
-                canRedo
-            ))
-            {
-                pendingHistoryOperation =
-                    quantum::editor::HistoryOperationType::Redo;
-            }
-        }
-
-        ImGui::End();
-        return height;
     }
 
     [[nodiscard]] std::optional<quantum::editor::TrackHardwareEdit>
@@ -3278,6 +3157,11 @@ namespace
                 if (ImGui::Button("Cancel"))
                 {
                     regionCreateFlow.choicePending = false;
+                }
+                if (regionCreateFlow.revealChoices)
+                {
+                    ImGui::SetScrollHereY(0.8F);
+                    regionCreateFlow.revealChoices = false;
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
                 {
@@ -4603,16 +4487,16 @@ namespace
         ImGui::DockBuilderSetNodeSize(dockspaceId, dockspaceSize);
         ImGuiID centerId = dockspaceId;
         ImGuiID leftId = 0;
-        ImGuiID rightId = 0;
-        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, 0.23F,
+        ImGuiID bottomId = 0;
+        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Down, 0.27F,
+            &bottomId, &centerId);
+        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, 0.27F,
             &leftId, &centerId);
-        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Right, 0.30F,
-            &rightId, &centerId);
         ImGui::DockBuilderDockWindow("Train Configuration", leftId);
         ImGui::DockBuilderDockWindow(
             quantum::editor::trainCoasterSetupWindowName, leftId);
         ImGui::DockBuilderDockWindow("Train Preview", centerId);
-        ImGui::DockBuilderDockWindow("Train Physical Definition", rightId);
+        ImGui::DockBuilderDockWindow("Train Physical Definition", bottomId);
         ImGui::DockBuilderFinish(dockspaceId);
     }
 }
@@ -4666,7 +4550,7 @@ namespace quantum::editor
         ImGui::Checkbox("Node Snap", &supportNodeSnapEnabled_);
         ImGui::SameLine();
         ImGui::Checkbox("Ground Snap", &supportGroundSnapEnabled_);
-        editorSecondaryText(
+        editorSecondaryTextWrapped(
             "Move gizmo: world X/Y/Z; ground applies near Z = 0.");
         ImGui::Separator();
 
@@ -4713,7 +4597,7 @@ namespace quantum::editor
         ImGui::Separator();
 
         ImGui::Text("Procedural Timber Supports");
-        editorSecondaryText(
+        editorSecondaryTextWrapped(
             "Stations and dimensions use Core coordinate units. "
             "Foundations use a flat elevation plane.");
         constexpr const char* familyNames[] = {
@@ -4725,6 +4609,9 @@ namespace quantum::editor
             "Regular three-post bents with repeated tower panels.",
             "Wide two-post bents, story ledgers and selective diagonals."};
         int familyIndex = static_cast<int>(woodenSupportRecipe_.family);
+        ImGui::SetNextItemWidth(std::max(75.0F, ImGui::GetContentRegionAvail().x
+            - ImGui::CalcTextSize("Structural Family").x
+            - ImGui::GetStyle().ItemInnerSpacing.x));
         if (ImGui::Combo("Structural Family", &familyIndex, familyNames, 4))
         {
             woodenSupportRecipe_.family =
@@ -4738,7 +4625,7 @@ namespace quantum::editor
             woodenSupportRecipe_.storyHeight = story[familyIndex];
             woodenSupportRecipe_.memberSize = timber[familyIndex];
         }
-        editorSecondaryText(familyDescriptions[familyIndex]);
+        editorSecondaryTextWrapped(familyDescriptions[familyIndex]);
         ImGui::PushItemWidth(110.0F);
         ImGui::InputDouble("Start Station", &woodenSupportRecipe_.startStation);
         ImGui::InputDouble("End Station", &woodenSupportRecipe_.endStation);
@@ -4769,7 +4656,7 @@ namespace quantum::editor
             command.woodenRecipe = woodenSupportRecipe_;
             supportEditCommand_ = command;
         }
-        editorSecondaryText("Regeneration replaces edits inside the selected "
+        editorSecondaryTextWrapped("Regeneration replaces edits inside the selected "
             "generated structure. Other structures are retained.");
         ImGui::Separator();
 
@@ -6229,7 +6116,9 @@ namespace quantum::editor
             }
             fonts_ = loadEditorFonts(basePath);
             icons_.load(basePath);
-            io.ConfigDpiScaleFonts = captureScenario_ == nullptr;
+            // QUANTUM scales both font requests and spacing from one SDL value.
+            // ImGui 1.92 still rasterizes fonts at each requested size/density.
+            io.ConfigDpiScaleFonts = false;
 
             if (!ImGui_ImplSDL3_InitForVulkan(window))
             {
@@ -6384,6 +6273,11 @@ namespace quantum::editor
                     event.window.data1,
                     event.window.data2
                 );
+                break;
+            case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                uiScaleRefreshPending_ = true;
                 break;
             case SDL_EVENT_WINDOW_MAXIMIZED:
                 quantum::logging::logMessage(
@@ -7776,9 +7670,9 @@ namespace quantum::editor
         }
         if (workspaceMode_ == WorkspaceMode::Editor)
         {
-            drawSimulationTelemetry();
             if (editorWorkspace_ == EditorWorkspace::Track)
             {
+                drawSimulationTelemetry();
                 drawViewportTrackAnchors();
                 drawViewportSupports();
             }
@@ -8373,10 +8267,24 @@ namespace quantum::editor
             ImGui::EndMenu();
         }
 
-        if (editorWorkspace_ == EditorWorkspace::Track
-            && ImGui::BeginMenu("Preferences"))
+        if (ImGui::BeginMenu("Preferences"))
         {
-            if (ImGui::MenuItem(
+            if (ImGui::BeginMenu("UI Scale"))
+            {
+                const std::array labels{"Auto", "100%", "125%", "150%", "175%", "200%"};
+                constexpr std::array scales{0.0F, 1.0F, 1.25F, 1.5F, 1.75F, 2.0F};
+                for (std::size_t index = 0; index < scales.size(); ++index)
+                {
+                    if (ImGui::MenuItem(labels[index], nullptr,
+                        uiScaleOverride_ == scales[index]))
+                    {
+                        uiScaleOverride_ = scales[index];
+                        uiScaleRefreshPending_ = true;
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            if (editorWorkspace_ == EditorWorkspace::Track && ImGui::MenuItem(
                 "Transition Editor Input",
                 nullptr,
                 &inputSettingsWindowOpen_
@@ -8610,7 +8518,9 @@ namespace quantum::editor
         const bool visible = ImGui::Begin("Simulator", nullptr, windowFlags);
         if (visible)
         {
-            ImGui::TextUnformatted("SIMULATOR");
+            ImGui::PushFont(fonts_.header, editorHeaderFontSize);
+            ImGui::TextColored(palette::textHeading, "SIMULATOR");
+            ImGui::PopFont();
             ImGui::SameLine();
             if (ImGui::Button("Return to Editor"))
             {
@@ -8735,6 +8645,26 @@ namespace quantum::editor
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
+        if (uiScaleRefreshPending_)
+        {
+            const float displayScale = SDL_GetWindowDisplayScale(window_);
+            const float pixelDensity = SDL_GetWindowPixelDensity(window_);
+            if (displayScale <= 0.0F || pixelDensity <= 0.0F)
+                throw std::runtime_error(std::string("SDL window scale query failed: ")
+                    + SDL_GetError());
+            const float scale = captureScenario_ != nullptr ? 1.0F
+                : editorLogicalUiScale(displayScale, pixelDensity, uiScaleOverride_);
+            if (scale != appliedUiScale_)
+            {
+                applyEditorUiScale(scale);
+                appliedUiScale_ = scale;
+                quantum::logging::logMessagef(quantum::logging::LogLevel::Info,
+                    "APP", "UI scale: display=%.2f density=%.2f logical=%.2f (%s)",
+                    displayScale, pixelDensity, scale,
+                    uiScaleOverride_ == 0.0F ? "Auto" : "override");
+            }
+            uiScaleRefreshPending_ = false;
+        }
         if (captureScenario_ != nullptr)
         {
             ImGuiIO& io = ImGui::GetIO();
@@ -8841,13 +8771,7 @@ namespace quantum::editor
         const float menuBarHeight = showMainMenuBar();
 
         ImGuiViewport* const mainViewport = ImGui::GetMainViewport();
-        const float commandAreaHeight = showCommandArea(
-            mainViewport,
-            icons_,
-            pendingFileOperation_,
-            pendingHistoryOperation_,
-            canUndo_,
-            canRedo_);
+        const float commandAreaHeight = drawWorkspaceCommandArea(mainViewport);
 
         // Build/submit the dockspace before any dockable window. Windows that
         // call Begin first cannot join a layout created later in the frame and
@@ -8902,6 +8826,7 @@ namespace quantum::editor
             {
                 buildDefaultTrainDockLayout(dockspaceId, defaultDockspaceSize);
                 trainCoasterSetupInitialDockPending_ = true;
+                trainConfigurationInitialFocusPending_ = true;
             }
             else
             {
@@ -8920,7 +8845,6 @@ namespace quantum::editor
         // Begin, so the request can never be consumed by a later window.
         bool& setupInitialDockPending = trainComposition
             ? trainCoasterSetupInitialDockPending_ : coasterSetupInitialDockPending_;
-        const bool focusTrainConfiguration = trainComposition && defaultLayoutRequired;
         if (setupInitialDockPending
             && coasterSetupWindowOpen_ && authoredTrack_ != nullptr)
         {
@@ -8957,8 +8881,12 @@ namespace quantum::editor
         if (trainComposition)
         {
             drawTrainWorkspace();
-            if (focusTrainConfiguration)
+            if (trainConfigurationInitialFocusPending_
+                && (!setupInitialDockPending || !coasterSetupWindowOpen_))
+            {
                 ImGui::SetWindowFocus("Train Configuration");
+                trainConfigurationInitialFocusPending_ = false;
+            }
         }
         else
         {
@@ -8971,6 +8899,7 @@ namespace quantum::editor
             showViewportSettingsWindow(
                 viewportSettings_,
                 pendingGroundEdit_,
+                fonts_,
                 &viewportSettingsWindowOpen_,
                 vulkan.capabilities().viewportMsaa4,
                 vulkan.capabilities().hdrEnvironment,
@@ -10639,6 +10568,7 @@ namespace quantum::editor
             riderLoadDiagnostics_.selectSection(selectedSection_);
         }
         regionCreateFlow_.choicePending = false;
+        regionCreateFlow_.revealChoices = false;
         // A rejection message names a region, so it does not follow the user
         // to a different selection.
         geometryEditError_.clear();
@@ -11649,6 +11579,7 @@ std::optional<coaster::LayoutMode>
         }
 
         regionCreateFlow_.choicePending = false;
+        regionCreateFlow_.revealChoices = false;
         regionCreateFlow_.anchor = RegionCreateAnchor::Append;
         sectionLengthEditBuffer_ = 0.0;
         planarArcEditBuffers_.fill(0.0);

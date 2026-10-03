@@ -24,6 +24,10 @@ namespace quantum::coaster
         std::string roughnessTexture;
     };
 
+    // Shared by new documents and explicit Reset Ground. The struct's defaults
+    // above remain the compatibility fallback for older documents.
+    [[nodiscard]] GroundAppearance newDocumentGroundAppearance();
+
     [[nodiscard]] std::string normalizeGroundTextureAssetIdentifier(
         std::string_view identifier);
     void validateGroundAppearance(const GroundAppearance& appearance);

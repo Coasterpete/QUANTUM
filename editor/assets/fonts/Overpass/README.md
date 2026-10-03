@@ -4,9 +4,13 @@ Unmodified static desktop faces from Red Hat's official Overpass **v3.0.5**
 release, commit `71f18db9466b3e3bc3346db287ed7658803baba0`:
 https://github.com/RedHatOfficial/Overpass/tree/v3.0.5
 
-- `desktop-fonts/overpass/overpass-regular.otf`: normal UI, 14 logical px.
-- `desktop-fonts/overpass/overpass-semibold.otf`: headings, 15 logical px.
-- `desktop-fonts/overpass-mono/overpass-mono-regular.otf`: technical values, 14 logical px.
+- `desktop-fonts/overpass/overpass-regular.otf`: normal UI, 15 logical px.
+- `desktop-fonts/overpass/overpass-semibold.otf`: retained original heading asset.
+- `desktop-fonts/overpass-mono/overpass-mono-regular.otf`: retained original technical asset.
+
+UI Theme M0 uses the existing sibling `Red_Hat_Mono/static` Regular face at
+15 logical px for technical values and SemiBold at 16 for headings. Only the
+active three faces are deployed and loaded; no synthetic bold is used.
 
 Distributed under the SIL Open Font License 1.1 option in the accompanying,
 unmodified upstream `LICENSE.md` (also describes upstream's LGPL alternative).

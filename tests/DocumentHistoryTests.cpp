@@ -808,7 +808,7 @@ namespace
         const std::string customized = snapshot(track);
         require(customized != baseline, "ground edit changes document");
         AuthoredTrackEditTransaction reset{track};
-        reset.candidate().setGround({});
+        reset.candidate().setGround(quantum::coaster::newDocumentGroundAppearance());
         reset.commit(track);
         history.record(track);
         require(snapshot(track) == baseline, "reset restores defaults");

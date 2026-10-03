@@ -1,7 +1,7 @@
 from pathlib import Path
 from PIL import Image
 
-repo_root = Path(r"C:\DEV1\QUANTUM")
+repo_root = Path(__file__).resolve().parents[1]
 
 icon_dir = repo_root / "assets" / "icons" / "quantum"
 generated_dir = icon_dir / "generated"

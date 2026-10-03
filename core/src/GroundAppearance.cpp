@@ -11,6 +11,15 @@
 
 namespace quantum::coaster
 {
+    GroundAppearance newDocumentGroundAppearance()
+    {
+        GroundAppearance ground;
+        ground.baseColor = {0.44F, 0.47F, 0.46F, 1.0F};
+        ground.roughness = 0.92F;
+        ground.uvTiling = {120.0F, 120.0F}; // 10 coordinate units per tile
+        return ground;
+    }
+
     std::string normalizeGroundTextureAssetIdentifier(
         const std::string_view identifier)
     {

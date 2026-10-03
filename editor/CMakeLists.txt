@@ -11,6 +11,7 @@ add_executable(
     src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
+    src/EditorUiCommands.cpp
     src/EditorUiTrain.cpp
     src/EditorUiPerformanceTelemetry.cpp
     src/EditorUiSimulationTelemetry.cpp
@@ -95,20 +96,23 @@ if(MSVC)
 endif()
 
 set(quantum_editor_font_files
-    overpass-regular.otf
-    overpass-semibold.otf
-    overpass-mono-regular.otf
-    LICENSE.md
-    README.md
+    Overpass/overpass-regular.otf
+    Overpass/LICENSE.md
+    Overpass/README.md
+    Red_Hat_Mono/static/RedHatMono-Regular.ttf
+    Red_Hat_Mono/static/RedHatMono-SemiBold.ttf
+    Red_Hat_Mono/OFL.txt
+    Red_Hat_Mono/README.txt
 )
 set(quantum_editor_font_outputs)
 foreach(font_file IN LISTS quantum_editor_font_files)
-    set(font_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/${font_file}")
-    set(font_destination "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/fonts/Overpass/${font_file}")
+    set(font_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/${font_file}")
+    set(font_destination "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/fonts/${font_file}")
+    get_filename_component(font_destination_directory "${font_destination}" DIRECTORY)
     add_custom_command(
         OUTPUT "${font_destination}"
         COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/fonts/Overpass"
+            "${font_destination_directory}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${font_source}" "${font_destination}"
         DEPENDS "${font_source}"
@@ -298,9 +302,24 @@ install(
 install(
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/overpass-regular.otf"
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/overpass-semibold.otf"
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/overpass-mono-regular.otf"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/LICENSE.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Overpass/README.md"
     DESTINATION assets/fonts/Overpass
+    COMPONENT Runtime
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Red_Hat_Mono/static/RedHatMono-Regular.ttf"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Red_Hat_Mono/static/RedHatMono-SemiBold.ttf"
+    DESTINATION assets/fonts/Red_Hat_Mono/static
+    COMPONENT Runtime
+)
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Red_Hat_Mono/OFL.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Red_Hat_Mono/README.txt"
+    DESTINATION assets/fonts/Red_Hat_Mono
     COMPONENT Runtime
 )
 

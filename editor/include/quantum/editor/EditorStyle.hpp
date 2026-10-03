@@ -9,9 +9,9 @@
 
 namespace quantum::editor
 {
-    inline constexpr float editorFontSize = 14.0F;
-    inline constexpr float editorHeaderFontSize = 15.0F;
-    inline constexpr float editorTechnicalFontSize = 14.0F;
+    inline constexpr float editorFontSize = 15.0F;
+    inline constexpr float editorHeaderFontSize = 16.0F;
+    inline constexpr float editorTechnicalFontSize = 15.0F;
 
     // Borrowed handles only: the current ImGui atlas owns all three fonts.
     struct EditorFonts
@@ -46,6 +46,11 @@ namespace quantum::editor
 
     // Logical drawing and hit-test dimensions use the same UI scale.
     [[nodiscard]] float editorPresentationScale();
+    [[nodiscard]] float editorLogicalUiScale(
+        float displayScale, float pixelDensity, float overrideScale = 0.0F);
+    void applyEditorUiScale(float logicalScale);
+    [[nodiscard]] std::uint32_t contentPixelDimension(
+        float logicalDimension, float framebufferScale);
     [[nodiscard]] ImVec2 clampViewportLabel(
         ImVec2 position, ImVec2 size, ImVec2 minimum, ImVec2 maximum);
 
@@ -77,26 +82,30 @@ namespace quantum::editor
         }
 
         inline const ImVec4 black = fromSrgb(0, 0, 0);
-        inline const ImVec4 background = fromSrgb(26, 26, 26);
-        inline const ImVec4 panel = fromSrgb(34, 34, 34);
-        inline const ImVec4 panelRaised = fromSrgb(41, 41, 41);
-        inline const ImVec4 frame = fromSrgb(48, 48, 48);
-        inline const ImVec4 frameHovered = fromSrgb(61, 61, 61);
-        inline const ImVec4 frameActive = fromSrgb(72, 72, 72);
-        inline const ImVec4 border = fromSrgb(86, 86, 86);
-        inline const ImVec4 separator = fromSrgb(74, 74, 74);
+        inline const ImVec4 background = fromSrgb(13, 18, 24);
+        inline const ImVec4 menu = fromSrgb(17, 24, 32);
+        inline const ImVec4 toolbar = fromSrgb(18, 26, 34);
+        inline const ImVec4 panel = fromSrgb(21, 28, 36);
+        inline const ImVec4 panelRaised = fromSrgb(24, 35, 46);
+        inline const ImVec4 frame = fromSrgb(28, 42, 54);
+        inline const ImVec4 frameHovered = fromSrgb(35, 61, 81);
+        inline const ImVec4 frameActive = fromSrgb(44, 77, 101);
+        inline const ImVec4 border = fromSrgb(43, 57, 72);
+        inline const ImVec4 borderStrong = fromSrgb(52, 73, 92);
+        inline const ImVec4 separator = border;
 
-        inline const ImVec4 textPrimary = fromSrgb(236, 236, 236);
-        inline const ImVec4 textSecondary = fromSrgb(184, 184, 184);
-        inline const ImVec4 textDisabled = fromSrgb(152, 152, 152);
+        inline const ImVec4 textPrimary = fromSrgb(199, 215, 229);
+        inline const ImVec4 textSecondary = fromSrgb(158, 179, 199);
+        inline const ImVec4 textDisabled = fromSrgb(127, 148, 168);
+        inline const ImVec4 textHeading = fromSrgb(175, 196, 216);
 
-        inline const ImVec4 accent = fromSrgb(168, 214, 42);
-        inline const ImVec4 accentHovered = fromSrgb(184, 224, 68);
-        inline const ImVec4 accentActive = fromSrgb(145, 190, 31);
-        inline const ImVec4 accentMuted = fromSrgb(63, 80, 30);
-        inline const ImVec4 selection = fromSrgb(52, 66, 28);
-        inline const ImVec4 selectionHovered = fromSrgb(65, 83, 34);
-        inline const ImVec4 selectionActive = fromSrgb(77, 99, 38);
+        inline const ImVec4 accent = fromSrgb(77, 173, 235);
+        inline const ImVec4 accentHovered = fromSrgb(103, 210, 235);
+        inline const ImVec4 accentActive = fromSrgb(54, 144, 209);
+        inline const ImVec4 accentMuted = fromSrgb(27, 60, 82);
+        inline const ImVec4 selection = fromSrgb(32, 56, 76);
+        inline const ImVec4 selectionHovered = fromSrgb(41, 71, 93);
+        inline const ImVec4 selectionActive = fromSrgb(49, 86, 110);
 
         inline const ImVec4 plotDot = fromSrgb(69, 69, 69);
         inline const ImVec4 plotReference = fromSrgb(101, 101, 101);

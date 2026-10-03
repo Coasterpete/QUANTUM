@@ -305,6 +305,9 @@ namespace quantum::editor
         }
         float offsetMeters =
             static_cast<float>(draft.heartline.offsetMeters);
+        ImGui::SetNextItemWidth(std::max(75.0F, ImGui::GetContentRegionAvail().x
+            - ImGui::CalcTextSize("Local +up offset (m)").x
+            - ImGui::GetStyle().ItemInnerSpacing.x));
         if (ImGui::DragFloat(
                 "Local +up offset (m)",
                 &offsetMeters,
