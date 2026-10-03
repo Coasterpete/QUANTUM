@@ -171,6 +171,124 @@ namespace
             "physical-settings Redo must restore the authored value");
     }
 
+    void rejectedCandidateAfterUndoPreservesRedoAndSavedRevision()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        quantum::coaster::setSectionLength(track.section(0), 75.0);
+        history.record(track);
+        history.markSaved();
+        const std::string saved = snapshot(track);
+        track = requireState(history.undo(), "pre-rejection Undo missing");
+        const std::string before = snapshot(track);
+        const bool dirtyBefore = history.isDirty();
+
+        AuthoredTrackEditTransaction transaction{track};
+        transaction.candidate().duplicateSection(0);
+        transaction.stageSelectionAfterCommit(1);
+        transaction.candidate().section(1).length = 0.0;
+        bool rejected = false;
+        try
+        {
+            static_cast<void>(quantum::coaster::integrateAuthoredTrack(
+                transaction.candidate(), 1.0));
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejected = true;
+        }
+
+        require(rejected && !transaction.committed()
+                && !transaction.selectionAfterCommit().has_value(),
+            "failed generation must leave the structural candidate unaccepted");
+        require(snapshot(track) == before && history.size() == 2
+                && history.canRedo() && history.isDirty() == dirtyBefore,
+            "an unrecorded rejection must preserve document, Redo and dirty state");
+        track = requireState(history.redo(), "post-rejection Redo missing");
+        require(snapshot(track) == saved && !history.isDirty(),
+            "Redo must still reach the exact saved revision after rejection");
+    }
+
+    void contentIdenticalAcceptedEditStillCreatesRevision()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        const std::string baseline = snapshot(track);
+        quantum::coaster::setSectionLength(track.section(0), 75.0);
+        history.record(track);
+        track = requireState(history.undo(), "identical-edit Undo missing");
+        require(!history.isDirty() && history.canRedo(),
+            "Undo must reach the clean baseline with Redo available");
+
+        AuthoredTrackEditTransaction transaction{track};
+        quantum::coaster::setSectionLength(
+            transaction.candidate().section(0), track.section(0).length);
+        require(snapshot(transaction.candidate()) == baseline,
+            "same-length mutation must preserve authored content");
+        transaction.commit(track);
+        history.record(track);
+
+        // History identifies accepted revisions; it does not deduplicate content.
+        require(snapshot(track) == baseline && history.isDirty()
+                && !history.canRedo() && history.size() == 2,
+            "an identical accepted revision must be dirty and replace Redo");
+        track = requireState(history.undo(), "identical revision Undo missing");
+        require(snapshot(track) == baseline && !history.isDirty(),
+            "only the original saved revision is clean");
+        track = requireState(history.redo(), "identical revision Redo missing");
+        require(snapshot(track) == baseline && history.isDirty(),
+            "identical content at another revision remains dirty");
+    }
+
+    void historySnapshotsAndRestoredValuesAreIndependent()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        const std::string baseline = snapshot(track);
+        quantum::coaster::setSectionLength(track.section(0), 75.0);
+        history.record(track);
+        const std::string accepted = snapshot(track);
+
+        quantum::coaster::setSectionLength(track.section(0), 90.0);
+        track = requireState(history.undo(), "snapshot Undo missing");
+        require(snapshot(track) == baseline,
+            "later document mutation must not alter the baseline snapshot");
+        track = requireState(history.redo(), "snapshot Redo missing");
+        require(snapshot(track) == accepted,
+            "record must retain its own accepted document value");
+
+        quantum::coaster::setSectionLength(track.section(0), 100.0);
+        static_cast<void>(history.undo());
+        track = requireState(history.redo(), "repeated snapshot Redo missing");
+        require(snapshot(track) == accepted,
+            "editing a restored value must not mutate the retained history entry");
+    }
+
+    void saveEndsContinuousEditAndPreservesSavedUndoState()
+    {
+        AuthoredTrack track = quantum::coaster::createNewDocument();
+        DocumentHistory history;
+        history.reset(track);
+        quantum::coaster::setSectionLength(track.section(0), 65.0);
+        history.record(track, true);
+        history.markSaved();
+        const std::string saved = snapshot(track);
+
+        quantum::coaster::setSectionLength(track.section(0), 70.0);
+        history.record(track, true);
+        require(history.size() == 3 && history.isDirty(),
+            "post-save drag must append rather than overwrite the saved revision");
+        track = requireState(history.undo(), "post-save drag Undo missing");
+        require(snapshot(track) == saved && !history.isDirty(),
+            "Undo must retain access to the saved continuous-edit revision");
+        track = requireState(history.redo(), "post-save drag Redo missing");
+        require(track.section(0).length == 70.0 && history.isDirty(),
+            "Redo must restore the later dirty drag revision");
+    }
+
     void dirtyStateTracksSavedRevision()
     {
         AuthoredTrack track = quantum::coaster::createNewDocument();
@@ -714,6 +832,10 @@ int main()
         representativeStructuralAndProfileEditsUndo();
         rejectedTransactionDoesNotEnterHistory();
         physicalSettingsEditUsesTransactionAndHistory();
+        rejectedCandidateAfterUndoPreservesRedoAndSavedRevision();
+        contentIdenticalAcceptedEditStillCreatesRevision();
+        historySnapshotsAndRestoredValuesAreIndependent();
+        saveEndsContinuousEditAndPreservesSavedUndoState();
         dirtyStateTracksSavedRevision();
         newOpenResetAndContinuousCoalescing();
         trackHardwareEditsUndoAndRedo();

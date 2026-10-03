@@ -962,11 +962,17 @@ Editor-visible effects derived from an authored edit become authoritative only
 after successful commit. This keeps the document, generated geometry, GPU
 contents, selection, and numeric controls synchronized to one accepted state.
 
-The transaction owns publication policy, not coaster mathematics. Core mutation
-and validation functions remain authoritative for section domains, profile
-continuity and ids, Planar Arc constraints, and generated geometry. Renderer
+The application owns publication policy; the transaction holds the candidate
+and staged effects. Core mutation and validation functions remain authoritative
+for section domains, profile continuity and ids, Planar Arc constraints, and
+generated geometry. Renderer
 acceptance is part of the commit gate because the Editor must not publish a
 document whose visible GPU representation failed to update.
+
+This ordering gates authored commit; it is not an atomic transaction across
+renderer resources. Uploads run sequentially, and a later failure does not roll
+back earlier successful uploads. See [Recovery M0 state contracts](recovery-m0-state-contracts.md)
+for the exact ownership, saved-revision policy, and limits of failure coverage.
 
 ### Simulation preview
 
