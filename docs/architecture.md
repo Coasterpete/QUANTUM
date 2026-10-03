@@ -28,6 +28,16 @@ synchronization resources. SDL3 supplies the native window and Vulkan surface
 integration. It consumes renderer-neutral generated geometry and asset
 references from `QuantumCore`; Core does not depend on the renderer.
 
+### Rigid Body M0
+
+`QuantumEngine` also owns the isolated Jolt-backed `RigidBodyWorld` subsystem.
+`Application` creates an empty world beside `SimulationPreview`; the preview
+borrows it and steps it after each committed 1/240-second train tick. Core's
+specialized coaster dynamics and document ownership remain unchanged. The
+floor/falling-box proof is automated test state, with no authoring or renderer
+integration. See [Rigid Body M0](rigid-body-m0.md) for ownership, units,
+dependency configuration and current limits.
+
 ### Rendering Hardware Interface M0
 
 `quantum::renderer::Renderer` is the narrow application-facing boundary for

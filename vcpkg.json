@@ -19,6 +19,7 @@
       ]
     },
     "glm",
+    "joltphysics",
     "nlohmann-json",
     "vulkan-memory-allocator"
   ]

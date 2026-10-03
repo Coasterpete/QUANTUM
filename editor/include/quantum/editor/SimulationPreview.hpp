@@ -14,6 +14,11 @@
 #include <string>
 #include <vector>
 
+namespace quantum::physics
+{
+    class RigidBodyWorld;
+}
+
 namespace quantum::editor
 {
     struct SimulationPreviewFrameTelemetry
@@ -142,6 +147,10 @@ namespace quantum::editor
         void setGpuValidationEnabled(bool enabled) noexcept;
         [[nodiscard]] bool gpuValidationEnabled() const noexcept;
 
+        // Optional adjacent world, owned by Application (or a test). It must
+        // outlive the preview. Preview reset/rebuild never replaces its bodies.
+        void setRigidBodyWorld(physics::RigidBodyWorld* world) noexcept;
+
         static constexpr std::size_t maximumStepsPerFrame = 60;
         // Eight steps is 33.3 ms of demand at 240 Hz and is deliberately
         // diagnostic only; it never changes accumulator or playback behavior.
@@ -176,6 +185,7 @@ namespace quantum::editor
         physics::gpu::GpuPhysicsContext* gpuContext_ = nullptr;
         bool gpuTrackReady_ = false;
         bool gpuValidationEnabled_ = false;
+        physics::RigidBodyWorld* rigidBodyWorld_ = nullptr;
         // M2 telemetry for batched GPU sampling (8 bogies per pose)
         std::size_t gpuBatchedSampleCount_ = 0;
         std::size_t gpuDispatchCount_ = 0;

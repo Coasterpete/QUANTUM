@@ -209,6 +209,8 @@ target_sources(
         src/VulkanContext.cpp
         src/ViewportAids.cpp
         src/physics/gpu/GpuPhysicsContext.cpp
+        src/physics/RigidBodyWorld.cpp
+        include/quantum/physics/RigidBodyWorld.hpp
         include/quantum/renderer/ViewportAids.hpp
         include/quantum/renderer/ViewportTrackPresentation.hpp
         include/quantum/engine/Logging.hpp
@@ -252,6 +254,7 @@ target_link_libraries(
         Quantum::Core
     PRIVATE
         SDL3::SDL3
+        Jolt::Jolt
         nlohmann_json::nlohmann_json
 )
 

@@ -1,5 +1,6 @@
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/SimulationPreview.hpp>
+#include <quantum/physics/RigidBodyWorld.hpp>
 #include <quantum/physics/TrackFollower.hpp>
 
 #include <glm/geometric.hpp>
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -1016,6 +1018,89 @@ namespace
         }
     }
 
+    void adjacentRigidBodyWorldSharesAcceptedTicks()
+    {
+        const auto track = straightTrack(200.0);
+        RigidBodyWorld world;
+        RigidBodyBoxSettings box;
+        box.positionMeters.z = 5.0;
+        const auto body = world.createBox(box);
+        SimulationPreview preview;
+        SimulationPreview control;
+        preview.setRigidBodyWorld(&world);
+        require(preview.rebuild(track) && control.rebuild(track), "adjacent-world previews rebuild");
+        preview.play();
+        control.play();
+        for (const double delta : {1.0 / 480.0, 1.0 / 480.0, 1.0 / 60.0, 0.01, 0.3})
+        {
+            preview.update(delta);
+            control.update(delta);
+            require(world.tick() == preview.dynamicsState()->tick,
+                "world must step once per committed train tick, including catch-up");
+            requireSameState(*preview.dynamicsState(), *control.dynamicsState());
+            requireSamePose(*preview.pose(), *control.pose());
+        }
+        const auto tick = world.tick();
+        require(world.bodyState(body).positionMeters.z < 5.0, "attached body must fall");
+        preview.update(5.0, true);
+        preview.update(std::numeric_limits<double>::quiet_NaN());
+        preview.update(-1.0);
+        require(world.tick() == tick, "discontinuity and invalid delta must not step world");
+        preview.pause();
+        preview.update(1.0);
+        require(world.tick() == tick, "pause must not step world");
+        const auto position = world.bodyState(body).positionMeters;
+        preview.reset();
+        require(world.tick() == tick && world.bodyState(body).positionMeters == position,
+            "train reset must not reset independently owned world");
+        require(preview.rebuild(straightTrack(200.0, 10.0, 0.5)), "scaled track rebuild");
+        require(world.tick() == tick && world.bodyState(body).positionMeters == position,
+            "document rebuild and scale must not replace or rescale world bodies");
+        preview.play();
+        preview.update(defaultFixedTimeStepSeconds);
+        require(world.tick() == tick + 1, "attachment survives train rebuild");
+        preview.setRigidBodyWorld(nullptr);
+        preview.update(defaultFixedTimeStepSeconds);
+        require(world.tick() == tick + 1, "detached preview must leave world alone");
+
+        RigidBodyWorld boundaryWorld;
+        SimulationPreview boundaryPreview;
+        boundaryPreview.setRigidBodyWorld(&boundaryWorld);
+        require(boundaryPreview.rebuild(straightTrack()), "boundary preview rebuild");
+        boundaryPreview.play();
+        for (int frame = 0; frame < 300
+            && boundaryPreview.playbackState() == SimulationPreview::PlaybackState::Playing;
+            ++frame)
+        {
+            boundaryPreview.update(1.0 / 60.0);
+        }
+        require(boundaryPreview.playbackState() == SimulationPreview::PlaybackState::Paused
+            && boundaryWorld.tick() == boundaryPreview.dynamicsState()->tick,
+            "world must include train boundary-stop tick");
+
+        const auto runAtCadence = [&](const int framesPerSecond)
+        {
+            RigidBodyWorld cadenceWorld;
+            const auto cadenceBody = cadenceWorld.createBox(box);
+            SimulationPreview cadencePreview;
+            cadencePreview.setRigidBodyWorld(&cadenceWorld);
+            require(cadencePreview.rebuild(track), "cadence preview rebuild");
+            cadencePreview.play();
+            for (int frame = 0; frame < framesPerSecond; ++frame)
+            {
+                cadencePreview.update(1.0 / framesPerSecond);
+            }
+            require(cadenceWorld.tick() == 240, "one second must produce 240 world ticks");
+            return cadenceWorld.bodyState(cadenceBody);
+        };
+        const auto slowFrames = runAtCadence(30);
+        const auto fastFrames = runAtCadence(144);
+        require(glm::length(slowFrames.positionMeters - fastFrames.positionMeters) <= 1.0e-6
+            && glm::length(slowFrames.linearVelocityMetersPerSecond
+                - fastFrames.linearVelocityMetersPerSecond) <= 1.0e-6,
+            "render cadence must not change rigid-body state after equal ticks");
+    }
+
     void renderCadenceDoesNotAffectPhysics()
     {
         SimulationPreview preview, control;
@@ -1210,6 +1295,7 @@ int main()
     {
         interpolationGeometryAndEndpoints();
         renderCadenceDoesNotAffectPhysics();
+        adjacentRigidBodyWorldSharesAcceptedTicks();
         spikeRollbackInterpolation();
         initializesFromAuthoredPhysicalSettings();
         authoredCarCountConfiguresPreviewConsist();
