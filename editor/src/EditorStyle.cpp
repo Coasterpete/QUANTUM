@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdarg>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -14,7 +15,7 @@ namespace quantum::editor
     {
         const auto load = [&](const char* name, const float size)
         {
-            const auto path = basePath / "assets/fonts/Overpass" / name;
+            const auto path = basePath / "assets/fonts" / name;
             std::error_code error;
             if (!std::filesystem::is_regular_file(path, error) || error)
             {
@@ -34,9 +35,9 @@ namespace quantum::editor
         };
 
         EditorFonts fonts;
-        fonts.normal = load("overpass-regular.otf", editorFontSize);
-        fonts.header = load("overpass-semibold.otf", editorHeaderFontSize);
-        fonts.technical = load("overpass-mono-regular.otf", editorTechnicalFontSize);
+        fonts.normal = load("Overpass/overpass-regular.otf", editorFontSize);
+        fonts.header = load("Red_Hat_Mono/static/RedHatMono-SemiBold.ttf", editorHeaderFontSize);
+        fonts.technical = load("Red_Hat_Mono/static/RedHatMono-Regular.ttf", editorTechnicalFontSize);
         ImGui::GetIO().FontDefault = fonts.normal;
         return fonts;
     }
@@ -44,7 +45,9 @@ namespace quantum::editor
     void editorHeading(const char* const label, const EditorFonts& fonts)
     {
         ImGui::PushFont(fonts.header, editorHeaderFontSize);
+        ImGui::PushStyleColor(ImGuiCol_Text, palette::textHeading);
         ImGui::SeparatorText(label);
+        ImGui::PopStyleColor();
         ImGui::PopFont();
     }
 
@@ -72,6 +75,66 @@ namespace quantum::editor
         return style.FontScaleMain * style.FontScaleDpi;
     }
 
+    float editorLogicalUiScale(const float displayScale,
+        const float pixelDensity, const float overrideScale)
+    {
+        if (!std::isfinite(displayScale) || displayScale <= 0.0F
+            || !std::isfinite(pixelDensity) || pixelDensity <= 0.0F
+            || !std::isfinite(overrideScale) || overrideScale < 0.0F)
+            throw std::invalid_argument("Invalid editor display scale.");
+        // Windows uses pixel window coordinates; high-density platforms can
+        // supply multiple framebuffer pixels per logical window coordinate.
+        return (overrideScale > 0.0F ? overrideScale : displayScale) / pixelDensity;
+    }
+
+    void applyEditorUiScale(const float logicalScale)
+    {
+        if (!std::isfinite(logicalScale) || logicalScale <= 0.0F)
+            throw std::invalid_argument("Invalid editor UI scale.");
+        // Always start from the unscaled style so repeated changes cannot grow
+        // spacing cumulatively. Font sizing is separate from ScaleAllSizes.
+        applyQuantumStyle();
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.ScaleAllSizes(logicalScale);
+        style.FontScaleMain = 1.0F;
+        style.FontScaleDpi = logicalScale;
+    }
+
+    std::uint32_t contentPixelDimension(
+        const float logicalDimension,
+        const float framebufferScale)
+    {
+        if (!std::isfinite(logicalDimension)
+            || !std::isfinite(framebufferScale)
+            || logicalDimension <= 0.0F
+            || framebufferScale <= 0.0F)
+        {
+            return 0;
+        }
+
+        const double pixels = std::floor(
+            static_cast<double>(logicalDimension)
+                * static_cast<double>(framebufferScale)
+            + 0.5
+        );
+
+        if (pixels < 1.0)
+        {
+            return 0;
+        }
+
+        if (pixels
+            > static_cast<double>(std::numeric_limits<std::uint32_t>::max()))
+        {
+            throw std::length_error(
+                "The Editor viewport content size exceeds a 32-bit pixel "
+                "dimension."
+            );
+        }
+
+        return static_cast<std::uint32_t>(pixels);
+    }
+
     ImVec2 clampViewportLabel(const ImVec2 position, const ImVec2 size,
         const ImVec2 minimum, const ImVec2 maximum)
     {
@@ -87,9 +150,9 @@ namespace quantum::editor
         ImGui::StyleColorsDark(&style);
         style.FontSizeBase = editorFontSize;
         style.DisabledAlpha = 0.70F;
-        style.WindowPadding = ImVec2(8.0F, 8.0F);
+        style.WindowPadding = ImVec2(9.0F, 9.0F);
         style.FramePadding = ImVec2(5.0F, 4.0F);
-        style.ItemSpacing = ImVec2(8.0F, 5.0F);
+        style.ItemSpacing = ImVec2(8.0F, 6.0F);
         style.ItemInnerSpacing = ImVec2(4.0F, 4.0F);
         style.CellPadding = ImVec2(4.0F, 3.0F);
         style.IndentSpacing = 21.0F;
@@ -112,7 +175,7 @@ namespace quantum::editor
         colors[ImGuiCol_TitleBg] = palette::background;
         colors[ImGuiCol_TitleBgActive] = palette::panelRaised;
         colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.0F, 0.0F, 0.0F, 0.8F);
-        colors[ImGuiCol_MenuBarBg] = palette::panelRaised;
+        colors[ImGuiCol_MenuBarBg] = palette::menu;
 
         colors[ImGuiCol_ScrollbarBg] = palette::background;
         colors[ImGuiCol_ScrollbarGrab] = palette::border;
@@ -172,7 +235,7 @@ namespace quantum::editor
         colors[ImGuiCol_PlotHistogram] = palette::accent;
         colors[ImGuiCol_PlotHistogramHovered] = palette::textPrimary;
         colors[ImGuiCol_TableHeaderBg] = palette::panelRaised;
-        colors[ImGuiCol_TableBorderStrong] = palette::border;
+        colors[ImGuiCol_TableBorderStrong] = palette::borderStrong;
         colors[ImGuiCol_TableBorderLight] = palette::frame;
         colors[ImGuiCol_TableRowBg] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
         colors[ImGuiCol_TableRowBgAlt] = ImVec4(0.0F, 0.0F, 0.0F, 0.16F);

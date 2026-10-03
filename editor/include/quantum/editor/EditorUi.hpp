@@ -349,6 +349,7 @@ namespace quantum::editor
     struct RegionCreateFlow
     {
         bool choicePending = false;
+        bool revealChoices = false;
         RegionCreateAnchor anchor = RegionCreateAnchor::Append;
     };
 
@@ -451,12 +452,10 @@ namespace quantum::editor
         float sunIntensity = 3.0F;
         float exposure = 1.0F;
         // Package-relative identity of the selected bundled HDR sky. Empty
-        // means "None": no sky is drawn and the renderer keeps its constant
-        // ambient term. The explicit default is independent of registry order.
+        // means the neutral background with constant ambient lighting (default).
         // Rotation, intensity, and sky visibility are push constants, so only
         // a changed identity touches GPU images.
-        std::string environmentAsset =
-            std::string(renderer::defaultEnvironmentAssetIdentifier);
+        std::string environmentAsset;
         float environmentRotationDegrees = 0.0F;
         float environmentIntensity = 0.35F;
         bool skyVisible = true;
@@ -838,6 +837,7 @@ void drawSimulationTelemetry();
         void drawSupportWorkspace();
         void drawTrainWorkspace();
         void drawTrainViewportToolbar();
+        [[nodiscard]] float drawWorkspaceCommandArea(ImGuiViewport* mainViewport);
         void drawSupportAppearancePanel();
         void drawTrackDevices();
         void drawDeviceAccelerationProfileEditor(
@@ -1075,6 +1075,10 @@ void drawSimulationTelemetry();
         std::optional<TrackHardwareEdit> trackHardwareEdit_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
+        float uiScaleOverride_ = 0.0F; // zero selects automatic display scaling
+        float appliedUiScale_ = 0.0F;
+        bool uiScaleRefreshPending_ = true;
+        bool trainConfigurationInitialFocusPending_ = false;
         std::optional<FileOperationType> pendingFileOperation_;
         std::optional<HistoryOperationType> pendingHistoryOperation_;
 bool canUndo_ = false;

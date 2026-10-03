@@ -293,27 +293,20 @@ namespace quantum::renderer
             check(vkCreateSampler(device_, &samplerInfo, nullptr,
                 &environmentSampler_), "vkCreateSampler for HDR environment");
 
-            // IBL preprocessing and upload are expensive, so the Editor's
-            // explicit default is prepared here. Later selections are prepared
-            // once on demand and then retained by the cache.
-            const std::string initial = environmentAsset_.empty()
-                ? std::string(defaultEnvironmentAssetIdentifier)
-                : environmentAsset_;
-            environmentDetail_.clear();
-            try
-            {
-                setEnvironmentImages(loadEnvironmentImages(initial).images);
-            }
-            catch (const std::exception& error)
-            {
-                environmentDetail_ = error.what();
-                quantum::logging::logMessagef(
-                    quantum::logging::LogLevel::Warning, "VK",
-                    "HDR environment '%s' unavailable: %s. Using constant "
-                    "ambient.", initial.c_str(), error.what());
-                environmentAvailable_ = false;
-            }
-            environmentAsset_ = initial;
+            // Shaders still declare these samplers when using constant ambient.
+            // Publish valid tiny neutral images without preprocessing an HDRI.
+            ProcessedEnvironment neutral;
+            neutral.sky = {1, 1, 6, 1, std::vector<float>(24, 0.0F)};
+            for (std::size_t face = 0; face < 6; ++face)
+                neutral.sky.rgba[face * 4 + 3] = 1.0F;
+            neutral.irradiance = neutral.sky;
+            neutral.specular = neutral.sky;
+            neutral.brdf = {1, 1, 1, 1, {0.0F, 0.0F, 0.0F, 1.0F}};
+            auto& fallback = environmentCache_[std::string(fallbackEnvironmentIdentifier)];
+            uploadEnvironmentImageSet(neutral, fallback.images);
+            setEnvironmentImages(fallback.images);
+            environmentAvailable_ = false;
+            environmentAsset_.clear();
         }
         catch (...)
         {
@@ -371,8 +364,9 @@ namespace quantum::renderer
             environmentDetail_.clear();
             if (accepted.empty())
             {
-                // "None" keeps the renderer's constant ambient term.
-                environmentImages_ = nullptr;
+                // Keep every sampler valid while the constant ambient branch runs.
+                setEnvironmentImages(environmentCache_.at(
+                    std::string(fallbackEnvironmentIdentifier)).images);
                 environmentAvailable_ = false;
             }
             else

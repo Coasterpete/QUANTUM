@@ -101,7 +101,7 @@ namespace quantum::editor
             current.frameTimeMilliseconds,
             averageFrameMilliseconds);
 
-        ImGui::SeparatorText("Catch-up / Spike Diagnostics");
+        editorHeading("Catch-up / Spike Diagnostics", fonts_);
         const bool largeCatchUp = current.requestedPhysicsStepCount
             >= SimulationPreview::catchUpStepThreshold;
         if (largeCatchUp)
@@ -156,7 +156,7 @@ namespace quantum::editor
             current.blockingEvents.hardwareAssetReload ? "yes" : "no",
             current.blockingEvents.modalOrFileDialog ? "yes" : "no");
 
-        ImGui::SeparatorText("Previous-frame blocking summary");
+        editorHeading("Previous-frame blocking summary", fonts_);
         if (previous != nullptr)
         {
             ImGui::Text(
@@ -273,7 +273,7 @@ namespace quantum::editor
             oldestIndex,
             PlotData::Metric::RawDelta};
         const ImVec2 plotSize{360.0F * editorPresentationScale(), 48.0F};
-        ImGui::SeparatorText("Rolling ~2 seconds");
+        editorHeading("Rolling ~2 seconds", fonts_);
         ImGui::PlotLines(
             "Raw delta ms",
             plotValue,

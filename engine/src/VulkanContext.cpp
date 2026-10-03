@@ -4420,7 +4420,7 @@ namespace quantum::renderer
                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             }
             viewportColorAttachment.clearValue.color = {
-                {0.001F, 0.001F, 0.001F, 1.0F}
+                {0.055F, 0.075F, 0.10F, 1.0F}
             };
 
             VkRenderingAttachmentInfo viewportDepthAttachment{};

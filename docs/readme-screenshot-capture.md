@@ -2,7 +2,8 @@
 
 This developer-only workflow renders the real QUANTUM editor and saves its
 complete client area as PNG. It does not author or edit track content.
-Normal startup without capture arguments is unchanged.
+Normal startup uses the neutral environment described in
+[UI Theme M0](ui-theme-m0.md); capture scenarios can still explicitly select HDR.
 The original five README views below remain supported. Supports M2A also uses
 named support views, optional camera poses and node-handle visibility; see
 [Hybrid mounting captures](hybrid-member-mounting.md) and
@@ -85,7 +86,7 @@ the manifest or a supplied document cannot be overwritten as screenshot files.
 ## Determinism and settings safety
 
 Each scenario creates a fresh SDL window, renderer, and EditorUi, then destroys
-them in the normal dependency order. The same bundled Overpass fonts and Phase 3
+them in the normal dependency order. The same bundled editor fonts and QUANTUM
 style are used at scale 1.0. The borderless, nonresizable capture window requests
 the configured pixel dimensions; a mismatching drawable or readback size is an
 error, not an implicit image resize. The driver must support the requested size.

@@ -942,6 +942,10 @@ namespace
     void groundPersistenceAndLegacy()
     {
         AuthoredTrack track = quantum::coaster::createNewDocument();
+        require(track.ground().baseColor == glm::vec4{0.44F, 0.47F, 0.46F, 1.0F}
+            && track.ground().roughness == 0.92F
+            && track.ground().uvTiling == glm::vec2{120.0F, 120.0F},
+            "new documents use neutral matte ground at ten-unit texture scale");
         auto ground = track.ground();
         ground.enabled = false;
         ground.elevation = 17.5F;
@@ -969,6 +973,8 @@ namespace
         const auto legacy = deserializeCoasterDocument(json.dump());
         requireValidDocument(legacy, "legacy document");
         require(legacy->ground().sizeX == 1200.0F
+            && legacy->ground().baseColor == glm::vec4{0.30F, 0.32F, 0.26F, 1.0F}
+            && legacy->ground().roughness == 0.85F
             && legacy->ground().albedoTexture.empty(),
             "legacy document uses defaults");
     }

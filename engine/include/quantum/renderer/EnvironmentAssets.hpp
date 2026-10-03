@@ -39,9 +39,9 @@ namespace quantum::renderer
     inline constexpr std::string_view fallbackEnvironmentIdentifier =
         "builtin://environment/constant-ambient";
 
-    // The Editor's neutral new-session sky. Keep this independent of registry
-    // ordering so presentation defaults do not change when assets are added or
-    // rearranged.
+    // The default optional HDR reference used by capture/smoke toggles. Normal
+    // editor sessions start with an empty selection and constant ambient.
+    // Keep the reference independent of registry ordering.
     inline constexpr std::string_view defaultEnvironmentAssetIdentifier =
         "assets://environment/dayskyhdri027b_1k.hdr";
 

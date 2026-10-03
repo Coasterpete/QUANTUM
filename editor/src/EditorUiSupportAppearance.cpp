@@ -17,7 +17,7 @@ namespace quantum::editor
     void EditorUi::drawSupportAppearancePanel()
     {
         ImGui::Text("Support Appearance");
-        editorSecondaryText("Appearance is independent of the structural "
+        editorSecondaryTextWrapped("Appearance is independent of the structural "
             "family. The wood texture supplies neutral grain detail; the tint "
             "sets the timber's color.");
 
