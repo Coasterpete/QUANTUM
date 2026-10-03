@@ -597,7 +597,10 @@ namespace quantum::engine
 
                 const auto rebuildSimulationPreview = [&]
                 {
-                    if (simulationPreview.rebuild(authoredTrack))
+                    const bool available = simulationPreview.rebuild(authoredTrack);
+                    editorUi.setTrainPreviewInspection(
+                        simulationPreview.trainInspection());
+                    if (available)
                     {
                         quantum::logging::logMessagef(
                             quantum::logging::LogLevel::Info,

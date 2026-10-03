@@ -748,11 +748,12 @@ The editor retains its 0.75-unit kinematic sample spacing as output configuratio
 
 ## Editor authored-track workflow
 
-The current Editor opens a resizable SDL3 Vulkan window with an explicit Track
-workspace and a persistent Dear ImGui layout. `EditorUi` retains the selected
-`EditorWorkspace::Track` independently from `WorkspaceMode::Editor/Simulator`;
+The current Editor opens a resizable SDL3 Vulkan window with Track and Train
+workspaces and persistent Dear ImGui layouts. Track is the default. `EditorUi`
+retains the selected `EditorWorkspace` independently from `WorkspaceMode::Editor/Simulator`;
 the dedicated Simulator mode does not replace that selection or own another
-document. The main menu identifies the current workspace as `Workspace: Track`.
+document. The main menu identifies the current workspace as `Workspace: Track`
+or `Workspace: Train`. Returning from Simulator restores that selection.
 A main menu and provisional COMMAND toolbar
 sit above the dockspace. The default docked shell contains `COASTER SETUP` and
 `TRACK WORKSPACE` on the left, the texture-backed `3D Viewport` in the centre,
@@ -763,14 +764,27 @@ editor appropriate to the selected region.
 
 `EditorUi::beginFrame` routes the dedicated Simulator first. Editor frames
 submit the menu, toolbar, and dockspace, draw shared Coaster Setup, then select
-the Track pane composition and finish with `ImGui::Render`. The dockspace is
+the selected pane composition and finish with `ImGui::Render`. Train submits
+Train Configuration, Train Physical Definition, and Train Preview. The latter
+shares the existing viewport texture, camera, and SimulationPreview diagnostic
+geometry; Track authoring gestures are active only in Track. Train's car-count
+input uses the same pending Coaster Setup edit and Application transaction/history
+path as shared Coaster Setup. Physical inspection is a copied value published
+after an available preview rebuild, cleared when unavailable. Car/loadout,
+connector, and resistance defaults are read only and are not document fields.
+The dockspace is
 built and submitted before any dockable window
 calls `Begin()`. A window that calls `Begin` first cannot join a layout created
 later in the same frame and would remain floating until moved by hand. The
 default layout is built only when no dockspace node exists yet, or when
 `View → Reset Workspace Layout` requests it, so a user-arranged workspace
 persists across relaunch. Layout is stored in ImGui's own ini under the SDL
-preference path; the Editor never writes it directly. See
+preference path; the Editor never writes it directly. Track keeps its existing
+window/dockspace IDs. Train has its own IDs in the same ini file; both inactive
+dockspaces are submitted with `KeepAliveOnly`, including during Simulator.
+Coaster Setup uses one implementation/open flag/edit path with a window ID per
+layout. Reset Workspace Layout rebuilds only the composition shown that frame.
+See [`recovery-m1b-train-workspace.md`](recovery-m1b-train-workspace.md) and
 [`ground-surface-m0-1.md`](ground-surface-m0-1.md).
 
 ### Shared region selection

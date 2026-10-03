@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/AuthoredTrack.hpp>
+#include <quantum/editor/TrainPreviewInspection.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
@@ -119,6 +120,10 @@ namespace quantum::editor
         // Exposed for focused non-render tests and compact UI telemetry.
         [[nodiscard]] const physics::TrainDefinition& trainDefinition()
             const noexcept;
+        // No inspection is published for an unavailable/failed preview, even
+        // if trainDefinition_ still contains inputs from a rebuild attempt.
+        [[nodiscard]] std::optional<TrainPreviewInspection>
+            trainInspection() const;
         [[nodiscard]] const physics::TrainDynamicsState* dynamicsState()
             const noexcept;
         [[nodiscard]] const physics::TrainPose* pose() const noexcept;
