@@ -8261,6 +8261,16 @@ namespace quantum::editor
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Workspace: Track"))
+        {
+            if (ImGui::MenuItem("Track", nullptr,
+                editorWorkspace_ == EditorWorkspace::Track))
+            {
+                editorWorkspace_ = EditorWorkspace::Track;
+            }
+            ImGui::EndMenu();
+        }
+
         if (ImGui::MenuItem("Enter Simulator"))
         {
             workspaceMode_ = WorkspaceMode::Simulator;
@@ -8698,7 +8708,11 @@ ImGui::MenuItem(
         hardwareDragActive_ = false;
         regionStyleNumericEditActive_ = false;
 
-        if (workspaceMode_ == WorkspaceMode::Simulator)
+        // Choose this frame's composition before the menu can request a mode
+        // transition. As before, that request takes effect on the next frame.
+        const auto editorComposition = editorWorkspaceComposition(
+            workspaceMode_, editorWorkspace_);
+        if (!editorComposition.has_value())
         {
             drawSimulator(vulkan);
             ImGui::Render();
@@ -8835,23 +8849,7 @@ ImGui::MenuItem(
             coasterSetupInitialDockPending_ = true;
         }
 
-
-        showTransitionEditorInputSettings(
-            transitionEditorInputSettings_,
-            &inputSettingsWindowOpen_
-        );
-
-        showViewportSettingsWindow(
-            viewportSettings_,
-            pendingGroundEdit_,
-            &viewportSettingsWindowOpen_,
-            vulkan.capabilities().viewportMsaa4,
-            vulkan.capabilities().hdrEnvironment,
-            window_,
-            vulkan
-        );
-
-        drawPerformanceTelemetry();
+        // Coaster Setup is shared editor UI, independent of the workspace.
         // Coaster Setup is the one default-layout window ImGui does not dock
         // from the builder's pending request on a clean first launch, so it is
         // docked explicitly here, into the left node it shares with the Track
@@ -8888,6 +8886,30 @@ ImGui::MenuItem(
         }
         pendingTrackConfigurationReset_ |=
             setupEdits.resetTrackConfiguration;
+
+        if (*editorComposition != EditorWorkspace::Track)
+        {
+            throw std::logic_error("Unsupported editor workspace composition.");
+        }
+
+        // Track composition: submit the existing supporting panes, viewport,
+        // Track Workspace, region editors, and Force Diagnostics below.
+        showTransitionEditorInputSettings(
+            transitionEditorInputSettings_,
+            &inputSettingsWindowOpen_
+        );
+
+        showViewportSettingsWindow(
+            viewportSettings_,
+            pendingGroundEdit_,
+            &viewportSettingsWindowOpen_,
+            vulkan.capabilities().viewportMsaa4,
+            vulkan.capabilities().hdrEnvironment,
+            window_,
+            vulkan
+        );
+
+        drawPerformanceTelemetry();
 
         constexpr ImGuiWindowFlags viewportWindowFlags =
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;

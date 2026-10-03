@@ -51,6 +51,7 @@ add_executable(
     include/quantum/editor/ViewportCamera.hpp
     include/quantum/editor/ViewportPicking.hpp
     include/quantum/editor/ViewportTrackAnchors.hpp
+    include/quantum/editor/WorkspaceComposition.hpp
     ${PROJECT_SOURCE_DIR}/engine/src/Application.cpp
     ${PROJECT_SOURCE_DIR}/engine/include/quantum/engine/Application.hpp
 )
