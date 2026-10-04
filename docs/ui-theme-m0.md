@@ -136,24 +136,20 @@ classes and ownership patterns were not ported.
 
 ## Existing icon pipeline
 
-`render_quantum_icon.py` resolves output from its own directory;
-`tools/build_quantum_icon.py` resolves the repository from its script path.
-Both retain the earlier checkout-relative improvements.
+`assets/icons/quantum/quantum_icon_master.png` is the maintainer-supplied
+canonical application-icon artwork. Ordinary icon generation reads this file
+without modifying it: `tools/build_quantum_icon.py` derives seven LANCZOS PNGs
+(256/128/64/48/32/24/16) and `quantum.ico`, preserving the supplied colors and
+alpha. Paths resolve from the script's location, independently of the working
+directory. `editor/platform/windows/QUANTUM.rc` embeds the ICO as group 101;
+the derived PNGs are companion assets, not separately loaded by the application.
 
-The loaded Blender scene retains its structural Q/trusses, camera, lights, and
-composition. The script replaces the unpacked external material with a
-white/silver metallic material, hides the floor, and uses an opaque deep blue
-camera background (`#0743C4`) with neutral lighting. The existing compositor's
-subtle edge vignette remains. Film transparency is disabled. Installed Blender
-5.1 warns that the source was saved by 5.2; rendering succeeds without saving
-or downgrading the `.blend`.
-
-The 1024 RGBA master, seven LANCZOS PNGs (256/128/64/48/32/24/16), and seven-entry
-Windows ICO were regenerated. Master and all PNG alpha values are 255. Visual
-inspection at 16/24/32 px confirmed the Q/tail and silver-on-blue contrast;
-fine truss detail merges at the smallest size. The existing `.rc` group 101
-still embeds the ICO. ICO SHA-256 is
-`2f24ea30f3389be5c98e1549d8b3758797dc1883419661d410be02637039d17d`.
+The `.blend` and `.blend1` are historical/source assets. Ordinary derivation
+does not open, rewrite, or rerender them. `render_quantum_icon.py` remains a
+separate tool for intentional future source-art rendering; it writes to the
+master path and must not be run as part of canonical icon derivation. The
+earlier Theme M0 render and its verification results below are historical;
+they do not define the canonical artwork.
 
 ## Neutral environment and ground
 
@@ -272,12 +268,10 @@ ctest --test-dir build -C Debug --output-on-failure -R '^(QuantumEditor\.(Viewpo
 git diff --check
 ```
 
-Icon commands use installed Blender and bundled Python/Pillow:
+Ordinary icon derivation uses Python with Pillow, without a Blender render:
 
 ```powershell
-& 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe' --background --factory-startup assets/icons/quantum/quantum_icon.blend --python-exit-code 1 --python assets/icons/quantum/render_quantum_icon.py
-& 'C:\Users\coast\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' tools/build_quantum_icon.py
-& 'C:\Users\coast\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' build/verification/housekeeping_verify_icon.py
+python tools/build_quantum_icon.py
 ```
 
 Local logs, icon/resource checks, original-file snapshots, and test-layout
