@@ -11,6 +11,7 @@
 #include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
 #include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
@@ -29,6 +30,8 @@ namespace quantum::physics
         constexpr JPH::uint layerCount = 2;
         // Deliberately bounded M0 capacities, not production scene limits.
         constexpr JPH::uint maximumBodies = 1024;
+        // Handles never reuse slots, so these bound total successful creations.
+        constexpr std::size_t maximumConstraints = 128;
         constexpr JPH::uint maximumBodyPairs = 1024;
         constexpr JPH::uint maximumContacts = 1024;
         constexpr JPH::uint temporaryBytes = 10 * 1024 * 1024;
@@ -91,6 +94,13 @@ namespace quantum::physics
 
     struct RigidBodyWorld::Impl
     {
+        struct HingeEntry
+        {
+            JPH::Ref<JPH::HingeConstraint> hinge;
+            JPH::BodyID connectedBody;
+            JPH::BodyID body;
+        };
+
         // PhysicsSystem borrows these tables, so it must be destroyed first.
         JPH::BroadPhaseLayerInterfaceTable broadPhase{layerCount, layerCount};
         JPH::ObjectLayerPairFilterTable layerPairs{layerCount};
@@ -99,6 +109,7 @@ namespace quantum::physics
         JPH::JobSystemSingleThreaded jobs{JPH::cMaxPhysicsJobs};
         JPH::PhysicsSystem system;
         std::vector<JPH::BodyID> bodies;
+        std::vector<HingeEntry> hinges;
         std::uint64_t tick = 0;
 
         Impl()
@@ -118,16 +129,60 @@ namespace quantum::physics
                 -static_cast<float>(coaster::standardGravityAcceleration)});
             // No vector allocation can fail after a library body is created.
             bodies.reserve(maximumBodies);
+            hinges.reserve(maximumConstraints);
         }
 
         ~Impl()
         {
+            // A hinge borrows its bodies. Drop both system and local references
+            // before destroying any body that the hinge can access.
+            for (auto& entry : hinges)
+            {
+                if (entry.hinge != nullptr)
+                {
+                    system.RemoveConstraint(entry.hinge);
+                    entry.hinge = nullptr;
+                }
+            }
             auto& interface = system.GetBodyInterface();
             for (const auto id : bodies)
             {
-                interface.RemoveBody(id);
-                interface.DestroyBody(id);
+                if (!id.IsInvalid())
+                {
+                    interface.RemoveBody(id);
+                    interface.DestroyBody(id);
+                }
             }
+        }
+
+        [[nodiscard]] JPH::BodyID requireBody(const RigidBodyWorld* world,
+            const RigidBodyHandle handle) const
+        {
+            if (handle.world != world || handle.index >= bodies.size()
+                || bodies[handle.index].IsInvalid())
+            {
+                throw std::invalid_argument("Rigid-body handle is invalid, foreign or removed.");
+            }
+            return bodies[handle.index];
+        }
+
+        [[nodiscard]] HingeEntry& requireHinge(const RigidBodyWorld* world,
+            const RigidBodyConstraintHandle handle)
+        {
+            if (handle.world != world || handle.index >= hinges.size()
+                || hinges[handle.index].hinge == nullptr)
+            {
+                throw std::invalid_argument("Rigid-body constraint handle is invalid, foreign or removed.");
+            }
+            return hinges[handle.index];
+        }
+
+        void removeHinge(HingeEntry& entry)
+        {
+            // Removing a support must let a sleeping body respond to gravity.
+            system.GetBodyInterface().ActivateConstraint(entry.hinge);
+            system.RemoveConstraint(entry.hinge);
+            entry.hinge = nullptr;
         }
     };
 
@@ -167,7 +222,7 @@ namespace quantum::physics
         orientation = orientation.Normalized();
         if (impl_->bodies.size() == maximumBodies)
         {
-            throw std::runtime_error("RigidBodyWorld M0 body capacity exceeded.");
+            throw std::runtime_error("RigidBodyWorld lifetime body creation capacity exceeded.");
         }
 
         // Zero convex radius keeps the proof's collider dimensions exact.
@@ -201,11 +256,7 @@ namespace quantum::physics
 
     RigidBodyState RigidBodyWorld::bodyState(const RigidBodyHandle handle) const
     {
-        if (handle.world != this || handle.index >= impl_->bodies.size())
-        {
-            throw std::invalid_argument("Rigid-body handle does not belong to this world.");
-        }
-        const auto id = impl_->bodies[handle.index];
+        const auto id = impl_->requireBody(this, handle);
         const auto& interface = impl_->system.GetBodyInterface();
         const auto position = interface.GetPosition(id);
         const auto orientation = interface.GetRotation(id);
@@ -213,8 +264,99 @@ namespace quantum::physics
             {position.GetX(), position.GetY(), position.GetZ()},
             {orientation.GetW(), orientation.GetX(), orientation.GetY(), orientation.GetZ()},
             fromVector(interface.GetLinearVelocity(id)),
-            interface.IsActive(id)
+            interface.IsActive(id),
+            fromVector(interface.GetAngularVelocity(id))
         };
+    }
+
+    void RigidBodyWorld::removeBody(const RigidBodyHandle handle)
+    {
+        const auto id = impl_->requireBody(this, handle);
+        for (auto& entry : impl_->hinges)
+        {
+            if (entry.hinge != nullptr
+                && (entry.body == id || entry.connectedBody == id))
+            {
+                impl_->removeHinge(entry);
+            }
+        }
+        auto& interface = impl_->system.GetBodyInterface();
+        interface.RemoveBody(id);
+        interface.DestroyBody(id);
+        impl_->bodies[handle.index] = JPH::BodyID{};
+    }
+
+    RigidBodyConstraintHandle RigidBodyWorld::createHinge(
+        const RigidBodyHingeSettings& settings)
+    {
+        const auto body = impl_->requireBody(this, settings.body);
+        const auto connectedBody = settings.connectedBody
+            ? impl_->requireBody(this, *settings.connectedBody) : JPH::BodyID{};
+        auto& interface = impl_->system.GetBodyInterface();
+        if (body == connectedBody)
+        {
+            throw std::invalid_argument("A hinge requires distinct bodies.");
+        }
+        if (interface.GetMotionType(body) != JPH::EMotionType::Dynamic
+            && (connectedBody.IsInvalid()
+                || interface.GetMotionType(connectedBody) != JPH::EMotionType::Dynamic))
+        {
+            throw std::invalid_argument("A hinge requires at least one dynamic body.");
+        }
+        const auto anchor = toVector(settings.anchorPositionMeters);
+        (void)toVector(settings.axis);
+        const double axisLength = glm::length(settings.axis);
+        if (axisLength <= 0.0 || !std::isfinite(axisLength))
+        {
+            throw std::invalid_argument("Hinge axis must be finite and nonzero.");
+        }
+        const auto axis = toVector(settings.axis / axisLength).Normalized();
+        // Jolt needs a perpendicular reference to define zero angle. Any one
+        // suffices for an unlimited velocity hinge; keep it private here.
+        const auto normal = axis.GetNormalizedPerpendicular();
+        if (impl_->hinges.size() == maximumConstraints)
+        {
+            throw std::runtime_error("RigidBodyWorld lifetime constraint creation capacity exceeded.");
+        }
+        JPH::HingeConstraintSettings hingeSettings;
+        hingeSettings.mPoint1 = hingeSettings.mPoint2 = JPH::RVec3{anchor};
+        hingeSettings.mHingeAxis1 = hingeSettings.mHingeAxis2 = axis;
+        hingeSettings.mNormalAxis1 = hingeSettings.mNormalAxis2 = normal;
+        JPH::Ref<JPH::HingeConstraint> hinge = static_cast<JPH::HingeConstraint*>(
+            interface.CreateConstraint(&hingeSettings, connectedBody, body));
+        if (hinge == nullptr)
+        {
+            throw std::runtime_error("Rigid-body hinge creation failed.");
+        }
+        // The reserved vector cannot allocate after the system takes a reference.
+        // The local Ref also releases the hinge if AddConstraint throws.
+        impl_->system.AddConstraint(hinge);
+        impl_->hinges.push_back({hinge, connectedBody, body});
+        interface.ActivateConstraint(hinge);
+        return {this, impl_->hinges.size() - 1};
+    }
+
+    void RigidBodyWorld::setHingeMotor(const RigidBodyConstraintHandle handle,
+        const RigidBodyHingeMotorSettings& settings)
+    {
+        auto& entry = impl_->requireHinge(this, handle);
+        const float velocity = toFloat(settings.targetAngularVelocityRadiansPerSecond);
+        const float torque = toFloat(settings.maximumTorqueNewtonMeters);
+        if (settings.maximumTorqueNewtonMeters < 0.0
+            || (settings.maximumTorqueNewtonMeters > 0.0 && torque == 0.0f))
+        {
+            throw std::invalid_argument("Hinge motor torque limit must be zero or positive.");
+        }
+        entry.hinge->GetMotorSettings().SetTorqueLimit(torque);
+        entry.hinge->SetTargetAngularVelocity(velocity);
+        entry.hinge->SetMotorState(settings.enabled
+            ? JPH::EMotorState::Velocity : JPH::EMotorState::Off);
+        impl_->system.GetBodyInterface().ActivateConstraint(entry.hinge);
+    }
+
+    void RigidBodyWorld::removeConstraint(const RigidBodyConstraintHandle handle)
+    {
+        impl_->removeHinge(impl_->requireHinge(this, handle));
     }
 
     void RigidBodyWorld::stepFixed()

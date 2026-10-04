@@ -7,6 +7,10 @@ track-constrained coaster dynamics. Trains, bogies, rail contact, connectors,
 launches, brakes, inertia and solver tolerances remain authoritative in Core.
 There is no coupling between the two domains in M0.
 
+[Rigid Body M1](rigid-body-m1.md) extends this same world with hinges,
+velocity motors and individual removal; the M0 stepping and coaster boundary
+described here remain unchanged.
+
 Library research was checked on 2026-10-03 against upstream documentation and
 the repository's existing vcpkg baseline:
 
@@ -65,10 +69,12 @@ optional non-owning pointer. Standalone preview tests need no world.
 World construction initializes Jolt and creates its implementation through
 `std::unique_ptr<Impl>`. That implementation owns collision filter tables, a
 10 MiB temporary allocator, a single-thread job runner, `PhysicsSystem` and
-the list of created body IDs. The system borrows its filter tables; declaration
-order keeps them alive until the system is destroyed. Bodies own reference-
-counted shapes through Jolt. Destruction removes each body from the system,
-then destroys it, before releasing the system and its support objects.
+the list of created body IDs (plus hinge references in M1). The system borrows
+its filter tables; declaration order keeps them alive until the system is
+destroyed. Bodies own reference-
+counted shapes through Jolt. In M1, destruction first removes and releases all
+hinges, which borrow their connected bodies. It then removes each body from
+the system and destroys it, before releasing the system and its support objects.
 
 Jolt requires process-wide allocator/type/collision registration and a factory.
 A private function-local `JoltRuntime` initializes these once, allowing several
@@ -80,7 +86,9 @@ initialize or unregister it. Keep worlds locally owned, not global objects.
 
 `RigidBodyWorld` cannot be copied or moved. Handles contain their owning world's
 address and an index; querying a foreign/invalid handle throws. Handles are
-valid only until world destruction. M0 has no per-body removal or handle reuse.
+valid only until body removal or world destruction. M0 initially had no per-body
+removal; M1 adds it and removes all attached constraints first. Neither milestone
+reuses handle indices. Removed slots remain invalid until world destruction.
 All creation, queries, stepping and destruction belong on the owning thread.
 
 ## Existing fixed-step path and insertion
@@ -119,7 +127,8 @@ QUANTUM uses right-handed world coordinates: X/Y horizontal, Z up. Core's
 coaster gravity vector is `(0, 0, -g)` and its local frame satisfies
 `tangent x lateral = up`. The world uses that same axis ordering and the existing
 standard gravity **9.80665 m/s^2**. Box positions and half extents are meters;
-mass is kilograms; returned velocity is meters per second; time is seconds.
+mass is kilograms; returned linear velocity is meters per second; M1's angular
+velocity is radians per second and motor torque is newton meters; time is seconds.
 No document scale is applied to the general world.
 
 Public inputs/outputs use `glm::dvec3` and `glm::dquat`, matching existing
@@ -162,12 +171,14 @@ authoring controls, or manual visual/live rigid-body proof is added.
 
 ## M0 limits and reading path
 
-M0 exposes static/dynamic boxes, initial transforms, state queries and stepping.
-It has bounded capacities of 1024 bodies, body pairs and contacts, default
-discrete collision, and a 10 MiB scratch arena. Extreme scales, high-speed
+M0 introduced static/dynamic boxes, initial transforms, state queries and stepping.
+M1 adds hinge constraints, velocity motors and removal. It retains bounded
+capacities of 1024 body creations per world lifetime, 1024 body pairs and
+1024 contacts, default discrete collision, and a 10 MiB scratch arena. Extreme scales, high-speed
 tunnelling, capacity exhaustion, large scenes and deployment on older CPUs
 are not covered by the proof. This is not an arbitrary-body serialization,
-collider pipeline, ECS, joints API, train collision system or flat-ride editor.
+collider pipeline, ECS, general joints framework, train collision system or
+flat-ride editor.
 Future domain interaction requires a separately authorized milestone.
 
 Useful reading order:
