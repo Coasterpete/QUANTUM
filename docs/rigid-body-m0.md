@@ -61,10 +61,11 @@ package configuration; M0 does not broaden the project's supported hardware.
 
 ## Ownership and cleanup
 
-`Application::runImpl()` constructs one empty `RigidBodyWorld` immediately
-before `SimulationPreview`. Reverse C++ scope destruction destroys the preview
-first, then the world. `SimulationPreview::setRigidBodyWorld()` stores an
-optional non-owning pointer. Standalone preview tests need no world.
+M0 constructed one empty `RigidBodyWorld` immediately before `SimulationPreview`.
+[M3](rigid-body-m3.md) now creates that world only inside the deliberately enabled
+Editor proof owner, declared before the preview. Reverse C++ scope destruction
+destroys the preview first, then the owner/world. `SimulationPreview::setRigidBodyWorld()`
+stores an optional non-owning pointer. Standalone preview tests need no world.
 
 World construction initializes Jolt and creates its implementation through
 `std::unique_ptr<Impl>`. That implementation owns collision filter tables, a
@@ -119,8 +120,8 @@ Preview pause, unavailability, boundary stop and timing discontinuities also
 stop general-world progress. Train reset/rebuild preserves the independently
 owned world's bodies and tick counter; playback resumes them from their current
 state. Document edits cannot reset, rescale or serialize these bodies. This is
-an M0 cadence integration, not independent scenery playback. The application
-world is empty; proof objects are created only in tests.
+an M0 cadence integration, not independent scenery playback. M0 proof objects
+were created only in tests; M3 adds an opt-in visible mechanism using this cadence.
 
 ## Coordinates and units
 

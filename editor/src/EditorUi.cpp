@@ -8582,6 +8582,8 @@ namespace quantum::editor
                 pendingSimulationControl_ = SimulationControlType::Reset;
             ImGui::EndDisabled();
 
+            drawRigidBodyProofControls();
+
             ImGui::Separator();
             const ImVec2 availableSize = ImGui::GetContentRegionAvail();
             const ImVec2 framebufferScale =
@@ -8615,6 +8617,8 @@ namespace quantum::editor
         ImGui::End();
         if (returnToEditor)
         {
+            if (rigidBodyProofEnabled_)
+                pendingRigidBodyProofControl_ = RigidBodyProofControlType::Disable;
             workspaceMode_ = WorkspaceMode::Editor;
             cameraGesture_ = CameraGesture::None;
             viewportNavigationActive_ = false;

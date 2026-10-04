@@ -426,6 +426,8 @@ namespace quantum::editor
         Reset
     };
 
+    enum class RigidBodyProofControlType : std::uint8_t { Enable, Disable, Reset };
+
     enum class SimulationPlaybackState : std::uint8_t
     {
         Stopped,
@@ -738,6 +740,11 @@ namespace quantum::editor
         // Simulation Preview 1: returns any pending simulation control request.
         [[nodiscard]] std::optional<SimulationControlType>
         takeSimulationControl() noexcept;
+
+        [[nodiscard]] std::optional<RigidBodyProofControlType>
+            takeRigidBodyProofControl() noexcept;
+        void setRigidBodyProofStatus(bool enabled, std::uint64_t tick,
+            double angularSpeed, const std::string& error = {});
         [[nodiscard]] std::optional<TrackDeviceCommand>
         takeTrackDeviceCommand() noexcept;
         void selectTrackDevice(coaster::TrackDeviceId id) noexcept;
@@ -831,6 +838,8 @@ namespace quantum::editor
             float logicalHeight
         );
 void drawSimulationTelemetry();
+        void drawRigidBodyProofControls();
+        void frameRigidBodyProof();
         void drawPerformanceTelemetry();
         void drawViewportTrackAnchors();
         void drawViewportSupports();
@@ -1094,6 +1103,12 @@ bool canUndo_ = false;
 
         // Simulation Preview 1 state.
         std::optional<SimulationControlType> pendingSimulationControl_;
+        std::optional<RigidBodyProofControlType> pendingRigidBodyProofControl_;
+        bool rigidBodyProofEnabled_ = false;
+        std::uint64_t rigidBodyProofTick_ = 0;
+        double rigidBodyProofAngularSpeed_ = 0.0;
+        std::string rigidBodyProofError_;
+        std::optional<ViewportCamera> cameraBeforeRigidBodyProof_;
         SimulationPlaybackState simulationPlaybackState_ = SimulationPlaybackState::Stopped;
         double simulationSpeedMps_ = 0.0;
         bool simulationAvailable_ = false;

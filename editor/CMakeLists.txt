@@ -22,6 +22,7 @@ add_executable(
     src/ReadmeCapture.cpp
     src/ReadmeCaptureRunner.cpp
     src/RiderLoadDiagnostics.cpp
+    src/RigidBodyMechanismProof.cpp
     src/SimulationPreview.cpp
     src/TransitionEditorModel.cpp
     src/TrackStylePresentation.cpp
@@ -46,6 +47,7 @@ add_executable(
     include/quantum/editor/ReadmeCapture.hpp
     include/quantum/editor/RegionSelection.hpp
     include/quantum/editor/RiderLoadDiagnostics.hpp
+    include/quantum/editor/RigidBodyMechanismProof.hpp
     include/quantum/editor/SimulationPreview.hpp
     include/quantum/editor/TransitionEditorModel.hpp
     include/quantum/editor/TrainPreviewInspection.hpp

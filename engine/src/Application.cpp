@@ -15,7 +15,7 @@
 #include <quantum/editor/RegionSelection.hpp>
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/SimulationPreview.hpp>
-#include <quantum/physics/RigidBodyWorld.hpp>
+#include <quantum/editor/RigidBodyMechanismProof.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
@@ -37,10 +37,12 @@
 #include <expected>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -587,10 +589,9 @@ namespace quantum::engine
                     documentHistory.canUndo(),
                     documentHistory.canRedo());
 
-                // Declared first so the borrowed world outlives the preview.
-                quantum::physics::RigidBodyWorld rigidBodyWorld;
+                // Declared first so an enabled proof's world outlives the preview.
+                std::unique_ptr<quantum::editor::RigidBodyMechanismProof> rigidBodyProof;
                 quantum::editor::SimulationPreview simulationPreview;
-                simulationPreview.setRigidBodyWorld(&rigidBodyWorld);
                 simulationPreview.setGpuContext(
                     gpuContext.has_value() ? &*gpuContext : nullptr);
                 if (previewSmokeOptions != nullptr
@@ -609,6 +610,9 @@ namespace quantum::engine
                     authoredTrack.coasterSetup().carsPerTrain;
                 std::uint64_t uploadedSimulationVertexGeneration =
                     std::numeric_limits<std::uint64_t>::max();
+                std::uint64_t uploadedRigidBodyProofTick =
+                    std::numeric_limits<std::uint64_t>::max();
+                std::vector<quantum::renderer::LineVertex> diagnosticVertices;
 
                 const auto rebuildSimulationPreview = [&]
                 {
@@ -4453,6 +4457,32 @@ editorUi.selectSection(restoredSelection, true);
                         frameBlockingEvents.modalOrFileDialog =
                             applicationBlockingEvents.modalOrFileDialog;
 
+                        bool rigidBodyProofPresentationChanged = false;
+                        if (const auto control = editorUi.takeRigidBodyProofControl())
+                        {
+                            // Detach before reset/destruction. A fresh isolated
+                            // world also avoids accumulating removed handle slots.
+                            simulationPreview.setRigidBodyWorld(nullptr);
+                            rigidBodyProof.reset();
+                            rigidBodyProofPresentationChanged = true;
+                            try
+                            {
+                                if (*control != quantum::editor::RigidBodyProofControlType::Disable)
+                                {
+                                    rigidBodyProof = std::make_unique<
+                                        quantum::editor::RigidBodyMechanismProof>();
+                                    simulationPreview.setRigidBodyWorld(&rigidBodyProof->world());
+                                }
+                                editorUi.setRigidBodyProofStatus(rigidBodyProof != nullptr, 0, 0.0);
+                            }
+                            catch (const std::exception& exception)
+                            {
+                                editorUi.setRigidBodyProofStatus(false, 0, 0.0, exception.what());
+                                quantum::logging::logMessagef(quantum::logging::LogLevel::Error,
+                                    "SIM", "Rigid-body proof creation failed: %s", exception.what());
+                            }
+                        }
+
                         if (const auto control =
                                 editorUi.takeSimulationControl())
                         {
@@ -4558,14 +4588,34 @@ editorUi.selectSection(restoredSelection, true);
                                 || frameBlockingEvents.windowRestored);
                         publishSimulationStatus();
 
+                        if (rigidBodyProof)
+                        {
+                            editorUi.setRigidBodyProofStatus(true, rigidBodyProof->world().tick(),
+                                rigidBodyProof->armAngularSpeedRadiansPerSecond());
+                        }
+
                         double previewVertexPublishMilliseconds = 0.0;
                         if (uploadedSimulationVertexGeneration
-                            != simulationPreview.vertexGeneration())
+                            != simulationPreview.vertexGeneration()
+                            || rigidBodyProofPresentationChanged
+                            || (rigidBodyProof && uploadedRigidBodyProofTick
+                                != rigidBodyProof->world().tick()))
                         {
                             const auto previewPublishBegin =
                                 PerformanceClock::now();
-                            renderer.updateTrainPreviewVertices(
-                                simulationPreview.vertices());
+                            const auto trainVertices = simulationPreview.vertices();
+                            if (rigidBodyProof)
+                            {
+                                diagnosticVertices.assign(trainVertices.begin(), trainVertices.end());
+                                const auto boxes = rigidBodyProof->snapshot();
+                                quantum::editor::appendRigidBodyProofVertices(diagnosticVertices, boxes);
+                                uploadedRigidBodyProofTick = rigidBodyProof->world().tick();
+                                renderer.updateTrainPreviewVertices(diagnosticVertices);
+                            }
+                            else
+                            {
+                                renderer.updateTrainPreviewVertices(trainVertices);
+                            }
                             previewVertexPublishMilliseconds =
                                 std::chrono::duration<double, std::milli>(
                                     PerformanceClock::now()
