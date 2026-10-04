@@ -38,6 +38,10 @@ floor/falling-box proof is automated test state, with no authoring or renderer
 integration. See [Rigid Body M0](rigid-body-m0.md) for ownership, units,
 dependency configuration and current limits.
 
+[Rigid Body M1](rigid-body-m1.md) adds hinges, velocity motors and safe
+body/constraint removal within that same isolated world, with mechanical
+state proofs in tests and no changes to coaster or preview ownership.
+
 ### Rendering Hardware Interface M0
 
 `quantum::renderer::Renderer` is the narrow application-facing boundary for
