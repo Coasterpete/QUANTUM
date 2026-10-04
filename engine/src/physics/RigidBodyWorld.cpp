@@ -12,6 +12,7 @@
 #include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
@@ -94,9 +95,9 @@ namespace quantum::physics
 
     struct RigidBodyWorld::Impl
     {
-        struct HingeEntry
+        struct ConstraintEntry
         {
-            JPH::Ref<JPH::HingeConstraint> hinge;
+            JPH::Ref<JPH::TwoBodyConstraint> constraint;
             JPH::BodyID connectedBody;
             JPH::BodyID body;
         };
@@ -109,7 +110,7 @@ namespace quantum::physics
         JPH::JobSystemSingleThreaded jobs{JPH::cMaxPhysicsJobs};
         JPH::PhysicsSystem system;
         std::vector<JPH::BodyID> bodies;
-        std::vector<HingeEntry> hinges;
+        std::vector<ConstraintEntry> constraints;
         std::uint64_t tick = 0;
 
         Impl()
@@ -129,19 +130,19 @@ namespace quantum::physics
                 -static_cast<float>(coaster::standardGravityAcceleration)});
             // No vector allocation can fail after a library body is created.
             bodies.reserve(maximumBodies);
-            hinges.reserve(maximumConstraints);
+            constraints.reserve(maximumConstraints);
         }
 
         ~Impl()
         {
-            // A hinge borrows its bodies. Drop both system and local references
-            // before destroying any body that the hinge can access.
-            for (auto& entry : hinges)
+            // Constraints borrow their bodies. Drop system and local references
+            // before destroying any body that a constraint can access.
+            for (auto& entry : constraints)
             {
-                if (entry.hinge != nullptr)
+                if (entry.constraint != nullptr)
                 {
-                    system.RemoveConstraint(entry.hinge);
-                    entry.hinge = nullptr;
+                    system.RemoveConstraint(entry.constraint);
+                    entry.constraint = nullptr;
                 }
             }
             auto& interface = system.GetBodyInterface();
@@ -166,23 +167,45 @@ namespace quantum::physics
             return bodies[handle.index];
         }
 
-        [[nodiscard]] HingeEntry& requireHinge(const RigidBodyWorld* world,
-            const RigidBodyConstraintHandle handle)
+        [[nodiscard]] const ConstraintEntry& requireConstraint(const RigidBodyWorld* world,
+            const RigidBodyConstraintHandle handle) const
         {
-            if (handle.world != world || handle.index >= hinges.size()
-                || hinges[handle.index].hinge == nullptr)
+            if (handle.world != world || handle.index >= constraints.size()
+                || constraints[handle.index].constraint == nullptr)
             {
                 throw std::invalid_argument("Rigid-body constraint handle is invalid, foreign or removed.");
             }
-            return hinges[handle.index];
+            return constraints[handle.index];
         }
 
-        void removeHinge(HingeEntry& entry)
+        [[nodiscard]] JPH::HingeConstraint& requireHinge(const RigidBodyWorld* world,
+            const RigidBodyConstraintHandle handle) const
+        {
+            const auto& entry = requireConstraint(world, handle);
+            if (entry.constraint->GetSubType() != JPH::EConstraintSubType::Hinge)
+            {
+                throw std::invalid_argument("Rigid-body constraint is not a hinge.");
+            }
+            return static_cast<JPH::HingeConstraint&>(*entry.constraint);
+        }
+
+        [[nodiscard]] JPH::SliderConstraint& requireSlider(const RigidBodyWorld* world,
+            const RigidBodyConstraintHandle handle) const
+        {
+            const auto& entry = requireConstraint(world, handle);
+            if (entry.constraint->GetSubType() != JPH::EConstraintSubType::Slider)
+            {
+                throw std::invalid_argument("Rigid-body constraint is not a slider.");
+            }
+            return static_cast<JPH::SliderConstraint&>(*entry.constraint);
+        }
+
+        void removeConstraint(ConstraintEntry& entry)
         {
             // Removing a support must let a sleeping body respond to gravity.
-            system.GetBodyInterface().ActivateConstraint(entry.hinge);
-            system.RemoveConstraint(entry.hinge);
-            entry.hinge = nullptr;
+            system.GetBodyInterface().ActivateConstraint(entry.constraint);
+            system.RemoveConstraint(entry.constraint);
+            entry.constraint = nullptr;
         }
     };
 
@@ -272,12 +295,12 @@ namespace quantum::physics
     void RigidBodyWorld::removeBody(const RigidBodyHandle handle)
     {
         const auto id = impl_->requireBody(this, handle);
-        for (auto& entry : impl_->hinges)
+        for (auto& entry : impl_->constraints)
         {
-            if (entry.hinge != nullptr
+            if (entry.constraint != nullptr
                 && (entry.body == id || entry.connectedBody == id))
             {
-                impl_->removeHinge(entry);
+                impl_->removeConstraint(entry);
             }
         }
         auto& interface = impl_->system.GetBodyInterface();
@@ -314,7 +337,7 @@ namespace quantum::physics
         // Jolt needs a perpendicular reference to define zero angle. Any one
         // suffices for an unlimited velocity hinge; keep it private here.
         const auto normal = axis.GetNormalizedPerpendicular();
-        if (impl_->hinges.size() == maximumConstraints)
+        if (impl_->constraints.size() == maximumConstraints)
         {
             throw std::runtime_error("RigidBodyWorld lifetime constraint creation capacity exceeded.");
         }
@@ -331,15 +354,15 @@ namespace quantum::physics
         // The reserved vector cannot allocate after the system takes a reference.
         // The local Ref also releases the hinge if AddConstraint throws.
         impl_->system.AddConstraint(hinge);
-        impl_->hinges.push_back({hinge, connectedBody, body});
+        impl_->constraints.push_back({hinge.GetPtr(), connectedBody, body});
         interface.ActivateConstraint(hinge);
-        return {this, impl_->hinges.size() - 1};
+        return {this, impl_->constraints.size() - 1};
     }
 
     void RigidBodyWorld::setHingeMotor(const RigidBodyConstraintHandle handle,
         const RigidBodyHingeMotorSettings& settings)
     {
-        auto& entry = impl_->requireHinge(this, handle);
+        auto& hinge = impl_->requireHinge(this, handle);
         const float velocity = toFloat(settings.targetAngularVelocityRadiansPerSecond);
         const float torque = toFloat(settings.maximumTorqueNewtonMeters);
         if (settings.maximumTorqueNewtonMeters < 0.0
@@ -347,16 +370,115 @@ namespace quantum::physics
         {
             throw std::invalid_argument("Hinge motor torque limit must be zero or positive.");
         }
-        entry.hinge->GetMotorSettings().SetTorqueLimit(torque);
-        entry.hinge->SetTargetAngularVelocity(velocity);
-        entry.hinge->SetMotorState(settings.enabled
+        hinge.GetMotorSettings().SetTorqueLimit(torque);
+        hinge.SetTargetAngularVelocity(velocity);
+        hinge.SetMotorState(settings.enabled
             ? JPH::EMotorState::Velocity : JPH::EMotorState::Off);
-        impl_->system.GetBodyInterface().ActivateConstraint(entry.hinge);
+        impl_->system.GetBodyInterface().ActivateConstraint(&hinge);
+    }
+
+    RigidBodyConstraintHandle RigidBodyWorld::createSlider(
+        const RigidBodySliderSettings& settings)
+    {
+        const auto body = impl_->requireBody(this, settings.body);
+        const auto connectedBody = settings.connectedBody
+            ? impl_->requireBody(this, *settings.connectedBody) : JPH::BodyID{};
+        auto& interface = impl_->system.GetBodyInterface();
+        if (body == connectedBody)
+        {
+            throw std::invalid_argument("A slider requires distinct bodies.");
+        }
+        if (interface.GetMotionType(body) != JPH::EMotionType::Dynamic
+            && (connectedBody.IsInvalid()
+                || interface.GetMotionType(connectedBody) != JPH::EMotionType::Dynamic))
+        {
+            throw std::invalid_argument("A slider requires at least one dynamic body.");
+        }
+        const auto anchor = toVector(settings.anchorPositionMeters);
+        (void)toVector(settings.axis);
+        // hypot avoids overflow/underflow when normalizing a finite direction.
+        const double axisLength = std::hypot(settings.axis.x, settings.axis.y, settings.axis.z);
+        if (axisLength <= 0.0 || !std::isfinite(axisLength))
+        {
+            throw std::invalid_argument("Slider axis must be finite and nonzero.");
+        }
+        const auto axis = toVector(settings.axis / axisLength).Normalized();
+        const float minimum = settings.minimumTranslationMeters
+            ? toFloat(*settings.minimumTranslationMeters) : -std::numeric_limits<float>::max();
+        const float maximum = settings.maximumTranslationMeters
+            ? toFloat(*settings.maximumTranslationMeters) : std::numeric_limits<float>::max();
+        // Jolt's hard slider limits require zero within the range. Coincident
+        // attachment points make the creation pose that zero reference.
+        if (minimum > 0.0f || maximum < 0.0f || minimum >= maximum
+            || (settings.minimumTranslationMeters
+                && *settings.minimumTranslationMeters != 0.0 && minimum == 0.0f)
+            || (settings.maximumTranslationMeters
+                && *settings.maximumTranslationMeters != 0.0 && maximum == 0.0f))
+        {
+            throw std::invalid_argument(
+                "Slider limits must include zero and have representable nonzero travel.");
+        }
+        if (impl_->constraints.size() == maximumConstraints)
+        {
+            throw std::runtime_error("RigidBodyWorld lifetime constraint creation capacity exceeded.");
+        }
+        JPH::SliderConstraintSettings sliderSettings;
+        sliderSettings.mPoint1 = sliderSettings.mPoint2 = JPH::RVec3{anchor};
+        sliderSettings.SetSliderAxis(axis);
+        sliderSettings.mLimitsMin = minimum;
+        sliderSettings.mLimitsMax = maximum;
+        JPH::Ref<JPH::SliderConstraint> slider = static_cast<JPH::SliderConstraint*>(
+            interface.CreateConstraint(&sliderSettings, connectedBody, body));
+        if (slider == nullptr)
+        {
+            throw std::runtime_error("Rigid-body slider creation failed.");
+        }
+        // Retain before registration; reserved storage cannot allocate afterward.
+        impl_->system.AddConstraint(slider);
+        impl_->constraints.push_back({slider.GetPtr(), connectedBody, body});
+        interface.ActivateConstraint(slider);
+        return {this, impl_->constraints.size() - 1};
+    }
+
+    void RigidBodyWorld::setSliderMotor(const RigidBodyConstraintHandle handle,
+        const RigidBodySliderMotorSettings& settings)
+    {
+        auto& slider = impl_->requireSlider(this, handle);
+        const float velocity = toFloat(settings.targetLinearVelocityMetersPerSecond);
+        const float force = toFloat(settings.maximumForceNewtons);
+        if (settings.maximumForceNewtons < 0.0
+            || (settings.maximumForceNewtons > 0.0 && force == 0.0f))
+        {
+            throw std::invalid_argument("Slider motor force limit must be zero or positive.");
+        }
+        slider.GetMotorSettings().SetForceLimit(force);
+        slider.SetTargetVelocity(velocity);
+        slider.SetMotorState(settings.enabled
+            ? JPH::EMotorState::Velocity : JPH::EMotorState::Off);
+        impl_->system.GetBodyInterface().ActivateConstraint(&slider);
+    }
+
+    RigidBodySliderState RigidBodyWorld::sliderState(
+        const RigidBodyConstraintHandle handle) const
+    {
+        const auto& slider = impl_->requireSlider(this, handle);
+        const auto& referenceBody = *slider.GetBody1();
+        const auto& body = *slider.GetBody2();
+        const auto axis = referenceBody.GetRotation()
+            * slider.GetConstraintToBody1Matrix().GetAxisX();
+        const auto attachment = body.GetCenterOfMassTransform()
+            * slider.GetConstraintToBody2Matrix().GetTranslation();
+        // Evaluate both point velocities at body 2's attachment. This includes
+        // rotation of the reference frame and matches Jolt's slider motor axis.
+        const auto relativeVelocity = body.GetPointVelocity(attachment)
+            - referenceBody.GetPointVelocity(attachment);
+        return {slider.GetCurrentPosition(), relativeVelocity.Dot(axis)};
     }
 
     void RigidBodyWorld::removeConstraint(const RigidBodyConstraintHandle handle)
     {
-        impl_->removeHinge(impl_->requireHinge(this, handle));
+        (void)impl_->requireConstraint(this, handle);
+        impl_->removeConstraint(impl_->constraints[handle.index]);
     }
 
     void RigidBodyWorld::stepFixed()

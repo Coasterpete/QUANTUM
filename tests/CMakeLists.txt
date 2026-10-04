@@ -13,6 +13,13 @@ if(QUANTUM_ENABLE_ENGINE)
     add_test(NAME QuantumEngine.RigidBodyConstraints COMMAND QuantumEngineRigidBodyConstraintTests)
     set_tests_properties(QuantumEngine.RigidBodyConstraints PROPERTIES LABELS "engine;physics;rigid-body;constraints")
 
+    add_executable(QuantumEngineRigidBodySliderTests RigidBodySliderTests.cpp)
+    target_link_libraries(QuantumEngineRigidBodySliderTests PRIVATE Quantum::Engine)
+    target_compile_features(QuantumEngineRigidBodySliderTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineRigidBodySliderTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEngine.RigidBodySliders COMMAND QuantumEngineRigidBodySliderTests)
+    set_tests_properties(QuantumEngine.RigidBodySliders PROPERTIES LABELS "engine;physics;rigid-body;constraints")
+
     add_executable(
         QuantumEngineLoggingTests
         LoggingTests.cpp

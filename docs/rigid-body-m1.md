@@ -71,7 +71,9 @@ disable their collision pair. Mechanism geometry must allow the intended motion.
 
 ## Ownership, removal and handles
 
-`Impl` stores a `JPH::Ref<HingeConstraint>` and both body IDs for each hinge.
+M1 stored a `JPH::Ref<HingeConstraint>` and both body IDs for each hinge.
+[M2](rigid-body-m2.md) now retains hinges and sliders in shared
+`JPH::Ref<TwoBodyConstraint>` entries with those same body IDs and lifetime rules.
 Jolt's system retains its own reference while the constraint is registered;
 the hinge borrows its bodies. Creation holds a local reference before adding
 the hinge to the system, so an allocation failure during registration releases
@@ -82,10 +84,10 @@ reference, then clears the retained reference. The hinge is destroyed before
 the next step and cannot affect that step. Velocities/transforms are preserved.
 Waking matters when removing the support of a sleeping pendulum.
 
-`removeBody` validates the handle and removes **all** hinges attached on either
+`removeBody` validates the handle and removes **all** constraints attached on either
 side before removing and destroying the Jolt body. Surviving connected bodies
-are awakened. Unrelated bodies and hinges remain live. World destruction releases
-every remaining hinge before removing/destroying remaining bodies, then lets
+are awakened. Unrelated bodies and constraints remain live. World destruction releases
+every remaining constraint before removing/destroying remaining bodies, then lets
 the existing system/resources destruct. Process registration remains alive
 for other worlds, as in M0.
 
@@ -98,8 +100,9 @@ removed hinges throw. Handles must not be used after their world is destroyed,
 including against a later world allocated at the same address.
 
 This simple policy bounds **total successful creations per world lifetime**:
-1024 bodies and 128 hinges. Removal releases Jolt resources but does not reclaim
-handle slots; exceeding either limit throws `std::runtime_error`. It is intended
+1024 bodies and 128 constraints (hinges and M2 sliders combined). Removal releases
+Jolt resources but does not reclaim handle slots; exceeding either limit throws
+`std::runtime_error`. It is intended
 for this small mechanical milestone, not indefinite scene editing. All operations
 run on the owning simulation thread outside an update.
 

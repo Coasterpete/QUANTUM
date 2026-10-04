@@ -69,12 +69,13 @@ optional non-owning pointer. Standalone preview tests need no world.
 World construction initializes Jolt and creates its implementation through
 `std::unique_ptr<Impl>`. That implementation owns collision filter tables, a
 10 MiB temporary allocator, a single-thread job runner, `PhysicsSystem` and
-the list of created body IDs (plus hinge references in M1). The system borrows
-its filter tables; declaration order keeps them alive until the system is
+the list of created body IDs (plus constraint references since M1). The system
+borrows its filter tables; declaration order keeps them alive until the system is
 destroyed. Bodies own reference-
-counted shapes through Jolt. In M1, destruction first removes and releases all
-hinges, which borrow their connected bodies. It then removes each body from
-the system and destroys it, before releasing the system and its support objects.
+counted shapes through Jolt. Destruction first removes and releases all
+constraints (hinges and M2 sliders), which borrow their connected bodies. It then
+removes each body from the system and destroys it, before releasing the system
+and its support objects.
 
 Jolt requires process-wide allocator/type/collision registration and a factory.
 A private function-local `JoltRuntime` initializes these once, allowing several
