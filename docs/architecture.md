@@ -31,8 +31,8 @@ references from `QuantumCore`; Core does not depend on the renderer.
 ### Rigid Body M0
 
 `QuantumEngine` also owns the isolated Jolt-backed `RigidBodyWorld` subsystem.
-`Application` creates an empty world beside `SimulationPreview`; the preview
-borrows it and steps it after each committed 1/240-second train tick. Core's
+M0 created an empty world beside `SimulationPreview`; the preview
+borrows an attached world and steps it after each committed 1/240-second train tick. Core's
 specialized coaster dynamics and document ownership remain unchanged. The
 floor/falling-box proof is automated test state, with no authoring or renderer
 integration. See [Rigid Body M0](rigid-body-m0.md) for ownership, units,
@@ -41,6 +41,11 @@ dependency configuration and current limits.
 [Rigid Body M1](rigid-body-m1.md) adds hinges, velocity motors and safe
 body/constraint removal within that same isolated world, with mechanical
 state proofs in tests and no changes to coaster or preview ownership.
+
+[Rigid Body M3](rigid-body-m3.md) adds an opt-in Simulator engineering proof.
+An Editor proof owner holds an isolated world; copied GLM box poses join the
+existing dynamic diagnostic line stream. Renderer resources remain renderer-owned,
+and train physics, document formats, and accepted-tick timing remain unchanged.
 
 ### Rendering Hardware Interface M0
 

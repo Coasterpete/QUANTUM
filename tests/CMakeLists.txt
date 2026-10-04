@@ -182,6 +182,20 @@ add_test(NAME QuantumCore.RotationalPhysics COMMAND QuantumCoreRotationalPhysics
 set_tests_properties(QuantumCore.RotationalPhysics PROPERTIES LABELS "core;coaster;physics")
 
 if(QUANTUM_ENABLE_EDITOR)
+    add_executable(QuantumEditorRigidBodyPresentationTests
+        RigidBodyPresentationTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp)
+    target_include_directories(QuantumEditorRigidBodyPresentationTests PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorRigidBodyPresentationTests PRIVATE
+        Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorRigidBodyPresentationTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorRigidBodyPresentationTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.RigidBodyPresentation COMMAND QuantumEditorRigidBodyPresentationTests)
+    set_tests_properties(QuantumEditor.RigidBodyPresentation PROPERTIES
+        LABELS "editor;physics;rigid-body;renderer;presentation")
+
     add_executable(
         QuantumEditorSimulationPreviewTests
         SimulationPreviewTests.cpp

@@ -94,7 +94,8 @@ Before and after M2: accepted preview tick -> train state/pose commit ->
 `RigidBodyWorld::stepFixed()` -> `Update(float(1/240), 1, ...)`. The same update
 now solves slider constraints. No clock, accumulator, thread, solver tolerance,
 train ordering or preview ownership changed. General physics still advances
-only with accepted preview playback ticks; the application's world stays empty.
+only with accepted preview playback ticks. M2 left the application's world empty;
+[M3](rigid-body-m3.md) creates an isolated world for an opt-in visible mechanism.
 
 ## Mechanical proofs
 

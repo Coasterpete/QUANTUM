@@ -118,8 +118,8 @@ state/pose -> `RigidBodyWorld::stepFixed()` -> Jolt `Update(float(1/240), 1, ...
 That existing update also solves hinges and motors. There is no new accumulator,
 clock, variable step, preview ownership change or reset/persistence coupling.
 Pause, unavailable preview, host interruption and boundary stop retain M0
-cadence behavior. The application's world remains empty; proof objects exist
-only in automated tests.
+cadence behavior. M1 proof objects existed only in automated tests;
+[M3](rigid-body-m3.md) adds a deliberately enabled visible mechanism on this cadence.
 
 ## Mechanical proofs and tolerances
 
