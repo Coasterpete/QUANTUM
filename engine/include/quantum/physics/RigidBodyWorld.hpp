@@ -54,6 +54,35 @@ namespace quantum::physics
         double maximumTorqueNewtonMeters = 0.0;
     };
 
+    struct RigidBodySliderSettings
+    {
+        RigidBodyHandle body;
+        // Absent attaches to the static world. A supplied handle must be valid.
+        std::optional<RigidBodyHandle> connectedBody;
+        // Shared world-space attachment at creation; initial translation is zero.
+        glm::dvec3 anchorPositionMeters{0.0};
+        // World-space at creation; normalized, then follows connectedBody.
+        glm::dvec3 axis{0.0, 0.0, 1.0};
+        // Absent means unbounded on that side. The range must include zero
+        // and have nonzero width after conversion to single precision.
+        std::optional<double> minimumTranslationMeters;
+        std::optional<double> maximumTranslationMeters;
+    };
+
+    struct RigidBodySliderMotorSettings
+    {
+        bool enabled = false;
+        // Positive moves body along the axis relative to connectedBody/world.
+        double targetLinearVelocityMetersPerSecond = 0.0;
+        double maximumForceNewtons = 0.0;
+    };
+
+    struct RigidBodySliderState
+    {
+        double translationMeters = 0.0;
+        double linearVelocityMetersPerSecond = 0.0;
+    };
+
     struct RigidBodyState
     {
         glm::dvec3 positionMeters{0.0};
@@ -89,6 +118,15 @@ namespace quantum::physics
             const RigidBodyHingeSettings& settings);
         void setHingeMotor(RigidBodyConstraintHandle handle,
             const RigidBodyHingeMotorSettings& settings);
+
+        // One relative translation, no relative rotation; at least one dynamic body.
+        [[nodiscard]] RigidBodyConstraintHandle createSlider(
+            const RigidBodySliderSettings& settings);
+        void setSliderMotor(RigidBodyConstraintHandle handle,
+            const RigidBodySliderMotorSettings& settings);
+        [[nodiscard]] RigidBodySliderState sliderState(
+            RigidBodyConstraintHandle handle) const;
+
         // Wakes connected bodies; release preserves their current velocities.
         void removeConstraint(RigidBodyConstraintHandle handle);
 
