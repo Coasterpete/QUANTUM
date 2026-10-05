@@ -51,7 +51,7 @@ namespace
     // Display names can change; these suffixes retain the existing window
     // IDs and their persisted docking placements.
     constexpr char trackWorkspaceWindowName[] =
-        "Track Workspace###TRACK WORKSPACE";
+        "Route###TRACK WORKSPACE";
     constexpr char supportWorkspaceWindowName[] =
         "Supports###Support Workspace";
     constexpr double orbitRadiansPerPixel = 0.005;
@@ -160,7 +160,7 @@ namespace
     }
 
     const ImU32 transitionCanvasColor = ImGui::ColorConvertFloat4ToU32(
-        quantum::editor::palette::black
+        quantum::editor::palette::panelRaised
     );
     const std::array<ImU32, 3> profileCurveColors{
         ImGui::ColorConvertFloat4ToU32(
@@ -733,7 +733,7 @@ namespace
         const ImU32 secondaryTextColor = ImGui::ColorConvertFloat4ToU32(
             quantum::editor::palette::textSecondary);
 
-        drawList->AddText(canvasBegin, textColor, "Distance in region");
+        drawList->AddText(canvasBegin, textColor, "Distance in region [m]");
 
         char domainLabel[64]{};
         std::snprintf(
@@ -888,12 +888,10 @@ namespace
             return;
         }
 
-        ImGui::PushTextWrapPos();
-        ImGui::Text(
-            "Region %zu - Actual rider loads (read-only)",
-            diagnostics.sectionIndex + 1
-        );
-        ImGui::PopTextWrapPos();
+        char context[96]{};
+        std::snprintf(context, sizeof(context), "Region %zu / evaluated rider loads",
+            diagnostics.sectionIndex + 1);
+        quantum::editor::editorPaneHeading("FORCE DIAGNOSTICS", context, fonts, "Read only");
         if (ImGui::TreeNode("Evaluation settings"))
         {
             ImGui::PushTextWrapPos();
@@ -1219,10 +1217,11 @@ namespace
         }
 
         ImGui::PushID(row.label);
-        const bool sideBySide = groupWidth >= 460.0F;
-        const float valueWidth = sideBySide ? 220.0F : groupWidth;
+        const float scale = quantum::editor::editorPresentationScale();
+        const bool sideBySide = groupWidth >= 660.0F * scale;
+        const float valueWidth = sideBySide ? 200.0F * scale : groupWidth;
         const float typeWidth = sideBySide
-            ? std::min(300.0F, groupWidth - valueWidth
+            ? std::min(240.0F * scale, groupWidth - valueWidth
                 - ImGui::GetStyle().ItemSpacing.x) : groupWidth;
 
         const quantum::editor::ScalarProfileEndpoint numericEndpoint =
@@ -1240,12 +1239,14 @@ namespace
             row.style.valueUnitLabel
         );
         ImGui::BeginGroup();
+        if (sideBySide) ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled(
             "%s",
             numericEndpoint == quantum::editor::ScalarProfileEndpoint::Begin
                 ? row.style.beginValueLabel
                 : row.style.endValueLabel
         );
+        if (sideBySide) ImGui::SameLine();
         ImGui::SetNextItemWidth(valueWidth);
         ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
         edit.valueEndEdited = ImGui::InputDouble(
@@ -1269,7 +1270,9 @@ namespace
         ImGui::EndGroup();
         sameLineIfFits(typeWidth);
         ImGui::BeginGroup();
+        if (sideBySide) ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("Shape");
+        if (sideBySide) ImGui::SameLine();
         ImGui::SetNextItemWidth(typeWidth);
         edit.transitionType = drawTransitionTypeCombo(
             "##TransitionType",
@@ -2890,15 +2893,27 @@ namespace
         bool& regionStyleNumericEditActive)
     {
         TrackWorkspaceEdit edit;
+        const bool hasSelection = selectedIndex < track.sectionCount();
+        const quantum::editor::RegionStations stations = track.sectionCount() > 0
+            ? quantum::editor::computeRegionStations(track, hasSelection ? selectedIndex : 0)
+            : quantum::editor::RegionStations{};
         ImGui::Begin(trackWorkspaceWindowName);
+        char routeStatus[48]{};
+        std::snprintf(routeStatus, sizeof(routeStatus), "%zu region%s",
+            track.sectionCount(), track.sectionCount() == 1 ? "" : "s");
+        char routeContext[96]{};
+        std::snprintf(routeContext, sizeof(routeContext), "Authoring route / %.3f m total",
+            stations.totalLength);
+        quantum::editor::editorPaneHeading("ROUTE", routeContext,
+            fonts, routeStatus);
 
         if (ImGui::BeginChild(
             "Section List",
             ImVec2(0.0F, 0.0F),
-            ImGuiChildFlags_Borders))
+            ImGuiChildFlags_None))
         {
-            quantum::editor::editorHeading("Regions", fonts);
             const std::size_t sectionCount = track.sectionCount();
+            double startStation = 0.0;
             for (std::size_t index = 0; index < sectionCount; ++index)
             {
                 // Region terminology is the user-facing prototype wording;
@@ -2910,140 +2925,79 @@ namespace
                 const char* kindName = isGeometry
                     ? (isForceDriven ? "Force-Based" : "Circular Arc")
                     : "Profile";
-                // Keep the legacy selectable ID, including its region/length
-                // components, while changing only the visible kind name.
+                // Keep the existing selectable ID, including its region/length
+                // components; draw the visible summary separately below.
                 const char* stableKindName = isGeometry
                     ? (isForceDriven
                         ? "Geometry / Force Driven" : "Geometry / Planar Arc")
                     : "Rate/Profile";
-                char label[160]{};
+                const double length = quantum::coaster::sectionLength(track.section(index));
+                const double endStation = startStation + length;
+                char label[128]{};
                 std::snprintf(
                     label,
                     sizeof(label),
-                    "%llu. %s\nLength %.3g###Region %llu - %s (%.3g)",
-                    static_cast<unsigned long long>(index + 1),
-                    kindName,
-                    quantum::coaster::sectionLength(track.section(index)),
+                    "###Region %llu - %s (%.3g)",
                     static_cast<unsigned long long>(index + 1),
                     stableKindName,
-                    quantum::coaster::sectionLength(track.section(index))
+                    length
                 );
-
-                if (ImGui::Selectable(label, index == selectedIndex))
+                char title[64]{};
+                std::snprintf(title, sizeof(title), "%02zu  %s", index + 1, kindName);
+                char metadata[128]{};
+                std::snprintf(metadata, sizeof(metadata), "Length %.3g m | s %.3g - %.3g m",
+                    length, startStation, endStation);
+                const ImGuiStyle& style = ImGui::GetStyle();
+                const float inset = style.WindowPadding.x;
+                const float rowWidth = ImGui::GetContentRegionAvail().x;
+                const float textWidth = std::max(1.0F, rowWidth - inset * 2.0F);
+                const float metadataHeight = ImGui::CalcTextSize(
+                    metadata, nullptr, false, textWidth).y;
+                ImGui::PushFont(fonts.header, quantum::editor::editorHeaderFontSize);
+                const float titleHeight = ImGui::CalcTextSize(title, nullptr, false, textWidth).y;
+                ImGui::PopFont();
+                const float rowHeight = titleHeight + metadataHeight
+                    + style.FramePadding.y * 2.0F + style.ItemInnerSpacing.y;
+                const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+                const ImVec2 rowEnd{rowStart.x + rowWidth, rowStart.y + rowHeight};
+                ImDrawList* const drawList = ImGui::GetWindowDrawList();
+                drawList->AddRectFilled(rowStart, rowEnd,
+                    ImGui::GetColorU32(quantum::editor::palette::panelRaised));
+                if (ImGui::Selectable(label, index == selectedIndex,
+                    ImGuiSelectableFlags_None, {0, rowHeight}))
                 {
                     edit.selectRequest = index;
                 }
+                drawList->AddRect(rowStart, rowEnd, ImGui::GetColorU32(
+                    index == selectedIndex ? quantum::editor::palette::accent
+                        : quantum::editor::palette::borderStrong));
+                if (index == selectedIndex)
+                    drawList->AddRectFilled(rowStart,
+                        {rowStart.x + 2.0F * quantum::editor::editorPresentationScale(), rowEnd.y},
+                        ImGui::GetColorU32(quantum::editor::palette::accent));
+                drawList->PushClipRect(rowStart, rowEnd, true);
+                ImGui::PushFont(fonts.header, quantum::editor::editorHeaderFontSize);
+                drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+                    {rowStart.x + inset, rowStart.y + style.FramePadding.y},
+                    ImGui::GetColorU32(quantum::editor::palette::textHeading),
+                    title, nullptr, textWidth);
+                ImGui::PopFont();
+                drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+                    {rowStart.x + inset, rowStart.y + style.FramePadding.y
+                        + titleHeight + style.ItemInnerSpacing.y},
+                    ImGui::GetColorU32(quantum::editor::palette::textSecondary),
+                    metadata, nullptr, textWidth);
+                drawList->PopClipRect();
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
                 {
-                    ImGui::SetTooltip("Region %zu - %s\nLength %.6g coordinate units",
-                        index + 1, kindName,
-                        quantum::coaster::sectionLength(track.section(index)));
+                    ImGui::SetTooltip("Region %zu - %s\nLength %.6g m\nTrack stations %.6g - %.6g m",
+                        index + 1, kindName, length, startStation, endStation);
                 }
-            }
-
-            if (selectedIndex < sectionCount && sectionLengthEdit != nullptr)
-            {
-                ImGui::Spacing();
-                quantum::editor::editorHeading("Selected region", fonts);
-
-                quantum::editor::editorSecondaryText("Length");
-                ImGui::SetNextItemWidth(-1.0F);
-                ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
-                if (ImGui::InputDouble(
-                    "###Length",
-                    sectionLengthEdit,
-                    1.0,
-                    10.0,
-                    "%.3f"
-                ))
-                {
-                    edit.lengthEdited = true;
-                }
-                ImGui::PopFont();
-
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::SetTooltip(
-                        "Authored distance-domain length of the selected "
-                        "region"
-                    );
-                }
-
-                const quantum::coaster::AuthoredTrackSection& selected =
-                    track.section(selectedIndex);
-
-                if (ImGui::TreeNode("Position & rotation"))
-                {
-                    const quantum::editor::RegionStations stations =
-                        quantum::editor::computeRegionStations(
-                            track,
-                            selectedIndex
-                        );
-                    ImGui::PushStyleColor(ImGuiCol_Text,
-                        quantum::editor::palette::textSecondary);
-                    ImGui::PushTextWrapPos();
-                    ImGui::Text(
-                        "Stations %.3f -> %.3f",
-                        stations.startStation,
-                        stations.endStation
-                    );
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::SetTooltip(
-                            "Cumulative distance along the whole track at this "
-                            "region's start and end"
-                        );
-                    }
-
-                    ImGui::Text(
-                        "Track total length %.3f",
-                        stations.totalLength
-                    );
-
-                    if (selectedHeightDelta.has_value())
-                    {
-                        ImGui::Text(
-                            "Entry-to-exit height change %+.3f",
-                            *selectedHeightDelta
-                        );
-                    }
-
-                    if (selected.kind == quantum::coaster::RegionKind::RateProfiles)
-                    {
-                        const quantum::editor::RegionNetRotation netRotation =
-                            quantum::editor::computeNetRotationDegrees(
-                                selected.rateProfileRegion().rateProfiles
-                            );
-                        ImGui::Spacing();
-                        ImGui::TextUnformatted("Total rotation");
-                        ImGui::Text("Roll %+.2f deg", netRotation.rollDegrees);
-                        ImGui::Text("Pitch %+.2f deg", netRotation.pitchDegrees);
-                        ImGui::Text("Yaw %+.2f deg", netRotation.yawDegrees);
-                        if (ImGui::IsItemHovered())
-                        {
-                            ImGui::SetTooltip(
-                                "Total angle accumulated by each rate channel "
-                                "across this region"
-                            );
-                        }
-                    }
-                    ImGui::PopTextWrapPos();
-                    ImGui::PopStyleColor();
-                    ImGui::TreePop();
-                }
-
-                if (ImGui::TreeNodeEx(
-                    "Track Style", ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    edit.regionStyleEdit = showRegionTrackStyleControls(
-                        track, selectedIndex, fonts,
-                        regionStyleNumericEditActive);
-                    ImGui::TreePop();
-                }
+                startStation = endStation;
             }
 
             ImGui::Spacing();
-            quantum::editor::editorHeading("Region actions", fonts);
+            quantum::editor::editorSectionHeading("Region actions", fonts);
             // A rejected authored edit leaves the committed document and the
             // viewport untouched, so the reason has to be reported here or
             // the user has no indication that nothing changed. The message
@@ -3063,7 +3017,6 @@ namespace
                 );
                 ImGui::Spacing();
             }
-            const bool hasSelection = selectedIndex < sectionCount;
             if (ImGui::Button("Append Region..."))
             {
                 regionCreateFlow.choicePending = true;
@@ -3184,7 +3137,7 @@ namespace
             itemTooltip("Remove the selected region; the final region cannot be removed");
 
             ImGui::Spacing();
-            quantum::editor::editorHeading("Layout & connectivity", fonts);
+            quantum::editor::editorSectionHeading("Layout & connectivity", fonts);
             const auto currentMode = track.layoutMode();
             const auto status = quantum::coaster::computeLayoutStatus(
                 currentMode, topology.kind);
@@ -3236,8 +3189,7 @@ namespace
                 }
             }
             ImGui::Spacing();
-            if (ImGui::TreeNodeEx(
-                    "Track Hardware", ImGuiTreeNodeFlags_DefaultOpen))
+            if (ImGui::TreeNode("Track Hardware"))
             {
                 edit.hardwareEdit = showTrackHardwareControls(
                     track, vulkan, window, hardwareAssetIdBuffer,
@@ -3249,6 +3201,120 @@ namespace
         ImGui::EndChild();
 
         ImGui::End();
+        // Give old persisted layouts a home for this new pane once. Existing
+        // Inspector settings and user docking always take precedence.
+        if (const auto* settings = ImGui::FindWindowSettingsByID(
+                ImHashStr(supportWorkspaceWindowName));
+            settings != nullptr && settings->DockId != 0)
+            ImGui::SetNextWindowDockID(settings->DockId, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Region Inspector"))
+        {
+            char context[96]{};
+            std::snprintf(context, sizeof(context), "Region %zu / %s", selectedIndex + 1,
+                selectedIndex < track.sectionCount()
+                    ? (track.section(selectedIndex).kind == quantum::coaster::RegionKind::RateProfiles
+                        ? "Profile" : quantum::coaster::isForceDrivenSection(track.section(selectedIndex))
+                            ? "Force-Based" : "Circular Arc")
+                    : "No selection");
+            quantum::editor::editorPaneHeading("INSPECTOR", context, fonts, "Authored");
+            const std::size_t sectionCount = track.sectionCount();
+            if (selectedIndex < sectionCount && sectionLengthEdit != nullptr)
+            {
+                ImGui::Spacing();
+                quantum::editor::editorSectionHeading("Dimensions", fonts);
+
+                quantum::editor::editorSecondaryText("Authored length [m]");
+                ImGui::SetNextItemWidth(-1.0F);
+                ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
+                if (ImGui::InputDouble(
+                    "###Length",
+                    sectionLengthEdit,
+                    1.0,
+                    10.0,
+                    "%.3f"
+                ))
+                {
+                    edit.lengthEdited = true;
+                }
+                ImGui::PopFont();
+
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip(
+                        "Authored distance-domain length of the selected "
+                        "region"
+                    );
+                }
+
+                const quantum::coaster::AuthoredTrackSection& selected =
+                    track.section(selectedIndex);
+
+                if (ImGui::TreeNodeEx("Position & rotation", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    quantum::editor::editorSecondaryText("Derived / read only");
+                    ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
+                    const float valueWidth = ImGui::CalcTextSize("+0000.000 m").x;
+                    ImGui::PopFont();
+                    const bool columnsFit = ImGui::GetContentRegionAvail().x >= valueWidth
+                        + ImGui::CalcTextSize("Station start").x
+                        + ImGui::GetStyle().CellPadding.x * 4.0F;
+                    if (ImGui::BeginTable("Region readouts", columnsFit ? 2 : 1,
+                        ImGuiTableFlags_SizingStretchProp))
+                    {
+                        ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch);
+                        if (columnsFit)
+                            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, valueWidth);
+                        const auto readout = [&](const char* label, const double value,
+                            const char* format)
+                        {
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            quantum::editor::editorSecondaryTextWrapped("%s", label);
+                            if (!columnsFit)
+                                ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
+                            char text[64]{};
+                            std::snprintf(text, sizeof(text), format, value);
+                            const float offset = ImGui::GetContentRegionAvail().x
+                                - ImGui::CalcTextSize(text).x;
+                            if (columnsFit && offset > 0.0F)
+                                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset);
+                            ImGui::TextWrapped("%s", text);
+                            ImGui::PopFont();
+                        };
+                        readout("Station start", stations.startStation, "%.3f m");
+                        readout("Station end", stations.endStation, "%.3f m");
+                        readout("Track length", stations.totalLength, "%.3f m");
+                        if (selectedHeightDelta.has_value())
+                            readout("Height change", *selectedHeightDelta, "%+.3f m");
+                        if (selected.kind == quantum::coaster::RegionKind::RateProfiles)
+                        {
+                            const auto rotation = quantum::editor::computeNetRotationDegrees(
+                                selected.rateProfileRegion().rateProfiles);
+                            readout("Net roll", rotation.rollDegrees, "%+.2f deg");
+                            readout("Net pitch", rotation.pitchDegrees, "%+.2f deg");
+                            readout("Net yaw", rotation.yawDegrees, "%+.2f deg");
+                        }
+                        ImGui::EndTable();
+                    }
+                    itemTooltip("Stations are cumulative authored distance. Net rotation integrates each rate channel.");
+                    ImGui::TreePop();
+                }
+
+                if (ImGui::TreeNodeEx(
+                    "Track Style", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    edit.regionStyleEdit = showRegionTrackStyleControls(
+                        track, selectedIndex, fonts,
+                        regionStyleNumericEditActive);
+                    ImGui::TreePop();
+                }
+            }
+
+        }
+        ImGui::End();
+
         return edit;
     }
 
@@ -3366,7 +3432,8 @@ namespace
     [[nodiscard]] TransitionEditorEdit showTransitionEditor(
         const char* const windowName,
         const std::span<const ProfileRowView> profileRows,
-        const double sectionLength,
+        const std::size_t regionIndex,
+        const quantum::editor::RegionStations& stations,
         const std::vector<quantum::editor::RiderLoadDiagnosticSample>*
             const riderLoadSamples,
         bool* const riderLoadDiagnosticsOpen,
@@ -3400,6 +3467,7 @@ namespace
         const quantum::editor::EditorFonts& fonts)
     {
         TransitionEditorEdit edit;
+        const double sectionLength = stations.length;
         ImGui::Begin(windowName);
 
         const auto hasForceTargetRow = [profileRows]
@@ -3414,6 +3482,14 @@ namespace
             }
             return false;
         }();
+
+        char context[128]{};
+        std::snprintf(context, sizeof(context), "Region %zu | track s %.3g - %.3g m | local 0 - %.3g m",
+            regionIndex + 1, stations.startStation, stations.endStation, sectionLength);
+        quantum::editor::editorPaneHeading(
+            hasForceTargetRow ? "FORCE TARGETS" : "MATH / TRANSITIONS",
+            context, fonts, hasForceTargetRow ? "Targets / response"
+                : "Distance-domain profiles");
 
         for (const ProfileRowView& row : profileRows)
         {
@@ -3519,6 +3595,7 @@ namespace
             : "curve segment";
         if (focusedSegment != nullptr)
         {
+            sameLineIfFits(480.0F * quantum::editor::editorPresentationScale());
             ImGui::PushTextWrapPos();
             quantum::editor::editorSecondaryText(
                 "Selected: segment %u - %s [%.6g to %.6g m]",
@@ -3581,6 +3658,7 @@ namespace
             };
         }
 
+        sameLineIfFits(buttonWidth("Fit Y"));
         if (ImGui::SmallButton("Fit Y"))
         {
             graphRanges[activeIndex] = fitProfileGraphRange(
@@ -3758,7 +3836,8 @@ namespace
 
         if (ImGui::BeginChild(
             "##TransitionTimeline",
-            ImVec2(0.0F, std::max(200.0F, timelineHeight)),
+            ImVec2(0.0F, std::max(200.0F
+                * quantum::editor::editorPresentationScale(), timelineHeight)),
             ImGuiChildFlags_Borders,
             timelineWindowFlags))
         {
@@ -4420,7 +4499,7 @@ namespace
     void buildDefaultDockLayout(
         const ImGuiID dockspaceId,
         const ImVec2 dockspaceSize,
-        const float bottomFraction = 0.27F)
+        const float bottomFraction = 0.34F)
     {
         ImGui::DockBuilderRemoveNode(dockspaceId);
         ImGui::DockBuilderAddNode(
@@ -4429,6 +4508,14 @@ namespace
                 | ImGuiDockNodeFlags_PassthruCentralNode
         );
         ImGui::DockBuilderSetNodeSize(dockspaceId, dockspaceSize);
+
+        // Give navigation less width than inspection, leaving the viewport
+        // dominant. Bounds keep reset usable at small sizes and high UI scales.
+        const float scale = quantum::editor::editorPresentationScale();
+        const float routeFraction = std::clamp(260.0F * scale / dockspaceSize.x,
+            0.14F, 0.22F);
+        const float inspectorFraction = std::clamp(330.0F * scale / dockspaceSize.x,
+            0.18F, 0.26F);
 
         ImGuiID upperId = dockspaceId;
         ImGuiID bottomId = 0;
@@ -4444,7 +4531,7 @@ namespace
         ImGui::DockBuilderSplitNode(
             upperId,
             ImGuiDir_Left,
-            0.19F,
+            routeFraction,
             &leftId,
             &upperId
         );
@@ -4454,7 +4541,7 @@ namespace
         ImGui::DockBuilderSplitNode(
             upperId,
             ImGuiDir_Right,
-            0.19F / 0.81F,
+            inspectorFraction / (1.0F - routeFraction),
             &rightId,
             &centerId
         );
@@ -4466,6 +4553,7 @@ namespace
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
         ImGui::DockBuilderDockWindow("Track Devices", rightId);
         ImGui::DockBuilderDockWindow("Viewport Settings", rightId);
+        ImGui::DockBuilderDockWindow("Region Inspector", rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
         ImGui::DockBuilderDockWindow(
             riderLoadDiagnosticsWindowName,
@@ -4490,7 +4578,10 @@ namespace
         ImGuiID bottomId = 0;
         ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Down, 0.27F,
             &bottomId, &centerId);
-        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, 0.27F,
+        const float configurationFraction = std::clamp(
+            320.0F * quantum::editor::editorPresentationScale() / dockspaceSize.x,
+            0.20F, 0.30F);
+        ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, configurationFraction,
             &leftId, &centerId);
         ImGui::DockBuilderDockWindow("Train Configuration", leftId);
         ImGui::DockBuilderDockWindow(
@@ -8805,7 +8896,7 @@ namespace quantum::editor
                 );
             }
 
-            float bottomFraction = 0.27F;
+            float bottomFraction = 0.34F;
             if (captureScenario_ != nullptr)
             {
                 bottomFraction = 0.38F;
@@ -8849,6 +8940,7 @@ namespace quantum::editor
         // Begin, so the request can never be consumed by a later window.
         bool& setupInitialDockPending = trainComposition
             ? trainCoasterSetupInitialDockPending_ : coasterSetupInitialDockPending_;
+        const bool setupWasDockPending = setupInitialDockPending;
         if (setupInitialDockPending
             && coasterSetupWindowOpen_ && authoredTrack_ != nullptr)
         {
@@ -9425,6 +9517,19 @@ namespace quantum::editor
             regionStyleNumericEditActive_
         );
 
+        if (defaultLayoutRequired || (setupWasDockPending && !setupInitialDockPending))
+        {
+            // Focus belongs to one window; select each default dock tab without
+            // letting the Inspector's focus cancel Route's pending selection.
+            for (const char* name : {trackWorkspaceWindowName, "Region Inspector"})
+            {
+                ImGuiWindow* pane = ImGui::FindWindowByName(name);
+                if (pane != nullptr && pane->DockNode != nullptr
+                    && pane->DockNode->TabBar != nullptr)
+                    pane->DockNode->TabBar->NextSelectedTabId = pane->TabId;
+            }
+        }
+
         if (workspaceEdit.hardwareEdit.has_value())
         {
             trackHardwareEdit_ = workspaceEdit.hardwareEdit;
@@ -9554,6 +9659,8 @@ namespace quantum::editor
             && !editingForceTargets)
         {
             ImGui::Begin(geometryEditorWindowName);
+
+        editorPaneHeading("GEOMETRY", "Selected region / circular arc", fonts_);
 
         const auto& committedArc =
             std::get<coaster::PlanarArcRegion>(
@@ -9760,7 +9867,8 @@ namespace quantum::editor
                 ? geometryEditorWindowName
                 : "Transition Editor",
             profileRows,
-            coaster::sectionLength(editedSection),
+            selectedSection_,
+            computeRegionStations(*authoredTrack_, selectedSection_),
             loadSamples,
             &riderLoadDiagnosticsWindowOpen_,
             valueEndEditBuffers_,

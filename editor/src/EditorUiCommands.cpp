@@ -25,17 +25,31 @@ namespace quantum::editor
         {
             // A narrow window scrolls the same compact groups horizontally.
             // Each button below reuses an existing request or pane action.
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0F);
+            ImGui::PushStyleColor(ImGuiCol_Button, palette::panelRaised);
             ImGui::BeginChild("Workspace commands", {0, 0}, ImGuiChildFlags_None,
                 ImGuiWindowFlags_HorizontalScrollbar);
-            const auto heading = [&](const char* label, const bool first = false)
+            const bool train = editorWorkspace_ == EditorWorkspace::Train;
+            ImGui::BeginGroup();
+            ImGui::PushFont(fonts_.header, editorHeaderFontSize);
+            ImGui::TextColored(palette::accent, "%s", train ? "TRAIN" : "TRACK");
+            ImGui::PopFont();
+            ImGui::TextDisabled("%s", train ? "Consist / preview" : "Author / inspect");
+            ImGui::EndGroup();
+            const auto heading = [&](const char* label)
             {
-                if (!first)
-                    ImGui::SameLine(0.0F, style.ItemSpacing.x * 2.0F);
+                ImGui::SameLine(0.0F, style.ItemSpacing.x * 1.5F);
+                const ImVec2 divider = ImGui::GetCursorScreenPos();
+                const float groupHeight = ImGui::GetTextLineHeight()
+                    + style.ItemSpacing.y + buttonHeight;
+                ImGui::Dummy({editorPresentationScale(), groupHeight});
+                ImGui::GetWindowDrawList()->AddLine(divider,
+                    {divider.x, divider.y + groupHeight},
+                    ImGui::GetColorU32(palette::border));
+                ImGui::SameLine(0.0F, style.ItemSpacing.x * 1.5F);
                 ImGui::BeginGroup();
-                ImGui::PushFont(fonts_.header, editorHeaderFontSize);
-                ImGui::TextColored(first ? palette::accent : palette::textHeading,
-                    "%s", label);
-                ImGui::PopFont();
+                editorSecondaryText("%s", label);
             };
             const auto button = [&](const char* label)
             {
@@ -48,9 +62,7 @@ namespace quantum::editor
                 cameraGesture_ = CameraGesture::None;
                 viewportNavigationActive_ = false;
             };
-            const bool train = editorWorkspace_ == EditorWorkspace::Train;
-
-            heading(train ? "TRAIN / Document" : "TRACK / Document", true);
+            heading("Document");
             if (button("New")) pendingFileOperation_ = FileOperationType::New;
             next();
             if (icons_.button(EditorIcon::Open, "##OpenDocument", "Open (Ctrl+O)"))
@@ -68,7 +80,7 @@ namespace quantum::editor
 
             if (train)
             {
-                heading("Consist / Setup");
+                heading("Configuration");
                 if (button("Configure")) ImGui::SetWindowFocus("Train Configuration");
                 next();
                 if (button("Coaster Setup"))
@@ -104,7 +116,7 @@ namespace quantum::editor
             }
             else
             {
-                heading("Create");
+                heading("Route");
                 if (button("Add Region..."))
                 {
                     regionCreateFlow_.choicePending = true;
@@ -149,6 +161,8 @@ namespace quantum::editor
             }
             ImGui::EndGroup();
             ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar(2);
         }
         ImGui::End();
         ImGui::PopStyleColor(2);

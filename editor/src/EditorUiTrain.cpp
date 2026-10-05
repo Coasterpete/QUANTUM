@@ -18,14 +18,6 @@ namespace quantum::editor
 
     namespace
     {
-        void trainTitle(const char* title, const EditorFonts& fonts)
-        {
-            ImGui::PushFont(fonts.header, editorHeaderFontSize);
-            ImGui::TextColored(palette::textHeading, "%s", title);
-            ImGui::PopFont();
-            ImGui::Spacing();
-        }
-
         void trainValue(const EditorFonts& fonts, const char* label,
             const char* value, const char* unit)
         {
@@ -53,7 +45,12 @@ namespace quantum::editor
 
         bool beginTrainValues(const char* id)
         {
-            if (!ImGui::BeginTable(id, 3, ImGuiTableFlags_SizingStretchProp))
+            // Keep labels near their values on wide Summary docks. The table
+            // still uses the available width when the pane is narrow.
+            const float width = std::min(ImGui::GetContentRegionAvail().x,
+                680.0F * editorPresentationScale());
+            if (!ImGui::BeginTable(id, 3, ImGuiTableFlags_SizingStretchProp,
+                {width, 0}))
                 return false;
             ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed);
@@ -66,14 +63,18 @@ namespace quantum::editor
     {
         if (ImGui::Begin("Train Configuration"))
         {
-            trainTitle("TRAIN CONFIGURATION", fonts_);
-            ImGui::TextColored(palette::accent, "AUTHORED / editable");
+            editorPaneHeading("TRAIN CONFIGURATION", "Authored consist / saved in this document", fonts_);
+            editorSectionHeading("Consist", fonts_);
             if (authoredTrack_ != nullptr)
             {
                 // Borrow the committed setup or this frame's shared candidate.
                 // Application still accepts it through document transactions.
                 auto draft = pendingCoasterSetupEdit_.value_or(
                     authoredTrack_->coasterSetup());
+                ImGui::SetNextItemWidth(std::max(80.0F * editorPresentationScale(),
+                    ImGui::GetContentRegionAvail().x
+                    - ImGui::CalcTextSize("Cars per train").x
+                    - ImGui::GetStyle().ItemInnerSpacing.x));
                 if (drawCarsPerTrainInput(draft))
                     pendingCoasterSetupEdit_ = std::move(draft);
                 editorSecondaryTextWrapped("Saved in Coaster Setup. Document Undo/Redo.");
@@ -85,8 +86,8 @@ namespace quantum::editor
                 ImGui::SetWindowFocus(trainCoasterSetupWindowName);
             }
             ImGui::Spacing();
-            editorHeading("Accepted preview", fonts_);
-            ImGui::TextDisabled("RESOLVED / read only");
+            editorSectionHeading("Accepted preview", fonts_);
+            editorSecondaryText("Resolved / read only");
             if (simulationAvailable_ && trainPreviewInspection_)
             {
                 ImGui::TextColored(palette::success, "Preview ready");
@@ -113,8 +114,9 @@ namespace quantum::editor
         // The suffix retains Recovery M1B's persisted window identity.
         if (ImGui::Begin("Train Summary###Train Physical Definition"))
         {
-            trainTitle("TRAIN SUMMARY", fonts_);
-            ImGui::TextDisabled("RESOLVED / accepted preview");
+            const bool available = simulationAvailable_ && trainPreviewInspection_.has_value();
+            editorPaneHeading("TRAIN SUMMARY", "Resolved values / last accepted preview", fonts_,
+                available ? "Accepted" : "Unavailable", available ? palette::success : palette::warning);
             if (!simulationAvailable_ || !trainPreviewInspection_)
                 ImGui::TextDisabled("No accepted preview definition.");
             else
@@ -132,7 +134,7 @@ namespace quantum::editor
                     ImGui::EndTable();
                 }
                 ImGui::Spacing();
-                if (ImGui::CollapsingHeader("Physical definition / backend defaults"))
+                if (ImGui::TreeNode("Physical definition / backend defaults"))
                 {
                     ImGui::TextDisabled("READ ONLY / not authored in this document");
                     if (beginTrainValues("Physical defaults"))
@@ -159,8 +161,9 @@ namespace quantum::editor
                     }
                     editorSecondaryTextWrapped("Local axes: +X forward / +Y lateral / +Z up.");
                     editorSecondaryTextWrapped("Style and restraint metadata do not yet select a physical car.");
+                    ImGui::TreePop();
                 }
-                if (ImGui::CollapsingHeader("Resistance / backend defaults"))
+                if (ImGui::TreeNode("Resistance / backend defaults"))
                 {
                     ImGui::TextDisabled("READ ONLY / whole train unless marked per car");
                     if (beginTrainValues("Resistance defaults"))
@@ -174,6 +177,7 @@ namespace quantum::editor
                         trainNumber(fonts_, "Drag area / car", car.aerodynamicDragAreaSquareMeters, "m^2");
                         ImGui::EndTable();
                     }
+                    ImGui::TreePop();
                 }
             }
         }
@@ -182,17 +186,18 @@ namespace quantum::editor
 
     void EditorUi::drawTrainViewportToolbar()
     {
-        trainTitle("TRAIN PREVIEW", fonts_);
         const char* state = simulationPlaybackState_ == SimulationPlaybackState::Playing
             ? "Playing" : simulationPlaybackState_ == SimulationPlaybackState::Paused
                 ? "Paused" : "Stopped";
-        ImGui::TextColored(simulationAvailable_ ? palette::success : palette::warning,
-            "%s", simulationAvailable_ ? state : "Unavailable");
-        ImGui::SameLine();
+        editorPaneHeading("TRAIN PREVIEW", nullptr, fonts_,
+            simulationAvailable_ ? state : "Unavailable",
+            simulationAvailable_ ? palette::success : palette::warning);
         ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
         ImGui::Text("%.2f m/s", simulationSpeedMps_);
         ImGui::PopFont();
-        ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x > ImGui::CalcTextSize("View").x
+            + ImGui::GetStyle().FramePadding.x * 2.0F + ImGui::GetStyle().ItemSpacing.x)
+            ImGui::SameLine();
         if (ImGui::Button("View")) ImGui::OpenPopup("Train View");
         if (ImGui::BeginPopup("Train View"))
         {

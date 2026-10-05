@@ -397,6 +397,20 @@ namespace
                 const auto tiny = clampViewportLabel({-100, -100}, {200, 200}, {10, 10}, {15, 15});
                 require(tiny.x == 10 && tiny.y == 10, "tiny image must not invert clamp bounds");
                 ImGui::PopFont();
+                const ImFont* fontBefore = ImGui::GetFont();
+                const ImVec2 paddingBefore = ImGui::GetStyle().WindowPadding;
+                const ImVec4 textBefore = ImGui::GetStyle().Colors[ImGuiCol_Text];
+                const ImVec4 childBefore = ImGui::GetStyle().Colors[ImGuiCol_ChildBg];
+                editorPaneHeading("TRAIN CONFIGURATION", "Authored consist / document setup",
+                    fonts, "Accepted", palette::success);
+                editorSectionHeading("Consist", fonts);
+                require(ImGui::GetFont() == fontBefore
+                        && ImGui::GetStyle().WindowPadding.x == paddingBefore.x
+                        && ImGui::GetStyle().WindowPadding.y == paddingBefore.y
+                        && sameColor(ImGui::GetStyle().Colors[ImGuiCol_Text], textBefore)
+                        && sameColor(ImGui::GetStyle().Colors[ImGuiCol_ChildBg], childBefore)
+                        && editorPresentationScale() == scale,
+                    "workbench headings must restore the surrounding font, style and DPI");
                 ImGui::End();
                 ImGui::EndFrame();
             }
