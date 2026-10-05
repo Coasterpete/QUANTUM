@@ -32,7 +32,7 @@ namespace quantum::renderer
         std::array<float, 4> color;
     };
 
-    // One moving instance; geometry is shared through the existing mesh cache.
+    // One independently placed mesh; geometry uses the existing shared cache.
     // The caller supplies a world transform, never a physics object.
     struct StaticMeshInstance
     {
@@ -164,11 +164,18 @@ namespace quantum::renderer
         virtual void setTrackPresentationMode(TrackPresentationMode mode) = 0;
         virtual void updateTrainPreviewVertices(
             std::span<const LineVertex> vertices) = 0;
-        // Empty removes the instance. Mesh geometry stays cached until shutdown.
-        virtual void updateDynamicMeshInstance(
-            const std::optional<StaticMeshInstance>& instance) = 0;
+        // Empty removes all instances. Mesh geometry stays cached until shutdown.
+        virtual void updateDynamicMeshInstances(
+            std::span<const StaticMeshInstance> instances) = 0;
+        void updateDynamicMeshInstance(const std::optional<StaticMeshInstance>& instance)
+        {
+            updateDynamicMeshInstances(instance
+                ? std::span<const StaticMeshInstance>{&*instance, 1}
+                : std::span<const StaticMeshInstance>{});
+        }
+        // Empty identifier queries the first instance (the M4 single-instance API).
         [[nodiscard]] virtual std::optional<HardwareAssetLoadStatus>
-            dynamicMeshAssetLoadStatus() const = 0;
+            dynamicMeshAssetLoadStatus(std::string_view identifier = {}) const = 0;
         // Replaces the Editor's renderer-neutral support-member line stream.
         // This stays available as the technical overlay and is independent of
         // the solid presentation below.

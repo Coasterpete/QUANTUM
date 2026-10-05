@@ -32,8 +32,19 @@ namespace quantum::editor
 
         // The asset origin is its pivot end. The box body origin is its center,
         // two meters along +X from the hinge. Keep that physics setup intact.
-        armMeshBinding_ = {bodies_[1], std::string{mechanicalArmAssetId},
+        meshBindings_[0] = {bodies_[1], std::string{mechanicalArmAssetId},
             glm::translate(glm::dmat4{1.0}, glm::dvec3{-2.0, 0.0, 0.0})};
+
+        // Keep the center of mass directly below the shared hinge. The proof's
+        // isolated world excludes contact between these connected box colliders.
+        box.positionMeters = {4.0, -12.0, 5.0};
+        box.halfExtentsMeters = {0.65, 0.28, 1.0};
+        box.massKilograms = 1.0;
+        halfExtents_[2] = box.halfExtentsMeters;
+        bodies_[2] = world_.createBox(box);
+        // Asset origin is the upper hinge, not the carrier's center of mass.
+        meshBindings_[1] = {bodies_[2], std::string{mechanicalGondolaAssetId},
+            glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, 1.0})};
 
         physics::RigidBodyHingeSettings joint;
         joint.body = bodies_[1];
@@ -41,17 +52,24 @@ namespace quantum::editor
         joint.axis = {0.0, 1.0, 0.0};
         const auto hinge = world_.createHinge(joint);
         world_.setHingeMotor(hinge, {true, 1.5, 200.0});
+
+        joint.body = bodies_[2];
+        joint.connectedBody = bodies_[1];
+        joint.anchorPositionMeters = {4.0, -12.0, 6.0};
+        // A new hinge defaults to motor Off: gravity/inertia drive the carrier.
+        (void)world_.createHinge(joint);
     }
 
-    std::array<RigidBodyProofBox, 2> RigidBodyMechanismProof::snapshot() const
+    std::array<RigidBodyProofBox, 3> RigidBodyMechanismProof::snapshot() const
     {
-        std::array<RigidBodyProofBox, 2> boxes;
+        constexpr std::array roles{RigidBodyProofRole::Support,
+            RigidBodyProofRole::DrivenArm, RigidBodyProofRole::PassiveGondola};
+        std::array<RigidBodyProofBox, 3> boxes;
         for (std::size_t index = 0; index < bodies_.size(); ++index)
         {
             const auto state = world_.bodyState(bodies_[index]);
             boxes[index] = {state.positionMeters, state.orientation,
-                halfExtents_[index], index == 0 ? RigidBodyProofRole::Support
-                                             : RigidBodyProofRole::DrivenArm};
+                halfExtents_[index], roles[index]};
         }
         return boxes;
     }
@@ -63,7 +81,15 @@ namespace quantum::editor
 
     renderer::StaticMeshInstance RigidBodyMechanismProof::armMeshInstance() const
     {
-        return armMeshBinding_.instance(world_);
+        return meshBindings_[0].instance(world_);
+    }
+
+    std::array<renderer::StaticMeshInstance, 2> RigidBodyMechanismProof::meshInstances() const
+    {
+        std::array<renderer::StaticMeshInstance, 2> instances;
+        for (std::size_t index = 0; index < meshBindings_.size(); ++index)
+            instances[index] = meshBindings_[index].instance(world_);
+        return instances;
     }
 
     void appendRigidBodyProofVertices(std::vector<renderer::LineVertex>& vertices,
@@ -85,7 +111,9 @@ namespace quantum::editor
         {
             const std::array<float, 4> color = box.role == RigidBodyProofRole::Support
                 ? std::array<float, 4>{0.75F, 0.78F, 0.82F, 1.0F}
-                : std::array<float, 4>{1.0F, 0.48F, 0.08F, 1.0F};
+                : box.role == RigidBodyProofRole::DrivenArm
+                    ? std::array<float, 4>{1.0F, 0.48F, 0.08F, 1.0F}
+                    : std::array<float, 4>{0.08F, 0.75F, 1.0F, 1.0F};
             std::array<glm::dvec3, 8> worldCorners;
             for (std::size_t index = 0; index < corners.size(); ++index)
             {

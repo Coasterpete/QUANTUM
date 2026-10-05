@@ -49,6 +49,20 @@ if(QUANTUM_ENABLE_ENGINE)
 endif()
 
 if(QUANTUM_ENABLE_EDITOR)
+    add_executable(QuantumEditorRigidBodyArticulatedMechanismTests
+        RigidBodyArticulatedMechanismTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp)
+    target_include_directories(QuantumEditorRigidBodyArticulatedMechanismTests PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorRigidBodyArticulatedMechanismTests PRIVATE Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorRigidBodyArticulatedMechanismTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorRigidBodyArticulatedMechanismTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.RigidBodyArticulatedMechanism COMMAND QuantumEditorRigidBodyArticulatedMechanismTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEditor.RigidBodyArticulatedMechanism PROPERTIES
+        LABELS "editor;physics;rigid-body;renderer;assets")
+
     add_executable(
         QuantumEditorPreviewSmokeTests
         PreviewSmokeTests.cpp
@@ -291,6 +305,9 @@ if(QUANTUM_ENABLE_ENGINE)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/assets/mechanical/rotating-arm-placeholder.glb"
             "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/assets/mechanical/rotating-arm-placeholder.glb"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/assets/mechanical/hanging-carrier-placeholder.glb"
+            "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/assets/mechanical/hanging-carrier-placeholder.glb"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/tests/fixtures/invalid-m4-test.glb"
             "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/assets/mechanical/invalid-m4-test.glb"

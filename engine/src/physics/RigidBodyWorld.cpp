@@ -113,14 +113,15 @@ namespace quantum::physics
         std::vector<ConstraintEntry> constraints;
         std::uint64_t tick = 0;
 
-        Impl()
+        explicit Impl(const RigidBodyWorldSettings& settings)
         {
             broadPhase.MapObjectToBroadPhaseLayer(
                 staticLayer, JPH::BroadPhaseLayer{0});
             broadPhase.MapObjectToBroadPhaseLayer(
                 dynamicLayer, JPH::BroadPhaseLayer{1});
             layerPairs.EnableCollision(staticLayer, dynamicLayer);
-            layerPairs.EnableCollision(dynamicLayer, dynamicLayer);
+            if (settings.dynamicBodyCollisions)
+                layerPairs.EnableCollision(dynamicLayer, dynamicLayer);
             broadPhaseFilter =
                 std::make_unique<JPH::ObjectVsBroadPhaseLayerFilterTable>(
                     broadPhase, layerCount, layerPairs, layerCount);
@@ -209,10 +210,10 @@ namespace quantum::physics
         }
     };
 
-    RigidBodyWorld::RigidBodyWorld()
+    RigidBodyWorld::RigidBodyWorld(const RigidBodyWorldSettings& settings)
     {
         initializeJolt();
-        impl_ = std::make_unique<Impl>();
+        impl_ = std::make_unique<Impl>(settings);
     }
 
     RigidBodyWorld::~RigidBodyWorld() = default;

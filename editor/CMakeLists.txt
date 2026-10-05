@@ -189,21 +189,28 @@ add_custom_target(QUANTUMTrackAssets ALL
     DEPENDS "${quantum_track_asset_destination}")
 add_dependencies(QUANTUM QUANTUMTrackAssets)
 
-set(quantum_mechanical_asset_source
-    "${PROJECT_SOURCE_DIR}/assets/mechanical/rotating-arm-placeholder.glb")
-set(quantum_mechanical_asset_destination
-    "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/mechanical/rotating-arm-placeholder.glb")
-add_custom_command(
-    OUTPUT "${quantum_mechanical_asset_destination}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/mechanical"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${quantum_mechanical_asset_source}" "${quantum_mechanical_asset_destination}"
-    DEPENDS "${quantum_mechanical_asset_source}"
-    COMMENT "Deploying QUANTUM mechanical-arm placeholder GLB"
-    VERBATIM)
+set(quantum_mechanical_asset_files
+    rotating-arm-placeholder.glb
+    hanging-carrier-placeholder.glb)
+set(quantum_mechanical_asset_outputs)
+foreach(mechanical_asset_file IN LISTS quantum_mechanical_asset_files)
+    set(quantum_mechanical_asset_source
+        "${PROJECT_SOURCE_DIR}/assets/mechanical/${mechanical_asset_file}")
+    set(quantum_mechanical_asset_destination
+        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/mechanical/${mechanical_asset_file}")
+    add_custom_command(
+        OUTPUT "${quantum_mechanical_asset_destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/mechanical"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${quantum_mechanical_asset_source}" "${quantum_mechanical_asset_destination}"
+        DEPENDS "${quantum_mechanical_asset_source}"
+        COMMENT "Deploying QUANTUM mechanical placeholder ${mechanical_asset_file}"
+        VERBATIM)
+    list(APPEND quantum_mechanical_asset_outputs "${quantum_mechanical_asset_destination}")
+endforeach()
 add_custom_target(QUANTUMMechanicalAssets ALL
-    DEPENDS "${quantum_mechanical_asset_destination}")
+    DEPENDS ${quantum_mechanical_asset_outputs})
 add_dependencies(QUANTUM QUANTUMMechanicalAssets)
 
 set(quantum_environment_asset_files
@@ -370,8 +377,10 @@ foreach(environment_asset_file IN LISTS quantum_environment_asset_files)
     )
 endforeach()
 
-install(FILES "${quantum_mechanical_asset_source}"
-    DESTINATION assets/mechanical COMPONENT Runtime)
+foreach(mechanical_asset_file IN LISTS quantum_mechanical_asset_files)
+    install(FILES "${PROJECT_SOURCE_DIR}/assets/mechanical/${mechanical_asset_file}"
+        DESTINATION assets/mechanical COMPONENT Runtime)
+endforeach()
 
 foreach(ground_asset_file IN LISTS quantum_ground_asset_files)
     install(

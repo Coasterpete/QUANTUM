@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <array>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -74,6 +75,35 @@ namespace
             renderer.drawFrame();
             renderer.drawFrame();
         }
+        // Grow/shrink through 1/2/3 transforms while frames are in flight.
+        // The third instance shares the arm GLB and must reuse its geometry.
+        std::array<StaticMeshInstance, 3> assembly{{
+            {"assets://mechanical/rotating-arm-placeholder.glb"},
+            {"assets://mechanical/hanging-carrier-placeholder.glb"},
+            {"assets://mechanical/rotating-arm-placeholder.glb"}}};
+        for (int reset = 0; reset < 20; ++reset)
+        {
+            for (const std::size_t count : {1, 2, 3, 2})
+            {
+                assembly[0].transform = glm::translate(glm::mat4{1}, glm::vec3{-2, 0, 3});
+                assembly[1].transform = glm::translate(glm::mat4{1}, glm::vec3{2, 0, 3})
+                    * glm::rotate(glm::mat4{1}, 0.1F * reset, glm::vec3{0, 1, 0});
+                assembly[2].transform = glm::translate(glm::mat4{1}, glm::vec3{-2, 1, 5});
+                renderer.updateDynamicMeshInstances(std::span{assembly}.first(count));
+                for (std::size_t index = 0; index < count; ++index)
+                {
+                    const auto status = renderer.dynamicMeshAssetLoadStatus(assembly[index].assetIdentifier);
+                    require(status && status->state == HardwareAssetLoadState::Loaded
+                        && !status->usingDiagnosticFallback, "Every independently placed GLB must load.");
+                }
+                renderer.drawFrame();
+                renderer.drawFrame();
+            }
+            renderer.updateDynamicMeshInstances({});
+            require(!renderer.dynamicMeshAssetLoadStatus(assembly[1].assetIdentifier),
+                "Disable must clear every active instance status.");
+            renderer.drawFrame();
+        }
         auto invalid = instance;
         invalid.transform[0][0] = std::numeric_limits<float>::quiet_NaN();
         bool rejected = false;
@@ -92,6 +122,16 @@ namespace
             renderer.updateDynamicMeshInstance(instance);
             renderer.drawFrame();
         }
+        // Failure in the first slot must not suppress a good second mesh or
+        // shift its transform index. Repeat poses must retain the failure result.
+        assembly[0] = instance;
+        for (int frame = 0; frame < 4; ++frame)
+        {
+            renderer.updateDynamicMeshInstances(std::span{assembly}.first(2));
+            const auto good = renderer.dynamicMeshAssetLoadStatus(assembly[1].assetIdentifier);
+            require(good && !good->usingDiagnosticFallback, "One failed asset must not hide a healthy sibling.");
+            renderer.drawFrame();
+        }
         renderer.updateDynamicMeshInstance(std::nullopt);
         instance.assetIdentifier = "assets://mechanical/invalid-m4-test.glb";
         renderer.updateDynamicMeshInstance(instance);
@@ -100,6 +140,19 @@ namespace
             && invalidGlb->usingDiagnosticFallback, "Invalid GLB must request explicit fallback.");
         renderer.drawFrame();
         renderer.updateDynamicMeshInstance(std::nullopt);
+        renderer.drawFrame();
+        // An empty requested ID is still a retained failure, not an uninitialized
+        // entry that should be retried/logged on every pose update.
+        instance.assetIdentifier.clear();
+        for (int frame = 0; frame < 4; ++frame)
+        {
+            renderer.updateDynamicMeshInstance(instance);
+            const auto empty = renderer.dynamicMeshAssetLoadStatus();
+            require(empty && empty->usingDiagnosticFallback && !empty->detail.empty(),
+                "Empty asset identity must report a retained explicit failure.");
+            renderer.drawFrame();
+        }
+        renderer.updateDynamicMeshInstances({});
         renderer.drawFrame();
         renderer.shutdown();
     }
@@ -115,11 +168,11 @@ int main()
             throw std::runtime_error(std::string{"SDL_Init: "} + SDL_GetError());
         rendererLifecycle();
         SDL_Quit();
-        require(counts.meshUploads == 1, "Repeated pose/reset/disable must upload immutable geometry only once.");
-        require(counts.assetErrors == 2, "Missing/invalid asset must each log once, including repeated pose updates.");
+        require(counts.meshUploads == 2, "Two assets/shared instances must each upload immutable geometry only once.");
+        require(counts.assetErrors == 3, "Missing/invalid/empty asset must each log once across pose updates.");
         require(counts.validationErrors == 0, "Dynamic mesh lifetime must produce no Vulkan errors.");
         quantum::logging::resetLogSinkForTesting();
-        std::cout << "Dynamic mesh renderer: 20 cycles, 166 frames, one mesh upload; missing/invalid fallback passed.\n";
+        std::cout << "Dynamic mesh renderer: 20 single + 20 multi cycles, 355 frames, two mesh uploads; growth/shrink/shared mesh and sibling/empty-ID fallback passed.\n";
         return 0;
     }
     catch (const std::exception& error)

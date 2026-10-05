@@ -3712,37 +3712,47 @@ namespace quantum::renderer
         frameBuffer.requiresUpdate = false;
     }
 
-    void VulkanContext::updateDynamicMeshInstance(
-        const std::optional<StaticMeshInstance>& instance)
+    void VulkanContext::updateDynamicMeshInstances(
+        const std::span<const StaticMeshInstance> instances)
     {
         if (allocator_ == VK_NULL_HANDLE)
             throw std::logic_error("Cannot update a dynamic mesh before renderer initialization.");
 
-        if (instance)
+        if (instances.size() > std::numeric_limits<std::uint32_t>::max())
+            throw std::length_error("Dynamic mesh count is outside Vulkan's draw range.");
+        // Validate the whole collection before changing the published poses.
+        for (const auto& instance : instances)
         {
             for (int column = 0; column < 4; ++column)
                 for (int row = 0; row < 4; ++row)
-                    if (!std::isfinite(instance->transform[column][row]))
+                    if (!std::isfinite(instance.transform[column][row]))
                         throw std::invalid_argument("Dynamic mesh transform must be finite.");
-            if (std::abs(glm::determinant(glm::mat3{instance->transform})) < 1e-8F
-                || instance->transform[0][3] != 0.0F
-                || instance->transform[1][3] != 0.0F
-                || instance->transform[2][3] != 0.0F
-                || instance->transform[3][3] != 1.0F)
+            if (std::abs(glm::determinant(glm::mat3{instance.transform})) < 1e-8F
+                || instance.transform[0][3] != 0.0F
+                || instance.transform[1][3] != 0.0F
+                || instance.transform[2][3] != 0.0F
+                || instance.transform[3][3] != 1.0F)
                 throw std::invalid_argument("Dynamic mesh transform must be nonsingular and affine.");
+        }
+
+        dynamicMeshEntries_.resize(instances.size());
+        dynamicMeshTransforms_.resize(instances.size());
+        for (std::size_t index = 0; index < instances.size(); ++index)
+        {
+            const auto& instance = instances[index];
+            auto& entry = dynamicMeshEntries_[index];
 
             // Pose updates retain the prior load result, including failure, so
             // a missing file is neither reparsed nor logged on every tick.
-            if (!dynamicMeshLoadStatus_
-                || dynamicMeshLoadStatus_->requestedIdentifier != instance->assetIdentifier)
+            if (!entry.status || entry.status->requestedIdentifier != instance.assetIdentifier)
             {
                 HardwareAssetLoadStatus status;
-                status.requestedIdentifier = instance->assetIdentifier;
+                status.requestedIdentifier = instance.assetIdentifier;
                 StaticMeshGpuHandle handle;
                 std::shared_ptr<const StaticMeshAsset> asset;
                 try
                 {
-                    asset = staticMeshAssets_.load(instance->assetIdentifier);
+                    asset = staticMeshAssets_.load(instance.assetIdentifier);
                 }
                 catch (const std::exception& exception)
                 {
@@ -3754,23 +3764,22 @@ namespace quantum::renderer
                 }
                 if (asset)
                     handle = uploadStaticMeshOnce(*asset);
-                dynamicMeshHandle_ = handle;
-                dynamicMeshLoadStatus_ = std::move(status);
+                entry.mesh = handle;
+                entry.status = std::move(status);
             }
+            dynamicMeshTransforms_[index] = coaster::HardwareInstance{instance.transform};
         }
-        else
-        {
-            dynamicMeshHandle_ = {};
-            dynamicMeshLoadStatus_.reset();
-        }
-        dynamicMeshInstance_ = instance;
         for (auto& frameBuffer : dynamicMeshFrameBuffers_)
             frameBuffer.requiresUpdate = true;
     }
 
-    std::optional<HardwareAssetLoadStatus> VulkanContext::dynamicMeshAssetLoadStatus() const
+    std::optional<HardwareAssetLoadStatus> VulkanContext::dynamicMeshAssetLoadStatus(
+        const std::string_view identifier) const
     {
-        return dynamicMeshLoadStatus_;
+        for (const auto& entry : dynamicMeshEntries_)
+            if (entry.status && (identifier.empty() || entry.status->requestedIdentifier == identifier))
+                return entry.status;
+        return std::nullopt;
     }
 
     void VulkanContext::updateDynamicMeshFrameBuffer(const std::uint32_t frameSlot)
@@ -3778,24 +3787,26 @@ namespace quantum::renderer
         auto& frameBuffer = dynamicMeshFrameBuffers_[frameSlot];
         if (!frameBuffer.requiresUpdate)
             return;
-        if (dynamicMeshInstance_ && dynamicMeshHandle_)
+        if (!dynamicMeshTransforms_.empty())
         {
-            // Match hardware.vert's existing instance stride/layout. Metadata
-            // is unused here; only the matrix follows the body's current pose.
-            const coaster::HardwareInstance instance{dynamicMeshInstance_->transform};
-            const std::span instances{&instance, 1};
-            if (frameBuffer.buffer == VK_NULL_HANDLE)
+            const std::span<const coaster::HardwareInstance> instances{dynamicMeshTransforms_};
+            const VkDeviceSize size = instances.size_bytes();
+            if (frameBuffer.buffer == VK_NULL_HANDLE || size > frameBuffer.capacity)
             {
                 const auto created = createHostVisibleBuffer(allocator_, instances,
                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, "dynamic mesh instance upload");
+                // This slot's fence has completed. Other frames own other buffers.
+                if (frameBuffer.buffer != VK_NULL_HANDLE)
+                    vmaDestroyBuffer(allocator_, frameBuffer.buffer, frameBuffer.allocation);
                 frameBuffer.buffer = created.buffer;
                 frameBuffer.allocation = created.allocation;
                 frameBuffer.mappedData = created.mappedData;
+                frameBuffer.capacity = created.capacity;
             }
             else
             {
                 writeHostVisibleBuffer(allocator_, frameBuffer.allocation,
-                    frameBuffer.mappedData, sizeof(instance), instances,
+                    frameBuffer.mappedData, frameBuffer.capacity, instances,
                     "dynamic mesh instance update");
             }
         }
@@ -4864,9 +4875,12 @@ namespace quantum::renderer
 
             // The engineering mesh has its own visibility, independent of the
             // authored track's presentation mode and continuous mesh contents.
-            if (dynamicMeshInstance_ && dynamicMeshHandle_)
+            for (std::size_t index = 0; index < dynamicMeshEntries_.size(); ++index)
             {
-                const auto& mesh = hardwareMeshes_.at(dynamicMeshHandle_.value);
+                const auto handle = dynamicMeshEntries_[index].mesh;
+                if (!handle)
+                    continue;
+                const auto& mesh = hardwareMeshes_.at(handle.value);
                 const std::array buffers{mesh.vertexBuffer,
                     dynamicMeshFrameBuffers_[frameSlot].buffer};
                 constexpr std::array<VkDeviceSize, 2> offsets{0, 0};
@@ -4885,7 +4899,7 @@ namespace quantum::renderer
                 {
                     pushTrackDraw(submesh.material.value_or(fallback));
                     vkCmdDrawIndexed(commandBuffer, submesh.indexCount,
-                        1, submesh.firstIndex, 0, 0);
+                        1, submesh.firstIndex, 0, static_cast<std::uint32_t>(index));
                 }
             }
 
@@ -5952,9 +5966,8 @@ namespace quantum::renderer
                 destroyAllocatedBuffer(frameBuffer.buffer, frameBuffer.allocation);
                 frameBuffer = {};
             }
-            dynamicMeshInstance_.reset();
-            dynamicMeshHandle_ = {};
-            dynamicMeshLoadStatus_.reset();
+            dynamicMeshEntries_.clear();
+            dynamicMeshTransforms_.clear();
 
             destroyAllocatedBuffer(
                 supportVertexBuffer_, supportVertexAllocation_);
