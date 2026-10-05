@@ -23,6 +23,10 @@ namespace quantum::editor
 
     [[nodiscard]] EditorFonts loadEditorFonts(const std::filesystem::path& basePath);
     void editorHeading(const char* label, const EditorFonts& fonts);
+    void editorPaneHeading(const char* title, const char* context,
+        const EditorFonts& fonts, const char* status = nullptr,
+        const ImVec4& statusColor = ImVec4{});
+    void editorSectionHeading(const char* label, const EditorFonts& fonts);
     void editorSecondaryText(const char* format, ...);
     void editorSecondaryTextWrapped(const char* format, ...);
 

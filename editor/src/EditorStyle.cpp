@@ -51,6 +51,56 @@ namespace quantum::editor
         ImGui::PopFont();
     }
 
+    void editorPaneHeading(const char* const title, const char* const context,
+        const EditorFonts& fonts, const char* const status,
+        const ImVec4& statusColor)
+    {
+        // A content-sized band shares the pane's scrolling and owns no state.
+        // Keep all dimensions in the existing logical UI scale.
+        const ImGuiStyle& style = ImGui::GetStyle();
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, palette::panelRaised);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+            ImVec2(style.WindowPadding.x, style.FramePadding.y));
+        if (ImGui::BeginChild("##PaneHeading", {0, 0},
+            ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize
+                | ImGuiChildFlags_AlwaysUseWindowPadding,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+        {
+            const float width = ImGui::GetContentRegionAvail().x;
+            const float statusWidth = status == nullptr
+                ? 0.0F : ImGui::CalcTextSize(status).x;
+            ImGui::PushFont(fonts.header, editorHeaderFontSize);
+            const float titleWidth = ImGui::CalcTextSize(title).x;
+            ImGui::PushStyleColor(ImGuiCol_Text, palette::textHeading);
+            ImGui::TextWrapped("%s", title);
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
+            if (status != nullptr)
+            {
+                if (titleWidth + statusWidth + style.ItemSpacing.x * 2.0F <= width)
+                    ImGui::SameLine(style.WindowPadding.x + width - statusWidth);
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    statusColor.w > 0.0F ? statusColor : palette::textSecondary);
+                ImGui::TextWrapped("%s", status);
+                ImGui::PopStyleColor();
+            }
+            if (context != nullptr && context[0] != '\0')
+                editorSecondaryTextWrapped("%s", context);
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+    }
+
+    void editorSectionHeading(const char* const label, const EditorFonts& fonts)
+    {
+        ImGui::Dummy({0, ImGui::GetStyle().ItemSpacing.y});
+        ImGui::PushFont(fonts.header, editorFontSize);
+        ImGui::TextColored(palette::textHeading, "%s", label);
+        ImGui::PopFont();
+    }
+
     void editorSecondaryText(const char* const format, ...)
     {
         va_list arguments;

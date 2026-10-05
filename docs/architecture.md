@@ -780,12 +780,18 @@ the dedicated Simulator mode does not replace that selection or own another
 document. The main menu identifies the current workspace as `Workspace: Track`
 or `Workspace: Train`. Returning from Simulator restores that selection.
 A main menu and compact workspace command strip
-sit above the dockspace. The default docked shell contains `COASTER SETUP` and
-`TRACK WORKSPACE` on the left, the texture-backed `3D Viewport` in the centre,
-`Support Workspace`, `Track Devices`, and `Viewport Settings` on the right, a
+sit above the dockspace. The default docked shell contains Coaster Setup and
+Route (`TRACK WORKSPACE` remains its stable ID) on the left, the texture-backed
+`3D Viewport` in the centre, Region Inspector, Supports (`Support Workspace` ID),
+`Track Devices`, and `Viewport Settings` on the right, a
 bottom row for the `Transition Editor`, Force Diagnostics, Geometry Editor,
 Performance Telemetry, and Transition Editor Input windows, and the detailed
-editor appropriate to the selected region.
+editor appropriate to the selected region. Fresh/reset Track layouts select
+Route and Region Inspector, reserve 34% of height for analysis, and size the
+side panes in scaled logical pixels with bounded fractions. Persisted layouts
+retain their proportions. The Inspector borrows the same selected region and
+returns the same edit requests that previously came from Route; it has no
+document ownership or separate selection.
 
 `EditorUi::beginFrame` routes the dedicated Simulator first. Editor frames
 submit the menu, toolbar, and dockspace, draw shared Coaster Setup, then select
@@ -817,8 +823,9 @@ dockspaces are submitted with `KeepAliveOnly`, including during Simulator.
 Coaster Setup uses one implementation/open flag/edit path with a window ID per
 layout. Reset Workspace Layout rebuilds only the composition shown that frame.
 See [`ui-theme-m0.md`](ui-theme-m0.md),
-[`recovery-m1b-train-workspace.md`](recovery-m1b-train-workspace.md), and
-[`ground-surface-m0-1.md`](ground-surface-m0-1.md).
+[`recovery-m1b-train-workspace.md`](recovery-m1b-train-workspace.md),
+[`ground-surface-m0-1.md`](ground-surface-m0-1.md), and
+[`workbench-presentation-m1.md`](workbench-presentation-m1.md).
 
 ### Shared region selection
 
@@ -836,10 +843,13 @@ or movement. Changing selection resets region-specific transient graph state
 and refreshes numeric edit buffers from the selected committed region. A pure
 selection change does not regenerate track geometry.
 
-The Track Workspace Section List is therefore an active authored-document view,
-not a placeholder. It displays the ordered region kinds and lengths, exposes
+The Route Section List is therefore an active authored-document view,
+not a placeholder. It displays ordered region kinds, lengths, and cumulative
+authored station ranges, exposes
 typed Rate/Profile, Circular Arc, and Force-Based creation and conversion, and
-issues structural and length-edit intent. It also reports why the last authored
+issues structural edit intent. Region Inspector issues length/style edit intent
+and separates authored controls from derived station/rotation readouts.
+Route also reports why the last authored
 edit was rejected, so an infeasible force target is visible in the Editor rather
 than only in the log. Core remains responsible for accepting the resulting
 document mutations.
