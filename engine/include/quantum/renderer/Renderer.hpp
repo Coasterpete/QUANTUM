@@ -32,6 +32,14 @@ namespace quantum::renderer
         std::array<float, 4> color;
     };
 
+    // One moving instance; geometry is shared through the existing mesh cache.
+    // The caller supplies a world transform, never a physics object.
+    struct StaticMeshInstance
+    {
+        std::string assetIdentifier;
+        glm::mat4 transform{1.0F};
+    };
+
     // Reference curves are four equal-length runs in this order.
     inline constexpr std::uint32_t viewportLeftRailCurve = 0;
     inline constexpr std::uint32_t viewportRightRailCurve = 1;
@@ -156,6 +164,11 @@ namespace quantum::renderer
         virtual void setTrackPresentationMode(TrackPresentationMode mode) = 0;
         virtual void updateTrainPreviewVertices(
             std::span<const LineVertex> vertices) = 0;
+        // Empty removes the instance. Mesh geometry stays cached until shutdown.
+        virtual void updateDynamicMeshInstance(
+            const std::optional<StaticMeshInstance>& instance) = 0;
+        [[nodiscard]] virtual std::optional<HardwareAssetLoadStatus>
+            dynamicMeshAssetLoadStatus() const = 0;
         // Replaces the Editor's renderer-neutral support-member line stream.
         // This stays available as the technical overlay and is independent of
         // the solid presentation below.

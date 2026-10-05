@@ -68,7 +68,8 @@ namespace quantum::editor
             ImGui::Text("2 box bodies / 1 world hinge | tick %llu | arm %+.3f rad/s",
                 static_cast<unsigned long long>(rigidBodyProofTick_),
                 rigidBodyProofAngularSpeed_);
-            ImGui::TextDisabled("Wire colliders: support (gray), arm (orange). Uses preview Play/Pause; Reset proof restores the arm.");
+            ImGui::Checkbox("Show physics/debug bounds", &rigidBodyProofDebugBoundsVisible_);
+            ImGui::TextDisabled("GLB arm / gray support. Uses preview Play/Pause; Reset proof restores the arm.");
         }
         if (!rigidBodyProofError_.empty())
             ImGui::TextColored(palette::warning, "%s", rigidBodyProofError_.c_str());

@@ -9,6 +9,21 @@
 
 namespace quantum::editor
 {
+    inline constexpr std::string_view mechanicalArmAssetId =
+        "assets://mechanical/rotating-arm-placeholder.glb";
+
+    // Presentation owns this relationship. The handle borrows the proof world;
+    // the asset identifier references renderer-owned CPU/GPU caches.
+    struct RigidBodyMeshBinding
+    {
+        physics::RigidBodyHandle body;
+        std::string assetIdentifier;
+        glm::dmat4 localAssetTransform{1.0};
+
+        [[nodiscard]] renderer::StaticMeshInstance instance(
+            const physics::RigidBodyWorld& world) const;
+    };
+
     enum class RigidBodyProofRole { Support, DrivenArm };
 
     // Copied presentation values; no body handles or borrowed physics objects.
@@ -30,11 +45,15 @@ namespace quantum::editor
         [[nodiscard]] physics::RigidBodyWorld& world() noexcept { return world_; }
         [[nodiscard]] std::array<RigidBodyProofBox, 2> snapshot() const;
         [[nodiscard]] double armAngularSpeedRadiansPerSecond() const;
+        [[nodiscard]] const RigidBodyMeshBinding& armMeshBinding() const noexcept
+        { return armMeshBinding_; }
+        [[nodiscard]] renderer::StaticMeshInstance armMeshInstance() const;
 
     private:
         physics::RigidBodyWorld world_;
         std::array<physics::RigidBodyHandle, 2> bodies_{};
         std::array<glm::dvec3, 2> halfExtents_{};
+        RigidBodyMeshBinding armMeshBinding_;
     };
 
     // Appends wire boxes to the existing dynamic diagnostic stream. Physics

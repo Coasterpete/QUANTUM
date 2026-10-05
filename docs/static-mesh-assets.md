@@ -3,6 +3,9 @@
 This milestone supports small Blender-authored repeating track-hardware meshes.
 It is intentionally not a scene importer, asset browser, or material system.
 
+[Rigid Body M4](rigid-body-m4.md) reuses the same CPU/GPU mesh caches and hardware
+shader for one moving mechanical GLB, with an Editor-owned body/asset binding.
+
 ## Asset identity and runtime paths
 
 Track styles retain renderer-neutral logical strings. Two schemes are accepted:
@@ -72,8 +75,9 @@ The loader accepts:
 - tightly packed or valid interleaved accessors;
 - multiple primitives merged into one GPU mesh while retaining CPU submesh
   index ranges;
-- glTF material references, UVs, and other unused vertex attributes, which are
-  ignored in favor of QUANTUM's existing hardware color/shading path.
+- untextured glTF metallic-roughness material factors per primitive, consumed
+  by the existing hardware shading path unless an instance batch overrides them;
+- UVs and other unused vertex attributes, which are ignored.
 
 Normals are required. Missing, non-finite, or degenerate normals are rejected;
 valid normals are normalized deterministically after axis conversion. Positions
@@ -83,7 +87,7 @@ must be divisible by three.
 The loader rejects external buffers, `.gltf`, sparse accessors, non-triangle
 primitive modes, non-indexed primitives, multiple meshes, node transforms or
 hierarchy, node-based mesh instancing, animations, skins, cameras, morph
-targets, and malformed buffer/accessor ranges. Lights, scene behavior, PBR,
+targets, and malformed buffer/accessor ranges. Lights, scene behavior,
 textures, samplers, and material graphs are not imported.
 
 ## Blender export contract
@@ -144,8 +148,8 @@ segments. Adapt it to the runtime style in three measurements/exports:
    that origin to the track centerline frame; do not bake a sample track's
    world-space pitch, yaw, or bank into the asset.
 
-The focused GLB loader retains geometry and normals but does not import glTF
-PBR materials or textures. Modern Steel therefore keeps separate renderer
+The focused GLB loader retains geometry, normals and untextured PBR factors,
+but does not import textures. Modern Steel keeps separate renderer
 colors for running rails, the continuous spine, and crosstie hardware in the
 track-style preset. The eventual crosstie may use `materialOverride` through
 the existing hardware draw batch; node-based material authoring remains a

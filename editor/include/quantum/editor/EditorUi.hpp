@@ -743,6 +743,8 @@ namespace quantum::editor
 
         [[nodiscard]] std::optional<RigidBodyProofControlType>
             takeRigidBodyProofControl() noexcept;
+        [[nodiscard]] bool rigidBodyProofDebugBoundsVisible() const noexcept
+        { return rigidBodyProofDebugBoundsVisible_; }
         void setRigidBodyProofStatus(bool enabled, std::uint64_t tick,
             double angularSpeed, const std::string& error = {});
         [[nodiscard]] std::optional<TrackDeviceCommand>
@@ -1105,6 +1107,7 @@ bool canUndo_ = false;
         std::optional<SimulationControlType> pendingSimulationControl_;
         std::optional<RigidBodyProofControlType> pendingRigidBodyProofControl_;
         bool rigidBodyProofEnabled_ = false;
+        bool rigidBodyProofDebugBoundsVisible_ = false;
         std::uint64_t rigidBodyProofTick_ = 0;
         double rigidBodyProofAngularSpeed_ = 0.0;
         std::string rigidBodyProofError_;

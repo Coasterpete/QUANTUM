@@ -182,6 +182,20 @@ add_test(NAME QuantumCore.RotationalPhysics COMMAND QuantumCoreRotationalPhysics
 set_tests_properties(QuantumCore.RotationalPhysics PROPERTIES LABELS "core;coaster;physics")
 
 if(QUANTUM_ENABLE_EDITOR)
+    add_executable(QuantumEditorRigidBodyMeshBindingTests
+        RigidBodyMeshBindingTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp)
+    target_include_directories(QuantumEditorRigidBodyMeshBindingTests PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorRigidBodyMeshBindingTests PRIVATE Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorRigidBodyMeshBindingTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorRigidBodyMeshBindingTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.RigidBodyMeshBinding COMMAND QuantumEditorRigidBodyMeshBindingTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEditor.RigidBodyMeshBinding PROPERTIES
+        LABELS "editor;physics;rigid-body;renderer;assets")
+
     add_executable(QuantumEditorRigidBodyPresentationTests
         RigidBodyPresentationTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
@@ -264,6 +278,26 @@ if(QUANTUM_ENABLE_ENGINE)
         "${PROJECT_SOURCE_DIR}")
     set_tests_properties(QuantumEngine.StaticMeshAssets PROPERTIES
         LABELS "engine;renderer;assets;hardware")
+
+    add_executable(QuantumEngineDynamicMeshInstanceTests DynamicMeshInstanceTests.cpp)
+    target_link_libraries(QuantumEngineDynamicMeshInstanceTests PRIVATE Quantum::Engine SDL3::SDL3)
+    target_compile_features(QuantumEngineDynamicMeshInstanceTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEngineDynamicMeshInstanceTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_custom_command(TARGET QuantumEngineDynamicMeshInstanceTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders"
+            "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/shaders"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/assets/mechanical"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/assets/mechanical/rotating-arm-placeholder.glb"
+            "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/assets/mechanical/rotating-arm-placeholder.glb"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/tests/fixtures/invalid-m4-test.glb"
+            "$<TARGET_FILE_DIR:QuantumEngineDynamicMeshInstanceTests>/assets/mechanical/invalid-m4-test.glb"
+        VERBATIM)
+    add_test(NAME QuantumEngine.DynamicMeshInstance COMMAND QuantumEngineDynamicMeshInstanceTests)
+    set_tests_properties(QuantumEngine.DynamicMeshInstance PROPERTIES
+        LABELS "engine;renderer;assets;gpu;validation")
 
     # Supports M2A: shared unit meshes and the bundled timber texture set.
     add_executable(QuantumEngineSupportSolidRendererTests

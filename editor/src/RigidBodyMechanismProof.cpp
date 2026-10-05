@@ -1,7 +1,18 @@
 #include <quantum/editor/RigidBodyMechanismProof.hpp>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace quantum::editor
 {
+    renderer::StaticMeshInstance RigidBodyMeshBinding::instance(
+        const physics::RigidBodyWorld& world) const
+    {
+        const auto state = world.bodyState(body);
+        const auto bodyTransform = glm::translate(glm::dmat4{1.0}, state.positionMeters)
+            * glm::mat4_cast(state.orientation);
+        return {assetIdentifier, glm::mat4{bodyTransform * localAssetTransform}};
+    }
+
     RigidBodyMechanismProof::RigidBodyMechanismProof()
     {
         // Support sits behind the arm's X/Z rotation plane, allowing a full
@@ -18,6 +29,11 @@ namespace quantum::editor
         box.massKilograms = 4.0;
         halfExtents_[1] = box.halfExtentsMeters;
         bodies_[1] = world_.createBox(box);
+
+        // The asset origin is its pivot end. The box body origin is its center,
+        // two meters along +X from the hinge. Keep that physics setup intact.
+        armMeshBinding_ = {bodies_[1], std::string{mechanicalArmAssetId},
+            glm::translate(glm::dmat4{1.0}, glm::dvec3{-2.0, 0.0, 0.0})};
 
         physics::RigidBodyHingeSettings joint;
         joint.body = bodies_[1];
@@ -43,6 +59,11 @@ namespace quantum::editor
     double RigidBodyMechanismProof::armAngularSpeedRadiansPerSecond() const
     {
         return world_.bodyState(bodies_[1]).angularVelocityRadiansPerSecond.y;
+    }
+
+    renderer::StaticMeshInstance RigidBodyMechanismProof::armMeshInstance() const
+    {
+        return armMeshBinding_.instance(world_);
     }
 
     void appendRigidBodyProofVertices(std::vector<renderer::LineVertex>& vertices,

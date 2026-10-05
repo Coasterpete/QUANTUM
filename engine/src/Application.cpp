@@ -613,6 +613,7 @@ namespace quantum::engine
                 std::uint64_t uploadedRigidBodyProofTick =
                     std::numeric_limits<std::uint64_t>::max();
                 std::vector<quantum::renderer::LineVertex> diagnosticVertices;
+                bool uploadedRigidBodyProofDebugBounds = false;
 
                 const auto rebuildSimulationPreview = [&]
                 {
@@ -4590,14 +4591,20 @@ editorUi.selectSection(restoredSelection, true);
 
                         if (rigidBodyProof)
                         {
+                            const auto assetStatus = renderer.dynamicMeshAssetLoadStatus();
                             editorUi.setRigidBodyProofStatus(true, rigidBodyProof->world().tick(),
-                                rigidBodyProof->armAngularSpeedRadiansPerSecond());
+                                rigidBodyProof->armAngularSpeedRadiansPerSecond(),
+                                assetStatus && assetStatus->usingDiagnosticFallback
+                                    ? assetStatus->detail + " Using physics/debug bounds."
+                                    : std::string{});
                         }
 
                         double previewVertexPublishMilliseconds = 0.0;
                         if (uploadedSimulationVertexGeneration
                             != simulationPreview.vertexGeneration()
                             || rigidBodyProofPresentationChanged
+                            || uploadedRigidBodyProofDebugBounds
+                                != editorUi.rigidBodyProofDebugBoundsVisible()
                             || (rigidBodyProof && uploadedRigidBodyProofTick
                                 != rigidBodyProof->world().tick()))
                         {
@@ -4606,16 +4613,23 @@ editorUi.selectSection(restoredSelection, true);
                             const auto trainVertices = simulationPreview.vertices();
                             if (rigidBodyProof)
                             {
+                                renderer.updateDynamicMeshInstance(rigidBodyProof->armMeshInstance());
+                                const auto assetStatus = renderer.dynamicMeshAssetLoadStatus();
                                 diagnosticVertices.assign(trainVertices.begin(), trainVertices.end());
                                 const auto boxes = rigidBodyProof->snapshot();
-                                quantum::editor::appendRigidBodyProofVertices(diagnosticVertices, boxes);
+                                const bool showArmBounds = editorUi.rigidBodyProofDebugBoundsVisible()
+                                    || (assetStatus && assetStatus->usingDiagnosticFallback);
+                                quantum::editor::appendRigidBodyProofVertices(diagnosticVertices,
+                                    std::span{boxes}.first(showArmBounds ? 2 : 1));
                                 uploadedRigidBodyProofTick = rigidBodyProof->world().tick();
                                 renderer.updateTrainPreviewVertices(diagnosticVertices);
                             }
                             else
                             {
+                                renderer.updateDynamicMeshInstance(std::nullopt);
                                 renderer.updateTrainPreviewVertices(trainVertices);
                             }
+                            uploadedRigidBodyProofDebugBounds = editorUi.rigidBodyProofDebugBoundsVisible();
                             previewVertexPublishMilliseconds =
                                 std::chrono::duration<double, std::milli>(
                                     PerformanceClock::now()
