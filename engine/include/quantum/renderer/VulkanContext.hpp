@@ -126,6 +126,10 @@ namespace quantum::renderer
         // Replaces the Editor's dynamic diagnostic train line stream.
         void updateTrainPreviewVertices(
             std::span<const LineVertex> vertices);
+        void updateDynamicMeshInstance(
+            const std::optional<StaticMeshInstance>& instance) override;
+        [[nodiscard]] std::optional<HardwareAssetLoadStatus>
+            dynamicMeshAssetLoadStatus() const override;
 
         // Replaces the Editor's renderer-neutral support-member line stream.
         void updateSupportVertices(std::span<const LineVertex> vertices);
@@ -280,6 +284,7 @@ namespace quantum::renderer
             std::span<const coaster::HardwareInstanceBatch> batches);
         [[nodiscard]] double waitForFrameSlot(std::uint32_t frameSlot);
         void updateTrainPreviewFrameBuffer(std::uint32_t frameSlot);
+        void updateDynamicMeshFrameBuffer(std::uint32_t frameSlot);
         void recreateSwapchain();
         void recordDrawCommands(
             std::uint32_t frameSlot,
@@ -519,6 +524,19 @@ namespace quantum::renderer
         std::array<DynamicLineFrameBuffer, maxFramesInFlight>
             trainPreviewFrameBuffers_{};
         std::vector<LineVertex> trainPreviewVertices_;
+
+        struct DynamicMeshFrameBuffer
+        {
+            VkBuffer buffer = VK_NULL_HANDLE;
+            VmaAllocation allocation = VK_NULL_HANDLE;
+            void* mappedData = nullptr;
+            bool requiresUpdate = false;
+        };
+        // A single transform per slot, written only after that slot's fence.
+        std::array<DynamicMeshFrameBuffer, maxFramesInFlight> dynamicMeshFrameBuffers_{};
+        std::optional<StaticMeshInstance> dynamicMeshInstance_;
+        StaticMeshGpuHandle dynamicMeshHandle_;
+        std::optional<HardwareAssetLoadStatus> dynamicMeshLoadStatus_;
 
         VkBuffer trackMeshVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackMeshVertexAllocation_ = VK_NULL_HANDLE;

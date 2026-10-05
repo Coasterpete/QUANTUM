@@ -4,6 +4,10 @@ M3 makes Jolt state observable in QUANTUM's Simulator with temporary wire-box
 colliders. This is an engineering visualization proof, with no authored assets,
 serialization, new workspace, dependency, or train/Jolt coupling.
 
+[M4](rigid-body-m4.md) retains this mechanism and lifecycle while making a GLB
+the primary arm visual. The wire arm remains available as debug bounds/fallback;
+the observations below describe the original M3 presentation.
+
 ## Observe it
 
 Launch the Windows Debug editor (`build/editor/Debug/QUANTUM.exe`), enter Simulator,
