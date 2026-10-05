@@ -740,6 +740,8 @@ namespace quantum::editor
         // Simulation Preview 1: returns any pending simulation control request.
         [[nodiscard]] std::optional<SimulationControlType>
         takeSimulationControl() noexcept;
+        [[nodiscard]] bool trainPhysicsDiagnosticsVisible() const noexcept
+        { return trainPhysicsDiagnosticsVisible_; }
 
         [[nodiscard]] std::optional<RigidBodyProofControlType>
             takeRigidBodyProofControl() noexcept;
@@ -1108,6 +1110,7 @@ bool canUndo_ = false;
         std::optional<RigidBodyProofControlType> pendingRigidBodyProofControl_;
         bool rigidBodyProofEnabled_ = false;
         bool rigidBodyProofDebugBoundsVisible_ = false;
+        bool trainPhysicsDiagnosticsVisible_ = false;
         std::uint64_t rigidBodyProofTick_ = 0;
         double rigidBodyProofAngularSpeed_ = 0.0;
         std::string rigidBodyProofError_;

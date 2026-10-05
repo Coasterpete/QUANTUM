@@ -541,6 +541,9 @@ namespace quantum::renderer
             std::optional<HardwareAssetLoadStatus> status;
         };
         std::vector<DynamicMeshEntry> dynamicMeshEntries_;
+        // Failed identities survive collection resize/mode changes. Repeated
+        // instances request the same fallback without retrying I/O each frame.
+        std::map<std::string, HardwareAssetLoadStatus> dynamicMeshAssetFailures_;
         // Same index as entries, using hardware.vert's existing instance layout.
         std::vector<coaster::HardwareInstance> dynamicMeshTransforms_;
 

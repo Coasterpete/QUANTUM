@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/TrainPreviewInspection.hpp>
+#include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
@@ -119,6 +120,11 @@ namespace quantum::editor
         [[nodiscard]] std::span<const renderer::LineVertex> vertices()
             const noexcept;
         [[nodiscard]] std::uint64_t vertexGeneration() const noexcept;
+        // Shares the diagnostic stream's render pose and generation. The span
+        // borrows preview storage until the next update/reset/rebuild.
+        [[nodiscard]] std::span<const renderer::StaticMeshInstance> meshInstances()
+            const noexcept;
+        void setPhysicsDiagnosticsVisible(bool visible);
         [[nodiscard]] const SimulationPreviewFrameTelemetry& frameTelemetry()
             const noexcept;
 
@@ -174,6 +180,9 @@ namespace quantum::editor
         std::optional<physics::TrainPose> previousPose_;
         std::optional<physics::TrainPose> renderPose_;
         std::vector<renderer::LineVertex> vertices_;
+        TrainVisualPrototype visualPrototype_;
+        std::vector<renderer::StaticMeshInstance> meshInstances_;
+        bool physicsDiagnosticsVisible_ = true;
         PlaybackState playbackState_ = PlaybackState::Stopped;
         double accumulatorSeconds_ = 0.0;
         double renderAlpha_ = 0.0;

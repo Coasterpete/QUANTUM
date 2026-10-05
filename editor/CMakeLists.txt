@@ -24,6 +24,7 @@ add_executable(
     src/RiderLoadDiagnostics.cpp
     src/RigidBodyMechanismProof.cpp
     src/SimulationPreview.cpp
+    src/TrainMeshPresentation.cpp
     src/TransitionEditorModel.cpp
     src/TrackStylePresentation.cpp
     src/ViewportCamera.cpp
@@ -49,6 +50,7 @@ add_executable(
     include/quantum/editor/RiderLoadDiagnostics.hpp
     include/quantum/editor/RigidBodyMechanismProof.hpp
     include/quantum/editor/SimulationPreview.hpp
+    include/quantum/editor/TrainMeshPresentation.hpp
     include/quantum/editor/TransitionEditorModel.hpp
     include/quantum/editor/TrainPreviewInspection.hpp
     include/quantum/editor/TrackStylePresentation.hpp
@@ -212,6 +214,23 @@ endforeach()
 add_custom_target(QUANTUMMechanicalAssets ALL
     DEPENDS ${quantum_mechanical_asset_outputs})
 add_dependencies(QUANTUM QUANTUMMechanicalAssets)
+
+set(quantum_train_asset_source
+    "${PROJECT_SOURCE_DIR}/assets/train/placeholder-car-shell.glb")
+set(quantum_train_asset_destination
+    "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/train/placeholder-car-shell.glb")
+add_custom_command(
+    OUTPUT "${quantum_train_asset_destination}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/train"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${quantum_train_asset_source}" "${quantum_train_asset_destination}"
+    DEPENDS "${quantum_train_asset_source}"
+    COMMENT "Deploying QUANTUM placeholder train shell"
+    VERBATIM)
+add_custom_target(QUANTUMTrainAssets ALL DEPENDS "${quantum_train_asset_destination}")
+add_dependencies(QUANTUM QUANTUMTrainAssets)
+install(FILES "${quantum_train_asset_source}" DESTINATION assets/train COMPONENT Runtime)
 
 set(quantum_environment_asset_files
     rooitou_park_1k.hdr
