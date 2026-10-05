@@ -613,7 +613,9 @@ namespace quantum::engine
                 std::uint64_t uploadedRigidBodyProofTick =
                     std::numeric_limits<std::uint64_t>::max();
                 std::vector<quantum::renderer::LineVertex> diagnosticVertices;
+                std::vector<quantum::renderer::StaticMeshInstance> dynamicMeshInstances;
                 bool uploadedRigidBodyProofDebugBounds = false;
+                bool uploadedTrainPhysicsDiagnostics = false;
 
                 const auto rebuildSimulationPreview = [&]
                 {
@@ -4613,15 +4615,31 @@ editorUi.selectSection(restoredSelection, true);
                             || rigidBodyProofPresentationChanged
                             || uploadedRigidBodyProofDebugBounds
                                 != editorUi.rigidBodyProofDebugBoundsVisible()
+                            || uploadedTrainPhysicsDiagnostics
+                                != editorUi.trainPhysicsDiagnosticsVisible()
                             || (rigidBodyProof && uploadedRigidBodyProofTick
                                 != rigidBodyProof->world().tick()))
                         {
                             const auto previewPublishBegin =
                                 PerformanceClock::now();
+                            const auto trainMeshes = simulationPreview.meshInstances();
+                            dynamicMeshInstances.assign(trainMeshes.begin(), trainMeshes.end());
+                            if (rigidBodyProof)
+                            {
+                                const auto mechanismMeshes = rigidBodyProof->meshInstances();
+                                dynamicMeshInstances.insert(dynamicMeshInstances.end(),
+                                    mechanismMeshes.begin(), mechanismMeshes.end());
+                            }
+                            // Both physics domains publish values into one collection.
+                            renderer.updateDynamicMeshInstances(dynamicMeshInstances);
+                            const auto trainAssetStatus = renderer.dynamicMeshAssetLoadStatus(
+                                quantum::editor::placeholderTrainCarAssetId);
+                            simulationPreview.setPhysicsDiagnosticsVisible(
+                                editorUi.trainPhysicsDiagnosticsVisible()
+                                || (trainAssetStatus && trainAssetStatus->usingDiagnosticFallback));
                             const auto trainVertices = simulationPreview.vertices();
                             if (rigidBodyProof)
                             {
-                                renderer.updateDynamicMeshInstances(rigidBodyProof->meshInstances());
                                 diagnosticVertices.assign(trainVertices.begin(), trainVertices.end());
                                 const auto boxes = rigidBodyProof->snapshot();
                                 quantum::editor::appendRigidBodyProofVertices(diagnosticVertices,
@@ -4640,10 +4658,10 @@ editorUi.selectSection(restoredSelection, true);
                             }
                             else
                             {
-                                renderer.updateDynamicMeshInstances({});
                                 renderer.updateTrainPreviewVertices(trainVertices);
                             }
                             uploadedRigidBodyProofDebugBounds = editorUi.rigidBodyProofDebugBoundsVisible();
+                            uploadedTrainPhysicsDiagnostics = editorUi.trainPhysicsDiagnosticsVisible();
                             previewVertexPublishMilliseconds =
                                 std::chrono::duration<double, std::milli>(
                                     PerformanceClock::now()

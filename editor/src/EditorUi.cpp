@@ -8673,6 +8673,7 @@ namespace quantum::editor
                 pendingSimulationControl_ = SimulationControlType::Reset;
             ImGui::EndDisabled();
 
+            ImGui::Checkbox("Show train physics diagnostics", &trainPhysicsDiagnosticsVisible_);
             drawRigidBodyProofControls();
 
             ImGui::Separator();

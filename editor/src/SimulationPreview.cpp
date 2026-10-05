@@ -892,6 +892,7 @@ namespace quantum::editor
         renderPose_.reset();
         renderAlpha_ = 0.0;
         vertices_.clear();
+        meshInstances_.clear();
         ++vertexGeneration_;
         playbackState_ = PlaybackState::Stopped;
         accumulatorSeconds_ = 0.0;
@@ -905,6 +906,21 @@ namespace quantum::editor
         error_ = std::move(error);
     }
 
+    std::span<const renderer::StaticMeshInstance> SimulationPreview::meshInstances()
+        const noexcept
+    {
+        return meshInstances_;
+    }
+
+    void SimulationPreview::setPhysicsDiagnosticsVisible(const bool visible)
+    {
+        if (physicsDiagnosticsVisible_ != visible)
+        {
+            physicsDiagnosticsVisible_ = visible;
+            rebuildVertices();
+        }
+    }
+
     void SimulationPreview::rebuildVertices()
     {
         const auto preparationBegin = std::chrono::steady_clock::now();
@@ -912,8 +928,14 @@ namespace quantum::editor
         ++vertexGeneration_;
         if (!renderPose_ || renderPose_->carCount() != trainDefinition_.cars.size())
         {
+            meshInstances_.clear();
             return;
         }
+
+        updateTrainMeshInstances(meshInstances_, *renderPose_, visualPrototype_,
+            coordinateUnitsPerMeter_);
+        if (!physicsDiagnosticsVisible_)
+            return;
 
         vertices_.reserve(
             renderPose_->carCount() * 36 + renderPose_->connectionCount() * 2);

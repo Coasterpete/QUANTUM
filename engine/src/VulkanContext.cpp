@@ -3750,17 +3750,26 @@ namespace quantum::renderer
                 status.requestedIdentifier = instance.assetIdentifier;
                 StaticMeshGpuHandle handle;
                 std::shared_ptr<const StaticMeshAsset> asset;
-                try
+                const auto failure = dynamicMeshAssetFailures_.find(instance.assetIdentifier);
+                if (failure != dynamicMeshAssetFailures_.end())
                 {
-                    asset = staticMeshAssets_.load(instance.assetIdentifier);
+                    status = failure->second;
                 }
-                catch (const std::exception& exception)
+                else
                 {
-                    status.state = classifyStaticMeshLoadFailure(exception.what());
-                    status.usingDiagnosticFallback = true;
-                    status.detail = exception.what();
-                    quantum::logging::logMessagef(quantum::logging::LogLevel::Error,
-                        "ASSET", "%s Using physics wire bounds for the dynamic mesh.", exception.what());
+                    try
+                    {
+                        asset = staticMeshAssets_.load(instance.assetIdentifier);
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        status.state = classifyStaticMeshLoadFailure(exception.what());
+                        status.usingDiagnosticFallback = true;
+                        status.detail = exception.what();
+                        dynamicMeshAssetFailures_.emplace(instance.assetIdentifier, status);
+                        quantum::logging::logMessagef(quantum::logging::LogLevel::Error,
+                            "ASSET", "%s Using physics wire bounds for the dynamic mesh.", exception.what());
+                    }
                 }
                 if (asset)
                     handle = uploadStaticMeshOnce(*asset);
@@ -5967,6 +5976,7 @@ namespace quantum::renderer
                 frameBuffer = {};
             }
             dynamicMeshEntries_.clear();
+            dynamicMeshAssetFailures_.clear();
             dynamicMeshTransforms_.clear();
 
             destroyAllocatedBuffer(

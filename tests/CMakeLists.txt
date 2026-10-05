@@ -49,10 +49,60 @@ if(QUANTUM_ENABLE_ENGINE)
 endif()
 
 if(QUANTUM_ENABLE_EDITOR)
+    add_executable(QuantumEditorTrainMeshPresentationTests
+        TrainMeshPresentationTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp)
+    target_include_directories(QuantumEditorTrainMeshPresentationTests PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorTrainMeshPresentationTests PRIVATE Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorTrainMeshPresentationTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorTrainMeshPresentationTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.TrainMeshPresentation COMMAND QuantumEditorTrainMeshPresentationTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEditor.TrainMeshPresentation PROPERTIES
+        LABELS "editor;train;renderer;assets;presentation")
+
+    add_executable(QuantumEditorTrainVisualRendererTests
+        TrainVisualRendererTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp)
+    target_include_directories(QuantumEditorTrainVisualRendererTests PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorTrainVisualRendererTests PRIVATE Quantum::Engine Quantum::Core SDL3::SDL3)
+    target_compile_features(QuantumEditorTrainVisualRendererTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorTrainVisualRendererTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_custom_command(TARGET QuantumEditorTrainVisualRendererTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders"
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/shaders"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/train"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/mechanical"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/assets/train/placeholder-car-shell.glb"
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/train/placeholder-car-shell.glb"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/assets/mechanical/rotating-arm-placeholder.glb"
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/mechanical/rotating-arm-placeholder.glb"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/assets/mechanical/hanging-carrier-placeholder.glb"
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/mechanical/hanging-carrier-placeholder.glb"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/tests/fixtures/invalid-m4-test.glb"
+            "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/train/invalid-m0-test.glb"
+        VERBATIM)
+    add_test(NAME QuantumEditor.TrainVisualRenderer COMMAND QuantumEditorTrainVisualRendererTests)
+    set_tests_properties(QuantumEditor.TrainVisualRenderer PROPERTIES
+        LABELS "editor;train;renderer;assets;vulkan;presentation")
+
     add_executable(QuantumEditorRigidBodyArticulatedMechanismTests
         RigidBodyArticulatedMechanismTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
-        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp)
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp)
     target_include_directories(QuantumEditorRigidBodyArticulatedMechanismTests PRIVATE
         ${PROJECT_SOURCE_DIR}/editor/include)
     target_link_libraries(QuantumEditorRigidBodyArticulatedMechanismTests PRIVATE Quantum::Engine Quantum::Core)
@@ -199,7 +249,8 @@ if(QUANTUM_ENABLE_EDITOR)
     add_executable(QuantumEditorRigidBodyMeshBindingTests
         RigidBodyMeshBindingTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
-        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp)
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp)
     target_include_directories(QuantumEditorRigidBodyMeshBindingTests PRIVATE
         ${PROJECT_SOURCE_DIR}/editor/include)
     target_link_libraries(QuantumEditorRigidBodyMeshBindingTests PRIVATE Quantum::Engine Quantum::Core)
@@ -213,7 +264,8 @@ if(QUANTUM_ENABLE_EDITOR)
     add_executable(QuantumEditorRigidBodyPresentationTests
         RigidBodyPresentationTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/RigidBodyMechanismProof.cpp
-        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp)
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp)
     target_include_directories(QuantumEditorRigidBodyPresentationTests PRIVATE
         ${PROJECT_SOURCE_DIR}/editor/include)
     target_link_libraries(QuantumEditorRigidBodyPresentationTests PRIVATE
@@ -228,6 +280,7 @@ if(QUANTUM_ENABLE_EDITOR)
         QuantumEditorSimulationPreviewTests
         SimulationPreviewTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp
     )
     target_include_directories(
         QuantumEditorSimulationPreviewTests

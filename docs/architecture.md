@@ -1101,7 +1101,13 @@ increments the visible interpolation failure counter without invalidating physic
 This adds one fixed tick of presentation latency and only queries train geometry;
 it neither recompiles the track nor traverses or rebuilds static scene objects.
 
-Rendering consumes the render-only `TrainPose`. Each wireframe car box transforms
+Rendering consumes the render-only `TrainPose`. [Train Visual M0](train-visual-m0.md)
+uses an Editor-only repeated visual prototype to transform one cached GLB shell
+per car from its solved body position/quaternion. Application combines these
+instances with any active M5 mechanism instances before one renderer collection
+update. The renderer knows only asset identities and matrices; Jolt never owns
+train poses. The existing diagnostic overlays are optional, and a failed shell
+asset forces them visible without stopping simulation. Each wireframe car box transforms
 its authored body dimensions through `CarPose::transformLocalPoint`; bogie
 markers use `BogiePose::transformLocalPoint`; connector lines use the solved
 `InterCarConnectionPose` endpoints. SI pose positions are converted back to the
