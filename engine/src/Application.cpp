@@ -4591,12 +4591,20 @@ editorUi.selectSection(restoredSelection, true);
 
                         if (rigidBodyProof)
                         {
-                            const auto assetStatus = renderer.dynamicMeshAssetLoadStatus();
+                            std::string assetError;
+                            for (const auto& binding : rigidBodyProof->meshBindings())
+                            {
+                                const auto status = renderer.dynamicMeshAssetLoadStatus(binding.assetIdentifier);
+                                if (status && status->usingDiagnosticFallback)
+                                {
+                                    if (!assetError.empty())
+                                        assetError += "\n";
+                                    assetError += status->detail + " Using physics/debug bounds.";
+                                }
+                            }
                             editorUi.setRigidBodyProofStatus(true, rigidBodyProof->world().tick(),
                                 rigidBodyProof->armAngularSpeedRadiansPerSecond(),
-                                assetStatus && assetStatus->usingDiagnosticFallback
-                                    ? assetStatus->detail + " Using physics/debug bounds."
-                                    : std::string{});
+                                assetError);
                         }
 
                         double previewVertexPublishMilliseconds = 0.0;
@@ -4613,20 +4621,26 @@ editorUi.selectSection(restoredSelection, true);
                             const auto trainVertices = simulationPreview.vertices();
                             if (rigidBodyProof)
                             {
-                                renderer.updateDynamicMeshInstance(rigidBodyProof->armMeshInstance());
-                                const auto assetStatus = renderer.dynamicMeshAssetLoadStatus();
+                                renderer.updateDynamicMeshInstances(rigidBodyProof->meshInstances());
                                 diagnosticVertices.assign(trainVertices.begin(), trainVertices.end());
                                 const auto boxes = rigidBodyProof->snapshot();
-                                const bool showArmBounds = editorUi.rigidBodyProofDebugBoundsVisible()
-                                    || (assetStatus && assetStatus->usingDiagnosticFallback);
                                 quantum::editor::appendRigidBodyProofVertices(diagnosticVertices,
-                                    std::span{boxes}.first(showArmBounds ? 2 : 1));
+                                    std::span{boxes}.first(1));
+                                const auto bindings = rigidBodyProof->meshBindings();
+                                for (std::size_t index = 0; index < bindings.size(); ++index)
+                                {
+                                    const auto status = renderer.dynamicMeshAssetLoadStatus(bindings[index].assetIdentifier);
+                                    if (editorUi.rigidBodyProofDebugBoundsVisible()
+                                        || (status && status->usingDiagnosticFallback))
+                                        quantum::editor::appendRigidBodyProofVertices(diagnosticVertices,
+                                            std::span{boxes}.subspan(index + 1, 1));
+                                }
                                 uploadedRigidBodyProofTick = rigidBodyProof->world().tick();
                                 renderer.updateTrainPreviewVertices(diagnosticVertices);
                             }
                             else
                             {
-                                renderer.updateDynamicMeshInstance(std::nullopt);
+                                renderer.updateDynamicMeshInstances({});
                                 renderer.updateTrainPreviewVertices(trainVertices);
                             }
                             uploadedRigidBodyProofDebugBounds = editorUi.rigidBodyProofDebugBoundsVisible();

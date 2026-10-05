@@ -39,11 +39,11 @@ namespace quantum::editor
             cameraBeforeRigidBodyProof_ = viewportCamera_;
         // Clip against the proof's full rotation sweep, even if the authored
         // track is far from this diagnostic mechanism.
-        viewportCamera_.setBounds({-5.0, -13.0, 1.0}, {5.0, -11.0, 11.0});
+        viewportCamera_.setBounds({-7.0, -13.1, -1.0}, {7.0, -11.0, 13.0});
         viewportSettings_.orthographic = false;
         viewportSettings_.applyCameraSettings(viewportCamera_);
         viewportCamera_.setPose({{0.0, -12.0, 6.0},
-            -std::numbers::pi / 2.0, 0.15, 18.0});
+            -std::numbers::pi / 2.0, 0.15, 24.0});
         initialViewportFramePending_ = false;
     }
 
@@ -65,11 +65,11 @@ namespace quantum::editor
             ImGui::SameLine();
             if (ImGui::Button("Reset proof"))
                 pendingRigidBodyProofControl_ = RigidBodyProofControlType::Reset;
-            ImGui::Text("2 box bodies / 1 world hinge | tick %llu | arm %+.3f rad/s",
+            ImGui::Text("3 box bodies / 2 hinges | tick %llu | arm %+.3f rad/s",
                 static_cast<unsigned long long>(rigidBodyProofTick_),
                 rigidBodyProofAngularSpeed_);
             ImGui::Checkbox("Show physics/debug bounds", &rigidBodyProofDebugBoundsVisible_);
-            ImGui::TextDisabled("GLB arm / gray support. Uses preview Play/Pause; Reset proof restores the arm.");
+            ImGui::TextDisabled("Driven GLB arm / passive GLB carrier / gray support. Preview Play/Pause; Reset proof restores both.");
         }
         if (!rigidBodyProofError_.empty())
             ImGui::TextColored(palette::warning, "%s", rigidBodyProofError_.c_str());

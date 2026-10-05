@@ -12,6 +12,13 @@ namespace quantum::physics
 {
     class RigidBodyWorld;
 
+    struct RigidBodyWorldSettings
+    {
+        // Static/dynamic collision remains enabled. An isolated mechanism may
+        // opt out of dynamic/dynamic contact when its connected colliders overlap.
+        bool dynamicBodyCollisions = true;
+    };
+
     // Valid only in the creating world, until removal or world destruction.
     // Indices are never reused during a world's lifetime.
     struct RigidBodyHandle
@@ -98,7 +105,7 @@ namespace quantum::physics
     class RigidBodyWorld
     {
     public:
-        RigidBodyWorld();
+        explicit RigidBodyWorld(const RigidBodyWorldSettings& settings = {});
         ~RigidBodyWorld();
 
         RigidBodyWorld(const RigidBodyWorld&) = delete;

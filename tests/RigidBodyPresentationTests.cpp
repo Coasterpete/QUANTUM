@@ -70,7 +70,7 @@ namespace
         {
             proof.world().stepFixed();
             const auto boxes = proof.snapshot();
-            // The dedicated setup creates exactly these two bodies in order.
+            // The dedicated setup creates these three bodies in order.
             for (std::size_t index = 0; index < boxes.size(); ++index)
             {
                 const auto physics = proof.world().bodyState({&proof.world(), index});
@@ -98,14 +98,14 @@ namespace
             "Arm must reach the hinge motor's target speed.");
         require(glm::length(proof.snapshot()[1].positionMeters - initial[1].positionMeters) > 1.0,
             "Snapshot must visibly change after stepping.");
-        bool rejectedThirdBody = false;
-        try { (void)proof.world().bodyState({&proof.world(), 2}); }
-        catch (const std::invalid_argument&) { rejectedThirdBody = true; }
-        require(rejectedThirdBody, "Proof should contain only two bodies.");
-        bool rejectedSecondConstraint = false;
-        try { proof.world().removeConstraint({&proof.world(), 1}); }
-        catch (const std::invalid_argument&) { rejectedSecondConstraint = true; }
-        require(rejectedSecondConstraint, "Proof should contain only one constraint.");
+        bool rejectedFourthBody = false;
+        try { (void)proof.world().bodyState({&proof.world(), 3}); }
+        catch (const std::invalid_argument&) { rejectedFourthBody = true; }
+        require(rejectedFourthBody, "M5 proof should contain exactly three bodies.");
+        bool rejectedThirdConstraint = false;
+        try { proof.world().removeConstraint({&proof.world(), 2}); }
+        catch (const std::invalid_argument&) { rejectedThirdConstraint = true; }
+        require(rejectedThirdConstraint, "M5 proof should contain exactly two constraints.");
         std::cout << "10 s / 2400 ticks: maximum rendered pivot drift "
             << maximumPivotDrift << " m; arm "
             << proof.armAngularSpeedRadiansPerSecond() << " rad/s\n";

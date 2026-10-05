@@ -126,10 +126,10 @@ namespace quantum::renderer
         // Replaces the Editor's dynamic diagnostic train line stream.
         void updateTrainPreviewVertices(
             std::span<const LineVertex> vertices);
-        void updateDynamicMeshInstance(
-            const std::optional<StaticMeshInstance>& instance) override;
+        void updateDynamicMeshInstances(
+            std::span<const StaticMeshInstance> instances) override;
         [[nodiscard]] std::optional<HardwareAssetLoadStatus>
-            dynamicMeshAssetLoadStatus() const override;
+            dynamicMeshAssetLoadStatus(std::string_view identifier = {}) const override;
 
         // Replaces the Editor's renderer-neutral support-member line stream.
         void updateSupportVertices(std::span<const LineVertex> vertices);
@@ -530,13 +530,19 @@ namespace quantum::renderer
             VkBuffer buffer = VK_NULL_HANDLE;
             VmaAllocation allocation = VK_NULL_HANDLE;
             void* mappedData = nullptr;
+            VkDeviceSize capacity = 0;
             bool requiresUpdate = false;
         };
-        // A single transform per slot, written only after that slot's fence.
+        // Each slot retains a transform collection, written after its fence.
         std::array<DynamicMeshFrameBuffer, maxFramesInFlight> dynamicMeshFrameBuffers_{};
-        std::optional<StaticMeshInstance> dynamicMeshInstance_;
-        StaticMeshGpuHandle dynamicMeshHandle_;
-        std::optional<HardwareAssetLoadStatus> dynamicMeshLoadStatus_;
+        struct DynamicMeshEntry
+        {
+            StaticMeshGpuHandle mesh;
+            std::optional<HardwareAssetLoadStatus> status;
+        };
+        std::vector<DynamicMeshEntry> dynamicMeshEntries_;
+        // Same index as entries, using hardware.vert's existing instance layout.
+        std::vector<coaster::HardwareInstance> dynamicMeshTransforms_;
 
         VkBuffer trackMeshVertexBuffer_ = VK_NULL_HANDLE;
         VmaAllocation trackMeshVertexAllocation_ = VK_NULL_HANDLE;

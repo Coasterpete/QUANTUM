@@ -6,6 +6,10 @@ engineering/CGI visualization proof. M3's two bodies, world hinge, motor,
 gravity, collider dimensions and accepted 1/240-second preview cadence are
 unchanged. There is no independent animation or train/Jolt coupling.
 
+[M5](rigid-body-m5.md) extends this path to two independent moving GLBs with a
+passive carrier and a body-to-body hinge. The single-body observations below
+remain the historical M4 verification; M5 retains its caches and shader path.
+
 ## Asset and authoring contract
 
 The logical asset is `assets://mechanical/rotating-arm-placeholder.glb`, staged

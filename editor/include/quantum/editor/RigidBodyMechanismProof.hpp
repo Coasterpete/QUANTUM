@@ -11,6 +11,8 @@ namespace quantum::editor
 {
     inline constexpr std::string_view mechanicalArmAssetId =
         "assets://mechanical/rotating-arm-placeholder.glb";
+    inline constexpr std::string_view mechanicalGondolaAssetId =
+        "assets://mechanical/hanging-carrier-placeholder.glb";
 
     // Presentation owns this relationship. The handle borrows the proof world;
     // the asset identifier references renderer-owned CPU/GPU caches.
@@ -24,7 +26,7 @@ namespace quantum::editor
             const physics::RigidBodyWorld& world) const;
     };
 
-    enum class RigidBodyProofRole { Support, DrivenArm };
+    enum class RigidBodyProofRole { Support, DrivenArm, PassiveGondola };
 
     // Copied presentation values; no body handles or borrowed physics objects.
     struct RigidBodyProofBox
@@ -43,17 +45,22 @@ namespace quantum::editor
         RigidBodyMechanismProof();
 
         [[nodiscard]] physics::RigidBodyWorld& world() noexcept { return world_; }
-        [[nodiscard]] std::array<RigidBodyProofBox, 2> snapshot() const;
+        [[nodiscard]] std::array<RigidBodyProofBox, 3> snapshot() const;
         [[nodiscard]] double armAngularSpeedRadiansPerSecond() const;
         [[nodiscard]] const RigidBodyMeshBinding& armMeshBinding() const noexcept
-        { return armMeshBinding_; }
+        { return meshBindings_[0]; }
         [[nodiscard]] renderer::StaticMeshInstance armMeshInstance() const;
+        [[nodiscard]] std::span<const RigidBodyMeshBinding> meshBindings() const noexcept
+        { return meshBindings_; }
+        [[nodiscard]] std::array<renderer::StaticMeshInstance, 2> meshInstances() const;
 
     private:
-        physics::RigidBodyWorld world_;
-        std::array<physics::RigidBodyHandle, 2> bodies_{};
-        std::array<glm::dvec3, 2> halfExtents_{};
-        RigidBodyMeshBinding armMeshBinding_;
+        // This world contains only the two connected dynamic parts. Their box
+        // colliders overlap at the joint; other worlds keep default collision.
+        physics::RigidBodyWorld world_{{.dynamicBodyCollisions = false}};
+        std::array<physics::RigidBodyHandle, 3> bodies_{};
+        std::array<glm::dvec3, 3> halfExtents_{};
+        std::array<RigidBodyMeshBinding, 2> meshBindings_;
     };
 
     // Appends wire boxes to the existing dynamic diagnostic stream. Physics
