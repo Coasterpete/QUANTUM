@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -22,6 +23,7 @@ namespace
     struct LogCounts
     {
         int trainUploads = 0;
+        std::array<int, 3> perTrainAssetUploads{};
         int mechanismUploads = 0;
         int assetErrors = 0;
         int vulkanErrors = 0;
@@ -34,8 +36,15 @@ namespace
         auto& counts = *static_cast<LogCounts*>(data);
         if (category == "ASSET" && message.starts_with("Uploaded static mesh once:"))
         {
-            if (message.find(editor::placeholderTrainCarAssetId) != std::string_view::npos)
+            if (message.find("assets://train/") != std::string_view::npos)
+            {
                 ++counts.trainUploads;
+                const std::array identifiers{editor::placeholderTrainLeadAssetId,
+                    editor::placeholderTrainCarAssetId, editor::placeholderTrainRearAssetId};
+                for (std::size_t index = 0; index < identifiers.size(); ++index)
+                    if (message.find(identifiers[index]) != std::string_view::npos)
+                        ++counts.perTrainAssetUploads[index];
+            }
             else
                 ++counts.mechanismUploads;
         }
@@ -48,7 +57,7 @@ namespace
     void rendererLifecycle(LogCounts& counts)
     {
         std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window{
-            SDL_CreateWindow("Train Visual M0 regression", 128, 128,
+            SDL_CreateWindow("Train Visual M0/M1 regression", 128, 128,
                 SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN), &SDL_DestroyWindow};
         if (!window)
             throw std::runtime_error(std::string{"SDL_CreateWindow: "} + SDL_GetError());
@@ -83,6 +92,14 @@ namespace
             }
             renderer.updateDynamicMeshInstances(combined);
         };
+        // Retain M0's four copies/one upload proof before mixed identities.
+        const auto initialCars = preview.meshInstances();
+        combined.assign(initialCars.begin(), initialCars.end());
+        for (auto& instance : combined)
+            instance.assetIdentifier = editor::placeholderTrainCarAssetId;
+        renderer.updateDynamicMeshInstances(combined);
+        require(counts.trainUploads == 1, "M0's four repeated shells must still upload one mesh.");
+        draw();
         for (int cycle = 0; cycle < 20; ++cycle)
         {
             preview.reset();
@@ -96,9 +113,12 @@ namespace
                     "Train/proof transitions must publish all active instances.");
                 if (train)
                 {
-                    const auto status = renderer.dynamicMeshAssetLoadStatus(editor::placeholderTrainCarAssetId);
-                    require(status && status->state == renderer::HardwareAssetLoadState::Loaded,
-                        "Four shells must share the loaded placeholder.");
+                    for (const auto& instance : preview.meshInstances())
+                    {
+                        const auto status = renderer.dynamicMeshAssetLoadStatus(instance.assetIdentifier);
+                        require(status && status->state == renderer::HardwareAssetLoadState::Loaded,
+                            "Every heterogeneous train identity must be loaded.");
+                    }
                 }
                 if (proof)
                 {
@@ -157,11 +177,70 @@ namespace
             require(preview.isAvailable() && preview.dynamicsState()->tick > tick,
                 "Missing/invalid GLBs must not stop or replace specialized train physics.");
         }
+        // Count transitions keep the same three meshes while resizing poses.
+        for (const std::size_t count : {4, 2, 6, 1, 4})
+        {
+            auto setup = track.coasterSetup();
+            setup.carsPerTrain = count;
+            track.setCoasterSetup(setup);
+            require(preview.rebuild(track), "Changed consist count must rebuild.");
+            publish(true, true);
+            require(combined.size() == count + 2, "Count changes must retain mechanism instances.");
+            draw();
+        }
+        for (const int failedRole : {0, 1, 2})
+        {
+            const auto identifier = failedRole == 0 ? "assets://train/missing-lead-m1-test.glb"
+                : failedRole == 1 ? "assets://train/invalid-m0-test.glb"
+                : "assets://train/missing-rear-m1-test.glb";
+            preview.play();
+            const auto tick = preview.dynamicsState()->tick;
+            for (int frame = 0; frame < 8; ++frame)
+            {
+                preview.update(1.5 * physics::defaultFixedTimeStepSeconds);
+                publish(true, true);
+                for (std::size_t index = 0; index < 4; ++index)
+                    if ((failedRole == 0 && index == 0)
+                        || (failedRole == 1 && (index == 1 || index == 2))
+                        || (failedRole == 2 && index == 3))
+                        combined[index].assetIdentifier = identifier;
+                renderer.updateDynamicMeshInstances(combined);
+                const auto failed = renderer.dynamicMeshAssetLoadStatus(identifier);
+                require(failed && failed->usingDiagnosticFallback && !failed->detail.empty(),
+                    "Failed lead/shared middle/rear must request diagnostics.");
+                require(failed->state == (failedRole == 1 ? renderer::HardwareAssetLoadState::InvalidGlb
+                    : renderer::HardwareAssetLoadState::MissingAsset), "M1 failure classification must be precise.");
+                for (std::size_t index = 0; index < combined.size(); ++index)
+                {
+                    if (combined[index].assetIdentifier == identifier)
+                        continue;
+                    const auto healthy = renderer.dynamicMeshAssetLoadStatus(combined[index].assetIdentifier);
+                    require(healthy && !healthy->usingDiagnosticFallback,
+                        "Healthy train and mechanism siblings must remain loaded beside failed shells.");
+                    if (index < 4)
+                        require(combined[index].transform == preview.meshInstances()[index].transform,
+                            "Failed siblings must not shift healthy transform indices.");
+                }
+                preview.setPhysicsDiagnosticsVisible(true);
+                require(!preview.vertices().empty(), "A shell failure must leave physics diagnostics available.");
+                renderer.updateTrainPreviewVertices(preview.vertices());
+                draw();
+                renderer.updateDynamicMeshInstances({});
+                draw();
+            }
+            require(preview.isAvailable() && preview.dynamicsState()->tick > tick,
+                "Partial visual failure must leave specialized physics stepping.");
+        }
         coaster::setSectionLength(track.section(0), 1.0);
         require(!preview.rebuild(track),
             "A one-meter document has no legal four-car placement.");
         publish(true, true);
         require(combined.size() == 2, "Unavailable preview removes shells while retaining an active proof.");
+        draw();
+        coaster::setSectionLength(track.section(0), 100.0);
+        require(preview.rebuild(track), "Recovered preview must restore the heterogeneous consist.");
+        publish(true, true);
+        require(combined.size() == 6, "Recovery must restore train and mechanism publication.");
         draw();
         preview.setRigidBodyWorld(nullptr);
         renderer.updateDynamicMeshInstances({});
@@ -180,13 +259,16 @@ int main()
             throw std::runtime_error(std::string{"SDL_Init: "} + SDL_GetError());
         rendererLifecycle(counts);
         SDL_Quit();
-        require(counts.trainUploads == 1 && counts.mechanismUploads == 2,
-            "Four shells upload once; arm/carrier each upload once across all transitions.");
-        require(counts.assetErrors == 2, "Missing/invalid shells each log once across four cars and re-enable.");
+        require(counts.trainUploads == 3 && counts.perTrainAssetUploads == std::array{1, 1, 1}
+            && counts.mechanismUploads == 2,
+            "Lead, shared middle, rear and arm/carrier must each upload once across all transitions.");
+        require(counts.assetErrors == 4,
+            "M0 missing/invalid and M1 missing lead/rear each log once; repeated invalid middle reuses M0 failure.");
         require(counts.vulkanErrors == 0, "Train/proof frame-buffer lifecycle must have no Vulkan errors.");
         logging::resetLogSinkForTesting();
-        std::cout << "Train Visual M0 Vulkan: " << counts.frames
-            << " frames, 20 collection cycles, 1 train + 2 mechanism uploads, 2 retained asset errors, 0 Vulkan errors.\n";
+        std::cout << "Train Visual M0/M1 Vulkan: " << counts.frames
+            << " frames, 20 collection cycles, 3 train + 2 mechanism uploads, 4 retained asset errors, "
+               "0 Vulkan errors; mixed failures, count changes and recovery passed.\n";
         return 0;
     }
     catch (const std::exception& exception)

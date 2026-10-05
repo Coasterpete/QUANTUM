@@ -1,12 +1,19 @@
-"""Train Visual M0: one open car tub, physical body origin, meters, +X forward."""
+"""Train visual proofs: open tubs, physical body origin, meters, +X forward."""
 
+import argparse
 import os
+import sys
 
 import bpy
 
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-output_path = os.path.join(repo_root, "assets", "train", "placeholder-car-shell.glb")
+parser = argparse.ArgumentParser()
+parser.add_argument("--variant", choices=("middle", "lead", "rear"), default="middle")
+options = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
+variant = options.variant
+filename = "placeholder-car-shell.glb" if variant == "middle" else f"placeholder-{variant}-car-shell.glb"
+output_path = os.path.join(repo_root, "assets", "train", filename)
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
 # Use a fresh background session; never open/save an authored .blend file.
@@ -26,9 +33,14 @@ def material(name, color, metallic, roughness):
     return result
 
 
-shell_material = material("Placeholder teal shell", (0.02, 0.42, 0.48, 1), 0.25, 0.38)
+shell_colors = {
+    "middle": (0.02, 0.42, 0.48, 1),
+    "lead": (0.08, 0.22, 0.72, 1),
+    "rear": (0.55, 0.07, 0.18, 1),
+}
+shell_material = material(f"Placeholder {variant} shell", shell_colors[variant], 0.25, 0.38)
 floor_material = material("Dark compartment", (0.035, 0.055, 0.07, 1), 0.1, 0.6)
-marker_material = material("Forward centerline marker", (1.0, 0.52, 0.05, 1), 0.2, 0.4)
+marker_material = material("Orientation marker", (1.0, 0.52, 0.05, 1), 0.2, 0.4)
 
 # Default preview body bounds: X +/-2, Y +/-0.675, Z +/-0.7.
 # Origin is the physical body origin, not its loaded COG at positive Z.
@@ -39,7 +51,9 @@ for name, center, dimensions, finish in (
     ("Left tub wall", (-0.3, 0.605, -0.08), (3.4, 0.14, 0.94), shell_material),
     ("Right tub wall", (-0.3, -0.605, -0.08), (3.4, 0.14, 0.94), shell_material),
     ("Raised rear wall", (-1.92, 0, 0.02), (0.16, 1.35, 1.36), shell_material),
-    ("Nose centerline marker", (1.28, 0, 0.25), (0.36, 0.12, 0.08), marker_material),
+    ("Orientation marker",
+     (-1.87, 0, 0.65) if variant == "rear" else (1.28, 0, 0.58 if variant == "lead" else 0.25),
+     (0.12, 1.0, 0.08) if variant == "rear" else (0.36, 0.12, 0.08), marker_material),
 ):
     bpy.ops.mesh.primitive_cube_add(location=center)
     part = bpy.context.object
@@ -53,11 +67,13 @@ for name, center, dimensions, finish in (
     part.data.materials.append(finish)
     parts.append(part)
 
-nose_mesh = bpy.data.meshes.new("Tapered nose")
+nose_top = (0.7, 0.25) if variant == "lead" else ((0.1, 0.1) if variant == "rear" else (0.29, -0.15))
+nose_half_width = 0.28 if variant == "lead" else 0.48
+nose_mesh = bpy.data.meshes.new("Front treatment")
 nose_mesh.from_pydata(
-    [(1.1, -0.605, -0.54), (2, -0.48, -0.54), (2, 0.48, -0.54),
-     (1.1, 0.605, -0.54), (1.1, -0.605, 0.29), (2, -0.48, -0.15),
-     (2, 0.48, -0.15), (1.1, 0.605, 0.29)],
+    [(1.1, -0.605, -0.54), (2, -nose_half_width, -0.54), (2, nose_half_width, -0.54),
+     (1.1, 0.605, -0.54), (1.1, -0.605, nose_top[0]), (2, -nose_half_width, nose_top[1]),
+     (2, nose_half_width, nose_top[1]), (1.1, 0.605, nose_top[0])],
     [],
     [(3, 2, 1, 0), (0, 1, 5, 4), (1, 2, 6, 5),
      (2, 3, 7, 6), (3, 0, 4, 7), (4, 5, 6, 7)],
@@ -68,13 +84,22 @@ bpy.context.collection.objects.link(nose)
 nose.data.materials.append(shell_material)
 parts.append(nose)
 
+if variant == "rear":
+    bpy.ops.mesh.primitive_cube_add(location=(-1.7, 0, 0.48))
+    tail = bpy.context.object
+    tail.name = "Raised transverse tail cap"
+    tail.dimensions = (0.6, 1.2, 0.44)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    tail.data.materials.append(shell_material)
+    parts.append(tail)
+
 bpy.ops.object.select_all(action="DESELECT")
 for part in parts:
     part.select_set(True)
 bpy.context.view_layer.objects.active = parts[0]
 bpy.ops.object.join()
 car = bpy.context.object
-car.name = "QUANTUM_Placeholder_Car_Shell"
+car.name = f"QUANTUM_Placeholder_{variant.capitalize()}_Car_Shell"
 triangulate = car.modifiers.new(name="Export triangulation", type="TRIANGULATE")
 bpy.ops.object.modifier_apply(modifier=triangulate.name)
 

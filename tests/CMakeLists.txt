@@ -64,6 +64,20 @@ if(QUANTUM_ENABLE_EDITOR)
     set_tests_properties(QuantumEditor.TrainMeshPresentation PROPERTIES
         LABELS "editor;train;renderer;assets;presentation")
 
+    add_executable(QuantumEditorTrainVisualConsistTests
+        TrainVisualConsistTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp)
+    target_include_directories(QuantumEditorTrainVisualConsistTests PRIVATE
+        ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorTrainVisualConsistTests PRIVATE Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorTrainVisualConsistTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorTrainVisualConsistTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.TrainVisualConsist COMMAND QuantumEditorTrainVisualConsistTests
+        "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumEditor.TrainVisualConsist PROPERTIES
+        LABELS "editor;train;renderer;assets;presentation")
+
     add_executable(QuantumEditorTrainVisualRendererTests
         TrainVisualRendererTests.cpp
         ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
@@ -94,6 +108,13 @@ if(QUANTUM_ENABLE_EDITOR)
             "${PROJECT_SOURCE_DIR}/tests/fixtures/invalid-m4-test.glb"
             "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/train/invalid-m0-test.glb"
         VERBATIM)
+    foreach(train_asset_file IN ITEMS placeholder-lead-car-shell.glb placeholder-rear-car-shell.glb)
+        add_custom_command(TARGET QuantumEditorTrainVisualRendererTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${PROJECT_SOURCE_DIR}/assets/train/${train_asset_file}"
+                "$<TARGET_FILE_DIR:QuantumEditorTrainVisualRendererTests>/assets/train/${train_asset_file}"
+            VERBATIM)
+    endforeach()
     add_test(NAME QuantumEditor.TrainVisualRenderer COMMAND QuantumEditorTrainVisualRendererTests)
     set_tests_properties(QuantumEditor.TrainVisualRenderer PROPERTIES
         LABELS "editor;train;renderer;assets;vulkan;presentation")
