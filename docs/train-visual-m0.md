@@ -1,5 +1,10 @@
 # Train Visual M0: GLB car shells from specialized coaster poses
 
+This records the completed M0 milestone. [Train Visual M1](train-visual-m1.md)
+now replaces the runtime repeated prototype with an ordered per-car visual
+consist, reusing this GLB as the middle shell. M0's transform, interpolation,
+lifecycle and repeated-geometry regression checks remain in the test suite.
+
 M0 makes a single repeated placeholder car shell the normal train body visual.
 Each solved car has its own world matrix. It adds presentation only: QUANTUM's
 specialized track-constrained solver remains authoritative for the train.

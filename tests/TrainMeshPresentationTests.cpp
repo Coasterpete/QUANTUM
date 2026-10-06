@@ -97,7 +97,7 @@ namespace
             const auto track = straight(tangent, roll);
             const auto pose = physics::solveTrainPose(track, train,
                 {physics::primaryTrackPathId, 35.0, direction});
-            editor::TrainVisualPrototype visual;
+            std::vector<editor::TrainVisualPrototype> visual(pose.carCount());
             editor::updateTrainMeshInstances(instances, pose, visual, 1.0);
             require(instances.size() == 4, "Every solved car needs a separate transform.");
             const auto* storage = instances.data();
@@ -120,12 +120,14 @@ namespace
                     require(glm::length(point(instances[index], {}) - point(instances[index - 1], {})) > 1.0,
                         "Different cars must not reuse the lead car's transform.");
             }
-            visual.localAssetTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.2, -0.1, 0.3})
+            const auto adjustment = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.2, -0.1, 0.3})
                 * glm::rotate(glm::dmat4{1.0}, 0.4, glm::dvec3{0, 0, 1});
+            for (auto& prototype : visual)
+                prototype.localAssetTransform = adjustment;
             editor::updateTrainMeshInstances(instances, pose, visual, 0.5);
             require(instances.data() == storage, "Motion should reuse instance storage.");
             const glm::dvec3 local{0.7, -0.3, 0.5};
-            const glm::dvec3 adjusted{visual.localAssetTransform * glm::dvec4{local, 1.0}};
+            const glm::dvec3 adjusted{adjustment * glm::dvec4{local, 1.0}};
             for (std::size_t index = 0; index < instances.size(); ++index)
                 near(point(instances[index], local),
                     0.5 * pose.cars()[index].carPose().transformLocalPoint(adjusted),
@@ -153,7 +155,8 @@ namespace
             const auto current = physics::solveTrainPose(curve, train,
                 {physics::primaryTrackPathId, 25.2, direction});
             const auto rendered = editor::interpolateTrainPreviewPose(curve, train, previous, current, 0.5);
-            editor::updateTrainMeshInstances(instances, rendered, {}, 1.0);
+            const std::vector<editor::TrainVisualPrototype> visual(rendered.carCount());
+            editor::updateTrainMeshInstances(instances, rendered, visual, 1.0);
             for (std::size_t index = 0; index < instances.size(); ++index)
                 for (const auto& vertex : shared->vertices)
                     near(point(instances[index], vertex.position),

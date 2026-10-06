@@ -1101,13 +1101,19 @@ increments the visible interpolation failure counter without invalidating physic
 This adds one fixed tick of presentation latency and only queries train geometry;
 it neither recompiles the track nor traverses or rebuilds static scene objects.
 
-Rendering consumes the render-only `TrainPose`. [Train Visual M0](train-visual-m0.md)
-uses an Editor-only repeated visual prototype to transform one cached GLB shell
-per car from its solved body position/quaternion. Application combines these
+Rendering consumes the render-only `TrainPose`. [Train Visual M1](train-visual-m1.md)
+extends M0's repeated prototype to an Editor-owned ordered `TrainVisualConsist`:
+entry i supplies the asset identity/local adjustment for render-pose car i.
+The temporary default is lead, middle(s), rear (one car uses only lead).
+Rebuild resolves exactly one visual entry per physical car; the mesh helper
+rejects mismatched counts before modifying output. Physical definitions remain
+repeated and renderer-neutral, and visual inputs are not serialized.
+Each cached GLB shell uses its car's solved body position/quaternion. Application combines these
 instances with any active M5 mechanism instances before one renderer collection
 update. The renderer knows only asset identities and matrices; Jolt never owns
 train poses. The existing diagnostic overlays are optional, and a failed shell
-asset forces them visible without stopping simulation. Each wireframe car box transforms
+asset forces the full overlay visible without stopping simulation or hiding
+healthy train/mechanism siblings. Each wireframe car box transforms
 its authored body dimensions through `CarPose::transformLocalPoint`; bogie
 markers use `BogiePose::transformLocalPoint`; connector lines use the solved
 `InterCarConnectionPose` endpoints. SI pose positions are converted back to the

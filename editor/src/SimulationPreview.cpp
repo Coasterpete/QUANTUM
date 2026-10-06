@@ -307,6 +307,7 @@ namespace quantum::editor
                 authoredTrack.coasterSetup().carsPerTrain;
             trainDefinition_ = coaster::resolveTrainConfiguration(
                 trainConfiguration);
+            visualConsist_ = makeDefaultTrainVisualConsist(trainDefinition_.cars.size());
             const std::vector<coaster::TrackKinematicState> kinematics =
                 coaster::integrateAuthoredTrackKinematics(
                     authoredTrack,
@@ -893,6 +894,7 @@ namespace quantum::editor
         renderAlpha_ = 0.0;
         vertices_.clear();
         meshInstances_.clear();
+        visualConsist_.cars.clear();
         ++vertexGeneration_;
         playbackState_ = PlaybackState::Stopped;
         accumulatorSeconds_ = 0.0;
@@ -932,7 +934,7 @@ namespace quantum::editor
             return;
         }
 
-        updateTrainMeshInstances(meshInstances_, *renderPose_, visualPrototype_,
+        updateTrainMeshInstances(meshInstances_, *renderPose_, visualConsist_.cars,
             coordinateUnitsPerMeter_);
         if (!physicsDiagnosticsVisible_)
             return;

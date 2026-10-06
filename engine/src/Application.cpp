@@ -4632,11 +4632,19 @@ editorUi.selectSection(restoredSelection, true);
                             }
                             // Both physics domains publish values into one collection.
                             renderer.updateDynamicMeshInstances(dynamicMeshInstances);
-                            const auto trainAssetStatus = renderer.dynamicMeshAssetLoadStatus(
-                                quantum::editor::placeholderTrainCarAssetId);
+                            bool trainAssetFailed = false;
+                            for (const auto& instance : trainMeshes)
+                            {
+                                const auto status = renderer.dynamicMeshAssetLoadStatus(instance.assetIdentifier);
+                                if (status && status->usingDiagnosticFallback)
+                                {
+                                    trainAssetFailed = true;
+                                    break;
+                                }
+                            }
                             simulationPreview.setPhysicsDiagnosticsVisible(
                                 editorUi.trainPhysicsDiagnosticsVisible()
-                                || (trainAssetStatus && trainAssetStatus->usingDiagnosticFallback));
+                                || trainAssetFailed);
                             const auto trainVertices = simulationPreview.vertices();
                             if (rigidBodyProof)
                             {

@@ -180,7 +180,7 @@ namespace quantum::editor
         std::optional<physics::TrainPose> previousPose_;
         std::optional<physics::TrainPose> renderPose_;
         std::vector<renderer::LineVertex> vertices_;
-        TrainVisualPrototype visualPrototype_;
+        TrainVisualConsist visualConsist_;
         std::vector<renderer::StaticMeshInstance> meshInstances_;
         bool physicsDiagnosticsVisible_ = true;
         PlaybackState playbackState_ = PlaybackState::Stopped;

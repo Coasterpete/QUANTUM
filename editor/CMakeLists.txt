@@ -215,22 +215,29 @@ add_custom_target(QUANTUMMechanicalAssets ALL
     DEPENDS ${quantum_mechanical_asset_outputs})
 add_dependencies(QUANTUM QUANTUMMechanicalAssets)
 
-set(quantum_train_asset_source
-    "${PROJECT_SOURCE_DIR}/assets/train/placeholder-car-shell.glb")
-set(quantum_train_asset_destination
-    "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/train/placeholder-car-shell.glb")
-add_custom_command(
-    OUTPUT "${quantum_train_asset_destination}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/train"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${quantum_train_asset_source}" "${quantum_train_asset_destination}"
-    DEPENDS "${quantum_train_asset_source}"
-    COMMENT "Deploying QUANTUM placeholder train shell"
-    VERBATIM)
-add_custom_target(QUANTUMTrainAssets ALL DEPENDS "${quantum_train_asset_destination}")
+set(quantum_train_asset_files
+    placeholder-car-shell.glb
+    placeholder-lead-car-shell.glb
+    placeholder-rear-car-shell.glb)
+set(quantum_train_asset_outputs)
+foreach(train_asset_file IN LISTS quantum_train_asset_files)
+    set(quantum_train_asset_source "${PROJECT_SOURCE_DIR}/assets/train/${train_asset_file}")
+    set(quantum_train_asset_destination
+        "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/train/${train_asset_file}")
+    add_custom_command(
+        OUTPUT "${quantum_train_asset_destination}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}${QUANTUM_ASSET_CONFIG_SUBDIR}/assets/train"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${quantum_train_asset_source}" "${quantum_train_asset_destination}"
+        DEPENDS "${quantum_train_asset_source}"
+        COMMENT "Deploying QUANTUM placeholder train shell ${train_asset_file}"
+        VERBATIM)
+    list(APPEND quantum_train_asset_outputs "${quantum_train_asset_destination}")
+    install(FILES "${quantum_train_asset_source}" DESTINATION assets/train COMPONENT Runtime)
+endforeach()
+add_custom_target(QUANTUMTrainAssets ALL DEPENDS ${quantum_train_asset_outputs})
 add_dependencies(QUANTUM QUANTUMTrainAssets)
-install(FILES "${quantum_train_asset_source}" DESTINATION assets/train COMPONENT Runtime)
 
 set(quantum_environment_asset_files
     rooitou_park_1k.hdr
