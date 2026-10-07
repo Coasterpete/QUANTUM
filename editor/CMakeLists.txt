@@ -1,13 +1,41 @@
+add_library(QuantumApplication STATIC
+    src/ApplicationService.cpp
+    src/CenterlineVisualization.cpp
+    src/DocumentHistory.cpp
+    src/DocumentState.cpp
+    src/RegionSummary.cpp
+    src/RiderLoadDiagnostics.cpp
+    src/SimulationPreview.cpp
+    src/SupportVisualization.cpp
+    src/TrainMeshPresentation.cpp
+    src/TrackStylePresentation.cpp
+    src/TransitionEditorModel.cpp
+    src/ViewportCamera.cpp
+    src/ViewportTrackAnchors.cpp)
+if(WIN32)
+    target_sources(QuantumApplication PRIVATE src/DocumentFileWindows.cpp)
+endif()
+target_include_directories(QuantumApplication PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(QuantumApplication PUBLIC Quantum::Engine)
+target_compile_features(QuantumApplication PUBLIC cxx_std_23)
+set_target_properties(QuantumApplication QuantumCore QuantumEngine PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(BUILD_TESTING)
+    add_executable(QuantumApplicationServiceTests ${PROJECT_SOURCE_DIR}/tests/ApplicationServiceTests.cpp)
+    target_link_libraries(QuantumApplicationServiceTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.Service COMMAND QuantumApplicationServiceTests)
+endif()
+
+if(QUANTUM_ENABLE_HYBRID_EDITOR)
+    add_subdirectory(native)
+endif()
+
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QUANTUM
     src/main.cpp
-    src/CenterlineVisualization.cpp
     src/SupportPicking.cpp
     src/SupportNodeManipulation.cpp
-    src/SupportVisualization.cpp
     src/CoasterSetupUi.cpp
-    src/DocumentHistory.cpp
-    src/DocumentState.cpp
     src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
@@ -18,18 +46,10 @@ add_executable(
     src/EditorUiSupportAppearance.cpp
     src/PlatformDialogs.cpp
     src/PreviewSmoke.cpp
-    src/RegionSummary.cpp
     src/ReadmeCapture.cpp
     src/ReadmeCaptureRunner.cpp
-    src/RiderLoadDiagnostics.cpp
     src/RigidBodyMechanismProof.cpp
-    src/SimulationPreview.cpp
-    src/TrainMeshPresentation.cpp
-    src/TransitionEditorModel.cpp
-    src/TrackStylePresentation.cpp
-    src/ViewportCamera.cpp
     src/ViewportPicking.cpp
-    src/ViewportTrackAnchors.cpp
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/SupportPicking.hpp
@@ -81,6 +101,7 @@ target_link_libraries(
     QUANTUM
     PRIVATE
         Quantum::Engine
+        QuantumApplication
         Quantum::Core
         Quantum::Audio
         SDL3::SDL3
@@ -439,4 +460,5 @@ if(WIN32)
         DESTINATION "."
         COMPONENT Runtime
     )
+endif()
 endif()

@@ -31,8 +31,9 @@ include(CTest)
 
 option(QUANTUM_ENABLE_ENGINE "Build the QuantumEngine renderer/audio target" ON)
 option(QUANTUM_ENABLE_EDITOR "Build the QUANTUM editor application" ON)
+option(QUANTUM_ENABLE_HYBRID_EDITOR "Build the production managed editor native boundary" OFF)
 
-if(QUANTUM_ENABLE_EDITOR AND NOT QUANTUM_ENABLE_ENGINE)
+if((QUANTUM_ENABLE_EDITOR OR QUANTUM_ENABLE_HYBRID_EDITOR) AND NOT QUANTUM_ENABLE_ENGINE)
     set(QUANTUM_ENABLE_ENGINE ON)
 endif()
 
@@ -96,7 +97,7 @@ if(QUANTUM_ENABLE_ENGINE)
     find_package(SDL3 CONFIG REQUIRED)
     find_package(Jolt CONFIG REQUIRED)
     find_package(VulkanMemoryAllocator CONFIG REQUIRED)
-    if(QUANTUM_ENABLE_EDITOR)
+    if(QUANTUM_ENABLE_EDITOR OR QUANTUM_ENABLE_HYBRID_EDITOR)
         find_package(imgui CONFIG REQUIRED)
     endif()
 endif()
@@ -111,7 +112,7 @@ if(QUANTUM_ENABLE_ENGINE)
     add_subdirectory(engine)
 endif()
 
-if(QUANTUM_ENABLE_EDITOR)
+if(QUANTUM_ENABLE_EDITOR OR QUANTUM_ENABLE_HYBRID_EDITOR)
     add_subdirectory(editor)
 endif()
 

@@ -1,4 +1,5 @@
 #include <quantum/engine/Application.hpp>
+#include <quantum/editor/ApplicationService.hpp>
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/coaster/ChannelProfileEditing.hpp>
 #include <quantum/coaster/CircuitCompletion.hpp>
@@ -174,50 +175,13 @@ namespace
         return track;
     }
 
-    struct PreparedDocument
-    {
-        quantum::coaster::AuthoredTrack track;
-        quantum::editor::CenterlineVisualization centerline;
-        quantum::editor::SupportVisualization supports;
-        quantum::coaster::RiderLoadHistory riderLoads;
-    };
-
-    // Both interactive Open and developer smoke startup use this complete
-    // read/parse/generate/accept path before publishing a document.
+    using PreparedDocument = quantum::editor::PreparedDocument;
     [[nodiscard]] std::expected<PreparedDocument, std::string>
     prepareDocument(const std::filesystem::path& path)
     {
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            return std::unexpected(
-                "Could not open document: " + path.string());
-        const std::string json{
-            std::istreambuf_iterator<char>(input),
-            std::istreambuf_iterator<char>()};
-        auto track = quantum::coaster::deserializeCoasterDocument(json);
-        if (!track) return std::unexpected(track.error());
-
-        try
-        {
-            auto centerline = quantum::editor::createCenterlineVisualization(
-                *track, track->trackStyle());
-            auto supports = quantum::editor::createSupportVisualization(
-                *track, centerline.samples);
-            auto riderLoads =
-                quantum::editor::evaluateRiderLoadDiagnostics(*track);
-            quantum::editor::AuthoredTrackEditTransaction transaction{*track};
-            transaction.requireAcceptableRiderLoads(riderLoads);
-            return PreparedDocument{
-                std::move(*track),
-                std::move(centerline),
-                std::move(supports),
-                std::move(riderLoads)};
-        }
-        catch (const std::exception& error)
-        {
-            return std::unexpected(std::string{error.what()});
-        }
+        return quantum::editor::ApplicationService::prepareFile(path);
     }
+
 }
 
 namespace quantum::engine
@@ -488,34 +452,28 @@ namespace quantum::engine
                     startupDocument = std::move(*prepared);
                 }
 
-                quantum::coaster::AuthoredTrack authoredTrack =
-                    startupDocument
-                    ? std::move(startupDocument->track)
-                    : interactiveAuthoringDemoEnabled()
+                // GPU/proof owners precede the service so borrowed contexts
+                // outlive its SimulationPreview on every exit path.
+                quantum::renderer::VulkanContext vulkan;
+                quantum::renderer::Renderer& renderer = vulkan;
+                std::optional<quantum::physics::gpu::GpuPhysicsContext> gpuContext;
+                std::unique_ptr<quantum::editor::RigidBodyMechanismProof> rigidBodyProof;
+                auto startupRiderLoads = startupDocument
+                    ? std::move(startupDocument->riderLoads)
+                    : quantum::coaster::RiderLoadHistory{};
+                quantum::editor::ApplicationService applicationService{
+                    startupDocument ? std::move(*startupDocument)
+                    : quantum::editor::ApplicationService::prepare(interactiveAuthoringDemoEnabled()
                         ? createInteractiveAuthoringDemoTrack()
-                        : quantum::coaster::createNewDocument();
-                quantum::editor::DocumentState documentState;
+                        : quantum::coaster::createNewDocument())};
+                auto& authoredTrack = applicationService.track();
+                auto& documentState = applicationService.fileState();
+                auto& documentHistory = applicationService.history();
+                auto& centerlineCache = applicationService.centerline();
+                auto& supportVisualization = applicationService.supports();
                 if (previewSmokeOptions != nullptr)
-                    documentState.setOpenDocument(
-                        previewSmokeOptions->documentPath);
-                quantum::editor::DocumentHistory documentHistory;
-                documentHistory.reset(authoredTrack);
-                quantum::editor::CenterlineVisualizationCache
-                    centerlineCache;
-                centerlineCache.setTrackStyle(authoredTrack.trackStyle());
-                if (startupDocument)
-                    centerlineCache.replace(
-                        std::move(startupDocument->centerline));
-                else
-                    static_cast<void>(
-                        centerlineCache.rebuildIfDirty(authoredTrack));
-                const quantum::editor::CenterlineVisualization& centerline =
-                    centerlineCache.visualization();
-                quantum::editor::SupportVisualization supportVisualization =
-                    startupDocument
-                    ? std::move(startupDocument->supports)
-                    : quantum::editor::createSupportVisualization(
-                        authoredTrack, centerline.samples);
+                    documentState.setOpenDocument(previewSmokeOptions->documentPath);
+                const auto& centerline = centerlineCache.visualization();
 
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Info,
@@ -533,9 +491,6 @@ namespace quantum::engine
                     centerline.maximumPosition.z
                 );
 
-                quantum::renderer::VulkanContext vulkan;
-                quantum::renderer::Renderer& renderer = vulkan;
-                std::optional<quantum::physics::gpu::GpuPhysicsContext> gpuContext;
                 // Screenshot capture is opt-in through the developer smoke
                 // harness, so the normal render path never allocates a
                 // readback buffer or adds a swapchain copy.
@@ -581,7 +536,7 @@ namespace quantum::engine
                 editorUi.setCenterlineVisualization(centerline);
                 editorUi.setSupportVisualization(supportVisualization);
                 editorUi.setRiderLoadHistory(startupDocument
-                    ? std::move(startupDocument->riderLoads)
+                    ? std::move(startupRiderLoads)
                     : quantum::editor::evaluateRiderLoadDiagnostics(
                         authoredTrack));
                 editorUi.updateWindowTitle(documentState.windowTitle());
@@ -589,9 +544,9 @@ namespace quantum::engine
                     documentHistory.canUndo(),
                     documentHistory.canRedo());
 
-                // Declared first so an enabled proof's world outlives the preview.
-                std::unique_ptr<quantum::editor::RigidBodyMechanismProof> rigidBodyProof;
-                quantum::editor::SimulationPreview simulationPreview;
+                // The proof owner precedes the service, so its world outlives
+                // this borrowed preview reference.
+                auto& simulationPreview = applicationService.preview();
                 simulationPreview.setGpuContext(
                     gpuContext.has_value() ? &*gpuContext : nullptr);
                 if (previewSmokeOptions != nullptr
@@ -619,7 +574,7 @@ namespace quantum::engine
 
                 const auto rebuildSimulationPreview = [&]
                 {
-                    const bool available = simulationPreview.rebuild(authoredTrack);
+                    const bool available = applicationService.rebuildPreview();
                     editorUi.setTrainPreviewInspection(
                         simulationPreview.trainInspection());
                     if (available)
@@ -713,20 +668,13 @@ namespace quantum::engine
                         previewSmokeStart = PerformanceClock::now();
                         if (!previewSmokeOptions->stoppedPreview
                             && !previewSmokeOptions->modeCycle)
-                            simulationPreview.play();
+                            applicationService.play();
                     }
                 }
 
                 const auto synchronizeDirtyState = [&]
                 {
-                    if (documentHistory.isDirty())
-                    {
-                        documentState.markDirty();
-                    }
-                    else
-                    {
-                        documentState.clearDirty();
-                    }
+                    applicationService.synchronizeDirtyState();
                     editorUi.updateWindowTitle(documentState.windowTitle());
                 };
 
@@ -965,27 +913,17 @@ editorUi.selectSection(restoredSelection, true);
                 const auto writeSerializedDocument =
                     [&](const std::filesystem::path& path) -> bool
                 {
-                    const std::string json =
-                        quantum::coaster::serializeCoasterDocument(
-                            authoredTrack);
-                    std::ofstream ofs(path);
-
-                    if (ofs.is_open()
-                        && ofs.write(
-                            json.data(),
-                            static_cast<std::streamsize>(
-                                json.size())))
+                    try
                     {
+                        applicationService.save(path);
                         return true;
                     }
-
-                    SDL_ShowSimpleMessageBox(
-                        SDL_MESSAGEBOX_ERROR,
-                        "Save Failed",
-                        "Could not write the document file.",
-                        window
-                    );
-                    return false;
+                    catch (const std::exception& error)
+                    {
+                        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                            "Save Failed", error.what(), window);
+                        return false;
+                    }
                 };
 
                 // Saves to the committed document path and marks the
@@ -998,8 +936,6 @@ editorUi.selectSection(restoredSelection, true);
                         return false;
                     }
 
-                    documentHistory.markSaved();
-                    documentState.clearDirty();
                     return true;
                 };
 
@@ -1025,8 +961,6 @@ editorUi.selectSection(restoredSelection, true);
                         return false;
                     }
 
-                    documentState.setOpenDocument(*savePath);
-                    documentHistory.markSaved();
                     return true;
                 };
 
@@ -1238,17 +1172,12 @@ editorUi.selectSection(restoredSelection, true);
                             const bool undoRequested =
                                 *pendingHistoryOperation
                                     == HistoryOperationType::Undo;
-                            std::optional<quantum::coaster::AuthoredTrack>
-                                restoredTrack = undoRequested
-                                    ? documentHistory.undo()
-                                    : documentHistory.redo();
-                            if (restoredTrack.has_value())
+                            if (undoRequested ? documentHistory.canUndo() : documentHistory.canRedo())
                             {
                                 try
                                 {
-                                    publishHistoryState(*restoredTrack,
-                                        documentHistory.
-                                            lastRestoreTrackStylePresentationImpact());
+                                    applicationService.restoreHistoryWithPublication(
+                                        undoRequested, publishHistoryState);
                                     editorUi.synchronizeSelectedWoodenSupportRecipe();
                                     editorUi.synchronizeGround(authoredTrack.ground());
                                     const auto restoredImpact = documentHistory.
@@ -1280,19 +1209,6 @@ editorUi.selectSection(restoredSelection, true);
                                 }
                                 catch (const std::exception& exception)
                                 {
-                                    // The cursor advances before publication;
-                                    // roll it back when generation or upload
-                                    // cannot publish the requested revision.
-                                    if (undoRequested)
-                                    {
-                                        static_cast<void>(
-                                            documentHistory.redo());
-                                    }
-                                    else
-                                    {
-                                        static_cast<void>(
-                                            documentHistory.undo());
-                                    }
                                     SDL_ShowSimpleMessageBox(
                                         SDL_MESSAGEBOX_ERROR,
                                         undoRequested
@@ -1387,10 +1303,7 @@ editorUi.selectSection(restoredSelection, true);
                                 }
                                 else
                                 {
-                                    authoredTrack =
-                                        quantum::coaster::createNewDocument();
-                                    documentHistory.reset(authoredTrack);
-                                    documentState.newDocument();
+                                    applicationService.newDocument();
                                     editorUi.resetTransientState();
                                     editorUi.synchronizeGround(authoredTrack.ground());
                                     editorUi.selectSection(0, true);
@@ -1471,16 +1384,8 @@ editorUi.selectSection(restoredSelection, true);
                                                 loaded->centerline.renderableTrack);
                                             publishSupportsToRenderer(
                                                 renderer, loaded->supports);
-                                            authoredTrack =
-                                                std::move(loaded->track);
-                                            centerlineCache.setTrackStyle(
-                                                authoredTrack.trackStyle());
-                                            centerlineCache.replace(
-                                                std::move(loaded->centerline));
-                                            supportVisualization =
-                                                std::move(loaded->supports);
-                                            documentHistory.reset(authoredTrack);
-                                            documentState.setOpenDocument(*openPath);
+                                            auto loadedRiderLoads = std::move(loaded->riderLoads);
+                                            applicationService.openPrepared(std::move(*loaded), *openPath);
                                             editorUi.resetTransientState();
                                             editorUi.synchronizeGround(authoredTrack.ground());
                                             editorUi.selectSection(0, true);
@@ -1490,7 +1395,7 @@ editorUi.selectSection(restoredSelection, true);
                                                 centerline.maximumPosition);
                                             editorUi.setCenterlineSections(centerline.sectionSlices);
                                             editorUi.setRiderLoadHistory(
-                                                std::move(loaded->riderLoads));
+                                                std::move(loadedRiderLoads));
                                             editorUi.updateWindowTitle(
                                                 documentState.windowTitle()
                                             );
@@ -1614,7 +1519,7 @@ editorUi.selectSection(restoredSelection, true);
                                 transaction.commit(authoredTrack);
                                 if (!simulationPreview.isAvailable())
                                     rebuildSimulationPreview();
-                                documentHistory.record(authoredTrack);
+                                applicationService.recordAcceptedEdit();
                                 synchronizeDirtyState();
                                 editorUi.selectTrackDevice(selectedId);
                                 editorUi.setTrackDeviceEditError({});
@@ -2049,8 +1954,7 @@ editorUi.selectSection(restoredSelection, true);
                                 transaction.candidate().setGround(groundEdit->first);
                                 renderer.setGroundSurface(transaction.candidate().ground());
                                 transaction.commit(authoredTrack);
-                                documentHistory.record(authoredTrack,
-                                    groundEdit->second);
+                                applicationService.recordAcceptedEdit(groundEdit->second);
                                 synchronizeDirtyState();
                             }
                             catch (const std::exception& error)
@@ -2170,8 +2074,7 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateVisualization);
                                 editorUi.setSupportVisualization(
                                     supportVisualization);
-                                documentHistory.record(
-                                    authoredTrack, appearance.continuous);
+                                applicationService.recordAcceptedEdit(appearance.continuous);
                                 synchronizeDirtyState();
                                 if (!appearance.continuous)
                                 {
@@ -2237,9 +2140,7 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateSupports);
                                 editorUi.setSupportVisualization(
                                     supportVisualization);
-                                documentHistory.record(
-                                    authoredTrack,
-                                    requestedSupportEdit->continuous);
+                                applicationService.recordAcceptedEdit(requestedSupportEdit->continuous);
                                 synchronizeDirtyState();
                                 if (!requestedSupportEdit->continuous)
                                 {
@@ -2430,7 +2331,7 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateSupports);
                                 editorUi.setSupportVisualization(
                                     supportVisualization);
-                                documentHistory.record(authoredTrack);
+                                applicationService.recordAcceptedEdit();
                                 synchronizeDirtyState();
                                 // The Connect Nodes tool completes when its
                                 // member is created; a rejection above leaves
@@ -2571,8 +2472,7 @@ editorUi.selectSection(restoredSelection, true);
                                     std::move(candidateSupports);
                                 editorUi.setSupportVisualization(
                                     supportVisualization);
-                                documentHistory.record(
-                                    authoredTrack, command.continuous);
+                                applicationService.recordAcceptedEdit(command.continuous);
                                 synchronizeDirtyState();
                                 for (const auto& structure
                                     : authoredTrack.supports().structures)
@@ -2749,7 +2649,7 @@ editorUi.selectSection(restoredSelection, true);
                                 }
                                 }
                                 supportTransaction.commit(authoredTrack);
-                                documentHistory.record(authoredTrack);
+                                applicationService.recordAcceptedEdit();
                                 synchronizeDirtyState();
                                 for (const auto& structure
                                     : authoredTrack.supports().structures)
@@ -3207,12 +3107,9 @@ editorUi.selectSection(restoredSelection, true);
 
                                 if (requestedLengthEdit.has_value())
                                 {
-                                    quantum::coaster::setSectionLength(
-                                        candidateTrack.section(
-                                            requestedLengthEdit
-                                                ->sectionIndex),
-                                        requestedLengthEdit->length
-                                    );
+                                    quantum::editor::ApplicationService::resizeRegion(
+                                        candidateTrack, requestedLengthEdit->sectionIndex,
+                                        requestedLengthEdit->length);
                                     candidateChanged = true;
                                 }
 
@@ -3446,9 +3343,7 @@ editorUi.selectSection(restoredSelection, true);
                                                     TrackStylePresentationProduct::
                                                         HardwareInstances);
                                     editTransaction.commit(authoredTrack);
-                                    documentHistory.record(
-                                        authoredTrack,
-                                        continuousDrag,
+                                    applicationService.recordAcceptedEdit(continuousDrag,
                                         regionStylePresentationImpact);
                                     synchronizeDirtyState();
                                 }
@@ -3457,41 +3352,16 @@ editorUi.selectSection(restoredSelection, true);
                                     FullEditTelemetry telemetry;
                                     applicationBlockingEvents
                                         .trackBufferMutation = true;
-                                    auto phaseBegin = PerformanceClock::now();
-                                    quantum::editor::CenterlineVisualization
-                                    candidateCenterline =
-                                        quantum::editor::
-                                            createCenterlineVisualization(
-                                                candidateTrack,
-                                                candidateTrack.trackStyle()
-                                            );
-                                telemetry.centerlineMilliseconds =
-                                    std::chrono::duration<double, std::milli>(
-                                        PerformanceClock::now()
-                                            - phaseBegin).count();
-                                phaseBegin = PerformanceClock::now();
-                                quantum::coaster::RiderLoadHistory
-                                    candidateRiderLoads =
-                                        quantum::editor::
-                                            evaluateRiderLoadDiagnostics(
-                                                candidateTrack
-                                            );
-                                telemetry.riderLoadsMilliseconds =
-                                    std::chrono::duration<double, std::milli>(
-                                        PerformanceClock::now()
-                                            - phaseBegin).count();
-                                phaseBegin = PerformanceClock::now();
-                                quantum::editor::SupportVisualization
-                                    candidateSupports = quantum::editor::
-                                        createSupportVisualization(
-                                            candidateTrack,
-                                            candidateCenterline.samples);
-                                telemetry.supportsMilliseconds =
-                                    std::chrono::duration<double, std::milli>(
-                                        PerformanceClock::now()
-                                            - phaseBegin).count();
-
-                                editTransaction.requireAcceptableRiderLoads(candidateRiderLoads);
+                                quantum::editor::DocumentPreparationTelemetry preparationTelemetry;
+                                auto prepared = quantum::editor::ApplicationService::prepare(
+                                    candidateTrack, &preparationTelemetry);
+                                auto& candidateCenterline = prepared.centerline;
+                                auto& candidateRiderLoads = prepared.riderLoads;
+                                auto& candidateSupports = prepared.supports;
+                                telemetry.centerlineMilliseconds = preparationTelemetry.centerlineMilliseconds;
+                                telemetry.riderLoadsMilliseconds = preparationTelemetry.riderLoadsMilliseconds;
+                                telemetry.supportsMilliseconds = preparationTelemetry.supportsMilliseconds;
+                                auto phaseBegin = PerformanceClock::now();
 
                                 editorUi.setCenterlineBounds(
                                     candidateCenterline.minimumPosition,
@@ -3531,21 +3401,11 @@ editorUi.selectSection(restoredSelection, true);
                                 telemetry.frameFenceWaitMilliseconds +=
                                     renderer.lastFrameCompletionWaitMilliseconds();
 
-                                centerlineCache.setTrackStyle(
-                                    candidateTrack.trackStyle());
-                                centerlineCache.replace(
-                                    std::move(candidateCenterline));
-                                editTransaction.commit(authoredTrack);
-                                supportVisualization =
-                                    std::move(candidateSupports);
-                                editorUi.setSupportVisualization(
-                                    supportVisualization);
-                                documentHistory.record(
-                                    authoredTrack,
-                                    continuousDrag);
-                                editorUi.setRiderLoadHistory(
-                                    std::move(candidateRiderLoads)
-                                );
+                                auto acceptedRiderLoads = std::move(candidateRiderLoads);
+                                applicationService.commitPreparedEdit(editTransaction,
+                                    std::move(prepared), continuousDrag);
+                                editorUi.setSupportVisualization(supportVisualization);
+                                editorUi.setRiderLoadHistory(std::move(acceptedRiderLoads));
                                 // The candidate became the committed
                                 // document, so any earlier rejection notice
                                 // no longer describes the current state.
@@ -4027,7 +3887,7 @@ editorUi.selectSection(restoredSelection, true);
                         {
                             authoredTrack.setLayoutMode(
                                 *requestedLayoutMode);
-                            documentHistory.record(authoredTrack);
+                            applicationService.recordAcceptedEdit();
                             synchronizeDirtyState();
 
                             quantum::logging::logMessagef(
@@ -4105,7 +3965,7 @@ editorUi.selectSection(restoredSelection, true);
                                 }
 
                                 setupTransaction.commit(authoredTrack);
-                                documentHistory.record(authoredTrack);
+                                applicationService.recordAcceptedEdit();
                                 synchronizeDirtyState();
                                 quantum::logging::logMessagef(
                                     quantum::logging::LogLevel::Info,
@@ -4170,7 +4030,7 @@ editorUi.selectSection(restoredSelection, true);
                                         candidateRiderLoads);
                                 physicalSettingsTransaction.commit(
                                     authoredTrack);
-                                documentHistory.record(authoredTrack);
+                                applicationService.recordAcceptedEdit();
                                 editorUi.setRiderLoadHistory(
                                     std::move(candidateRiderLoads));
                                 synchronizeDirtyState();
@@ -4239,8 +4099,7 @@ editorUi.selectSection(restoredSelection, true);
                                                 TrackStylePresentationProduct::
                                                     HardwareInstances);
                                     authoredTrack = std::move(candidateTrack);
-                                    documentHistory.record(
-                                        authoredTrack, false, impact);
+                                    applicationService.recordAcceptedEdit(false, impact);
                                     synchronizeDirtyState();
                                 }
                             }
@@ -4318,7 +4177,7 @@ editorUi.selectSection(restoredSelection, true);
                                         evaluateRiderLoadDiagnostics(
                                             authoredTrack)
                                 );
-                                documentHistory.record(authoredTrack);
+                                applicationService.recordAcceptedEdit();
                                 synchronizeDirtyState();
 
                                 // Select the newly created connector.
@@ -4493,13 +4352,13 @@ editorUi.selectSection(restoredSelection, true);
                             switch (*control)
                             {
                             case SimulationControlType::Play:
-                                simulationPreview.play();
+                                applicationService.play();
                                 break;
                             case SimulationControlType::Pause:
-                                simulationPreview.pause();
+                                applicationService.pause();
                                 break;
                             case SimulationControlType::Reset:
-                                simulationPreview.reset();
+                                applicationService.reset();
                                 break;
                             }
                         }
@@ -4586,7 +4445,7 @@ editorUi.selectSection(restoredSelection, true);
                         // Minimized iterations skip ImGui NewFrame, so its
                         // first restored delta includes the entire suspension.
                         // The event flags survive those skipped iterations.
-                        simulationPreview.update(editorUi.frameDeltaSeconds(),
+                        applicationService.update(editorUi.frameDeltaSeconds(),
                             frameBlockingEvents.windowMinimized
                                 || frameBlockingEvents.windowRestored);
                         publishSimulationStatus();
@@ -4882,7 +4741,7 @@ editorUi.selectSection(restoredSelection, true);
                                 previewSmokeFailure = true;
                                 previewSmokeFailureMessage =
                                     simulationPreview.error();
-                                simulationPreview.pause();
+                                applicationService.pause();
                                 running = false;
                             }
                             else if (preview.renderPoseFailureCount > 0)
@@ -4890,7 +4749,7 @@ editorUi.selectSection(restoredSelection, true);
                                 previewSmokeFailure = true;
                                 previewSmokeFailureMessage =
                                     "Simulation preview interpolation failed.";
-                                simulationPreview.pause();
+                                applicationService.pause();
                                 running = false;
                             }
                             else if (!previewSmokeOptions->stoppedPreview
@@ -4916,14 +4775,14 @@ editorUi.selectSection(restoredSelection, true);
                                 if (previewSmokeOptions->repeat
                                     && preview.boundaryStopped)
                                 {
-                                    simulationPreview.reset();
-                                    simulationPreview.play();
+                                    applicationService.reset();
+                                    applicationService.play();
                                 }
                                 if (elapsedSeconds
                                     >= previewSmokeOptions->durationSeconds)
                                 {
                                     previewSmokeDurationCompleted = true;
-                                    simulationPreview.pause();
+                                    applicationService.pause();
                                     running = false;
                                 }
                             }

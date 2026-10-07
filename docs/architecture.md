@@ -5,7 +5,10 @@ implemented behavior from planned coaster-design, physics, and Editor systems.
 
 ## Target boundaries
 
-The repository currently builds three primary targets plus Core tests.
+The repository builds Core, Engine and the ImGui editor, with an opt-in native
+application library/C ABI and Avalonia frontend. See
+[Hybrid editor foundation](hybrid-editor-foundation.md) for build commands,
+frontend ownership and migration limits.
 
 ### `QuantumCore`
 
@@ -64,7 +67,11 @@ policy, deferred retirement, timestamp queries, and synchronization.
 
 `Application` is the composition root: it creates `VulkanContext`, then uses a
 `Renderer&` for track uploads, Simulator preview lines, and frame submission.
-Both workspaces share that renderer and the same `SimulationPreview`. The
+Its `ApplicationService` owns document/history/file state, generated CPU
+presentation and `SimulationPreview`. The optional managed frontend uses that
+same service through `QuantumNative`; specialized ImGui publication remains at
+its existing renderer boundary. Both ImGui workspaces share that renderer and
+the same preview. The
 Editor uses the contract for renderer-neutral camera, lighting, presentation,
 asset status, and viewport-aid operations. Its existing Dear ImGui Vulkan
 integration still registers the viewport image and records UI commands through

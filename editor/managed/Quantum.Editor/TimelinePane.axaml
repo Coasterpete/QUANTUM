@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Quantum.Editor" xmlns:managed="using:Quantum.Managed"
+             x:Class="Quantum.Editor.TimelinePane" x:DataType="local:EditorViewModel">
+  <Border Classes="pane" Padding="12,8">
+    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+      <Grid ColumnDefinitions="Auto,210,*" ColumnSpacing="14">
+        <TextBlock Classes="heading" Text="TIMELINE / TRANSITION EDITOR" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="1" SelectedIndex="{Binding TimelineSource}" MinHeight="28">
+          <ComboBoxItem Content="Region profiles" /><ComboBoxItem Content="Track Devices" />
+        </ComboBox>
+        <TextBlock Grid.Column="2" Classes="technical muted" Text="{Binding TimelineContext}" VerticalAlignment="Center" TextWrapping="Wrap" />
+      </Grid>
+      <Grid Grid.Row="1" ColumnDefinitions="245,*,350" ColumnSpacing="12">
+        <Grid RowDefinitions="Auto,*">
+          <StackPanel IsVisible="{Binding IsDeviceTimeline}" Spacing="5">
+            <ComboBox ItemsSource="{Binding Snapshot.Devices}" SelectedItem="{Binding SelectedDevice}" HorizontalAlignment="Stretch" MinHeight="28" />
+            <Grid ColumnDefinitions="*,90,Auto" ColumnSpacing="4">
+              <ComboBox SelectedIndex="{Binding DeviceMode}" MinHeight="28"><ComboBoxItem Content="Constant" /><ComboBoxItem Content="Custom" /></ComboBox>
+              <TextBox Grid.Column="1" Text="{Binding DeviceAcceleration}" MinHeight="28" ToolTip.Tip="Constant acceleration / seed for a new Custom profile, m/s²" />
+              <Button Grid.Column="2" Content="Apply" Command="{Binding ApplyDeviceCommand}" MinHeight="28" Padding="7,3" />
+            </Grid>
+          </StackPanel>
+          <ListBox Grid.Row="1" ItemsSource="{Binding VisibleProfiles}" SelectedItem="{Binding SelectedProfile}" Background="Transparent" BorderThickness="0">
+            <ListBox.Styles><Style Selector="ListBoxItem"><Setter Property="Padding" Value="5,4" /><Setter Property="Margin" Value="0,1" /></Style></ListBox.Styles>
+            <ListBox.ItemTemplate><DataTemplate x:DataType="managed:ProfileSegment"><TextBlock Classes="technical" Text="{Binding Summary}" TextWrapping="Wrap" /></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+        <local:ProfilePlot Grid.Column="1" Profiles="{Binding VisibleProfiles}" Selected="{Binding SelectedProfile}" />
+        <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="5" IsVisible="{Binding HasProfile}">
+            <TextBlock Text="{Binding SelectedProfile.Units}" Classes="technical muted" />
+            <Grid ColumnDefinitions="42,*,Auto" ColumnSpacing="6"><TextBlock Text="Begin" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding ProfileBegin}" MinHeight="28" /><Button Grid.Column="2" Content="Apply" Command="{Binding ApplyProfileBeginCommand}" MinHeight="28" Padding="8,3" /></Grid>
+            <Grid ColumnDefinitions="42,*,Auto" ColumnSpacing="6"><TextBlock Text="End" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding ProfileEnd}" MinHeight="28" /><Button Grid.Column="2" Content="Apply" Command="{Binding ApplyProfileEndCommand}" MinHeight="28" Padding="8,3" /></Grid>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6"><ComboBox ItemsSource="{Binding TransitionTypes}" SelectedItem="{Binding SelectedTransition}" MinHeight="28" HorizontalAlignment="Stretch" /><Button Grid.Column="1" Content="Apply type" Command="{Binding ApplyTransitionCommand}" MinHeight="28" Padding="8,3" /></Grid>
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6"><TextBox Text="{Binding ProfileDistance}" MinHeight="28" ToolTip.Tip="Local distance in metres; outer boundaries remain pinned" /><Button Grid.Column="1" Content="Split" Command="{Binding SplitProfileCommand}" MinHeight="28" Padding="8,3" /><Button Grid.Column="2" Content="Remove" Command="{Binding RemoveProfileCommand}" MinHeight="28" Padding="8,3" /></Grid>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Button Content="Move begin" Command="{Binding MoveProfileBeginCommand}" MinHeight="28" Padding="8,3" /><Button Content="Move end" Command="{Binding MoveProfileEndCommand}" MinHeight="28" Padding="8,3" /></StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>
