@@ -33,4 +33,4 @@ if ($Test) {
     & (Join-Path $testOutput 'Quantum.Managed.Tests.exe') (Join-Path $repository 'smoke-tests/modern-steel-validation.quantum')
     if ($LASTEXITCODE) { throw 'Managed tests failed.' }
 }
-if ($Run) { Start-Process -FilePath (Join-Path $output 'Quantum.Editor.exe') -WorkingDirectory $output -WindowStyle Hidden }
+if ($Run) { Start-Process -FilePath (Join-Path $output 'Quantum.Editor.exe') -WorkingDirectory $output -WindowStyle Normal }
