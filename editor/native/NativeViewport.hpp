@@ -6,6 +6,7 @@
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
 #include <quantum/editor/InfrastructurePresentation.hpp>
+#include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 #include <imgui.h>
 #include <thread>
@@ -28,6 +29,11 @@ public:
     void captureTrain(uint64_t revision, uint64_t generation,
         std::span<const quantum::renderer::LineVertex> train,
         std::span<const quantum::renderer::StaticMeshInstance> meshes);
+    void captureTrainAuthoring(uint64_t revision, bool active, uint64_t selected, uint32_t overlays,
+        const quantum::coaster::TrainConfiguration& train, const quantum::physics::TrainPose* pose, double metersPerUnit);
+    [[nodiscard]] bool trainAssetFailed() const noexcept { return trainAssetFailed_; }
+    struct TrainPickIntent { uint64_t revision, car; };
+    [[nodiscard]] std::optional<TrainPickIntent> takeTrainPick() noexcept;
     void captureDevice(uint64_t revision, uint64_t selected,
         const quantum::coaster::AuthoredTrack& track,
         const quantum::editor::CenterlineVisualization& geometry,
@@ -63,6 +69,9 @@ private:
     static void retireTexture(void* self) noexcept;
     void drawSupportOverlay();
     void frameSupportSelection();
+    void drawTrainOverlay();
+    void frameTrain(uint32_t action);
+    void pickTrainAt(double x, double y);
     void drawPlacementOverlay();
     void placementPointer(uint32_t phase, const glm::dvec2& pointer, double pixelScale = 1);
     void queueTransform(uint32_t phase, const glm::dvec2& pointer);
@@ -94,6 +103,12 @@ private:
     std::vector<quantum::editor::InfrastructureSolid> infrastructurePicking_, accessPicking_;
     std::vector<std::pair<uint64_t,double>> accessFractions_, nextAccessFractions_;
     std::vector<quantum::renderer::StaticMeshInstance> meshes_;
+    std::vector<quantum::editor::TrainPreviewCar> previewCars_;
+    bool trainActive_ = false;
+    bool trainAssetFailed_ = false;
+    uint64_t trainAuthoringRevision_ = 0, selectedCar_ = 0;
+    uint32_t trainOverlays_ = 31;
+    std::optional<TrainPickIntent> trainPick_;
     quantum::editor::SupportVisualization supportPicking_;
     std::vector<uint32_t> supportAnchors_;
     std::vector<std::pair<glm::dvec3, quantum::editor::SupportSelection>> supportConnections_;

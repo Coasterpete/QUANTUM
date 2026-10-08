@@ -7,13 +7,16 @@
 namespace quantum::physics
 {
     using namespace coaster;
-    TrainObservation observeTrain(const TrainPose& pose, double speed, OperationTrainId id)
+    TrainObservation observeTrain(const TrainPose& pose, double speed, OperationTrainId id, const TrainDefinition* definition)
     {
+        if (definition && definition->cars.size() != pose.carCount())
+            throw std::invalid_argument("Train observation needs matching physical definitions.");
         TrainObservation result{id, pose.generalizedReferenceLocation().stationMeters, speed, {}};
         result.bogies.reserve(pose.carCount() * 2);
         for (std::size_t car = 0; car < pose.carCount(); ++car)
             for (const auto* bogie : {&pose.cars()[car].carPose().frontBogie(), &pose.cars()[car].carPose().rearBogie()})
-                result.bogies.push_back({car, bogie->definitionIndex(), bogie->location().stationMeters});
+                result.bogies.push_back({car, bogie->definitionIndex(), bogie->location().stationMeters,
+                    definition ? definition->cars[car].authoredCarId : 0});
         return result;
     }
     namespace
@@ -30,7 +33,7 @@ namespace quantum::physics
                     if (trackDeviceContainsStation(device, bogie.stationMeters, length, circuit))
                     {
                         ++count; cars.insert(bogie.car);
-                        result.bogies.push_back({train.id, bogie.car, bogie.bogie});
+                        result.bogies.push_back({train.id, bogie.car, bogie.bogie, bogie.carId});
                     }
                 if (count) result.trains.push_back({train.id, count, cars.size(), count == train.bogies.size()});
             }

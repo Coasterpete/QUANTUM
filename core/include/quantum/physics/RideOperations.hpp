@@ -6,7 +6,7 @@
 namespace quantum::physics
 {
     using OperationTrainId = std::uint64_t;
-    struct BogieObservation { std::size_t car = 0, bogie = 0; double stationMeters = 0; };
+    struct BogieObservation { std::size_t car = 0, bogie = 0; double stationMeters = 0; std::uint64_t carId = 0; };
     struct TrainObservation
     {
         OperationTrainId id = 1;
@@ -14,8 +14,9 @@ namespace quantum::physics
         std::vector<BogieObservation> bogies;
     };
     [[nodiscard]] TrainObservation observeTrain(const TrainPose& pose,
-        double signedSpeedMetersPerSecond, OperationTrainId id = 1);
-    struct OccupiedBogie { OperationTrainId train; std::size_t car, bogie; };
+        double signedSpeedMetersPerSecond, OperationTrainId id = 1, const TrainDefinition* definition = nullptr);
+    // Bogie identity is (train, stable carId, definition-local bogie index).
+    struct OccupiedBogie { OperationTrainId train; std::size_t car, bogie; std::uint64_t carId = 0; };
     struct OccupyingTrain
     {
         OperationTrainId id;

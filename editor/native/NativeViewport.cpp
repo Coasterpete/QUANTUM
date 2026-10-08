@@ -171,7 +171,8 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
                 else if (event.key.key == SDLK_O) shortcuts_ |= 8u;
                 else if (event.key.key == SDLK_N) shortcuts_ |= 16u;
             }
-            else if (!pointerTransform_ && event.key.key == SDLK_F) camera_.frame(static_cast<double>(width_) / height_);
+            else if (!pointerTransform_ && event.key.key == SDLK_F)
+            { if (trainActive_) frameTrain(14); else camera_.frame(static_cast<double>(width_) / height_); }
             else if (!pointerTransform_ && event.key.key == SDLK_W) camera_.moveLocal(1, 0, 0, .05);
             else if (!pointerTransform_ && event.key.key == SDLK_S) camera_.moveLocal(-1, 0, 0, .05);
             else if (!pointerTransform_ && event.key.key == SDLK_A) camera_.moveLocal(0, -1, 0, .05);
@@ -182,13 +183,15 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
             if (event.button.button != SDL_BUTTON_LEFT) cancelTransformInput();
             focusViewport(window_);
             shortcuts_ |= 256u;
-            if (supportActive_ && !supports && !geometry && event.button.button == SDL_BUTTON_LEFT)
+            if (trainActive_ && !supports && !geometry && event.button.button == SDL_BUTTON_LEFT && inputWidth > 0 && inputHeight > 0)
+                pickTrainAt(event.button.x / inputWidth, event.button.y / inputHeight);
+            if (!trainActive_ && supportActive_ && !supports && !geometry && event.button.button == SDL_BUTTON_LEFT)
             {
                 selectedSupport_ = pick(event.button.x, event.button.y);
                 supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
                 if (!selectedSupport_ && inputWidth > 0 && inputHeight > 0) pickInfrastructureAt(event.button.x/inputWidth,event.button.y/inputHeight);
             }
-            if (placementActive_ && !geometry && !supports && event.button.button == SDL_BUTTON_LEFT)
+            if (!trainActive_ && placementActive_ && !geometry && !supports && event.button.button == SDL_BUTTON_LEFT)
                 placementPointer(0, {event.button.x * static_cast<double>(width) / std::max(1, inputWidth),
                     event.button.y * static_cast<double>(height) / std::max(1, inputHeight)},
                     static_cast<double>(width) / std::max(1, inputWidth));
@@ -255,6 +258,12 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
         lines_.insert(lines_.end(), placementGhost_.begin(), placementGhost_.end());
         renderer_.updateTrainPreviewVertices(lines_);
         renderer_.updateDynamicMeshInstances(meshes_);
+        trainAssetFailed_ = false;
+        for (const auto& instance : meshes_)
+        {
+            const auto status = renderer_.dynamicMeshAssetLoadStatus(instance.assetIdentifier);
+            if (status && status->usingDiagnosticFallback) { trainAssetFailed_ = true; break; }
+        }
         trainDirty_ = false;
     }
     auto& io = ImGui::GetIO();
@@ -269,6 +278,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
     }
     if (supportActive_) drawSupportOverlay();
     drawPlacementOverlay();
+    drawTrainOverlay();
     ImGui::Render(); renderer_.drawFrame();
     if (swapchainGeneration_ != renderer_.swapchainGeneration())
     {
@@ -382,6 +392,8 @@ void NativeViewport::input(uint32_t action, double x, double y, double z, double
     case 10: case 11: case 12:
         placementPointer(action - 10, {x * width_, y * height_}, pixelScale_); break;
     case 13: cancelTransformInput(); break;
+    case 14: case 15: case 16: case 17: frameTrain(action); break;
+    case 18: pickTrainAt(x, y); break;
     }
 }
 void NativeViewport::pickInfrastructureAt(double x, double y)

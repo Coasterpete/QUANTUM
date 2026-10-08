@@ -1092,6 +1092,7 @@ void drawSimulationTelemetry();
         float appliedUiScale_ = 0.0F;
         bool uiScaleRefreshPending_ = true;
         bool trainConfigurationInitialFocusPending_ = false;
+        int trainSummaryCarIndex_ = 0;
         std::optional<FileOperationType> pendingFileOperation_;
         std::optional<HistoryOperationType> pendingHistoryOperation_;
 bool canUndo_ = false;

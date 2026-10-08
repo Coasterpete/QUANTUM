@@ -223,6 +223,19 @@ QN_API QnResult QN_CALL qn_hardware_command(QnSession session, uint64_t expected
 QN_API QnResult QN_CALL qn_infrastructure_configuration(QnSession session, uint64_t expected_revision,
     const char* json, uint64_t next_id, QnError* error);
 QN_API QnResult QN_CALL qn_update(QnSession session, double seconds, QnError* error);
+/* Train 2 additive JSON boundary, native SI values. op: 0 replace, 1 append,
+   2 insert, 3 duplicate, 4 remove, 5 reorder, 6 apply prototype, 7 resize,
+   8 apply proposal with native uniform-box dry inertia for the selected car.
+   Prototype text is a role name; replace text is the complete train object.
+   Selection/overlays are transient and never enter document history. */
+QN_API QnResult QN_CALL qn_train_snapshot(QnSession session, uint64_t revision,
+    char* buffer, uint32_t capacity, uint32_t* required, QnError* error);
+QN_API QnResult QN_CALL qn_train_edit(QnSession session, uint64_t revision,
+    uint32_t operation, uint64_t car, uint32_t index, const char* text, QnError* error);
+QN_API QnResult QN_CALL qn_train_view(QnSession session, uint64_t revision,
+    uint32_t active, uint64_t car, uint32_t overlays, QnError* error);
+QN_API QnResult QN_CALL qn_train_validate(QnSession session, uint64_t revision,
+    const char* proposal, char* buffer, uint32_t capacity, uint32_t* required, QnError* error);
 /* Borrowed host: 1=HWND, 2=X11 XID; 0/0 standalone validation window.
    Avalonia positions/sizes the child. frame dimensions are physical pixels. */
 QN_API QnResult QN_CALL qn_viewport_open(QnSession session, uint32_t platform, uint64_t window, QnError* error);
@@ -239,7 +252,8 @@ QN_API QnResult QN_CALL qn_viewport_presentation(QnSession session, uint32_t mod
    6=focus borrowed child after managed keyboard navigation, 7=frame support selection,
    8=select support at normalized x/y (same native picking as SDL clicks),
    9=frame Track Start; 10/11/12=normalized transform down/move/up,
-   13=cancel pointer input (same path used by SDL and bounded smoke). */
+   13=cancel pointer input; 14/15/16/17=frame train/selected car/front/rear;
+   18=pick physical car envelope at normalized x/y in Train workspace. */
 QN_API QnResult QN_CALL qn_viewport_input(QnSession session, uint32_t action,
     double x, double y, double z, double seconds, QnError* error);
 #ifdef __cplusplus

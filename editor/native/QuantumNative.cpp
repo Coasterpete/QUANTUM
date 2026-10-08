@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <SDL3/SDL_filesystem.h>
 
 namespace
 {
@@ -45,6 +46,10 @@ namespace
         std::vector<QnSupportMember> supportMembers;
         std::optional<quantum::editor::SupportSelection> selectedSupport;
         bool supportWorkspace = false;
+        bool trainWorkspace = false;
+        std::uint64_t selectedCar = 0, trainSnapshotRevision = 0;
+        std::uint32_t trainOverlays = 31;
+        nlohmann::json trainSnapshot;
         uint64_t placementSelectionRevision = 1;
         bool selectedTrackStart = false;
         quantum::editor::StartPoseTransformMode transformMode = quantum::editor::StartPoseTransformMode::Select;
@@ -190,6 +195,48 @@ namespace
     {
         if (state.application.revision() != revision)
             throw Failure(QN_CONFLICT, "Document changed. Refresh the workspace and try again.");
+    }
+    nlohmann::json trainSummary(const quantum::coaster::TrainConfiguration& configuration)
+    {
+        using nlohmann::json;
+        const auto s = quantum::coaster::summarizeTrainConfiguration(configuration);
+        json cars = json::array(), diagnostics = json::array();
+        for (const auto& car : s.cars)
+            cars.push_back({{"id", car.id}, {"dryMassKilograms", car.dryMassKilograms}, {"loadedMassKilograms", car.loadedMassKilograms},
+                {"loadedCogMeters", {car.loadedCenterOfGravityMeters.x, car.loadedCenterOfGravityMeters.y, car.loadedCenterOfGravityMeters.z}},
+                {"referenceXMeters", car.referenceXMeters}, {"gapToNextMeters", car.gapToNextMeters}});
+        for (const auto& d : s.diagnostics)
+            diagnostics.push_back({{"severity", d.error ? "ERROR" : "WARNING"}, {"carId", d.carId}, {"message", d.message}});
+        const char* base = SDL_GetBasePath();
+        for (const auto& car : configuration.cars)
+        {
+            if (car.visualAsset.empty()) continue;
+            try
+            {
+                const auto normalized = quantum::renderer::normalizeStaticMeshAssetIdentifier(car.visualAsset);
+                if (!normalized.starts_with("assets://")) throw std::invalid_argument("Train shells require assets:// GLB identifiers.");
+                const auto path = std::filesystem::u8path(normalized.substr(9));
+                if (!base || !std::filesystem::is_regular_file(std::filesystem::u8path(base) / "assets" / path))
+                    diagnostics.push_back({{"severity", "WARNING"}, {"carId", car.id}, {"message", "GLB is missing from runtime assets: " + normalized}});
+            }
+            catch (const std::exception& error)
+            { diagnostics.push_back({{"severity", "WARNING"}, {"carId", car.id}, {"message", error.what()}}); }
+        }
+        return {{"carCount", s.carCount}, {"bogieCount", s.bogieCount}, {"connectorCount", s.connectorCount},
+            {"dryMassKilograms", s.dryMassKilograms}, {"loadedMassKilograms", s.loadedMassKilograms},
+            {"straightAssemblyAvailable", s.straightAssemblyAvailable}, {"bodyEnvelopeLengthMeters", s.bodyEnvelopeLengthMeters}, {"frontExtentMeters", s.frontExtentMeters},
+            {"rearExtentMeters", s.rearExtentMeters}, {"straightCogMeters", {s.straightLoadedCenterOfGravityMeters.x,
+                s.straightLoadedCenterOfGravityMeters.y, s.straightLoadedCenterOfGravityMeters.z}},
+            {"cars", cars}, {"diagnostics", diagnostics}};
+    }
+    void copyJson(const nlohmann::json& value, char* buffer, uint32_t capacity, uint32_t* required)
+    {
+        if (!required || (!buffer && capacity)) throw std::invalid_argument("Invalid Train JSON buffer.");
+        const auto text = value.dump();
+        if (text.size() >= std::numeric_limits<uint32_t>::max()) throw std::invalid_argument("Train snapshot is too large.");
+        *required = static_cast<uint32_t>(text.size() + 1);
+        if (capacity < *required) throw Failure(QN_BUFFER_TOO_SMALL, "Train snapshot buffer is too small.");
+        std::memcpy(buffer, text.c_str(), *required);
     }
     void selectSupport(Session& state, std::optional<quantum::editor::SupportSelection> selection)
     {
@@ -566,6 +613,108 @@ QnResult QN_CALL qn_select_device(QnSession handle, uint64_t revision, uint64_t 
         state->selectedDevice = device;
     });
 }
+QnResult QN_CALL qn_train_snapshot(QnSession handle, uint64_t revision,
+    char* buffer, uint32_t capacity, uint32_t* required, QnError* error)
+{
+    return boundary(error, [&] {
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        const auto& train = state->application.track().trainConfiguration();
+        if (std::ranges::none_of(train.cars, [&](const auto& car) { return car.id == state->selectedCar; }))
+        {
+            state->selectedCar = train.cars.empty() ? 0 : train.cars.front().id;
+            state->application.preview().setTrainInspection(state->trainWorkspace, state->selectedCar, state->trainOverlays);
+        }
+        if (state->trainSnapshotRevision != revision)
+        {
+            state->trainSnapshot = {{"revision", revision}, {"configuration", nlohmann::json::parse(quantum::coaster::serializeTrainConfiguration(train))},
+                {"summary", trainSummary(train)}};
+            state->trainSnapshotRevision = revision;
+        }
+        auto& result = state->trainSnapshot;
+        result["selectedCar"] = state->selectedCar; result["active"] = state->trainWorkspace; result["overlays"] = state->trainOverlays;
+        result["previewAvailable"] = state->application.preview().isAvailable(); result["previewError"] = state->application.preview().error();
+        copyJson(result, buffer, capacity, required);
+    });
+}
+QnResult QN_CALL qn_train_edit(QnSession handle, uint64_t revision,
+    uint32_t operation, uint64_t id, uint32_t index, const char* text, QnError* error)
+{
+    return boundary(error, [&] {
+        using namespace quantum::coaster;
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        auto configuration = state->application.track().trainConfiguration();
+        auto it = std::ranges::find(configuration.cars, id, &AuthoredTrainCar::id);
+        if (operation >= 3 && operation <= 6 && it == configuration.cars.end()) throw std::invalid_argument("Unknown train car ID.");
+        uint64_t selected = state->selectedCar;
+        const auto role = [&] { return trainCarRoleFromName(text ? text : "Middle"); };
+        switch (operation)
+        {
+        case 0:
+            if (!text) throw std::invalid_argument("Train proposal is required.");
+            configuration = deserializeTrainConfiguration(text); break;
+        case 1: case 2:
+            selected = insertTrainCar(configuration, operation == 1 ? configuration.cars.size() : index, createTrainCarPrototype(role())); break;
+        case 3:
+        {
+            const auto position = static_cast<std::size_t>(it - configuration.cars.begin());
+            auto copy = *it; copy.name += " copy";
+            selected = insertTrainCar(configuration, position + 1, std::move(copy)); break;
+        }
+        case 4: removeTrainCar(configuration, id); selected = 0; break;
+        case 5: reorderTrainCar(configuration, id, index); selected = id; break;
+        case 6:
+        {
+            auto prototype = createTrainCarPrototype(role()); prototype.id = it->id; prototype.name = it->name;
+            *it = std::move(prototype); selected = id; break;
+        }
+        case 7: resizeTrainConsist(configuration, index); break;
+        case 8:
+        {
+            if (!text) throw std::invalid_argument("Train proposal is required.");
+            configuration = deserializeTrainConfiguration(text, false);
+            auto car = std::ranges::find(configuration.cars, id, &AuthoredTrainCar::id);
+            if (car == configuration.cars.end()) throw std::invalid_argument("Unknown train car ID.");
+            car->physical.car.dryInertiaTensorBodyKgM2 = quantum::physics::makeUniformBoxInertiaTensorBodyKgM2(
+                car->physical.car.dryMassKilograms, car->physical.car.bodyDimensionsMeters);
+            selected = id; break;
+        }
+        default: throw std::invalid_argument("Unknown Train edit operation.");
+        }
+        state->application.setTrainConfiguration(configuration);
+        state->selectedCar = selected;
+        state->application.preview().setTrainInspection(state->trainWorkspace, selected, state->trainOverlays);
+    });
+}
+QnResult QN_CALL qn_train_view(QnSession handle, uint64_t revision,
+    uint32_t active, uint64_t car, uint32_t overlays, QnError* error)
+{
+    return boundary(error, [&] {
+        if (active > 1 || overlays > 31) throw std::invalid_argument("Invalid Train preview options.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        if (car && std::ranges::none_of(state->application.track().trainConfiguration().cars, [car](const auto& value) { return value.id == car; }))
+            throw std::invalid_argument("Unknown train car selection.");
+        state->trainWorkspace = active != 0; state->selectedCar = car; state->trainOverlays = overlays;
+        if (active) { state->supportWorkspace = false; state->application.cancelTransform(); }
+        state->application.preview().setTrainInspection(active != 0, car, overlays);
+    });
+}
+QnResult QN_CALL qn_train_validate(QnSession handle, uint64_t revision, const char* text,
+    char* buffer, uint32_t capacity, uint32_t* required, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!text) throw std::invalid_argument("Train proposal is required.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        const auto proposal = quantum::coaster::deserializeTrainConfiguration(text, false);
+        auto summary = trainSummary(proposal);
+        if (std::ranges::none_of(summary["diagnostics"], [](const auto& d) { return d.at("severity") == "ERROR"; }))
+        {
+            auto candidate = state->application.track(); candidate.setTrainConfiguration(proposal);
+            quantum::editor::SimulationPreview preview;
+            if (!preview.rebuild(candidate)) summary["diagnostics"].push_back({{"severity", "ERROR"}, {"carId", 0}, {"message", preview.error()}});
+        }
+        copyJson(summary, buffer, capacity, required);
+    });
+}
 QnResult QN_CALL qn_hardware_snapshot(QnSession handle, uint64_t revision,
     char* buffer, uint32_t capacity, uint32_t* required, QnError* error)
 {
@@ -838,6 +987,11 @@ QnResult QN_CALL qn_support_workspace(QnSession handle, uint32_t active, QnError
             state->application.cancelTransform();
             ++state->placementSelectionRevision;
             state->supportWorkspace = active != 0;
+            if (active)
+            {
+                state->trainWorkspace = false;
+                state->application.preview().setTrainInspection(false, state->selectedCar, state->trainOverlays);
+            }
         }
     });
 }
@@ -873,6 +1027,12 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
         bool frameTrack;
         const auto acceptPick = [&](Session& state, NativeViewport& viewport)
         {
+            if (const auto pick = viewport.takeTrainPick(); pick && state.trainWorkspace && pick->revision == state.application.revision()
+                && std::ranges::any_of(state.application.track().trainConfiguration().cars, [&](const auto& c) { return c.id == pick->car; }))
+            {
+                state.selectedCar = pick->car;
+                state.application.preview().setTrainInspection(true, pick->car, state.trainOverlays);
+            }
             if (const auto pick = viewport.takeInfrastructurePick(); pick && pick->revision == state.application.revision())
             {
                 if (pick->access) state.selectedDevice = pick->id;
@@ -882,7 +1042,7 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
                 && pick->revision == state.application.revision() && pick->selectionRevision == state.supportSelectionRevision
                 && (!pick->selection || quantum::editor::supportSelectionExists(state.application.track().supports(), *pick->selection)))
                 selectSupport(state, pick->selection);
-            if (const auto pick = viewport.takeTrackStartPick(); pick && !state.supportWorkspace
+            if (const auto pick = viewport.takeTrackStartPick(); pick && !state.supportWorkspace && !state.trainWorkspace
                 && pick->revision == state.application.revision() && pick->selectionRevision == state.placementSelectionRevision)
                 selectTrackStart(state, true, state.transformMode);
         };
@@ -897,6 +1057,7 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
             acceptPick(*state, *viewport);
             auto& app = state->application;
             refreshSupports(*state);
+            app.preview().setPhysicsDiagnosticsVisible(viewport->trainAssetFailed());
             revision = app.revision();
             geometryGeneration = app.centerline().generation();
             documentEpoch = state->documentEpoch;
@@ -904,10 +1065,12 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
             // File replacement frames once; other framing is explicit.
             frameTrack = state->viewportFramedEpoch != documentEpoch;
             viewport->capturePlacement(revision, state->placementSelectionRevision, app.transformPresentationRevision(),
-                !state->supportWorkspace, state->selectedTrackStart, state->transformMode,
+                !state->supportWorkspace && !state->trainWorkspace, state->selectedTrackStart, state->transformMode,
                 app.track().startPose(), app.transformPreview(), app.track().physicalSettings().metersPerCoordinateUnit,
                 app.centerline().visualization());
             viewport->captureTrain(revision, app.preview().vertexGeneration(), app.preview().vertices(), app.preview().meshInstances());
+            viewport->captureTrainAuthoring(revision, state->trainWorkspace, state->selectedCar, state->trainOverlays,
+                app.track().trainConfiguration(), app.preview().renderPose(), app.track().physicalSettings().metersPerCoordinateUnit);
             viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization(), app.preview().operations(), state->selectedInfrastructure);
             viewport->captureSupports(revision, state->supportSelectionRevision, state->supportWorkspace,
                 state->selectedSupport, app.track().supports(), app.supports());
@@ -968,16 +1131,24 @@ QnResult QN_CALL qn_viewport_close(QnSession handle, QnError* error)
 QnResult QN_CALL qn_viewport_input(QnSession handle, uint32_t action, double x, double y, double z, double seconds, QnError* error)
 {
     return boundary(error, [&] {
-        if (action < 1 || action > 13 || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(seconds))
+        if (action < 1 || action > 18 || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(seconds)
+            || (action == 18 && (x < 0 || x > 1 || y < 0 || y > 1)))
             throw std::invalid_argument("Invalid viewport camera input.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         if (!state->viewport) throw Failure(QN_UNAVAILABLE, "Viewport is not open.");
         state->viewport->requireOwnerThread();
+        if (action >= 14)
+        {
+            if (!state->trainWorkspace) throw std::invalid_argument("Open Train before using train preview controls.");
+            auto& app = state->application;
+            state->viewport->captureTrainAuthoring(app.revision(), true, state->selectedCar, state->trainOverlays,
+                app.track().trainConfiguration(), app.preview().renderPose(), app.track().physicalSettings().metersPerCoordinateUnit);
+        }
         if (action == 9)
         {
             auto& app = state->application;
             state->viewport->capturePlacement(app.revision(), state->placementSelectionRevision, app.transformPresentationRevision(),
-                !state->supportWorkspace, state->selectedTrackStart, state->transformMode,
+                !state->supportWorkspace && !state->trainWorkspace, state->selectedTrackStart, state->transformMode,
                 app.track().startPose(), app.transformPreview(), app.track().physicalSettings().metersPerCoordinateUnit,
                 app.centerline().visualization());
         }

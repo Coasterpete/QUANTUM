@@ -3,7 +3,8 @@ using System.Collections.ObjectModel;
 namespace Quantum.Managed;
 
 public enum SessionCommand : uint { Play = 1, Pause, Reset, SetInitialSpeed, Undo, Redo, SetRegionLength }
-public enum ViewportAction : uint { Orbit = 1, Pan, Zoom, Frame, Move, Focus, FrameSupport, PickSupport, FrameTrackStart, TransformDown, TransformMove, TransformUp, TransformCancel }
+public enum ViewportAction : uint { Orbit = 1, Pan, Zoom, Frame, Move, Focus, FrameSupport, PickSupport, FrameTrackStart, TransformDown, TransformMove, TransformUp, TransformCancel,
+    FrameTrain, FrameCar, FrameTrainFront, FrameTrainRear, PickTrainCar }
 public enum ProfileOperation : uint { BeginValue, EndValue, TransitionType, Split, Remove, MoveBegin, MoveEnd }
 public enum DeviceKind : uint { Launch, Brake, Transport, ChainLift, CableLift, Station, Block, Transfer, Access }
 public sealed record TransitionChoice(uint Type, string Name) { public override string ToString() => Name; }
@@ -41,7 +42,7 @@ public sealed record Region(uint Index, uint Kind, uint Construction, double Sta
 public sealed record SessionSnapshot(ulong Revision, ulong Tick, double Speed, double Station,
     double InitialSpeed, uint CarCount, double TrainMass, double TotalLength, uint Playback,
     bool Available, bool Dirty, bool CanUndo, bool CanRedo, double PhysicsMs, ReadOnlyCollection<Region> Route,
-    ReadOnlyCollection<ProfileSegment> Profiles, ReadOnlyCollection<TrackDevice> Devices, SupportSnapshot Supports, PlacementSnapshot Placement, HardwareSnapshot Hardware)
+    ReadOnlyCollection<ProfileSegment> Profiles, ReadOnlyCollection<TrackDevice> Devices, SupportSnapshot Supports, PlacementSnapshot Placement, HardwareSnapshot Hardware, TrainWorkspaceSnapshot Train)
 {
     public double TimeSeconds => Tick / 240.0;
     public string PlaybackLabel => Available ? Playback switch { 1 => "Playing", 2 => "Paused", _ => "Stopped" } : "Preview unavailable";
@@ -119,7 +120,7 @@ public sealed unsafe partial class Session : IDisposable
             RefreshAuthoring(summary.Revision);
             return new(summary.Revision, summary.Tick, summary.Speed, summary.Station, summary.InitialSpeed,
                 summary.CarCount, summary.TrainMass, summary.TotalLength, summary.Playback, summary.Available != 0,
-                summary.Dirty != 0, summary.CanUndo != 0, summary.CanRedo != 0, summary.PhysicsMs, route, profiles, devices, ReadSupports(summary.Revision), ReadPlacement(), ReadHardware(summary.Revision));
+                summary.Dirty != 0, summary.CanUndo != 0, summary.CanRedo != 0, summary.PhysicsMs, route, profiles, devices, ReadSupports(summary.Revision), ReadPlacement(), ReadHardware(summary.Revision), ReadTrain(summary.Revision));
         }
         throw new InvalidOperationException("Document changed repeatedly during snapshot sizing.");
     }

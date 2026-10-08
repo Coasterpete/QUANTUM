@@ -22,6 +22,7 @@ target_sources(
         src/physics/RideOperations.cpp
         src/TrackDevices.cpp
         src/TrainConfiguration.cpp
+        src/TrainConfigurationJson.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
@@ -81,6 +82,7 @@ target_sources(
         include/quantum/physics/CarPose.hpp
         include/quantum/physics/DynamicContactPhysics.hpp
         include/quantum/physics/TrainPhysics.hpp
+        include/quantum/physics/TrainDefinition.hpp
         include/quantum/physics/TrackDeviceForces.hpp
         include/quantum/physics/TrackFollower.hpp
 )

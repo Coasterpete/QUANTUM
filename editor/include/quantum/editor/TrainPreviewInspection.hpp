@@ -7,8 +7,7 @@
 
 namespace quantum::editor
 {
-    // A copy of accepted preview inputs, published only after rebuild. These
-    // backend defaults are not a second authored train or saved document data.
+    // Copies of accepted document inputs, published only after rebuild.
     struct TrainPreviewInspection
     {
         std::size_t carCount = 0;
@@ -17,5 +16,6 @@ namespace quantum::editor
         double totalTrainMassKilograms = 0.0;
         std::optional<double> connectorLengthMeters;
         physics::BasicResistance resistance;
+        std::vector<physics::TrainCarDefinition> cars;
     };
 }

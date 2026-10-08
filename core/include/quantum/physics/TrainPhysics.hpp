@@ -1,4 +1,5 @@
 #pragma once
+#include <quantum/physics/TrainDefinition.hpp>
 
 #include <quantum/physics/CarPose.hpp>
 
@@ -72,27 +73,6 @@ namespace quantum::physics
     inline constexpr double
         bogieContactReportingActiveRelativeTolerance = 1.0e-6;
 
-    struct TrainCarDefinition
-    {
-        CarDefinition car;
-        CarLoadout loadout;
-    };
-
-    struct InterCarConnectionDefinition
-    {
-        double rigidLengthMeters = 0.0;
-    };
-
-    // Cars are ordered from lead to rear. Connection i always joins the rear
-    // hitch of car i to the front hitch of car i + 1. Resistance coefficients
-    // describe the complete train once; they are not multiplied by car count.
-    struct TrainDefinition
-    {
-        std::vector<TrainCarDefinition> cars;
-        std::vector<InterCarConnectionDefinition> connections;
-        BasicResistance resistance;
-    };
-
     // Runtime physical input, intentionally separate from authored vehicle
     // configuration. The application point uses the target car's physical
     // +X-forward, +Y-lateral, +Z-up coordinates; the force is world-space.
@@ -102,10 +82,6 @@ namespace quantum::physics
         glm::dvec3 localApplicationPointMeters{0.0};
         glm::dvec3 worldForceNewtons{0.0};
     };
-
-    void validateInterCarConnectionDefinition(
-        const InterCarConnectionDefinition& definition);
-    void validateTrainDefinition(const TrainDefinition& definition);
 
     class TrainCarPose
     {

@@ -15,7 +15,12 @@ public sealed partial class EditorApplication : Application
             {
                 var window = new MainWindow();
                 desktop.MainWindow = window;
-                if (desktop.Args is ["--verify-runtime", var fixture, var report])
+                if (desktop.Args is ["--verify-train-2-smoke", var trainFixture, var trainReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunTrain2Smoke(window, trainFixture, trainReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-runtime", var fixture, var report])
                 {
                     desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                     window.Opened += async (_, _) => await RuntimeChecks.Run(window, fixture, report, desktop);

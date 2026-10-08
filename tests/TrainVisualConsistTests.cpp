@@ -143,6 +143,7 @@ namespace
             auto setup = track.coasterSetup();
             setup.carsPerTrain = count;
             track.setCoasterSetup(setup);
+            track.setTrainConfiguration(coaster::createDefaultOrderedTrainConfiguration(count));
             require(preview.rebuild(track) && preview.meshInstances().size() == count,
                 "Rebuild must replace the visual count without stale entries.");
             requireOrder(preview.meshInstances());

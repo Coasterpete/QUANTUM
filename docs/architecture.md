@@ -1079,8 +1079,9 @@ for the exact ownership, saved-revision policy, and limits of failure coverage.
 ### Simulation preview
 
 The Editor composition root owns one `SimulationPreview` for diagnostic
-playback of the configured `carsPerTrain` using the current repeated-car
-definition. Rebuilding starts from the committed `AuthoredTrack`, calls
+playback of the document-owned ordered `TrainConfiguration`. Each car owns
+its physical definition/load and visual assignment; `carsPerTrain` remains a
+synchronized Coaster Setup count. See [Train 2](train-2.md). Rebuilding starts from the committed `AuthoredTrack`, calls
 `integrateAuthoredTrackKinematics`, and constructs an
 owned immutable `CompiledPhysicsTrack` using the document's physical scale,
 layout intent, and derived topology. Accepted geometry/document replacements
@@ -1120,13 +1121,15 @@ increments the visible interpolation failure counter without invalidating physic
 This adds one fixed tick of presentation latency and only queries train geometry;
 it neither recompiles the track nor traverses or rebuilds static scene objects.
 
-Rendering consumes the render-only `TrainPose`. [Train Visual M1](train-visual-m1.md)
-extends M0's repeated prototype to an Editor-owned ordered `TrainVisualConsist`:
-entry i supplies the asset identity/local adjustment for render-pose car i.
-The temporary default is lead, middle(s), rear (one car uses only lead).
+Rendering consumes the render-only `TrainPose`. Train 2 resolves each saved
+car's GLB reference and explicit visual alignment into the existing
+Editor-owned `TrainVisualConsist`, retaining [M1's](train-visual-m1.md) instance
+publication path. Entry i supplies the asset identity/local adjustment for
+physical car i. The native document and history own order, stable car IDs,
+roles, physics, load and visuals; runtime physics still contains no mesh data.
 Rebuild resolves exactly one visual entry per physical car; the mesh helper
-rejects mismatched counts before modifying output. Physical definitions remain
-repeated and renderer-neutral, and visual inputs are not serialized.
+rejects mismatched counts before modifying output. Train edits stop/reset the
+preview and reuse track/support presentation; no topology changes mid-step.
 Each cached GLB shell uses its car's solved body position/quaternion. Application combines these
 instances with any active M5 mechanism instances before one renderer collection
 update. The renderer knows only asset identities and matrices; Jolt never owns

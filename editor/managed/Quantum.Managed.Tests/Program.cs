@@ -100,6 +100,7 @@ await HardwareChecks.Run();
 await SupportChecks.Run();
 await Supports2Checks.Run();
 await PlacementChecks.Run(fixture);
+await TrainChecks.Run();
 var disposedController = new SessionController();
 disposedController.Dispose(); disposedController.Dispose();
 Expect<ObjectDisposedException>(() => disposedController.Submit(_ => { }));

@@ -257,6 +257,27 @@ namespace quantum::editor
         edit(std::move(transaction), publish);
     }
 
+    void ApplicationService::setTrainConfiguration(const coaster::TrainConfiguration& configuration)
+    {
+        coaster::validateTrainConfiguration(configuration);
+        if (coaster::serializeTrainConfiguration(configuration)
+            == coaster::serializeTrainConfiguration(track_.trainConfiguration())) return;
+        AuthoredTrackEditTransaction transaction{track_};
+        transaction.candidate().setTrainConfiguration(configuration);
+        SimulationPreview proposal;
+        if (!proposal.rebuild(transaction.candidate()) && preview_.isAvailable())
+            throw std::invalid_argument(proposal.error());
+        auto history = history_;
+        history.record(transaction.candidate());
+        cancelTransform();
+        profileDrag_.reset();
+        transaction.commit(track_);
+        history_ = std::move(history);
+        ++revision_;
+        synchronizeDirtyState();
+        static_cast<void>(rebuildPreview());
+    }
+
     void ApplicationService::editRegionProfile(std::size_t region, ProfileChannel channel,
         ProfileEdit request, const Publish& publish)
     {

@@ -24,13 +24,17 @@ public sealed partial class EditorViewModel
             if (workspaceMode == value) return;
             CancelForSelection(); workspaceMode = value;
             Changed(); Changed(nameof(IsSupportsWorkspace)); Changed(nameof(IsRouteWorkspace));
+            Changed(nameof(IsTrainWorkspace));
             Changed(nameof(ViewportInstructions)); RefreshCommands();
             SynchronizeSupportWorkspace(); SynchronizeDeviceSelection();
+            SynchronizeTrainView();
         }
     }
     public bool IsSupportsWorkspace => WorkspaceMode == 1;
-    public bool IsRouteWorkspace => !IsSupportsWorkspace;
-    public string ViewportInstructions => IsSupportsWorkspace
+    public bool IsRouteWorkspace => WorkspaceMode == 0;
+    public string ViewportInstructions => IsTrainWorkspace
+        ? "Left click: physical car envelope · yellow: selected car · magenta: loaded COG · RGB: local frame · native two-bogie model"
+        : IsSupportsWorkspace
         ? "Left click: select node / member · Right drag: orbit · Middle drag: pan · Wheel: zoom · Numeric move in Inspector"
         : "Diamond: Track Start · Move / Rotate in Track Layout · Right drag: orbit · Middle drag: pan · Wheel: zoom · F: frame · Esc: cancel";
     public IReadOnlyList<SupportStructure> SupportStructures { get; private set; } = [];

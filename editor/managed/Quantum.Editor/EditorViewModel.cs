@@ -125,6 +125,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         InitializeInfrastructureCommands();
         InitializeSupportCommands();
         InitializePlacementCommands();
+        InitializeTrainCommands();
     }
     private EditorCommand Add(Func<Task> action, Func<bool>? enabled = null)
     {
@@ -245,6 +246,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         PublishPlacement(next.Placement, changedRoute);
         PublishInfrastructure(next, changedRoute);
         PublishSupports(next.Supports, changedRoute);
+        PublishTrain(next.Train);
         Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry)); Changed(nameof(HardwareTelemetry));
         if (changedRoute)
         {

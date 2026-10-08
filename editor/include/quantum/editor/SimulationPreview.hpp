@@ -128,6 +128,9 @@ namespace quantum::editor
         [[nodiscard]] std::span<const renderer::StaticMeshInstance> meshInstances()
             const noexcept;
         void setPhysicsDiagnosticsVisible(bool visible);
+        // Train workspace engineering overlays; selection is a stable authored ID.
+        // Bits: bounds=1, bogies=2, hitches/connectors=4, loaded COG=8, frame=16.
+        void setTrainInspection(bool active, std::uint64_t selectedCarId, std::uint32_t overlays = 31);
         [[nodiscard]] const SimulationPreviewFrameTelemetry& frameTelemetry()
             const noexcept;
 
@@ -187,6 +190,9 @@ namespace quantum::editor
         TrainVisualConsist visualConsist_;
         std::vector<renderer::StaticMeshInstance> meshInstances_;
         bool physicsDiagnosticsVisible_ = true;
+        bool trainInspectionActive_ = false;
+        std::uint64_t selectedCarId_ = 0;
+        std::uint32_t trainOverlays_ = 31;
         PlaybackState playbackState_ = PlaybackState::Stopped;
         double accumulatorSeconds_ = 0.0;
         double renderAlpha_ = 0.0;

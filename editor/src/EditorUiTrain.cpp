@@ -107,7 +107,7 @@ namespace quantum::editor
                     ImGui::TextWrapped("%s", simulationError_.c_str());
             }
             ImGui::Spacing();
-            editorSecondaryTextWrapped("One backend car definition is repeated across the consist.");
+            editorSecondaryTextWrapped("Each saved car owns its physical definition and visual shell. Full car authoring is in the Avalonia Train workspace.");
         }
         ImGui::End();
 
@@ -122,21 +122,29 @@ namespace quantum::editor
             else
             {
                 const auto& inspection = *trainPreviewInspection_;
-                const auto& car = inspection.repeatedCar.car;
-                const auto& loadout = inspection.repeatedCar.loadout;
+                int selectedCar = trainSummaryCarIndex_;
+                if (!inspection.cars.empty())
+                {
+                    selectedCar = std::clamp(selectedCar, 0, static_cast<int>(inspection.cars.size() - 1));
+                    ImGui::SliderInt("Inspect car (front = 0)", &selectedCar, 0, static_cast<int>(inspection.cars.size() - 1));
+                    trainSummaryCarIndex_ = selectedCar;
+                }
+                const auto& physical = inspection.cars.empty() ? inspection.repeatedCar : inspection.cars[selectedCar];
+                const auto& car = physical.car;
+                const auto& loadout = physical.loadout;
                 if (beginTrainValues("Resolved summary"))
                 {
                     trainNumber(fonts_, "Cars", static_cast<double>(inspection.carCount), "cars", 0);
-                    trainNumber(fonts_, "Loaded mass / car", inspection.loadedCarMassKilograms, "kg", 1);
+                    trainNumber(fonts_, "Loaded mass / car", physics::totalCarMassKilograms(car, loadout), "kg", 1);
                     trainNumber(fonts_, "Total train mass", inspection.totalTrainMassKilograms, "kg", 1);
                     if (inspection.connectorLengthMeters)
                         trainNumber(fonts_, "Connector length", *inspection.connectorLengthMeters, "m");
                     ImGui::EndTable();
                 }
                 ImGui::Spacing();
-                if (ImGui::TreeNode("Physical definition / backend defaults"))
+                if (ImGui::TreeNode("Selected physical car / authored values"))
                 {
-                    ImGui::TextDisabled("READ ONLY / not authored in this document");
+                    ImGui::TextDisabled("READ ONLY / authored in this document");
                     if (beginTrainValues("Physical defaults"))
                     {
                         trainNumber(fonts_, "Dry mass / car", car.dryMassKilograms, "kg", 1);
@@ -160,7 +168,7 @@ namespace quantum::editor
                         ImGui::EndTable();
                     }
                     editorSecondaryTextWrapped("Local axes: +X forward / +Y lateral / +Z up.");
-                    editorSecondaryTextWrapped("Style and restraint metadata do not yet select a physical car.");
+                    editorSecondaryTextWrapped("Role metadata does not change explicit physical values.");
                     ImGui::TreePop();
                 }
                 if (ImGui::TreeNode("Resistance / backend defaults"))

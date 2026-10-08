@@ -101,6 +101,9 @@ namespace quantum::editor
         void save(const std::filesystem::path& path);
         void setRegionLength(std::size_t index, double meters, const Publish& publish = {});
         void setInitialSpeed(double metersPerSecond, const Publish& publish = {});
+        // Train edits reuse track/support presentation and reset the runtime.
+        // A complete native proposal becomes one document/history action.
+        void setTrainConfiguration(const coaster::TrainConfiguration& configuration);
         void setTrackStartPosition(const glm::dvec3& meters, const Publish& publish = {});
         void setTrackStartAngles(const glm::dvec3& pitchYawRollDegrees, const Publish& publish = {});
         [[nodiscard]] std::uint64_t beginTransform(TransformTarget target,

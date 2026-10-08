@@ -301,13 +301,19 @@ namespace quantum::editor
         setUnavailable({});
         try
         {
-            coaster::TrainConfiguration trainConfiguration =
-                coaster::createDefaultTrainConfiguration();
-            trainConfiguration.carCount =
-                authoredTrack.coasterSetup().carsPerTrain;
+            const auto& trainConfiguration = authoredTrack.trainConfiguration();
             trainDefinition_ = coaster::resolveTrainConfiguration(
                 trainConfiguration);
-            visualConsist_ = makeDefaultTrainVisualConsist(trainDefinition_.cars.size());
+            visualConsist_.cars.clear();
+            for (const auto& car : trainConfiguration.cars)
+            {
+                auto transform = glm::translate(glm::dmat4{1}, car.visualAlignment.translationMeters);
+                const auto radians = glm::radians(car.visualAlignment.rotationDegrees);
+                transform = glm::rotate(transform, radians.z, glm::dvec3{0, 0, 1});
+                transform = glm::rotate(transform, radians.y, glm::dvec3{0, 1, 0});
+                transform = glm::rotate(transform, radians.x, glm::dvec3{1, 0, 0});
+                visualConsist_.cars.push_back({car.visualAsset, transform});
+            }
             const std::vector<coaster::TrackKinematicState> kinematics =
                 coaster::integrateAuthoredTrackKinematics(
                     authoredTrack,
@@ -400,7 +406,7 @@ namespace quantum::editor
         operations_.reset(trackDevices_);
         if (compiledTrack_ && pose_ && dynamicsState_)
         {
-            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
             operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
                 compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
             deviceRuntimeStates_ = operations_.forceControls();
@@ -411,7 +417,7 @@ namespace quantum::editor
     {
         if (!isAvailable()) throw std::invalid_argument("Simulation preview is unavailable.");
         operations_.command(id, command, value, target);
-        const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+        const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
         operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
             compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
     }
@@ -464,7 +470,7 @@ namespace quantum::editor
         try
         {
             operations_.reset(trackDevices_);
-            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
             operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
                 compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
             deviceRuntimeStates_ = operations_.forceControls();
@@ -565,7 +571,7 @@ namespace quantum::editor
                 const double previousVelocity =
                     dynamicsState_->signedVelocityMetersPerSecond;
                 const auto stepBegin = std::chrono::steady_clock::now();
-                const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+                const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
                 operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
                     compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit);
                 deviceRuntimeStates_ = operations_.forceControls();
@@ -888,6 +894,7 @@ namespace quantum::editor
             inspection.connectorLengthMeters =
                 trainDefinition_.connections.front().rigidLengthMeters;
         inspection.resistance = trainDefinition_.resistance;
+        inspection.cars = trainDefinition_.cars;
         return inspection;
     }
 
@@ -968,7 +975,7 @@ namespace quantum::editor
 
         updateTrainMeshInstances(meshInstances_, *renderPose_, visualConsist_.cars,
             coordinateUnitsPerMeter_);
-        if (!physicsDiagnosticsVisible_)
+        if (!physicsDiagnosticsVisible_ && !trainInspectionActive_)
             return;
 
         vertices_.reserve(
@@ -981,13 +988,15 @@ namespace quantum::editor
         {
             const physics::CarPose& carPose =
                 renderPose_->cars()[index].carPose();
-            appendCarBox(
+            const bool selected = trainInspectionActive_ && trainDefinition_.cars[index].authoredCarId == selectedCarId_;
+            if (physicsDiagnosticsVisible_ || (trainOverlays_ & 1) || selected) appendCarBox(
                 vertices_,
                 carPose,
                 trainDefinition_.cars[index].car.bodyDimensionsMeters,
                 coordinateUnitsPerMeter_,
-                carColors[index % carColors.size()]);
-            if (useGpuBogieMarkers)
+                selected ? Color{1, .85F, .1F, 1} : carColors[index % carColors.size()]);
+            if (trainInspectionActive_ && !physicsDiagnosticsVisible_ && !(trainOverlays_ & 2)) {}
+            else if (useGpuBogieMarkers)
             {
                 appendBogieMarkerFromGpuSample(vertices_, lastGpuBogieSamples_[index * 2], coordinateUnitsPerMeter_);
                 appendBogieMarkerFromGpuSample(vertices_, lastGpuBogieSamples_[index * 2 + 1], coordinateUnitsPerMeter_);
@@ -999,9 +1008,34 @@ namespace quantum::editor
                 appendBogieMarker(
                     vertices_, carPose.rearBogie(), coordinateUnitsPerMeter_);
             }
+            const auto cross = [&](const glm::dvec3& point, const Color& color) {
+                for (const auto axis : {glm::dvec3{.12, 0, 0}, glm::dvec3{0, .12, 0}, glm::dvec3{0, 0, .12}})
+                    appendLine(vertices_, point - axis, point + axis, coordinateUnitsPerMeter_, color);
+            };
+            if (trainInspectionActive_ && (trainOverlays_ & 4))
+            {
+                cross(carPose.frontHitchWorldPositionMeters(), connectorColor);
+                cross(carPose.rearHitchWorldPositionMeters(), connectorColor);
+            }
+            if (selected && (trainOverlays_ & 8))
+            {
+                const auto& cog = renderPose_->cars()[index].loadedWorldCenterOfGravityMeters();
+                cross(cog, {1, .2F, 1, 1});
+                appendLine(vertices_, carPose.bodyWorldPositionMeters(), cog, coordinateUnitsPerMeter_, {1, .2F, 1, 1});
+            }
+            if (selected && (trainOverlays_ & 16))
+            {
+                const auto origin = carPose.bodyWorldPositionMeters();
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    glm::dvec3 local{0}; local[axis] = .75;
+                    Color color{0, 0, 0, 1}; color[axis] = 1;
+                    appendLine(vertices_, origin, origin + carPose.bodyOrientation() * local, coordinateUnitsPerMeter_, color);
+                }
+            }
         }
 
-        for (const physics::InterCarConnectionPose& connection
+        if (physicsDiagnosticsVisible_ || (trainOverlays_ & 4)) for (const physics::InterCarConnectionPose& connection
             : renderPose_->connections())
         {
             appendLine(
@@ -1015,6 +1049,15 @@ namespace quantum::editor
         frameTelemetry_.vertexPreparationMilliseconds +=
             std::chrono::duration<double, std::milli>(
                 preparationEnd - preparationBegin).count();
+    }
+
+    void SimulationPreview::setTrainInspection(bool active, std::uint64_t selectedCarId, std::uint32_t overlays)
+    {
+        if (active == trainInspectionActive_ && selectedCarId == selectedCarId_ && overlays == trainOverlays_) return;
+        trainInspectionActive_ = active;
+        selectedCarId_ = selectedCarId;
+        trainOverlays_ = overlays;
+        rebuildVertices();
     }
 
     void SimulationPreview::setGpuContext(physics::gpu::GpuPhysicsContext* gpu) noexcept

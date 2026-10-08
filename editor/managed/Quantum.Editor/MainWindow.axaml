@@ -40,7 +40,7 @@
           <Border Background="{StaticResource QuantumBorder}" Width="1" Height="24" />
           <StackPanel><TextBlock Text="{Binding DocumentName}" FontWeight="SemiBold" /><TextBlock Classes="muted" FontSize="12" Text="Coaster design workspace" /></StackPanel>
           <ComboBox SelectedIndex="{Binding WorkspaceMode}" IsEnabled="{Binding !InteractionActive}" MinWidth="125">
-            <ComboBoxItem Content="Route" /><ComboBoxItem Content="Supports" />
+            <ComboBoxItem Content="Route" /><ComboBoxItem Content="Supports" /><ComboBoxItem Content="Train" />
           </ComboBox>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
@@ -67,6 +67,7 @@
         </Grid>
       </Border>
       <Border Classes="pane" MinWidth="190" IsVisible="{Binding IsSupportsWorkspace}"><local:SupportsBrowser x:Name="SupportsTree" /></Border>
+      <Border Classes="pane" MinWidth="190" IsVisible="{Binding IsTrainWorkspace}"><local:TrainBrowser /></Border>
       <GridSplitter Grid.Column="1" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Focusable="True" />
       <Grid Grid.Column="2" RowDefinitions="Auto,*,Auto" MinWidth="300">
         <Border Padding="14,10" Background="{StaticResource QuantumRaised}">
@@ -111,9 +112,11 @@
         </Grid>
       </Border>
       <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsSupportsWorkspace}"><local:SupportInspector /></Border>
+      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsTrainWorkspace}"><local:TrainInspector /></Border>
     </Grid>
     <GridSplitter Grid.Row="3" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Focusable="True" />
-    <local:TimelinePane Grid.Row="4" x:Name="Timeline" MinHeight="200" />
+    <local:TimelinePane Grid.Row="4" x:Name="Timeline" MinHeight="200" IsVisible="{Binding !IsTrainWorkspace}" />
+    <local:TrainDiagnosticsPane Grid.Row="4" IsVisible="{Binding IsTrainWorkspace}" />
     <Border Grid.Row="5" Background="#492D32" Padding="16,10" IsVisible="{Binding HasError}"><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFCECE" /></Border>
     <Border Grid.Row="6" Padding="16,12" Background="{StaticResource QuantumPane}" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,1,0,0">
       <Grid ColumnDefinitions="Auto,*,Auto">

@@ -2401,6 +2401,7 @@ TrackStylePreset deserializeTrackStyle(
         }
         root["trackStyle"] = serializeTrackStyle(track.trackStyle());
         root["coasterSetup"] = serializeCoasterSetup(track.coasterSetup());
+        root["train"] = json::parse(serializeTrainConfiguration(track.trainConfiguration()));
         root["supports"] = serializeSupportCollection(track.supports());
         json devicesJson = json::array();
         for (const TrackDevice& device : track.trackDevices().devices)
@@ -2466,7 +2467,7 @@ TrackStylePreset deserializeTrackStyle(
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
                 "physicalSettings", "trackConfigurationId", "trackStyle",
-                "coasterSetup", "supports", "trackDevices", "ground"
+                "coasterSetup", "supports", "trackDevices", "ground", "train"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -2710,6 +2711,17 @@ TrackStylePreset deserializeTrackStyle(
                 track.setCoasterSetup(deserializeCoasterSetup(
                     root["coasterSetup"], "coasterSetup"));
             }
+
+            // Train 2 is an additive sub-schema. Historical documents retain
+            // equivalent repeated physical definitions and ordered default shells.
+            if (root.contains("train"))
+            {
+                auto train = deserializeTrainConfiguration(root["train"].dump());
+                if (train.cars.size() != track.coasterSetup().carsPerTrain)
+                    throw std::invalid_argument("train.cars disagrees with coasterSetup.carsPerTrain.");
+                track.setTrainConfiguration(train);
+            }
+            else track.setTrainConfiguration(createDefaultOrderedTrainConfiguration(track.coasterSetup().carsPerTrain));
 
             // Documents written before persistent supports were introduced
             // retain the default empty collection.
