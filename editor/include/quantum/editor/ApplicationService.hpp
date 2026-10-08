@@ -52,7 +52,8 @@ namespace quantum::editor
         CreateStructure, DeleteStructure, RenameStructure, CreateNode, DeleteNode,
         MoveNode, SetAttachment, ClearAttachment, SetFoundation, ClearFoundation,
         CreateMember, DeleteMember, SetProfile, SetTreatment, ClearConnection,
-        SetConnectorAsset, ClearConnectionPlacement
+        SetConnectorAsset, ClearConnectionPlacement,
+        SetStyle, SetStructureSurface, SetMemberSurface, UseStyleProfile, GenerateFrame, SetFoundationShape
     };
     // Core units throughout; the managed boundary converts its SI form values.
     struct SupportEdit
@@ -66,6 +67,11 @@ namespace quantum::editor
         coaster::SupportMemberEnd memberEnd = coaster::SupportMemberEnd::Start;
         coaster::SupportMemberEndTreatment treatment = coaster::SupportMemberEndTreatment::MiteredCut;
         std::string text;
+        coaster::SupportStyleFamily style = coaster::SupportStyleFamily::TraditionalTimber;
+        std::optional<coaster::SupportSurface> surface;
+        coaster::SupportFrameRecipe frame;
+        coaster::Foundation foundation;
+        bool useStyleProfile = false;
     };
 
     // Native application state shared by the ImGui and managed frontends.

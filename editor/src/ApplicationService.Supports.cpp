@@ -1,4 +1,5 @@
 #include <quantum/editor/ApplicationService.hpp>
+#include <quantum/coaster/WoodenSupportGenerator.hpp>
 #include <algorithm>
 #include <stdexcept>
 
@@ -65,11 +66,33 @@ namespace quantum::editor
             coaster::clearSupportFoundation(collection, request.structureId, request.elementId); break;
         case Operation::CreateMember:
             created = coaster::createSupportMember(collection, request.structureId,
-                request.startNodeId, request.endNodeId, request.profile); break;
+                request.startNodeId, request.endNodeId, request.profile);
+            structure().members.back().useStyleProfile = request.useStyleProfile;
+            break;
         case Operation::DeleteMember:
             coaster::removeSupportMember(collection, request.structureId, request.elementId); break;
         case Operation::SetProfile:
-            member().profile = request.profile; break;
+            member().profile = request.profile; member().useStyleProfile = false; member().useFrameProfile = false; break;
+        case Operation::UseStyleProfile:
+            member().useStyleProfile = true; member().useFrameProfile = false; break;
+        case Operation::SetStyle:
+            static_cast<void>(coaster::supportStyleName(request.style));
+            structure().style = request.style; break;
+        case Operation::SetStructureSurface:
+            structure().surface = request.surface; break;
+        case Operation::SetMemberSurface:
+            member().surface = request.surface; break;
+        case Operation::GenerateFrame:
+            created = coaster::generateSupportFrame(candidate, request.style, request.frame,
+                request.structureId ? std::optional{request.structureId} : std::nullopt);
+            collection = candidate.supports(); break;
+        case Operation::SetFoundationShape:
+        {
+            auto& nodes = structure().nodes;
+            const auto found = std::ranges::find(nodes, request.elementId, &coaster::SupportNode::id);
+            if (found == nodes.end() || !found->foundation) throw std::invalid_argument("Select a foundation node first.");
+            found->foundation = request.foundation; break;
+        }
         case Operation::SetTreatment:
         {
             auto value = connection(); value.treatment = request.treatment;

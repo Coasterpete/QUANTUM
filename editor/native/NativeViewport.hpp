@@ -5,6 +5,7 @@
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
+#include <quantum/editor/InfrastructurePresentation.hpp>
 #include <quantum/renderer/VulkanContext.hpp>
 #include <imgui.h>
 #include <thread>
@@ -30,7 +31,7 @@ public:
     void captureDevice(uint64_t revision, uint64_t selected,
         const quantum::coaster::AuthoredTrack& track,
         const quantum::editor::CenterlineVisualization& geometry,
-        const quantum::physics::RideOperations& operations);
+        const quantum::physics::RideOperations& operations, uint64_t infrastructureSelection = 0);
     struct SupportPickIntent
     {
         uint64_t revision, selectionRevision;
@@ -41,6 +42,9 @@ public:
         const quantum::coaster::SupportCollection& supports,
         const quantum::editor::SupportVisualization& visualization);
     [[nodiscard]] std::optional<SupportPickIntent> takeSupportPick() noexcept;
+    struct InfrastructurePickIntent { uint64_t revision, id; bool access; };
+    [[nodiscard]] std::optional<InfrastructurePickIntent> takeInfrastructurePick() noexcept;
+    void pickInfrastructureAt(double x, double y);
     void input(uint32_t action, double x, double y, double z, double value);
     void requireOwnerThread() const;
     uint32_t takeShortcuts() noexcept;
@@ -83,6 +87,12 @@ private:
     double deviceMechanismPosition_ = -1;
     std::string deviceMechanismState_;
     uint64_t deviceRevision_ = 0, selectedDevice_ = 0;
+    uint64_t infrastructureRevision_ = 0, selectedInfrastructure_ = 0;
+    std::optional<InfrastructurePickIntent> infrastructurePick_;
+    bool infrastructureDirty_ = false;
+    std::vector<quantum::coaster::SupportSolidPresentation> infrastructure_, access_;
+    std::vector<quantum::editor::InfrastructureSolid> infrastructurePicking_, accessPicking_;
+    std::vector<std::pair<uint64_t,double>> accessFractions_, nextAccessFractions_;
     std::vector<quantum::renderer::StaticMeshInstance> meshes_;
     quantum::editor::SupportVisualization supportPicking_;
     std::vector<uint32_t> supportAnchors_;

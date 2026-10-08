@@ -116,7 +116,9 @@ add_custom_command(
     COMMAND
         "${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE}"
         -V
-        --target-env vulkan1.3
+        # SPIR-V 1.5 keeps discard as OpKill. Vulkan 1.3's default SPIR-V 1.6
+        # emits demote, whose optional device feature is not enabled here.
+        --target-env vulkan1.2
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/support.frag"
         -o "${QUANTUM_SUPPORT_FRAGMENT_SHADER}"
     COMMAND

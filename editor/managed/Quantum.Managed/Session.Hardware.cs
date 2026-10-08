@@ -42,9 +42,9 @@ public sealed record AccessSettings(uint Role = 0, uint Motion = 0, int TravelDi
 
     double LateralOffsetMeters = 2, double VerticalOffsetMeters = 0, double YawDegrees = 0,
 
-    bool InitiallyOpen = false, bool InitiallyLocked = true, bool InitiallyInterlocked = false, string MeshAsset = "");
+    bool InitiallyOpen = false, bool InitiallyLocked = true, bool InitiallyInterlocked = false, string MeshAsset = "", uint Infill = 0, double WidthMeters = 1, double HeightMeters = 1.1, SupportSurfaceSettings? Surface = null);
 
-public sealed record RailingSettings(bool Inner = false, bool Outer = true, double HeightMeters = 1.1);
+public sealed record RailingSettings(bool Inner = false, bool Outer = true, double HeightMeters = 1.1, double PostSpacingMeters = 1.5);
 
 public sealed record InfrastructureSettings(ulong Id, string Name, uint Kind,
 
@@ -52,7 +52,12 @@ public sealed record InfrastructureSettings(ulong Id, string Name, uint Kind,
 
     double LateralOffsetMeters = 1.5, double VerticalOffsetMeters = 0, double WidthMeters = .8,
 
-    uint Deck = 1, RailingSettings? Railings = null, ulong[]? AccessGates = null, string MeshAsset = "");
+    uint Deck = 1, RailingSettings? Railings = null, ulong[]? AccessGates = null, string MeshAsset = "",
+    SupportSurfaceSettings? Surface = null, bool WorldPlacement = false,
+    double[]? WorldStartMeters = null, double[]? WorldEndMeters = null, double StepRiseMeters = .18)
+{
+    public override string ToString() => $"{Name} · #{Id}";
+}
 
 public sealed record HardwareEntry(ulong Id, JsonElement Configuration, string State = "Preview unavailable",
 
@@ -83,7 +88,7 @@ public sealed record HardwareEntry(ulong Id, JsonElement Configuration, string S
 
 }
 
-public sealed record HardwareSnapshot(ulong Revision, HardwareEntry[] Hardware, ulong NextInfrastructureId, InfrastructureSettings[] Infrastructure);
+public sealed record HardwareSnapshot(ulong Revision, HardwareEntry[] Hardware, ulong NextInfrastructureId, InfrastructureSettings[] Infrastructure, ulong SelectedInfrastructure = 0, ulong SelectedAccess = 0);
 
 public sealed unsafe partial class Session
 
@@ -150,7 +155,7 @@ public sealed unsafe partial class Session
 
         RequireOpen(); Check(Native.qn_infrastructure_configuration(handle, revision,
 
-            JsonSerializer.Serialize(infrastructure.Select(c => c with { Railings = c.Railings ?? new(), AccessGates = c.AccessGates ?? [] }), HardwareJson), nextId, out var error), error);
+            JsonSerializer.Serialize(infrastructure.Select(c => c with { Railings = c.Railings ?? new(), AccessGates = c.AccessGates ?? [], WorldStartMeters = c.WorldStartMeters ?? [0,0,0], WorldEndMeters = c.WorldEndMeters ?? [3,0,1.5] }), HardwareJson), nextId, out var error), error);
 
     }
 

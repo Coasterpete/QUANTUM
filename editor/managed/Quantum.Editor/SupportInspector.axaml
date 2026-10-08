@@ -19,6 +19,50 @@
             <Button Content="Frame selection" Command="{Binding FrameSupportCommand}" />
           </StackPanel>
         </Expander>
+        <Expander Header="Style / Appearance" IsExpanded="False" IsVisible="{Binding HasSupportStructure}" HorizontalAlignment="Stretch">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Support family" />
+            <ComboBox SelectedIndex="{Binding SupportFamily}" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Traditional Timber" /><ComboBoxItem Content="Tubular Steel" />
+              <ComboBoxItem Content="Box / HSS Steel" /><ComboBoxItem Content="I / H Structural Steel" />
+              <ComboBoxItem Content="Concrete Pier" /><ComboBoxItem Content="Custom" />
+            </ComboBox>
+            <Button Content="Apply family defaults" Command="{Binding ApplySupportStyleCommand}" />
+            <TextBlock Text="Explicit profiles and material overrides are preserved. New members inherit the family profile." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+            <TextBlock Text="Structure material" />
+            <ComboBox SelectedIndex="{Binding StructureMaterial}" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Use family default" /><ComboBoxItem Content="Timber" /><ComboBoxItem Content="Painted steel" />
+              <ComboBoxItem Content="Galvanized steel" /><ComboBoxItem Content="Concrete" />
+            </ComboBox>
+            <TextBlock Text="Tint · RGB hex" /><TextBox Text="{Binding StructureTint}" />
+            <TextBlock Text="Longitudinal repeat · metres" /><TextBox Text="{Binding StructureRepeat}" />
+            <TextBlock Text="Across repeat · metres" /><TextBox Text="{Binding StructureAcross}" />
+            <TextBlock Text="Roughness · 0.045–1" /><TextBox Text="{Binding StructureRoughness}" />
+            <Button Content="Apply material / UV scale" Command="{Binding ApplyStructureMaterialCommand}" />
+            <TextBlock Text="Member override → Structure override → Family default. Repeat scale is a physical distance, independent of shape." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          </StackPanel>
+        </Expander>
+        <Expander Header="Generate bent / steel frame" IsExpanded="False" HorizontalAlignment="Stretch">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Family" />
+            <ComboBox SelectedIndex="{Binding SupportFamily}" HorizontalAlignment="Stretch">
+              <ComboBoxItem Content="Traditional Timber" /><ComboBoxItem Content="Tubular Steel" /><ComboBoxItem Content="Box / HSS Steel" />
+              <ComboBoxItem Content="I / H Structural Steel" /><ComboBoxItem Content="Concrete Pier" /><ComboBoxItem Content="Custom" />
+            </ComboBox>
+            <TextBlock Text="Station · metres" /><TextBox Text="{Binding FrameStation}" />
+            <TextBlock Text="Bent width / post spacing · metres" /><TextBox Text="{Binding FrameWidth}" />
+            <TextBlock Text="Foundation world Z · metres" /><TextBox Text="{Binding FrameElevation}" />
+            <TextBlock Text="Attachment vertical offset · metres" /><TextBox Text="{Binding FrameVertical}" />
+            <TextBlock Text="Post size · metres" /><TextBox Text="{Binding FramePost}" />
+            <TextBlock Text="Beam depth · metres" /><TextBox Text="{Binding FrameBeam}" />
+            <TextBlock Text="Brace size · metres" /><TextBox Text="{Binding FrameBrace}" />
+            <TextBlock Text="Foundation footprint · metres" /><TextBox Text="{Binding FrameFooting}" />
+            <Button Content="Create new frame" Command="{Binding GenerateFrameCommand}" />
+            <Button Content="Apply selected frame parameters" Command="{Binding RegenerateFrameCommand}" IsVisible="{Binding HasGeneratedFrame}" />
+            <TextBlock Text="Creates editable native nodes and members. Parameter edits retain frame IDs and explicit member/material overrides. Existing Wooden Run generation remains available in the native editor." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          </StackPanel>
+        </Expander>
+        <local:InfrastructureInspector />
         <StackPanel IsVisible="{Binding HasSupportNode}" Spacing="8">
           <Separator /><TextBlock Classes="heading" Text="NODE POSITION · metres" />
           <TextBlock Text="{Binding SelectedSupportNode.AnchorLabel}" Classes="muted" />
@@ -42,6 +86,12 @@
           <WrapPanel><Button Content="Mark foundation" Command="{Binding SetSupportFoundationCommand}" Margin="0,0,5,5" />
             <Button Content="Clear foundation" Command="{Binding ClearSupportFoundationCommand}" Margin="0,0,0,5" /></WrapPanel>
           <TextBlock Text="A foundation keeps its authored position; this marker does not project to terrain." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <StackPanel IsVisible="{Binding IsFoundationSupportNode}" Spacing="5">
+            <ComboBox SelectedIndex="{Binding FoundationKind}" HorizontalAlignment="Stretch"><ComboBoxItem Content="Footing" /><ComboBoxItem Content="Pedestal" /><ComboBoxItem Content="Pier" /><ComboBoxItem Content="Foundation block" /></ComboBox>
+            <TextBlock Text="Width / depth / height · metres; zero derives size" TextWrapping="Wrap" />
+            <TextBox Text="{Binding FoundationWidth}" /><TextBox Text="{Binding FoundationDepth}" /><TextBox Text="{Binding FoundationHeight}" />
+            <Button Content="Apply foundation geometry" Command="{Binding ApplyFoundationShapeCommand}" />
+          </StackPanel>
         </StackPanel>
         <Expander Header="Connect nodes" IsExpanded="True" IsVisible="{Binding HasSupportStructure}" HorizontalAlignment="Stretch">
           <StackPanel Spacing="6">
@@ -55,12 +105,27 @@
           <TextBlock Text="{Binding SelectedSupportMember.Label}" />
           <TextBlock Text="{Binding MemberMetadata}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
           <TextBlock Classes="heading" Text="PROFILE / DIMENSIONS · metres" />
-          <ComboBox SelectedIndex="{Binding MemberShape}" HorizontalAlignment="Stretch"><ComboBoxItem Content="Circular" /><ComboBoxItem Content="Rectangular" /></ComboBox>
+          <ComboBox SelectedIndex="{Binding MemberShape}" HorizontalAlignment="Stretch"><ComboBoxItem Content="Circular" /><ComboBoxItem Content="Rectangular" /><ComboBoxItem Content="Box / HSS" /><ComboBoxItem Content="I / H section" /></ComboBox>
           <TextBlock Text="Width / diameter" /><TextBox Text="{Binding MemberWidth}" />
           <TextBlock IsVisible="{Binding IsRectangularMember}" Text="Height" /><TextBox IsVisible="{Binding IsRectangularMember}" Text="{Binding MemberHeight}" />
           <TextBlock Text="Wall thickness" /><TextBox Text="{Binding MemberWall}" />
           <TextBlock Text="Zero wall thickness is solid. A hollow section needs a wall smaller than half its smallest dimension." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding ProfileInheritance}" Classes="muted" FontSize="11" />
           <Button Content="Apply profile / dimensions" Command="{Binding ApplySupportProfileCommand}" />
+          <Button Content="Use family profile default" Command="{Binding UseStyleProfileCommand}" />
+          <Expander Header="Member material / UV override" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="6">
+              <ComboBox SelectedIndex="{Binding MemberMaterial}" HorizontalAlignment="Stretch">
+                <ComboBoxItem Content="Inherit structure / family" /><ComboBoxItem Content="Timber" /><ComboBoxItem Content="Painted steel" />
+                <ComboBoxItem Content="Galvanized steel" /><ComboBoxItem Content="Concrete" />
+              </ComboBox>
+              <TextBlock Text="Tint · RGB hex" /><TextBox Text="{Binding MemberTint}" />
+              <TextBlock Text="Longitudinal repeat · metres" /><TextBox Text="{Binding MemberRepeat}" />
+              <TextBlock Text="Across repeat · metres" /><TextBox Text="{Binding MemberAcross}" />
+              <TextBlock Text="Roughness · 0.045–1" /><TextBox Text="{Binding MemberRoughness}" />
+              <Button Content="Apply member material" Command="{Binding ApplyMemberMaterialCommand}" />
+            </StackPanel>
+          </Expander>
           <Separator /><TextBlock Classes="heading" Text="END CONNECTION" />
           <ComboBox SelectedIndex="{Binding ConnectionEnd}" HorizontalAlignment="Stretch"><ComboBoxItem Content="Start end" /><ComboBoxItem Content="End end" /></ComboBox>
           <TextBlock Text="{Binding ConnectionContext}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
@@ -74,7 +139,7 @@
           <Button Content="Apply asset / clear if empty" Command="{Binding ApplySupportAssetCommand}" />
           <TextBlock Text="{Binding ConnectionMetadata}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
           <Button IsVisible="{Binding HasConnectionPlacement}" Content="Clear local placement" Command="{Binding ClearSupportPlacementCommand}" />
-          <TextBlock Text="Connections are native authored metadata. Detailed connector meshes and splice pairing remain future work." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <TextBlock Text="Native plates, flanges, saddles, clamps and bases follow the authored end frame. Splice pairing and fabrication detail remain future work." Classes="muted" FontSize="11" TextWrapping="Wrap" />
         </StackPanel>
       </StackPanel>
     </ScrollViewer>

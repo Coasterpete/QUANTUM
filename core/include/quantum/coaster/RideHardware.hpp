@@ -1,5 +1,7 @@
 #pragma once
 
+#include <quantum/coaster/SupportSurface.hpp>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -79,6 +81,7 @@ namespace quantum::coaster
     // and a sliding storage door share the same operation/telemetry contract.
     enum class AccessRole : std::uint8_t { Station, Queue, Maintenance, Catwalk, Transfer, Storage, Barrier };
     enum class AccessMotion : std::uint8_t { Swing, Slide };
+    enum class AccessInfill : std::uint8_t { Mesh, Solid };
     struct AccessConfiguration
     {
         AccessRole role = AccessRole::Station;
@@ -94,6 +97,9 @@ namespace quantum::coaster
         bool initiallyLocked = true;
         bool initiallyInterlocked = false;
         std::string meshAsset;
+        AccessInfill infill = AccessInfill::Mesh;
+        double widthMeters = 1.0, heightMeters = 1.1;
+        std::optional<SupportSurface> surface;
         bool operator==(const AccessConfiguration&) const = default;
     };
     // monostate preserves legacy Launch/Brake semantics and serialized fields.
@@ -109,6 +115,7 @@ namespace quantum::coaster
     {
         bool inner = false, outer = true;
         double heightMeters = 1.1;
+        double postSpacingMeters = 1.5;
         bool operator==(const RailingConfiguration&) const = default;
     };
     struct TrackInfrastructure
@@ -124,6 +131,12 @@ namespace quantum::coaster
         RailingConfiguration railings;
         std::vector<TrackDeviceId> accessGates;
         std::string meshAsset;
+        std::optional<SupportSurface> surface;
+        // Explicit world endpoints for stairs / platforms. SI coordinates;
+        // track-relative objects retain their existing attachment semantics.
+        bool worldPlacement = false;
+        glm::dvec3 worldStartMeters{0,0,0}, worldEndMeters{3,0,1.5};
+        double stepRiseMeters = .18;
         bool operator==(const TrackInfrastructure&) const = default;
     };
 }

@@ -71,7 +71,7 @@ namespace quantum::renderer
     }
 
     SupportSolidMesh createSupportSolidCylinderMesh(
-        const std::uint32_t radialSegments)
+        const std::uint32_t radialSegments, const bool hollow)
     {
         if (radialSegments < 3)
         {
@@ -93,59 +93,96 @@ namespace quantum::renderer
                 std::sin(angle) * 0.5F};
         };
 
-        // The side wall shares vertices between adjacent segments. The seam is
-        // continuous because each vertex is placed from its own angle.
-        const auto wallBase = static_cast<std::uint32_t>(mesh.vertices.size());
-        for (std::uint32_t segment = 0; segment <= radialSegments; ++segment)
+        // Duplicate the cylindrical seam, including its UV. Inner and outer
+        // walls share a unit radius; the vertex shader applies the instance's
+        // validated inner diameter ratio only to vertices marked inner.
+        for (unsigned wall = 0; wall < (hollow ? 2u : 1u); ++wall)
         {
-            const glm::vec3 point = ringPoint(segment);
-            const glm::vec3 normal{0.0F, point.y * 2.0F, point.z * 2.0F};
-            mesh.vertices.push_back({glm::vec3{0.5F, point.y, point.z}, normal});
-            mesh.vertices.push_back({glm::vec3{-0.5F, point.y, point.z}, normal});
-        }
-        for (std::uint32_t segment = 0; segment < radialSegments; ++segment)
-        {
-            const std::uint32_t near = wallBase + segment * 2;
-            const std::uint32_t far = near + 2;
-            mesh.triangleIndices.insert(mesh.triangleIndices.end(),
-                {near, far, far + 1, near, far + 1, near + 1});
-        }
-
-        // Caps get their own centre vertices so their normals stay flat.
-        for (const float end : {0.5F, -0.5F})
-        {
-            const std::uint32_t centre =
-                static_cast<std::uint32_t>(mesh.vertices.size());
-            // The cap normal is the axis direction, not the cap's position, so
-            // it must be the sign of the end rather than its half-unit offset.
-            const glm::vec3 capNormal{end > 0.0F ? 1.0F : -1.0F, 0.0F, 0.0F};
-            mesh.vertices.push_back({{end, 0.0F, 0.0F}, capNormal});
-            const auto ringBase = static_cast<std::uint32_t>(
-                mesh.vertices.size());
-            for (std::uint32_t segment = 0; segment < radialSegments; ++segment)
+            const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+            for (std::uint32_t segment = 0; segment <= radialSegments; ++segment)
             {
-                const glm::vec3 point = ringPoint(segment);
-                mesh.vertices.push_back({{end, point.y, point.z}, capNormal});
+                const auto p = ringPoint(segment);
+                const glm::vec3 n{0, p.y * (wall ? -2.0F : 2.0F), p.z * (wall ? -2.0F : 2.0F)};
+                const float v = static_cast<float>(segment) / radialSegments;
+                mesh.vertices.push_back({{.5F,p.y,p.z}, n, {.5F,v}, static_cast<float>(wall)});
+                mesh.vertices.push_back({{-.5F,p.y,p.z}, n, {-.5F,v}, static_cast<float>(wall)});
             }
             for (std::uint32_t segment = 0; segment < radialSegments; ++segment)
             {
-                const std::uint32_t current = ringBase + segment;
-                const std::uint32_t next =
-                    ringBase + (segment + 1) % radialSegments;
-                // Reversed winding on the -X cap keeps both caps facing out.
-                if (end > 0.0F)
+                const auto a = base + segment*2, b = a+2;
+                if (wall) mesh.triangleIndices.insert(mesh.triangleIndices.end(), {a,b,b+1,a,b+1,a+1});
+                else mesh.triangleIndices.insert(mesh.triangleIndices.end(), {a,b+1,b,a,a+1,b+1});
+            }
+        }
+        for (const float end : {.5F, -.5F})
+        {
+            const glm::vec3 n{end > 0 ? 1.0F : -1.0F, 0, 0};
+            const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+            if (hollow)
+            {
+                for (std::uint32_t segment = 0; segment <= radialSegments; ++segment)
                 {
-                    mesh.triangleIndices.insert(mesh.triangleIndices.end(),
-                        {centre, current, next});
+                    const auto p = ringPoint(segment);
+                    mesh.vertices.push_back({{end,p.y,p.z},n,{0,0},0});
+                    mesh.vertices.push_back({{end,p.y,p.z},n,{0,0},1});
                 }
-                else
+                for (std::uint32_t segment = 0; segment < radialSegments; ++segment)
                 {
-                    mesh.triangleIndices.insert(mesh.triangleIndices.end(),
-                        {centre, next, current});
+                    const auto a=base+segment*2, b=a+2;
+                    if (end > 0) mesh.triangleIndices.insert(mesh.triangleIndices.end(), {a,b,a+1,b,b+1,a+1});
+                    else mesh.triangleIndices.insert(mesh.triangleIndices.end(), {a,a+1,b,b,a+1,b+1});
+                }
+            }
+            else
+            {
+                mesh.vertices.push_back({{end,0,0},n});
+                for (std::uint32_t segment = 0; segment < radialSegments; ++segment)
+                {
+                    const auto p = ringPoint(segment);
+                    mesh.vertices.push_back({{end,p.y,p.z},n});
+                }
+                for (std::uint32_t segment = 0; segment < radialSegments; ++segment)
+                {
+                    const auto a=base+1+segment, b=base+1+(segment+1)%radialSegments;
+                    if (end > 0) mesh.triangleIndices.insert(mesh.triangleIndices.end(), {base,a,b});
+                    else mesh.triangleIndices.insert(mesh.triangleIndices.end(), {base,b,a});
                 }
             }
         }
         return mesh;
+    }
+
+    std::vector<coaster::SupportMemberInstance> createSupportFoundationInstances(
+        const coaster::SupportFoundationPad& pad)
+    {
+        std::vector<coaster::SupportMemberInstance> result;
+        const auto emit = [&](glm::dvec3 position, glm::dvec3 size)
+        {
+            coaster::SupportMemberInstance instance;
+            if (pad.kind == coaster::SupportFoundationKind::Pier)
+            {
+                instance.transform[0] = {0,0,static_cast<float>(size.z),0};
+                instance.transform[1] = {static_cast<float>(size.x),0,0,0};
+                instance.transform[2] = {0,static_cast<float>(size.y),0,0};
+                instance.section.y = 1;
+            }
+            else
+            {
+                instance.transform[0] = {static_cast<float>(size.x),0,0,0};
+                instance.transform[1] = {0,static_cast<float>(size.y),0,0};
+                instance.transform[2] = {0,0,static_cast<float>(size.z),0};
+            }
+            instance.transform[3] = {glm::vec3{position},1};
+            result.push_back(instance);
+        };
+        const glm::dvec3 size{pad.padDimensions,pad.padDepth};
+        if (pad.kind == coaster::SupportFoundationKind::Pedestal)
+        {
+            emit(pad.position-glm::dvec3{0,0,pad.padDepth*.275},{size.x,size.y,size.z*.45});
+            emit(pad.position+glm::dvec3{0,0,pad.padDepth*.225},{size.x*.6,size.y*.6,size.z*.55});
+        }
+        else emit(pad.position,size);
+        return result;
     }
 
     SupportSolidMesh createSupportSolidMesh(const SupportMemberMeshKind mesh)
@@ -156,6 +193,8 @@ namespace quantum::renderer
             return createSupportSolidBoxMesh();
         case SupportMemberMeshKind::Circular:
             return createSupportSolidCylinderMesh();
+        case SupportMemberMeshKind::CircularTube:
+            return createSupportSolidCylinderMesh(supportSolidCylinderRadialSegments, true);
         }
         throw std::invalid_argument(
             "Unknown support member mesh kind.");

@@ -141,19 +141,28 @@ enum { QN_SUPPORT_CREATE_STRUCTURE, QN_SUPPORT_DELETE_STRUCTURE, QN_SUPPORT_RENA
     QN_SUPPORT_SET_ATTACHMENT, QN_SUPPORT_CLEAR_ATTACHMENT, QN_SUPPORT_SET_FOUNDATION,
     QN_SUPPORT_CLEAR_FOUNDATION, QN_SUPPORT_CREATE_MEMBER, QN_SUPPORT_DELETE_MEMBER,
     QN_SUPPORT_SET_PROFILE, QN_SUPPORT_SET_TREATMENT, QN_SUPPORT_CLEAR_CONNECTION,
-    QN_SUPPORT_SET_ASSET, QN_SUPPORT_CLEAR_PLACEMENT };
+    QN_SUPPORT_SET_ASSET, QN_SUPPORT_CLEAR_PLACEMENT,
+    QN_SUPPORT_SET_STYLE, QN_SUPPORT_SET_STRUCTURE_SURFACE, QN_SUPPORT_SET_MEMBER_SURFACE,
+    QN_SUPPORT_USE_STYLE_PROFILE, QN_SUPPORT_GENERATE_FRAME, QN_SUPPORT_FOUNDATION_SHAPE };
 
 QN_API QnResult QN_CALL qn_support_snapshot(QnSession session, QnSupportSnapshot* summary,
     QnSupportStructure* structures, uint32_t structure_capacity,
     QnSupportNode* nodes, uint32_t node_capacity, QnSupportMember* members,
     uint32_t member_capacity, uint64_t known_revision, QnError* error);
 /* text is a UTF-8 structure name or logical connector asset; may be null.
+   CreateMember optionally accepts {"useStyleProfile":true}; otherwise its
+   explicit profile is preserved. Surface and frame commands accept JSON.
    For SetAttachment x/y/z mean station/lateral/vertical. Returns allocated ID. */
 QN_API QnResult QN_CALL qn_support_command(QnSession session, const QnSupportCommand* command,
     const char* text, uint32_t* created, QnError* error);
 /* Selection kind: 0 clear, 1 structure, 2 node, 3 member. Transient only. */
 QN_API QnResult QN_CALL qn_select_support(QnSession session, uint64_t expected_revision,
     uint32_t kind, uint32_t structure, uint32_t element, QnError* error);
+/* Optional appearance/generator extension; existing graph snapshot ABI stays intact.
+   JSON contains immutable display values. Authored commands still use native history. */
+QN_API QnResult QN_CALL qn_select_infrastructure(QnSession session, uint64_t revision, uint64_t id, QnError* error);
+QN_API QnResult QN_CALL qn_support_style_snapshot(QnSession session, uint64_t revision,
+    char* buffer, uint32_t capacity, uint32_t* required, QnError* error);
 QN_API QnResult QN_CALL qn_support_workspace(QnSession session, uint32_t active, QnError* error);
 
 QN_API uint32_t QN_CALL qn_abi_version(void);

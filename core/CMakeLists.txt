@@ -28,6 +28,8 @@ target_sources(
         src/StaticMeshAsset.cpp
         src/SupportSolidGeometry.cpp
         src/Supports.cpp
+        src/SupportStyles.cpp
+        src/SupportFrameGenerator.cpp
         src/WoodenSupportGenerator.cpp
         src/physics/CarPose.cpp
         src/physics/DynamicContactPhysics.cpp

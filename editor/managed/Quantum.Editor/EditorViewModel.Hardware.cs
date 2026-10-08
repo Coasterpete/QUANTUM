@@ -108,6 +108,11 @@ public sealed partial class EditorViewModel
     public bool GateInitiallyLocked { get => gateInitiallyLocked; set { gateInitiallyLocked = value; Changed(); } }
     private bool gateInitiallyInterlocked = false;
     public bool GateInitiallyInterlocked { get => gateInitiallyInterlocked; set { gateInitiallyInterlocked = value; Changed(); } }
+    private int gateInfill;
+    public int GateInfill { get => gateInfill; set { gateInfill = value; Changed(); } }
+    private string gateWidth = "1", gateHeight = "1.1";
+    public string GateWidth { get => gateWidth; set { gateWidth = value; Changed(); } }
+    public string GateHeight { get => gateHeight; set { gateHeight = value; Changed(); } }
     private string gateMesh = "";
     public string GateMesh { get => gateMesh; set { gateMesh = value; Changed(); } }
     private string alignmentName = "";
@@ -198,7 +203,8 @@ public sealed partial class EditorViewModel
                 Finite(HardwareSpeed, "Movement speed"), Finite(HardwareStoppedTolerance, "Stopped tolerance"), GateIds(), nextAlignmentId),
             DeviceKind.Access => new AccessSettings((uint)GateRole, (uint)GateMotion, Direction, Finite(GateAngle, "Open angle"), Finite(GateTravel, "Travel distance"),
                 Finite(GateDuration, "Movement duration"), Finite(GateLateral, "Lateral offset"), Finite(GateVertical, "Vertical offset"), Finite(GateYaw, "Yaw"),
-                GateInitiallyOpen, GateInitiallyLocked, GateInitiallyInterlocked, GateMesh),
+                GateInitiallyOpen, GateInitiallyLocked, GateInitiallyInterlocked, GateMesh, (uint)GateInfill,
+                Finite(GateWidth,"Gate width"),Finite(GateHeight,"Gate height"), SelectedHardwareRuntime?.Settings(new AccessSettings()).Surface),
             _ => throw new ArgumentException("Select configurable hardware.")
         };
         return Controller.Submit(s => s.SetHardwareConfiguration(snapshot.Revision, d.Id, configuration));
@@ -234,7 +240,7 @@ public sealed partial class EditorViewModel
             var gate = runtime.Settings(new AccessSettings()); GateRole = (int)gate.Role; GateMotion = (int)gate.Motion; HardwareDirection = gate.TravelDirection == 1 ? 0 : 1;
             GateAngle = Number(gate.OpenAngleDegrees); GateTravel = Number(gate.TravelDistanceMeters); GateDuration = Number(gate.MovementSeconds);
             GateLateral = Number(gate.LateralOffsetMeters); GateVertical = Number(gate.VerticalOffsetMeters); GateYaw = Number(gate.YawDegrees);
-            GateInitiallyOpen = gate.InitiallyOpen; GateInitiallyLocked = gate.InitiallyLocked; GateInitiallyInterlocked = gate.InitiallyInterlocked; GateMesh = gate.MeshAsset; break;
+            GateInitiallyOpen = gate.InitiallyOpen; GateInitiallyLocked = gate.InitiallyLocked; GateInitiallyInterlocked = gate.InitiallyInterlocked; GateMesh = gate.MeshAsset; GateInfill = (int)gate.Infill; GateWidth = Number(gate.WidthMeters); GateHeight = Number(gate.HeightMeters); break;
         }
         foreach (var name in new[] { nameof(IsLaunchHardware), nameof(IsBrakeHardware), nameof(IsTransportHardware), nameof(IsChainHardware), nameof(IsCableHardware),
             nameof(IsStationHardware), nameof(IsBlockHardware), nameof(IsTransferHardware), nameof(IsAccessHardware), nameof(HasHardwareSpeed), nameof(HasSpeedControllerHardware), nameof(HasHardwareDirection),

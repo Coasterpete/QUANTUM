@@ -198,6 +198,7 @@ namespace quantum::renderer
         }
         supportSolidInstanceMappedData_ = nullptr;
         supportSolidInstanceCapacity_ = 0;
+        publishedSupports_.clear(); publishedInfrastructure_.clear(); publishedAccess_.clear();
         supportSolidDrawBatches_.clear();
         supportFoundationDrawBatches_.clear();
 

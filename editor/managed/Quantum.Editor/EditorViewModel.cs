@@ -122,6 +122,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             await Controller.Submit(s => s.SetDeviceProperties(snapshot.Revision, device.Id, enabled, start, end, force));
         }), () => HasDevice);
         InitializeHardwareCommands();
+        InitializeInfrastructureCommands();
         InitializeSupportCommands();
         InitializePlacementCommands();
     }
@@ -242,6 +243,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         Snapshot = next;
         publishingSnapshot = true;
         PublishPlacement(next.Placement, changedRoute);
+        PublishInfrastructure(next, changedRoute);
         PublishSupports(next.Supports, changedRoute);
         Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry)); Changed(nameof(HardwareTelemetry));
         if (changedRoute)

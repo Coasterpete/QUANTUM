@@ -19,7 +19,8 @@ namespace quantum::coaster
         Rectangular,
         // Unit-diameter unit-length cylinder spanning x = [-0.5, 0.5] with
         // radius 0.5 in the y/z plane, scaled per instance.
-        Circular
+        Circular,
+        CircularTube
     };
 
     // One row of the shared support instance stream. The transform already
@@ -30,18 +31,21 @@ namespace quantum::coaster
     struct SupportMemberInstance
     {
         glm::mat4 transform{1.0F};
+        // x = inner diameter ratio, y = circular mapping. z selects efficient deck
+        // grating / gate mesh cutouts; w marks treatment geometry.
+        glm::vec4 section{1.0F, 0.0F, 0.0F, 0.0F};
 
         [[nodiscard]] friend bool operator==(
             const SupportMemberInstance&,
             const SupportMemberInstance&) = default;
     };
 
-    // Solid members for one support structure, grouped by profile shape so
-    // each shape becomes one instanced draw call.
+    // Solid parts for one structure, grouped by shared mesh and material.
     struct SupportSolidBatch
     {
         SupportMemberMeshKind mesh = SupportMemberMeshKind::Rectangular;
         std::vector<SupportMemberInstance> instances;
+        SupportSurface surface;
 
         [[nodiscard]] std::size_t memberCount() const noexcept
         {
@@ -58,6 +62,7 @@ namespace quantum::coaster
         glm::dvec3 position{0.0};
         glm::dvec2 padDimensions{0.0, 0.0};
         double padDepth = 0.0;
+        SupportFoundationKind kind = SupportFoundationKind::Footing;
 
         [[nodiscard]] friend bool operator==(
             const SupportFoundationPad&,
@@ -72,7 +77,8 @@ namespace quantum::coaster
         // appearance resolves to the conservative default timber.
         SupportAppearance appearance;
         SupportFoundationAppearance foundationAppearance;
-        // Rectangular members first, then circular members.
+        double metersPerCoordinateUnit = 1.0;
+        // Batches retain first encounter order within the graph.
         std::vector<SupportSolidBatch> batches;
         // One pad per foundation node, in node order.
         std::vector<SupportFoundationPad> foundations;
@@ -181,11 +187,19 @@ namespace quantum::coaster
     // Throws std::invalid_argument for a non-finite resolved node position or
     // a malformed member profile or appearance.
     [[nodiscard]] SupportSolidPresentation buildSupportSolidPresentation(
-        const SupportStructure& structure);
+        const SupportStructure& structure, double metersPerCoordinateUnit = 1.0);
 
     // Builds every structure's presentation in collection order. Structures
     // with no renderable members and no foundations are still returned, so a
     // caller can key results by SupportStructureId.
     [[nodiscard]] std::vector<SupportSolidPresentation>
-    buildSupportSolidPresentation(const SupportCollection& collection);
+    buildSupportSolidPresentation(const SupportCollection& collection, double metersPerCoordinateUnit = 1.0);
+
+    // Shared physical-coordinate mapping specification used by regression
+    // tests and the vertex shader. U is longitudinal; V is directed around
+    // the perimeter. End caps use section coordinates and a separate shader
+    // end-grain signal. No world axes participate.
+    [[nodiscard]] glm::dvec2 supportSurfaceUv(const glm::dvec3& localPosition,
+        const glm::dvec3& localNormal, const glm::dvec3& extents,
+        const glm::dvec2& repeat, bool circular, double seamFraction = 0.0);
 }

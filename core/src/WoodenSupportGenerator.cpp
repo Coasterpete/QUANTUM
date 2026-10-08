@@ -206,6 +206,8 @@ namespace quantum::coaster
         {
             structure.appearance = replacement->appearance;
             structure.foundationAppearance = replacement->foundationAppearance;
+            structure.style = replacement->style;
+            structure.surface = replacement->surface;
         }
         // Hybrid section proportions are QUANTUM approximations, not measured
         // lumber dimensions. TrackSupport remains available in the role model,

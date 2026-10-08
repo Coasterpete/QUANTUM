@@ -38,7 +38,7 @@ namespace
         nlohmann::json hardwareConfiguration = nlohmann::json::array();
         QnProfileCommand dragCommand{};
         std::uint64_t dragToken = 0;
-        std::uint64_t selectedDevice = 0;
+        std::uint64_t selectedDevice = 0, selectedInfrastructure = 0;
         std::uint64_t supportRevision = 0, supportSelectionRevision = 1;
         std::vector<QnSupportStructure> supportStructures;
         std::vector<QnSupportNode> supportNodes;
@@ -237,7 +237,7 @@ namespace
         for (const auto& structure : app.track().supports().structures)
         {
             QnSupportStructure row{structure.id, static_cast<uint32_t>(structure.nodes.size()),
-                static_cast<uint32_t>(structure.members.size()), structure.generatedWoodenRun.has_value()};
+                static_cast<uint32_t>(structure.members.size()), structure.generatedWoodenRun.has_value() || structure.generatedFrame.has_value()};
             copyLabel(row.name, sizeof(row.name), structure.name); structures.push_back(row);
             for (const auto& node : structure.nodes)
             {
@@ -251,11 +251,14 @@ namespace
                     attachment.station * scale, attachment.lateralOffset * scale, attachment.verticalOffset * scale});
             }
             for (const auto& member : structure.members)
+            {
+                const auto profile = quantum::coaster::resolveSupportProfile(structure, member);
                 members.push_back({structure.id, member.id, member.startNodeId, member.endNodeId,
-                    static_cast<uint32_t>(member.profile.shape), static_cast<uint32_t>(member.role),
+                    static_cast<uint32_t>(profile.shape), static_cast<uint32_t>(member.role),
                     static_cast<uint32_t>(member.orientation), member.orientationReference.has_value(),
-                    member.profile.outerDimensions.x * scale, member.profile.outerDimensions.y * scale,
-                    member.profile.wallThickness * scale, copyConnection(member.startConnection), copyConnection(member.endConnection)});
+                    profile.outerDimensions.x * scale, profile.outerDimensions.y * scale,
+                    profile.wallThickness * scale, copyConnection(member.startConnection), copyConnection(member.endConnection)});
+            }
         }
         state.supportStructures = std::move(structures); state.supportNodes = std::move(nodes);
         state.supportMembers = std::move(members); state.supportRevision = app.revision();
@@ -322,6 +325,7 @@ QnResult QN_CALL qn_new(QnSession handle, QnError* error)
     return boundary(error, [&] {
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         state->application.newDocument();
+        state->selectedInfrastructure = 0;
         ++state->documentEpoch;
         selectSupport(*state, std::nullopt);
         selectTrackStart(*state, false, quantum::editor::StartPoseTransformMode::Select);
@@ -333,6 +337,7 @@ QnResult QN_CALL qn_open(QnSession handle, const char* path, QnError* error)
         const auto input = utf8Path(path);
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         state->application.open(input);
+        state->selectedInfrastructure = 0;
         ++state->documentEpoch;
         selectSupport(*state, std::nullopt);
         selectTrackStart(*state, false, quantum::editor::StartPoseTransformMode::Select);
@@ -569,7 +574,10 @@ QnResult QN_CALL qn_hardware_snapshot(QnSession handle, uint64_t revision,
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
         refreshAuthoring(*state);
         using nlohmann::json;
+        if (std::ranges::none_of(state->application.track().trackDevices().infrastructure,
+            [&](const auto& i) { return i.id == state->selectedInfrastructure; })) state->selectedInfrastructure = 0;
         json result = {{"revision", revision}, {"hardware", state->hardwareConfiguration},
+            {"selectedInfrastructure",state->selectedInfrastructure}, {"selectedAccess",state->selectedDevice},
             {"nextInfrastructureId", state->application.track().trackDevices().nextInfrastructureId},
             {"infrastructure", json::parse(quantum::coaster::serializeTrackInfrastructure(state->application.track().trackDevices().infrastructure))}};
         for (auto& item : result["hardware"])
@@ -686,8 +694,8 @@ QnResult QN_CALL qn_support_command(QnSession handle, const QnSupportCommand* co
 {
     if (created) *created = 0;
     return boundary(error, [&] {
-        if (!command || !created || command->operation > QN_SUPPORT_CLEAR_PLACEMENT
-            || command->shape > 1 || command->member_end > 1 || command->treatment > 8)
+        if (!command || !created || command->operation > QN_SUPPORT_FOUNDATION_SHAPE
+            || command->shape > (command->operation == QN_SUPPORT_SET_PROFILE || command->operation == QN_SUPPORT_CREATE_MEMBER ? 3u : 5u) || command->member_end > 1 || command->treatment > 8)
             throw std::invalid_argument("Invalid support command or enum value.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         requireRevision(*state, command->expected_revision);
@@ -703,6 +711,48 @@ QnResult QN_CALL qn_support_command(QnSession handle, const QnSupportCommand* co
         request.memberEnd = static_cast<quantum::coaster::SupportMemberEnd>(command->member_end);
         request.treatment = static_cast<quantum::coaster::SupportMemberEndTreatment>(command->treatment);
         request.text = text ? text : "";
+        request.style = static_cast<quantum::coaster::SupportStyleFamily>(command->shape);
+        try
+        {
+            if (request.operation == SupportOperation::CreateMember && !request.text.empty())
+            {
+                const auto j = nlohmann::json::parse(request.text);
+                if (!j.is_object() || j.size() != 1) throw std::invalid_argument("Member options require useStyleProfile only.");
+                request.useStyleProfile = j.at("useStyleProfile").get<bool>();
+            }
+            if (request.operation == SupportOperation::SetStructureSurface || request.operation == SupportOperation::SetMemberSurface)
+            {
+                if (!request.text.empty()) request.surface = quantum::coaster::deserializeSupportSurface(request.text);
+            }
+            if (request.operation == SupportOperation::SetFoundationShape)
+                request.foundation = {static_cast<quantum::coaster::SupportFoundationKind>(command->shape),
+                    {command->width/scale,command->height/scale,command->wall/scale}};
+            if (request.operation == SupportOperation::GenerateFrame)
+            {
+                const auto j = nlohmann::json::parse(request.text);
+                request.frame.station = j.at("stationMeters").get<double>()/scale;
+                request.frame.width = j.at("widthMeters").get<double>()/scale;
+                request.frame.foundationElevation = j.at("foundationElevationMeters").get<double>()/scale;
+                request.frame.verticalOffset = j.at("verticalOffsetMeters").get<double>()/scale;
+                const auto profile = [&](const char* key)
+                {
+                    const auto& p = j.at(key);
+                    const auto shape = p.at("shape").get<unsigned>();
+                    if (shape > 3) throw std::invalid_argument("Unknown frame profile shape.");
+                    return quantum::coaster::SupportMemberProfile{static_cast<quantum::coaster::SupportMemberProfileShape>(shape),
+                        {p.at("width").get<double>()/scale,p.at("height").get<double>()/scale},p.at("wall").get<double>()/scale};
+                };
+                request.frame.post = profile("post"); request.frame.beam = profile("beam"); request.frame.brace = profile("brace");
+                const auto& a = j.at("foundationSizeMeters");
+                if (!a.is_array() || a.size()!=3) throw std::invalid_argument("Foundation size needs three dimensions.");
+                request.frame.foundationSize = glm::dvec3{a[0].get<double>(),a[1].get<double>(),a[2].get<double>()}/scale;
+            }
+        }
+        catch (const nlohmann::json::exception& failure)
+        {
+            throw std::invalid_argument(std::string("Invalid support command JSON: ") + failure.what());
+        }
+
         *created = state->application.editSupport(request);
     });
 }
@@ -721,6 +771,61 @@ QnResult QN_CALL qn_select_support(QnSession handle, uint64_t revision,
                 throw std::invalid_argument("Unknown support selection.");
         }
         selectSupport(*state, selection);
+    });
+}
+QnResult QN_CALL qn_select_infrastructure(QnSession handle, uint64_t revision, uint64_t id, QnError* error)
+{
+    return boundary(error,[&] {
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state,revision);
+        const auto& items = state->application.track().trackDevices().infrastructure;
+        if (id && std::ranges::none_of(items,[id](const auto& item) { return item.id == id; }))
+            throw std::invalid_argument("Unknown infrastructure ID.");
+        state->selectedInfrastructure = id;
+    });
+}
+QnResult QN_CALL qn_support_style_snapshot(QnSession handle, uint64_t revision,
+    char* buffer, uint32_t capacity, uint32_t* required, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!required || (!buffer && capacity)) throw std::invalid_argument("Invalid support style buffer.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        using namespace quantum::coaster;
+        using nlohmann::json;
+        json structures = json::array();
+        const double scale = state->application.track().physicalSettings().metersPerCoordinateUnit;
+        const auto profile = [scale](const SupportMemberProfile& p) -> json {
+            return {{"shape",static_cast<unsigned>(p.shape)}, {"width",p.outerDimensions.x*scale},
+                {"height",p.outerDimensions.y*scale}, {"wall",p.wallThickness*scale}}; };
+        for (const auto& s : state->application.track().supports().structures)
+        {
+            json members = json::array(), foundations = json::array();
+            for (const auto& m : s.members)
+                members.push_back({{"id",m.id}, {"useStyleProfile",m.useStyleProfile},
+                    {"useFrameProfile",m.useFrameProfile},
+                    {"surface",m.surface ? json::parse(serializeSupportSurface(*m.surface)) : json(nullptr)},
+                    {"resolved",json::parse(serializeSupportSurface(resolveSupportSurface(s,m,scale)))}});
+            for (const auto& n : s.nodes) if (n.foundation)
+                foundations.push_back({{"id",n.id}, {"kind",static_cast<unsigned>(n.foundation->kind)},
+                    {"dimensions",{n.foundation->dimensions.x*scale,n.foundation->dimensions.y*scale,n.foundation->dimensions.z*scale}}});
+            json recipe = nullptr;
+            if (s.generatedFrame)
+            {
+                const auto& r = *s.generatedFrame;
+                recipe = {{"stationMeters",r.station*scale}, {"widthMeters",r.width*scale},
+                    {"foundationElevationMeters",r.foundationElevation*scale}, {"verticalOffsetMeters",r.verticalOffset*scale},
+                    {"post",profile(r.post)}, {"beam",profile(r.beam)}, {"brace",profile(r.brace)},
+                    {"foundationSizeMeters",{r.foundationSize.x*scale,r.foundationSize.y*scale,r.foundationSize.z*scale}}};
+            }
+            structures.push_back({{"id",s.id}, {"family",static_cast<unsigned>(s.style)},
+                {"surface",s.surface ? json::parse(serializeSupportSurface(*s.surface)) : json(nullptr)},
+                {"resolved",json::parse(serializeSupportSurface(resolveSupportSurface(s,SupportMember{},scale)))},
+                {"frame",recipe}, {"members",members}, {"foundations",foundations}});
+        }
+        const auto text = structures.dump();
+        if (text.size() >= std::numeric_limits<uint32_t>::max()) throw std::invalid_argument("Support style snapshot is too large.");
+        *required = static_cast<uint32_t>(text.size()+1);
+        if (capacity < *required) throw Failure(QN_BUFFER_TOO_SMALL,"Support style buffer is too small.");
+        std::memcpy(buffer,text.c_str(),*required);
     });
 }
 QnResult QN_CALL qn_support_workspace(QnSession handle, uint32_t active, QnError* error)
@@ -768,6 +873,11 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
         bool frameTrack;
         const auto acceptPick = [&](Session& state, NativeViewport& viewport)
         {
+            if (const auto pick = viewport.takeInfrastructurePick(); pick && pick->revision == state.application.revision())
+            {
+                if (pick->access) state.selectedDevice = pick->id;
+                else state.selectedInfrastructure = pick->id;
+            }
             if (const auto pick = viewport.takeSupportPick(); pick && state.supportWorkspace
                 && pick->revision == state.application.revision() && pick->selectionRevision == state.supportSelectionRevision
                 && (!pick->selection || quantum::editor::supportSelectionExists(state.application.track().supports(), *pick->selection)))
@@ -798,7 +908,7 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
                 app.track().startPose(), app.transformPreview(), app.track().physicalSettings().metersPerCoordinateUnit,
                 app.centerline().visualization());
             viewport->captureTrain(revision, app.preview().vertexGeneration(), app.preview().vertices(), app.preview().meshInstances());
-            viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization(), app.preview().operations());
+            viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization(), app.preview().operations(), state->selectedInfrastructure);
             viewport->captureSupports(revision, state->supportSelectionRevision, state->supportWorkspace,
                 state->selectedSupport, app.track().supports(), app.supports());
             if (state->viewportGeometryGeneration != geometryGeneration)

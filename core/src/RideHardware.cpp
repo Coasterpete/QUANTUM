@@ -1,5 +1,6 @@
 #include <quantum/coaster/TrackDevices.hpp>
 #include <algorithm>
+#include <glm/geometric.hpp>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
@@ -132,6 +133,12 @@ namespace quantum::coaster
                     && std::isfinite(c->lateralOffsetMeters) && std::isfinite(c->verticalOffsetMeters)
                     && std::isfinite(c->yawDegrees) && !(c->initiallyOpen && c->initiallyLocked),
                     "Invalid access motion or initial lock state.");
+            if (const auto* c = std::get_if<AccessConfiguration>(&config))
+            {
+                require(c->infill <= AccessInfill::Solid && positive(c->widthMeters) && positive(c->heightMeters)
+                    && c->widthMeters <= 50 && c->heightMeters <= 50, "Invalid access presentation dimensions or infill.");
+                if (c->surface) validateSupportSurface(*c->surface);
+            }
         }
         std::unordered_set<std::uint64_t> ids;
         std::uint64_t greatest = 0;
@@ -140,14 +147,22 @@ namespace quantum::coaster
         {
             TrackDevice interval;
             interval.startStationMeters = item.startStationMeters; interval.endStationMeters = item.endStationMeters;
+            if (item.surface) validateSupportSurface(*item.surface);
+            for (double component : {item.worldStartMeters.x, item.worldStartMeters.y, item.worldStartMeters.z,
+                item.worldEndMeters.x, item.worldEndMeters.y, item.worldEndMeters.z})
+                require(std::isfinite(component), "Infrastructure world endpoints must be finite.");
+            require(positive(item.stepRiseMeters) && item.stepRiseMeters >= .05
+                && positive(item.railings.postSpacingMeters) && item.railings.postSpacingMeters >= .25,
+                "Invalid stair rise or guardrail spacing.");
             require(item.id && ids.insert(item.id).second && !item.name.empty()
                 && item.kind <= InfrastructureKind::Landing && (item.side == TrackSide::Left || item.side == TrackSide::Right)
                 && item.deck <= DeckStyle::Grating && positive(item.widthMeters) && positive(item.railings.heightMeters)
                 && std::isfinite(item.lateralOffsetMeters) && std::isfinite(item.verticalOffsetMeters)
                 && std::isfinite(item.startStationMeters) && std::isfinite(item.endStationMeters)
-                && item.startStationMeters >= 0 && item.startStationMeters < length && item.endStationMeters >= 0
-                && (circuit ? item.endStationMeters < length : item.endStationMeters <= length)
-                && trackDeviceLengthMeters(interval, length, circuit) > 0,
+                && (item.worldPlacement ? glm::length(item.worldEndMeters - item.worldStartMeters) > 1e-6
+                    : item.startStationMeters >= 0 && item.startStationMeters < length && item.endStationMeters >= 0
+                        && (circuit ? item.endStationMeters < length : item.endStationMeters <= length)
+                        && trackDeviceLengthMeters(interval, length, circuit) > 0),
                 "Invalid track-relative infrastructure.");
             greatest = std::max(greatest, item.id);
             gatesValid(item.accessGates, collection);

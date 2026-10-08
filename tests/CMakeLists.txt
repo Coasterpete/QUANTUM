@@ -396,6 +396,8 @@ if(QUANTUM_ENABLE_ENGINE)
     target_link_libraries(QuantumEngineSupportSolidRendererTests PRIVATE
         Quantum::Engine Quantum::Core)
     target_compile_features(QuantumEngineSupportSolidRendererTests PRIVATE cxx_std_23)
+    target_compile_definitions(QuantumEngineSupportSolidRendererTests PRIVATE
+        QUANTUM_SUPPORT_FRAGMENT_BINARY="${CMAKE_BINARY_DIR}/shaders/support.frag.spv")
     set_target_properties(QuantumEngineSupportSolidRendererTests PROPERTIES
         CXX_EXTENSIONS OFF)
     add_dependencies(QuantumEngineSupportSolidRendererTests QuantumShaders)

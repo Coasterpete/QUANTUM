@@ -98,6 +98,7 @@ using (var deviceSession = new Session())
 await TimelineChecks.Run();
 await HardwareChecks.Run();
 await SupportChecks.Run();
+await Supports2Checks.Run();
 await PlacementChecks.Run(fixture);
 var disposedController = new SessionController();
 disposedController.Dispose(); disposedController.Dispose();

@@ -13,6 +13,7 @@ add_library(QuantumApplication STATIC
     src/TrainMeshPresentation.cpp
     src/TrackStylePresentation.cpp
     src/TrackDevicePresentation.cpp
+    src/InfrastructurePresentation.cpp
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
     src/ViewportTrackAnchors.cpp
@@ -25,6 +26,10 @@ target_link_libraries(QuantumApplication PUBLIC Quantum::Engine)
 target_compile_features(QuantumApplication PUBLIC cxx_std_23)
 set_target_properties(QuantumApplication QuantumCore QuantumEngine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(BUILD_TESTING)
+    add_executable(QuantumSupports2Tests ${PROJECT_SOURCE_DIR}/tests/Supports2Tests.cpp)
+    target_link_libraries(QuantumSupports2Tests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.Supports2 COMMAND QuantumSupports2Tests)
+    set_tests_properties(QuantumApplication.Supports2 PROPERTIES LABELS "supports;infrastructure;appearance;history;uv")
     add_executable(QuantumRideHardwareAuthoringTests ${PROJECT_SOURCE_DIR}/tests/RideHardwareAuthoringTests.cpp)
     target_link_libraries(QuantumRideHardwareAuthoringTests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.RideHardwareAuthoring COMMAND QuantumRideHardwareAuthoringTests)

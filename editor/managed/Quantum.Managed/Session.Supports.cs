@@ -8,10 +8,10 @@ public enum SupportOperation : uint
     CreateStructure, DeleteStructure, RenameStructure, CreateNode, DeleteNode,
     MoveNode, SetAttachment, ClearAttachment, SetFoundation, ClearFoundation,
     CreateMember, DeleteMember, SetProfile, SetTreatment, ClearConnection,
-    SetConnectorAsset, ClearConnectionPlacement
+    SetConnectorAsset, ClearConnectionPlacement, SetStyle, SetStructureSurface, SetMemberSurface, UseStyleProfile, GenerateFrame, SetFoundationShape
 }
 public sealed record SupportSelection(SupportSelectionKind Kind, uint Structure, uint Element = 0);
-public sealed record SupportStructure(uint Id, string Name, uint NodeCount, uint MemberCount, bool Generated)
+public sealed record SupportStructure(uint Id, string Name, uint NodeCount, uint MemberCount, bool Generated, SupportStyleSettings? Appearance = null)
 {
     public string Label => $"{Name} · #{Id}";
     public string Summary => $"{NodeCount} nodes · {MemberCount} members{(Generated ? " · Generated run" : "")}";
@@ -28,10 +28,10 @@ public sealed record SupportNode(uint Structure, uint Id, uint Anchor, double X,
 public sealed record SupportConnection(uint Treatment, bool HasPlacement, bool HasMounting, bool AssetTruncated, string Asset);
 public sealed record SupportMember(uint Structure, uint Id, uint StartNode, uint EndNode, uint Shape,
     uint Role, uint Orientation, bool HasReference, double Width, double Height, double Wall,
-    SupportConnection StartConnection, SupportConnection EndConnection)
+    SupportConnection StartConnection, SupportConnection EndConnection, SupportMemberAppearance? Appearance = null)
 {
     public string Label => $"Member #{Id} · {StartNode} → {EndNode}";
-    public string Summary => $"{(Shape == 0 ? "Circular" : "Rectangular")} · {Width:G5} × {Height:G5} m · wall {Wall:G5} m";
+    public string Summary => $"{(Shape switch { 0 => "Circular", 1 => "Rectangular", 2 => "Box / HSS", _ => "I / H" })} · {Width:G5} × {Height:G5} m · wall {Wall:G5} m";
     public override string ToString() => Label;
 }
 // Immutable display copies, never an editable managed graph or serializer.
@@ -73,8 +73,9 @@ public sealed unsafe partial class Session
             if (summary.Revision != revision) throw new InvalidOperationException("Document changed during support snapshot.");
             if (supportsRevision != summary.Revision)
             {
+                var styles = ReadSupportStyles(revision).ToDictionary(s => s.Id);
                 supportStructures = Array.AsReadOnly(structureBuffer.Take((int)summary.StructureCount)
-                    .Select(s => new SupportStructure(s.Id, s.Label(), s.NodeCount, s.MemberCount, s.Generated != 0)).ToArray());
+                    .Select(s => new SupportStructure(s.Id, s.Label(), s.NodeCount, s.MemberCount, s.Generated != 0, styles.GetValueOrDefault(s.Id))).ToArray());
                 supportNodes = Array.AsReadOnly(nodeBuffer.Take((int)summary.NodeCount)
                     .Select(n => new SupportNode(n.Structure, n.Id, n.Anchor, n.X, n.Y, n.Z,
                         n.ResolvedX, n.ResolvedY, n.ResolvedZ, n.Station, n.Lateral, n.Vertical)).ToArray());
@@ -82,7 +83,8 @@ public sealed unsafe partial class Session
                     (c.Flags & 1) != 0, (c.Flags & 2) != 0, (c.Flags & 4) != 0, c.AssetLabel());
                 supportMembers = Array.AsReadOnly(memberBuffer.Take((int)summary.MemberCount)
                     .Select(m => new SupportMember(m.Structure, m.Id, m.StartNode, m.EndNode, m.Shape, m.Role,
-                        m.Orientation, m.HasReference != 0, m.Width, m.Height, m.Wall, Map(m.StartConnection), Map(m.EndConnection))).ToArray());
+                        m.Orientation, m.HasReference != 0, m.Width, m.Height, m.Wall, Map(m.StartConnection), Map(m.EndConnection),
+                        styles.GetValueOrDefault(m.Structure)?.Members.FirstOrDefault(a => a.Id == m.Id))).ToArray());
                 supportsRevision = summary.Revision;
             }
             return new(summary.Revision, summary.SelectionRevision, summary.PresentationRevision, summary.Active != 0,

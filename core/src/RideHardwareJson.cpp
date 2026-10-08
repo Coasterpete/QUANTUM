@@ -254,11 +254,17 @@ namespace quantum::coaster
             j["initiallyLocked"] = write(value.initiallyLocked);
             j["initiallyInterlocked"] = write(value.initiallyInterlocked);
             j["meshAsset"] = write(value.meshAsset);
+            if (value.infill != AccessInfill::Mesh) j["infill"] = write(value.infill);
+            if (value.widthMeters != 1.0) j["widthMeters"] = value.widthMeters;
+            if (value.heightMeters != 1.1) j["heightMeters"] = value.heightMeters;
+            if (value.surface) j["surface"] = json::parse(serializeSupportSurface(*value.surface));
             return j;
         }
         template<> AccessConfiguration read(const json& j)
         {
-            fields(j, {"role", "motion", "travelDirection", "openAngleDegrees", "travelDistanceMeters", "movementSeconds", "lateralOffsetMeters", "verticalOffsetMeters", "yawDegrees", "initiallyOpen", "initiallyLocked", "initiallyInterlocked", "meshAsset"});
+            auto legacy = j;
+            for (const char* key : {"infill", "widthMeters", "heightMeters", "surface"}) legacy.erase(key);
+            fields(legacy, {"role", "motion", "travelDirection", "openAngleDegrees", "travelDistanceMeters", "movementSeconds", "lateralOffsetMeters", "verticalOffsetMeters", "yawDegrees", "initiallyOpen", "initiallyLocked", "initiallyInterlocked", "meshAsset"});
             AccessConfiguration value;
             value.role = read<decltype(value.role)>(j.at("role"));
             value.motion = read<decltype(value.motion)>(j.at("motion"));
@@ -273,6 +279,10 @@ namespace quantum::coaster
             value.initiallyLocked = read<decltype(value.initiallyLocked)>(j.at("initiallyLocked"));
             value.initiallyInterlocked = read<decltype(value.initiallyInterlocked)>(j.at("initiallyInterlocked"));
             value.meshAsset = read<decltype(value.meshAsset)>(j.at("meshAsset"));
+            if (j.contains("infill")) value.infill = read<AccessInfill>(j["infill"]);
+            if (j.contains("widthMeters")) value.widthMeters = read<double>(j["widthMeters"]);
+            if (j.contains("heightMeters")) value.heightMeters = read<double>(j["heightMeters"]);
+            if (j.contains("surface") && !j["surface"].is_null()) value.surface = deserializeSupportSurface(j["surface"].dump());
             return value;
         }
         template<> json write(const RailingConfiguration& value)
@@ -281,15 +291,18 @@ namespace quantum::coaster
             j["inner"] = write(value.inner);
             j["outer"] = write(value.outer);
             j["heightMeters"] = write(value.heightMeters);
+            if (value.postSpacingMeters != 1.5) j["postSpacingMeters"] = value.postSpacingMeters;
             return j;
         }
         template<> RailingConfiguration read(const json& j)
         {
-            fields(j, {"inner", "outer", "heightMeters"});
+            auto legacy = j; legacy.erase("postSpacingMeters");
+            fields(legacy, {"inner", "outer", "heightMeters"});
             RailingConfiguration value;
             value.inner = read<decltype(value.inner)>(j.at("inner"));
             value.outer = read<decltype(value.outer)>(j.at("outer"));
             value.heightMeters = read<decltype(value.heightMeters)>(j.at("heightMeters"));
+            if (j.contains("postSpacingMeters")) value.postSpacingMeters = read<double>(j["postSpacingMeters"]);
             return value;
         }
         template<> json write(const TrackInfrastructure& value)
@@ -308,11 +321,21 @@ namespace quantum::coaster
             j["railings"] = write(value.railings);
             j["accessGates"] = write(value.accessGates);
             j["meshAsset"] = write(value.meshAsset);
+            if (value.surface) j["surface"] = json::parse(serializeSupportSurface(*value.surface));
+            if (value.worldPlacement)
+            {
+                j["worldPlacement"] = true;
+                j["worldStartMeters"] = {value.worldStartMeters.x, value.worldStartMeters.y, value.worldStartMeters.z};
+                j["worldEndMeters"] = {value.worldEndMeters.x, value.worldEndMeters.y, value.worldEndMeters.z};
+            }
+            if (value.stepRiseMeters != .18) j["stepRiseMeters"] = value.stepRiseMeters;
             return j;
         }
         template<> TrackInfrastructure read(const json& j)
         {
-            fields(j, {"id", "name", "kind", "startStationMeters", "endStationMeters", "side", "lateralOffsetMeters", "verticalOffsetMeters", "widthMeters", "deck", "railings", "accessGates", "meshAsset"});
+            auto legacy = j;
+            for (const char* key : {"surface", "worldPlacement", "worldStartMeters", "worldEndMeters", "stepRiseMeters"}) legacy.erase(key);
+            fields(legacy, {"id", "name", "kind", "startStationMeters", "endStationMeters", "side", "lateralOffsetMeters", "verticalOffsetMeters", "widthMeters", "deck", "railings", "accessGates", "meshAsset"});
             TrackInfrastructure value;
             value.id = read<decltype(value.id)>(j.at("id"));
             value.name = read<decltype(value.name)>(j.at("name"));
@@ -327,6 +350,18 @@ namespace quantum::coaster
             value.railings = read<decltype(value.railings)>(j.at("railings"));
             value.accessGates = read<decltype(value.accessGates)>(j.at("accessGates"));
             value.meshAsset = read<decltype(value.meshAsset)>(j.at("meshAsset"));
+            if (j.contains("surface") && !j["surface"].is_null()) value.surface = deserializeSupportSurface(j["surface"].dump());
+            if (j.contains("worldPlacement")) value.worldPlacement = read<bool>(j["worldPlacement"]);
+            const auto vector = [&](const char* key, glm::dvec3 fallback)
+            {
+                if (!j.contains(key)) return fallback;
+                const auto& a = j[key];
+                if (!a.is_array() || a.size() != 3) throw std::invalid_argument("Infrastructure world endpoint needs three coordinates.");
+                return glm::dvec3{read<double>(a[0]), read<double>(a[1]), read<double>(a[2])};
+            };
+            value.worldStartMeters = vector("worldStartMeters", value.worldStartMeters);
+            value.worldEndMeters = vector("worldEndMeters", value.worldEndMeters);
+            if (j.contains("stepRiseMeters")) value.stepRiseMeters = read<double>(j["stepRiseMeters"]);
             return value;
         }
         template<> json write(const std::vector<TrackInfrastructure>& values)

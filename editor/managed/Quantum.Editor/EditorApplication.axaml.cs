@@ -30,6 +30,11 @@ public sealed partial class EditorApplication : Application
                     desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                     window.Opened += async (_, _) => await RuntimeChecks.RunSupportsSmoke(window, supportFixture, supportReport, desktop);
                 }
+                else if (desktop.Args is ["--verify-supports-2-smoke", var stylesFixture, var stylesReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunSupports2Smoke(window, stylesFixture, stylesReport, desktop);
+                }
                 else if (desktop.Args is ["--verify-hardware-smoke", var hardwareFixture, var hardwareReport])
                 {
                     desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;

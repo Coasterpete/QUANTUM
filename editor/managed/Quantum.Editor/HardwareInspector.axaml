@@ -54,6 +54,9 @@
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding IsAccessHardware}">
       <ComboBox SelectedIndex="{Binding GateRole}"><ComboBoxItem Content="Station" /><ComboBoxItem Content="Queue / loading" /><ComboBoxItem Content="Maintenance" /><ComboBoxItem Content="Catwalk" /><ComboBoxItem Content="Transfer" /><ComboBoxItem Content="Storage" /><ComboBoxItem Content="Barrier" /></ComboBox>
+      <ComboBox SelectedIndex="{Binding GateInfill}"><ComboBoxItem Content="Mesh / chain-link gate" /><ComboBoxItem Content="Solid gate / door / barrier" /></ComboBox>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Gate width · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateWidth}" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Gate height · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateHeight}" /></Grid>
       <ComboBox SelectedIndex="{Binding GateMotion}"><ComboBoxItem Content="Swing / hinged" /><ComboBoxItem Content="Slide" /></ComboBox>
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Open angle · degrees" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateAngle}" MinHeight="28" /></Grid>
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Slide travel · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateTravel}" MinHeight="28" /></Grid>

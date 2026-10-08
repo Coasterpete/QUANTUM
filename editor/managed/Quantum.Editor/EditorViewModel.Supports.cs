@@ -64,7 +64,7 @@ public sealed partial class EditorViewModel
     public string MemberHeight { get => memberHeight; set { memberHeight = value; Changed(); } }
     public string MemberWall { get => memberWall; set { memberWall = value; Changed(); } }
     public int MemberShape { get => memberShape; set { memberShape = value; Changed(); Changed(nameof(IsRectangularMember)); } }
-    public bool IsRectangularMember => MemberShape == 1;
+    public bool IsRectangularMember => MemberShape != 0;
     public int ConnectionEnd { get => connectionEnd; set { connectionEnd = value; Changed(); RefreshConnection(); } }
     public int ConnectionTreatment { get => connectionTreatment; set { connectionTreatment = value; Changed(); } }
     public string ConnectorAsset { get => connectorAsset; set { connectorAsset = value; Changed(); } }
@@ -120,6 +120,7 @@ public sealed partial class EditorViewModel
     public EditorCommand FrameSupportCommand { get; private set; } = null!;
     private void InitializeSupportCommands()
     {
+        InitializeSupportAppearanceCommands();
         CreateSupportStructureCommand = Add(() => SupportMutation(() => new(SupportOperation.CreateStructure)), () => Snapshot is not null);
         DeleteSupportStructureCommand = Add(() => SupportMutation(() => new(SupportOperation.DeleteStructure, selectedStructure!.Id)), () => HasSupportStructure);
         RenameSupportStructureCommand = Add(() => SupportMutation(() => new(SupportOperation.RenameStructure, selectedStructure!.Id, Text: StructureName)), () => HasSupportStructure);
@@ -134,7 +135,7 @@ public sealed partial class EditorViewModel
         SetSupportFoundationCommand = Add(() => SupportMutation(() => NodeRequest(SupportOperation.SetFoundation)), () => IsFreeSupportNode);
         ClearSupportFoundationCommand = Add(() => SupportMutation(() => NodeRequest(SupportOperation.ClearFoundation)), () => IsFoundationSupportNode);
         CreateSupportMemberCommand = Add(() => SupportMutation(() => new(SupportOperation.CreateMember, selectedStructure!.Id,
-            StartNode: memberStartNode!.Id, EndNode: memberEndNode!.Id)), () => HasSupportStructure && memberStartNode is not null
+            StartNode: memberStartNode!.Id, EndNode: memberEndNode!.Id, Text: "{\"useStyleProfile\":true}")), () => HasSupportStructure && memberStartNode is not null
                 && memberEndNode is not null && memberStartNode.Id != memberEndNode.Id);
         DeleteSupportMemberCommand = Add(() => SupportMutation(() => MemberRequest(SupportOperation.DeleteMember)), () => HasSupportMember);
         ApplySupportProfileCommand = Add(() => SupportMutation(() => MemberRequest(SupportOperation.SetProfile) with
@@ -162,7 +163,7 @@ public sealed partial class EditorViewModel
         {
             var id = s.EditSupport(snapshot.Revision, request);
             if (id == 0) return;
-            var kind = request.Operation switch { SupportOperation.CreateStructure => SupportSelectionKind.Structure,
+            var kind = request.Operation switch { SupportOperation.CreateStructure or SupportOperation.GenerateFrame => SupportSelectionKind.Structure,
                 SupportOperation.CreateNode => SupportSelectionKind.Node, _ => SupportSelectionKind.Member };
             s.SelectSupport(s.Snapshot().Revision, new(kind, kind == SupportSelectionKind.Structure ? id : request.Structure,
                 kind == SupportSelectionKind.Structure ? 0 : id));
@@ -238,7 +239,7 @@ public sealed partial class EditorViewModel
             MemberHeight = Format(selectedMember?.Height ?? .1); MemberWall = Format(selectedMember?.Wall ?? 0);
             foreach (var name in new[] { nameof(HasSupportStructure), nameof(HasSupportNode), nameof(HasSupportMember), nameof(IsFreeSupportNode),
                 nameof(IsAttachedSupportNode), nameof(IsFoundationSupportNode), nameof(CanMoveSupportNode), nameof(SupportHeading), nameof(SupportContext), nameof(MemberMetadata) }) Changed(name);
-            RefreshConnection(); RefreshCommands();
+            SeedSupportAppearance(); RefreshConnection(); RefreshCommands();
         }
         finally { updatingSupports = previousUpdating; }
     }

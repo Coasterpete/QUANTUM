@@ -5,6 +5,8 @@
 #include <imgui_impl_vulkan.h>
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -184,6 +186,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
             {
                 selectedSupport_ = pick(event.button.x, event.button.y);
                 supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
+                if (!selectedSupport_ && inputWidth > 0 && inputHeight > 0) pickInfrastructureAt(event.button.x/inputWidth,event.button.y/inputHeight);
             }
             if (placementActive_ && !geometry && !supports && event.button.button == SDL_BUTTON_LEFT)
                 placementPointer(0, {event.button.x * static_cast<double>(width) / std::max(1, inputWidth),
@@ -259,6 +262,11 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
     io.DisplayFramebufferScale = ImVec2(1, 1); io.DeltaTime = 1.0f / 60;
     ImGui_ImplVulkan_NewFrame(); ImGui::NewFrame();
     ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)texture_), ImVec2(0, 0), io.DisplaySize);
+    if (infrastructureDirty_)
+    {
+        renderer_.updateInfrastructurePresentation(infrastructure_, access_);
+        infrastructureDirty_ = false;
+    }
     if (supportActive_) drawSupportOverlay();
     drawPlacementOverlay();
     ImGui::Render(); renderer_.drawFrame();
@@ -292,8 +300,28 @@ void NativeViewport::captureTrain(uint64_t revision, uint64_t generation,
 void NativeViewport::captureDevice(uint64_t revision, uint64_t selected,
     const quantum::coaster::AuthoredTrack& track,
     const quantum::editor::CenterlineVisualization& geometry,
-    const quantum::physics::RideOperations& operations)
+    const quantum::physics::RideOperations& operations, uint64_t infrastructureSelection)
 {
+    nextAccessFractions_.clear();
+    auto& fractions = nextAccessFractions_;
+    for (const auto& hardware : operations.hardware())
+        if (const auto* gate = std::get_if<quantum::physics::AccessRuntime>(&hardware.mechanism))
+            fractions.emplace_back(hardware.id, gate->fraction);
+    const bool documentChanged = infrastructureRevision_ != revision;
+    if (documentChanged)
+    {
+        infrastructurePicking_ = quantum::editor::createInfrastructurePresentation(track, geometry.samples);
+        infrastructure_.clear();
+        for (const auto& object : infrastructurePicking_) infrastructure_.push_back(object.solid);
+    }
+    if (documentChanged || fractions != accessFractions_)
+    {
+        accessPicking_ = quantum::editor::createAccessPresentation(track, geometry.samples, operations.hardware());
+        access_.clear();
+        for (const auto& object : accessPicking_) access_.push_back(object.solid);
+        infrastructureDirty_ = true; infrastructureRevision_ = revision;
+        accessFractions_.swap(nextAccessFractions_);
+    }
     const auto found = std::find_if(operations.hardware().begin(), operations.hardware().end(), [selected](const auto& h) { return h.id == selected; });
     const auto* runtime = found == operations.hardware().end() ? nullptr : &*found;
     double position = 0;
@@ -303,11 +331,32 @@ void NativeViewport::captureDevice(uint64_t revision, uint64_t selected,
         if (const auto* g = std::get_if<quantum::physics::AccessRuntime>(&runtime->mechanism)) position = g->fraction;
     }
     const auto label = runtime ? runtime->state : std::string{};
-    if (position == deviceMechanismPosition_ && label == deviceMechanismState_ && revision == deviceRevision_ && selected == selectedDevice_) return;
+    if (position == deviceMechanismPosition_ && label == deviceMechanismState_ && revision == deviceRevision_ && selected == selectedDevice_ && infrastructureSelection == selectedInfrastructure_) return;
     device_ = quantum::editor::createTrackDeviceSelectionVertices(track, geometry, selected);
     auto mechanism = quantum::editor::createHardwareMechanismVertices(track, geometry, selected, runtime);
     device_.insert(device_.end(), mechanism.begin(), mechanism.end());
     deviceMechanismPosition_ = position; deviceMechanismState_ = label;
+    selectedInfrastructure_ = infrastructureSelection;
+    // A small bounding outline communicates infrastructure selection without
+    // duplicating its geometry in the authoring model.
+    if (selectedInfrastructure_)
+        for (const auto& object : infrastructurePicking_) if (object.id == selectedInfrastructure_)
+        {
+            glm::dvec3 lo{std::numeric_limits<double>::infinity()}, hi{-std::numeric_limits<double>::infinity()};
+            for (const auto& batch : object.solid.batches) for (const auto& instance : batch.instances)
+                for (int corner = 0; corner < 8; ++corner)
+                {
+                    const auto p = glm::dvec3{glm::dmat4{instance.transform}*glm::dvec4{corner&1 ? .5 : -.5,corner&2 ? .5 : -.5,corner&4 ? .5 : -.5,1}};
+                    lo = glm::min(lo,p); hi = glm::max(hi,p);
+                }
+            if (std::isfinite(lo.x)) for (int corner = 0; corner < 8; ++corner) for (int axis = 0; axis < 3; ++axis)
+                if (!(corner & (1<<axis))) for (int end = 0; end < 2; ++end)
+                {
+                    const int c = corner | (end<<axis);
+                    const glm::dvec3 p{c&1 ? hi.x : lo.x,c&2 ? hi.y : lo.y,c&4 ? hi.z : lo.z};
+                    device_.push_back({static_cast<float>(p.x),static_cast<float>(p.y),static_cast<float>(p.z),{1,.65F,.15F,1}});
+                }
+        }
     deviceRevision_ = revision; selectedDevice_ = selected; trainDirty_ = true;
 }
 void NativeViewport::input(uint32_t action, double x, double y, double z, double value)
@@ -325,6 +374,7 @@ void NativeViewport::input(uint32_t action, double x, double y, double z, double
         if (!supportActive_) throw std::invalid_argument("Open Supports before selecting support geometry.");
         selectedSupport_ = pickSupportAt(x, y);
         supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
+        if (!selectedSupport_) pickInfrastructureAt(x,y);
         break;
     case 9:
         camera_.frameSphere(displayedStartPose_.position, 5 / coordinateScale_, static_cast<double>(width_) / height_);
@@ -333,6 +383,18 @@ void NativeViewport::input(uint32_t action, double x, double y, double z, double
         placementPointer(action - 10, {x * width_, y * height_}, pixelScale_); break;
     case 13: cancelTransformInput(); break;
     }
+}
+void NativeViewport::pickInfrastructureAt(double x, double y)
+{
+    const auto ray = camera_.viewportRay(x,y,static_cast<double>(width_)/height_);
+    auto hit = quantum::editor::pickInfrastructureSolid(infrastructurePicking_,ray.origin,ray.direction);
+    auto gate = quantum::editor::pickInfrastructureSolid(accessPicking_,ray.origin,ray.direction);
+    if (gate && (!hit || gate->distance < hit->distance)) hit = gate;
+    if (hit) infrastructurePick_ = {infrastructureRevision_,hit->id,hit->access};
+}
+std::optional<NativeViewport::InfrastructurePickIntent> NativeViewport::takeInfrastructurePick() noexcept
+{
+    return std::exchange(infrastructurePick_,std::nullopt);
 }
 std::optional<quantum::editor::SupportSelection> NativeViewport::pickSupportAt(
     double x, double y, double pixelScale) const

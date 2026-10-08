@@ -72,7 +72,7 @@ namespace quantum::editor
                     placement.start,
                     placement.end,
                     placement.frame,
-                    member.profile});
+                    coaster::resolveSupportProfile(structure, member)});
                 visualization.memberVertices.push_back({
                     static_cast<float>(start->position.x),
                     static_cast<float>(start->position.y),
@@ -147,7 +147,10 @@ namespace quantum::editor
                 }
             }
         }
-        return createSupportVisualization(resolved);
+        auto visualization = createSupportVisualization(resolved);
+        visualization.solidPresentations = coaster::buildSupportSolidPresentation(resolved,
+            track.physicalSettings().metersPerCoordinateUnit);
+        return visualization;
     }
 
     bool supportSelectionExists(

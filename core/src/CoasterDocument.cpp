@@ -502,6 +502,8 @@ namespace quantum::coaster
             {
             case SupportMemberProfileShape::Circular: return "Circular";
             case SupportMemberProfileShape::Rectangular: return "Rectangular";
+            case SupportMemberProfileShape::Hss: return "Hss";
+            case SupportMemberProfileShape::ISection: return "ISection";
             }
             throw std::runtime_error("Unknown support member profile shape.");
         }
@@ -645,6 +647,13 @@ namespace quantum::coaster
                     if (node.foundation.has_value())
                     {
                         nodeJson["foundation"] = json::object();
+                        if (node.foundation->kind != SupportFoundationKind::Footing)
+                        {
+                            const char* kinds[]{"Footing", "Pedestal", "Pier", "Block"};
+                            nodeJson["foundation"]["kind"] = kinds[static_cast<unsigned>(node.foundation->kind)];
+                        }
+                        if (node.foundation->dimensions != glm::dvec3{0.0})
+                            nodeJson["foundation"]["dimensions"] = {node.foundation->dimensions.x, node.foundation->dimensions.y, node.foundation->dimensions.z};
                     }
                     nodesJson.push_back(std::move(nodeJson));
                 }
@@ -666,6 +675,9 @@ namespace quantum::coaster
                     // Absent means Unspecified, so M1/M2A documents without
                     // roles keep their byte layout and manual members that
                     // never picked a role stay compact.
+                    if (member.surface) memberJson["surface"] = json::parse(serializeSupportSurface(*member.surface));
+                    if (member.useStyleProfile) memberJson["useStyleProfile"] = true;
+                    if (member.useFrameProfile) memberJson["useFrameProfile"] = true;
                     if (member.role != SupportMemberRole::Unspecified)
                     {
                         memberJson["role"] =
@@ -714,6 +726,23 @@ namespace quantum::coaster
                     {"nextElementId", structure.nextElementId},
                     {"nodes", std::move(nodesJson)},
                     {"members", std::move(membersJson)}};
+                if (structure.style != SupportStyleFamily::TraditionalTimber)
+                    structureJson["style"] = supportStyleName(structure.style);
+                if (structure.surface) structureJson["surface"] = json::parse(serializeSupportSurface(*structure.surface));
+                if (structure.generatedFrame)
+                {
+                    const auto& r = *structure.generatedFrame;
+                    const auto profile = [](const SupportMemberProfile& p) -> json
+                    {
+                        return {{"shape", supportProfileShapeToString(p.shape)},
+                            {"outerDimensions", {{"x", p.outerDimensions.x}, {"y", p.outerDimensions.y}}},
+                            {"wallThickness", p.wallThickness}};
+                    };
+                    structureJson["generatedFrame"] = {{"station", r.station}, {"width", r.width},
+                        {"foundationElevation", r.foundationElevation}, {"verticalOffset", r.verticalOffset},
+                        {"post", profile(r.post)}, {"beam", profile(r.beam)}, {"brace", profile(r.brace)},
+                        {"foundationSize", {r.foundationSize.x, r.foundationSize.y, r.foundationSize.z}}};
+                }
                 if (structure.generatedWoodenRun)
                 {
                     const auto& recipe = *structure.generatedWoodenRun;
@@ -1313,6 +1342,8 @@ namespace quantum::coaster
             {
                 profile.shape = SupportMemberProfileShape::Rectangular;
             }
+            else if (shape == "Hss") profile.shape = SupportMemberProfileShape::Hss;
+            else if (shape == "ISection") profile.shape = SupportMemberProfileShape::ISection;
             else
             {
                 throw std::runtime_error(
@@ -1510,7 +1541,7 @@ namespace quantum::coaster
                 requireNoUnknownFields(structureJson,
                     {"id", "name", "nextElementId", "nodes", "members",
                      "generatedWoodenRun", "appearance",
-                     "foundationAppearance"},
+                     "foundationAppearance", "style", "surface", "generatedFrame"},
                     structurePath);
                 requireString(structureJson, "name", structurePath);
                 requireArray(structureJson, "nodes", structurePath);
@@ -1520,6 +1551,25 @@ namespace quantum::coaster
                 structure.id = deserializeSupportId<SupportStructureId>(
                     structureJson, "id", structurePath);
                 structure.name = structureJson["name"].get<std::string>();
+                if (structureJson.contains("style")) structure.style = supportStyleFromName(structureJson["style"].get<std::string>());
+                if (structureJson.contains("surface")) structure.surface = deserializeSupportSurface(structureJson["surface"].dump());
+                if (structureJson.contains("generatedFrame"))
+                {
+                    const auto& j = structureJson["generatedFrame"];
+                    requireNoUnknownFields(j, {"station", "width", "foundationElevation", "verticalOffset",
+                        "post", "beam", "brace", "foundationSize"}, structurePath + ".generatedFrame");
+                    SupportFrameRecipe r;
+                    r.station = j.at("station").get<double>(); r.width = j.at("width").get<double>();
+                    r.foundationElevation = j.at("foundationElevation").get<double>(); r.verticalOffset = j.at("verticalOffset").get<double>();
+                    r.post = deserializeSupportMemberProfile(j.at("post"), structurePath + ".generatedFrame.post");
+                    r.beam = deserializeSupportMemberProfile(j.at("beam"), structurePath + ".generatedFrame.beam");
+                    r.brace = deserializeSupportMemberProfile(j.at("brace"), structurePath + ".generatedFrame.brace");
+                    const auto& a = j.at("foundationSize");
+                    if (!a.is_array() || a.size() != 3) throw std::runtime_error("Frame foundation size needs three dimensions.");
+                    r.foundationSize = {a[0].get<double>(), a[1].get<double>(), a[2].get<double>()};
+                    validateSupportFrameRecipe(r); structure.generatedFrame = r;
+                }
+
                 structure.nextElementId =
                     deserializeSupportId<SupportElementId>(
                         structureJson, "nextElementId", structurePath);
@@ -1823,8 +1873,24 @@ namespace quantum::coaster
                     {
                         requireObject(nodeJson, "foundation", nodePath);
                         requireNoUnknownFields(
-                            nodeJson["foundation"], {}, nodePath + ".foundation");
+                            nodeJson["foundation"], {"kind", "dimensions"}, nodePath + ".foundation");
                         node.foundation.emplace();
+                        const auto& f = nodeJson["foundation"];
+                        if (f.contains("kind"))
+                        {
+                            const auto kind = f["kind"].get<std::string>();
+                            if (kind == "Footing") node.foundation->kind = SupportFoundationKind::Footing;
+                            else if (kind == "Pedestal") node.foundation->kind = SupportFoundationKind::Pedestal;
+                            else if (kind == "Pier") node.foundation->kind = SupportFoundationKind::Pier;
+                            else if (kind == "Block") node.foundation->kind = SupportFoundationKind::Block;
+                            else throw std::runtime_error("Unknown foundation kind.");
+                        }
+                        if (f.contains("dimensions"))
+                        {
+                            const auto& a = f["dimensions"];
+                            if (!a.is_array() || a.size() != 3) throw std::runtime_error("Foundation dimensions need three values.");
+                            node.foundation->dimensions = {a[0].get<double>(), a[1].get<double>(), a[2].get<double>()};
+                        }
                     }
                     structure.nodes.push_back(std::move(node));
                 }
@@ -1845,7 +1911,7 @@ namespace quantum::coaster
                     requireNoUnknownFields(memberJson,
                         {"id", "startNodeId", "endNodeId", "profile", "role",
                          "orientation", "orientationReference",
-                         "startConnection", "endConnection"},
+                         "startConnection", "endConnection", "surface", "useStyleProfile", "useFrameProfile"},
                         memberPath);
                     requireObject(memberJson, "profile", memberPath);
 
@@ -1859,6 +1925,9 @@ namespace quantum::coaster
                         deserializeSupportMemberProfile(
                             memberJson["profile"], memberPath + ".profile")};
                     // Absent role means Unspecified for M1/M2A documents.
+                    if (memberJson.contains("surface")) member.surface = deserializeSupportSurface(memberJson["surface"].dump());
+                    if (memberJson.contains("useStyleProfile")) member.useStyleProfile = memberJson["useStyleProfile"].get<bool>();
+                    if (memberJson.contains("useFrameProfile")) member.useFrameProfile = memberJson["useFrameProfile"].get<bool>();
                     if (memberJson.contains("role"))
                     {
                         requireString(memberJson, "role", memberPath);

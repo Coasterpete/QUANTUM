@@ -20,6 +20,8 @@ namespace quantum::renderer
     {
         glm::vec3 position{0.0F};
         glm::vec3 normal{0.0F, 0.0F, 1.0F};
+        glm::vec2 uv{0.0F};
+        float inner = 0.0F;
     };
 
     struct SupportSolidMesh
@@ -38,10 +40,15 @@ namespace quantum::renderer
     inline constexpr std::uint32_t supportSolidCylinderRadialSegments = 16;
 
     [[nodiscard]] SupportSolidMesh createSupportSolidCylinderMesh(
-        std::uint32_t radialSegments = supportSolidCylinderRadialSegments);
+        std::uint32_t radialSegments = supportSolidCylinderRadialSegments, bool hollow = false);
 
     [[nodiscard]] SupportSolidMesh createSupportSolidMesh(
         coaster::SupportMemberMeshKind mesh);
+
+    // Shared by upload and deterministic tests. Piers use the circular mesh;
+    // other kinds use boxes. A pedestal has two tiers inside the authored bounds.
+    [[nodiscard]] std::vector<coaster::SupportMemberInstance> createSupportFoundationInstances(
+        const coaster::SupportFoundationPad& pad);
 
     // Resolved package-relative identifiers for the bundled timber maps.
     // These are the M2A inputs: a neutral grayscale base color, a tangent

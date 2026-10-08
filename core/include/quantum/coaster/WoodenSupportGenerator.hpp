@@ -13,4 +13,8 @@ namespace quantum::coaster
         AuthoredTrack& track,
         const WoodenSupportRunRecipe& recipe,
         std::optional<SupportStructureId> replaceStructureId = std::nullopt);
+
+    [[nodiscard]] SupportStructureId generateSupportFrame(AuthoredTrack& track,
+        SupportStyleFamily style, const SupportFrameRecipe& recipe,
+        std::optional<SupportStructureId> replaceStructureId = std::nullopt);
 }
