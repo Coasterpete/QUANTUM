@@ -121,6 +121,20 @@ public sealed partial class EditorViewModel
     private static ulong Id(string text, string name) => ulong.TryParse(text, out var id) ? id : throw new ArgumentException($"{name} must be a whole nonnegative ID.");
     private ulong[] GateIds() => HardwareGates.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries).Select(text => Id(text, "Gate ID")).ToArray();
     private int Direction => HardwareDirection == 0 ? 1 : -1;
+    private async Task ApplyDeviceSettings(Func<Task> operation)
+    {
+        var id = SelectedDevice?.Id;
+        var pendingSpeed = HardwareSpeed;
+        var pendingTarget = HardwareTarget;
+        await Run(operation);
+        // These Apply buttons commit placement/force or acceleration, not the
+        // typed configuration. Publication must not discard its velocity draft.
+        if (Error.Length == 0 && SelectedDevice?.Id == id)
+        {
+            HardwareSpeed = pendingSpeed;
+            HardwareTarget = pendingTarget;
+        }
+    }
     private void InitializeHardwareCommands()
     {
         CreateHardwareCommand = Add(() => CreateDevice(SelectedHardwareChoice.Kind), () => Snapshot?.TotalLength > 0);

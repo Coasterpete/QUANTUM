@@ -99,7 +99,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         RemoveProfileCommand = Add(() => EditProfile(ProfileOperation.Remove), () => CanRemoveProfile);
         MoveProfileBeginCommand = Add(() => EditProfile(ProfileOperation.MoveBegin, ProfileDistance), () => CanMoveProfileBegin);
         MoveProfileEndCommand = Add(() => EditProfile(ProfileOperation.MoveEnd, ProfileDistance), () => CanMoveProfileEnd);
-        ApplyDeviceCommand = Add(() => Run(async () =>
+        ApplyDeviceCommand = Add(() => ApplyDeviceSettings(async () =>
         {
             if (SelectedDevice is not { } device || Snapshot is not { } snapshot) return;
             var acceleration = ParsePositive(DeviceAcceleration, "Acceleration magnitude");
@@ -112,7 +112,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             if (SelectedDevice is { } device && Snapshot is { } snapshot)
                 await Controller.Submit(s => s.DeleteDevice(snapshot.Revision, device.Id));
         }), () => HasDevice);
-        ApplyDevicePropertiesCommand = Add(() => Run(async () =>
+        ApplyDevicePropertiesCommand = Add(() => ApplyDeviceSettings(async () =>
         {
             if (SelectedDevice is not { } device || Snapshot is not { } snapshot) return;
             var start = ParsePositive(DeviceStart, "Start station", true);

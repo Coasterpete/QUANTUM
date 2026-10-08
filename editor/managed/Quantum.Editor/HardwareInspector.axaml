@@ -7,7 +7,7 @@
       <Button Content="Apply response limit" Command="{Binding ApplyDeviceCommand}" />
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding HasHardwareSpeed}">
-      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Command speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareSpeed}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Command speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox x:Name="HardwareSpeedField" Grid.Column="1" Text="{Binding HardwareSpeed}" MinHeight="28" /></Grid>
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding HasHardwareDirection}">
       <ComboBox SelectedIndex="{Binding HardwareDirection}"><ComboBoxItem Content="Forward / positive travel" /><ComboBoxItem Content="Reverse / negative travel" /></ComboBox>

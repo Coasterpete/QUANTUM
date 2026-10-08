@@ -182,6 +182,12 @@ and speed parameters. Station, Block, Transfer and Access show state/configurati
 content without an acceleration graph. Transfer destinations have their own
 editable name, offset, kind, home selection and move target.
 
+Velocity edits remain pending until Apply hardware configuration. Applying
+placement/force or Constant/Custom/response settings preserves the pending speed
+and target fields for the same selected hardware after successful publication.
+Rejected edits still restore accepted form values, and selection/Undo/Redo refresh
+from authored configuration. These buttons do not silently commit a velocity edit.
+
 Selected hardware retains interval/end markers. Station adds its stop marker;
 Transfer adds alignment markers and a moving table outline; Access adds a moving
 engineering gate outline. These are display-only native line vertices, generated

@@ -1,10 +1,72 @@
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Controls;
+using Avalonia.LogicalTree;
 using Quantum.Managed;
 using System.Diagnostics;
 using System.Text.Json;
 namespace Quantum.Editor;
 internal static partial class RuntimeChecks
 {
+    public static async Task RunVelocitySmoke(MainWindow window, string report,
+        IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var checks = new List<string>(); var watch = Stopwatch.StartNew(); string? failure = null;
+        var model = window.Model;
+        void Require(bool condition, string name)
+        { if (!condition) throw new InvalidOperationException($"{name}: {model.Error}"); checks.Add(name); }
+        async Task Execute(EditorCommand command, string name)
+        { Require(command.CanExecute(null), $"{name} enabled"); await command.ExecuteAsync(); Require(model.Error.Length == 0, name); }
+        try
+        {
+            while ((!window.HostedViewport.IsReady || window.HostedViewport.FrameCount == 0)
+                && watch.Elapsed.TotalSeconds < 3) await Task.Delay(50);
+            Require(window.HostedViewport.IsReady && window.HostedViewport.FrameCount > 0, "Embedded Vulkan presents frames");
+            await model.Controller.Submit(s =>
+            {
+                s.Command(SessionCommand.SetRegionLength, s.Snapshot().Revision, 300, 0);
+                s.Command(SessionCommand.SetInitialSpeed, s.Snapshot().Revision, 3);
+            });
+            model.Publish(model.Controller.Latest!); model.TimelineSource = 1;
+            model.SelectedHardwareChoice = model.HardwareChoices.First(c => c.Kind == DeviceKind.Transport);
+            await Execute(model.CreateHardwareCommand, "Create transport");
+            model.DeviceEnd = "280"; model.DeviceForce = "1000000";
+            await Execute(model.ApplyDevicePropertiesCommand, "Apply transport placement");
+            var inspector = window.GetLogicalDescendants().OfType<HardwareInspector>().Single();
+            var field = inspector.FindControl<TextBox>("HardwareSpeedField")!;
+            field.Text = "6";
+            Require(model.HardwareSpeed == "6", "Real TextBox binding updates velocity draft");
+            model.DeviceAcceleration = "5";
+            await Execute(model.ApplyDeviceCommand, "Apply response limit");
+            Require(field.Text == "6" && model.HardwareSpeed == "6", "Response publication preserves the bound velocity field");
+            await Execute(model.ApplyHardwareCommand, "Commit velocity configuration");
+            Require(model.SelectedHardwareRuntime!.Settings(new TransportSettings()).SpeedMetersPerSecond == 6
+                && model.SelectedHardwareRuntime.CommandedSpeed == 6, "Configuration snapshot and native command use edited velocity");
+            await model.Controller.Submit(s =>
+            {
+                s.Command(SessionCommand.Play);
+                for (var i = 0; i < 12; ++i) s.Update(.25);
+                s.Command(SessionCommand.Pause);
+            });
+            model.Publish(model.Controller.Latest!);
+            Require(Math.Abs(model.Snapshot!.Speed - 6) < .08, "Actual train responds to edited velocity");
+        }
+        catch (Exception error) { failure = error.ToString(); }
+        finally
+        {
+            await File.WriteAllTextAsync(report, JsonSerializer.Serialize(new
+            {
+                success = failure is null, seconds = watch.Elapsed.TotalSeconds, checks, failure,
+                authoredSpeed = model.SelectedHardwareRuntime?.Configuration,
+                commandedSpeed = model.SelectedHardwareRuntime?.CommandedSpeed, actualSpeed = model.Snapshot?.Speed,
+                viewportFrames = window.HostedViewport.FrameCount, physicalInputVerified = false, maintainerApproval = "Pending"
+            }, new JsonSerializerOptions { WriteIndented = true }));
+            model.ConfirmUnsaved = () => Task.FromResult(UnsavedChoice.Discard);
+            window.Close();
+            await Task.Delay(150);
+            desktop.Shutdown(failure is null ? 0 : 1);
+        }
+    }
+
     public static async Task RunHardwareSmoke(MainWindow window, string fixture, string report,
         IClassicDesktopStyleApplicationLifetime desktop)
     {

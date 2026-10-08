@@ -6,6 +6,7 @@ internal static class HardwareChecks
     private static void Require(bool value, string text) { ++checks; if (!value) throw new Exception(text); }
     public static async Task Run()
     {
+        await VelocityControlPath();
         using var controller = new SessionController(); await controller.Submit(_ => { });
         var vm = new EditorViewModel(controller); vm.Publish(controller.Latest!); vm.TimelineSource = 1;
         async Task Execute(EditorCommand command)
@@ -57,5 +58,116 @@ internal static class HardwareChecks
         }
         finally { File.Delete(temp); }
         Console.WriteLine($"Managed hardware forms/commands/telemetry/persistence: {checks} checks passed.");
+    }
+
+    private static async Task VelocityControlPath()
+    {
+        using var controller = new SessionController();
+        await controller.Submit(s =>
+        {
+            s.Command(SessionCommand.SetRegionLength, s.Snapshot().Revision, 300, 0);
+            s.Command(SessionCommand.SetInitialSpeed, s.Snapshot().Revision, 3);
+        });
+        var vm = new EditorViewModel(controller);
+        vm.Publish(controller.Latest!); vm.TimelineSource = 1;
+        vm.SelectedHardwareChoice = vm.HardwareChoices.First(c => c.Kind == DeviceKind.Transport);
+        await vm.CreateHardwareCommand.ExecuteAsync();
+        vm.DeviceEnd = "280"; vm.DeviceForce = "1000000";
+        await vm.ApplyDevicePropertiesCommand.ExecuteAsync();
+        var speeds = new List<double>();
+        foreach (var target in new[] { 1.0, 6.0 })
+        {
+            var revision = vm.Snapshot!.Revision;
+            vm.HardwareSpeed = target.ToString(System.Globalization.CultureInfo.CurrentCulture);
+            await controller.Submit(_ => { }); vm.Publish(controller.Latest!);
+            Require(double.Parse(vm.HardwareSpeed) == target, "Telemetry publication preserves the pending velocity edit");
+            vm.DeviceAcceleration = target == 1 ? "5" : "4";
+            await vm.ApplyDeviceCommand.ExecuteAsync();
+            Require(vm.Error.Length == 0 && double.Parse(vm.HardwareSpeed) == target,
+                "Applying the response limit preserves the pending velocity edit before Apply hardware configuration");
+            vm.DeviceAcceleration = "4"; await vm.ApplyDeviceCommand.ExecuteAsync();
+            vm.DeviceEnd = target == 1 ? "281" : "282";
+            await vm.ApplyDevicePropertiesCommand.ExecuteAsync();
+            Require(vm.Error.Length == 0 && double.Parse(vm.HardwareSpeed) == target,
+                "Applying placement preserves the pending velocity edit");
+            await vm.ApplyHardwareCommand.ExecuteAsync();
+            Require(vm.Error.Length == 0 && vm.Snapshot!.Revision > revision, "Managed velocity field commits an authored revision");
+            var hardware = vm.SelectedHardwareRuntime!;
+            Require(hardware.Settings(new TransportSettings()).SpeedMetersPerSecond == target
+                && vm.Snapshot!.Hardware.Revision == vm.Snapshot.Revision, "Velocity configuration and ABI snapshot agree");
+            Require(hardware.OccupiedBogieCount > 0 && hardware.CommandedSpeed == target, "RideOperations consumes the committed velocity");
+            await controller.Submit(s =>
+            {
+                s.Command(SessionCommand.Play);
+                for (var i = 0; i < 12; ++i) s.Update(.25);
+                s.Command(SessionCommand.Pause);
+            });
+            vm.Publish(controller.Latest!);
+            speeds.Add(vm.Snapshot!.Speed);
+            Require(Math.Abs(vm.Snapshot.Speed - target) < .08, $"Velocity target {target} reaches native train physics (actual {vm.Snapshot.Speed})");
+            Console.WriteLine($"Velocity path: authored={target}, command={vm.SelectedHardwareRuntime!.CommandedSpeed}, actual={vm.Snapshot.Speed:F6}, force={vm.SelectedHardwareRuntime.AppliedForce:F1} N");
+        }
+        Require(speeds[1] - speeds[0] > 4.8, "Changing only velocity changes the actual train response");
+        var acceptedRevision = vm.Snapshot!.Revision;
+        vm.HardwareSpeed = "7"; vm.DeviceAcceleration = "-1";
+        await vm.ApplyDeviceCommand.ExecuteAsync();
+        Require(vm.Error.Length > 0 && vm.Snapshot!.Revision == acceptedRevision && double.Parse(vm.HardwareSpeed) == 6,
+            "Rejected response edit retains the existing accepted-form restoration policy");
+        vm.DeviceAcceleration = "4"; await vm.ApplyDeviceCommand.ExecuteAsync();
+
+        await vm.DeleteDeviceCommand.ExecuteAsync();
+        foreach (var kind in new[] { DeviceKind.Launch, DeviceKind.Brake })
+        {
+            await controller.Submit(s => s.Command(SessionCommand.SetInitialSpeed, s.Snapshot().Revision, kind == DeviceKind.Launch ? 3 : 10));
+            vm.Publish(controller.Latest!);
+            vm.SelectedHardwareChoice = vm.HardwareChoices.First(c => c.Kind == kind);
+            await vm.CreateHardwareCommand.ExecuteAsync();
+            vm.DeviceStart = "0"; vm.DeviceEnd = "280"; vm.DeviceForce = "1000000";
+            await vm.ApplyDevicePropertiesCommand.ExecuteAsync();
+            foreach (var target in kind == DeviceKind.Launch ? new[] { 4.0, 8.0 } : new[] { 1.0, 6.0 })
+            {
+                vm.HardwareTarget = target.ToString(System.Globalization.CultureInfo.CurrentCulture);
+                vm.DeviceMode = 0; vm.DeviceAcceleration = "4"; await vm.ApplyDeviceCommand.ExecuteAsync();
+                vm.DeviceMode = 1; await vm.ApplyDeviceCommand.ExecuteAsync();
+                Require(vm.Error.Length == 0 && double.Parse(vm.HardwareTarget) == target,
+                    "Applying Constant/Custom mode preserves the pending launch/brake target");
+                Require(vm.VisibleProfiles.All(p => p.ValueBegin == 4 && p.ValueEnd == 4), "Velocity comparison retains the same Custom acceleration profile");
+                await vm.ApplyHardwareCommand.ExecuteAsync();
+                var hardware = vm.SelectedHardwareRuntime!;
+                var authored = kind == DeviceKind.Launch ? hardware.Settings(new LaunchSettings()).TargetSpeedMetersPerSecond
+                    : hardware.Settings(new BrakeSettings()).TargetSpeedMetersPerSecond;
+                Require(vm.Error.Length == 0 && authored == target && hardware.CommandedSpeed == target,
+                    "Launch/brake target reaches configuration snapshot and RideOperations");
+                await controller.Submit(s =>
+                {
+                    s.Command(SessionCommand.Play);
+                    if (kind == DeviceKind.Brake)
+                    {
+                        // A trim brake releases at its target; resistance then
+                        // keeps slowing the train. Check the first target crossing.
+                        for (var i = 0; i < 720; ++i)
+                        {
+                            s.Update(1.0 / 240);
+                            if (s.Snapshot().Speed <= target) break;
+                        }
+                        s.Update(1.0 / 240);
+                    }
+                    else for (var i = 0; i < 12; ++i) s.Update(.25);
+                    s.Command(SessionCommand.Pause);
+                });
+                vm.Publish(controller.Latest!);
+                Require(Math.Abs(vm.Snapshot!.Speed - target) < .08,
+                    $"{kind} target {target} limits the Custom-profile force path (actual {vm.Snapshot.Speed})");
+                if (kind == DeviceKind.Brake)
+                    Require(vm.SelectedHardwareRuntime!.State == "At target" && vm.SelectedHardwareRuntime.AppliedForce == 0,
+                        "Trim brake releases its force at the authored target");
+                Console.WriteLine($"{kind} velocity path: authored={target}, command={vm.SelectedHardwareRuntime!.CommandedSpeed}, actual={vm.Snapshot.Speed:F6}");
+            }
+            await vm.UndoCommand.ExecuteAsync();
+            Require(double.Parse(vm.HardwareTarget) == (kind == DeviceKind.Launch ? 4 : 1), "Velocity Undo refreshes the authored target field");
+            await vm.RedoCommand.ExecuteAsync();
+            Require(double.Parse(vm.HardwareTarget) == (kind == DeviceKind.Launch ? 8 : 6), "Velocity Redo refreshes the authored target field");
+            await vm.DeleteDeviceCommand.ExecuteAsync();
+        }
     }
 }
