@@ -1,4 +1,5 @@
 #include "NativeViewport.hpp"
+#include <quantum/editor/TrackDevicePresentation.hpp>
 #include <imgui_impl_vulkan.h>
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -203,7 +204,9 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
     renderer_.setViewportCameraPosition(glm::vec3(camera_.position()));
     if (trainDirty_)
     {
-        renderer_.updateTrainPreviewVertices(train_);
+        lines_.assign(train_.begin(), train_.end());
+        lines_.insert(lines_.end(), device_.begin(), device_.end());
+        renderer_.updateTrainPreviewVertices(lines_);
         renderer_.updateDynamicMeshInstances(meshes_);
         trainDirty_ = false;
     }
@@ -239,6 +242,14 @@ void NativeViewport::captureTrain(uint64_t revision, uint64_t generation,
     train_.assign(train.begin(), train.end());
     meshes_.assign(meshes.begin(), meshes.end());
     trainRevision_ = revision; trainGeneration_ = generation; trainDirty_ = true;
+}
+void NativeViewport::captureDevice(uint64_t revision, uint64_t selected,
+    const quantum::coaster::AuthoredTrack& track,
+    const quantum::editor::CenterlineVisualization& geometry)
+{
+    if (revision == deviceRevision_ && selected == selectedDevice_) return;
+    device_ = quantum::editor::createTrackDeviceSelectionVertices(track, geometry, selected);
+    deviceRevision_ = revision; selectedDevice_ = selected; trainDirty_ = true;
 }
 void NativeViewport::input(uint32_t action, double x, double y, double z, double value)
 {

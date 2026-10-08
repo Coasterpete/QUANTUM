@@ -36,6 +36,14 @@ namespace quantum::editor
         math::TransitionType transitionType = math::TransitionType::Linear;
     };
 
+    enum class ProfileOwner { Region, Device };
+    struct ProfileTarget
+    {
+        ProfileOwner owner = ProfileOwner::Region;
+        std::uint64_t ownerId = 0;
+        ProfileChannel channel = ProfileChannel::Roll;
+    };
+
     // Native application state shared by the ImGui and managed frontends.
     // The caller serializes access; GPU publication stays on its window thread.
     class ApplicationService
@@ -69,6 +77,21 @@ namespace quantum::editor
             const Publish& publish = {});
         void setDeviceAcceleration(coaster::TrackDeviceId device, bool custom,
             double metersPerSecondSquared, const Publish& publish = {});
+        [[nodiscard]] coaster::TrackDeviceId createDevice(coaster::TrackDeviceKind kind,
+            const Publish& publish = {});
+        void deleteDevice(coaster::TrackDeviceId device, const Publish& publish = {});
+        void setDeviceProperties(coaster::TrackDeviceId device, bool enabled,
+            double startMeters, double endMeters, double maximumForceNewtons,
+            const Publish& publish = {});
+
+        // A gesture owns only a native analytical candidate. It never changes
+        // document/history/simulation until full preparation succeeds at commit.
+        [[nodiscard]] std::uint64_t beginProfileDrag(ProfileTarget target, ProfileEdit edit);
+        [[nodiscard]] const coaster::ChannelProfile& previewProfileDrag(std::uint64_t token,
+            double displayValue, double snapIncrement = 0);
+        void commitProfileDrag(std::uint64_t token, const Publish& publish = {});
+        void cancelProfileDrag(std::uint64_t token) noexcept;
+        [[nodiscard]] std::uint64_t profileDragRevision(std::uint64_t token) const;
         void restoreHistory(bool undo, const Publish& publish = {});
         using HistoryPublish = std::function<void(const coaster::AuthoredTrack&,
             std::optional<TrackStylePresentationImpact>)>;
@@ -99,6 +122,16 @@ namespace quantum::editor
     private:
         void replace(PreparedDocument prepared);
         void edit(AuthoredTrackEditTransaction transaction, const Publish& publish);
+        struct ProfileDrag
+        {
+            std::uint64_t token, revision;
+            ProfileTarget target;
+            ProfileEdit edit;
+            coaster::ChannelProfile original, candidate;
+            double coordinateScale, displayToAuthored, extent;
+        };
+        std::optional<ProfileDrag> profileDrag_;
+        std::uint64_t nextProfileDragToken_ = 1;
         coaster::AuthoredTrack track_;
         DocumentHistory history_;
         DocumentState fileState_;

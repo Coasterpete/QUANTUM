@@ -121,6 +121,7 @@ namespace quantum::editor
 
     void ApplicationService::replace(PreparedDocument prepared)
     {
+        profileDrag_.reset();
         centerline_.setTrackStyle(prepared.track.trackStyle());
         track_ = std::move(prepared.track);
         centerline_.replace(std::move(prepared.centerline));
@@ -300,6 +301,164 @@ namespace quantum::editor
         AuthoredTrackEditTransaction transaction{track_};
         transaction.candidate().updateTrackDevice(device);
         edit(std::move(transaction), publish);
+    }
+
+    coaster::TrackDeviceId ApplicationService::createDevice(coaster::TrackDeviceKind kind, const Publish& publish)
+    {
+        if (kind != coaster::TrackDeviceKind::Launch && kind != coaster::TrackDeviceKind::Brake)
+            throw std::invalid_argument("Unknown Track Device kind.");
+        AuthoredTrackEditTransaction transaction{track_};
+        const bool launch = kind == coaster::TrackDeviceKind::Launch;
+        coaster::TrackDevice device;
+        device.kind = kind;
+        device.name = launch ? "Launch" : "Brake";
+        const double length = track_.trackLengthMeters();
+        device.startStationMeters = launch ? 0 : length * .5;
+        device.endStationMeters = launch ? length * .25 : length * .75;
+        device.targetAccelerationMetersPerSecondSquared = launch ? 3 : 4;
+        const auto id = transaction.candidate().addTrackDevice(std::move(device));
+        edit(std::move(transaction), publish);
+        return id;
+    }
+
+    void ApplicationService::deleteDevice(coaster::TrackDeviceId id, const Publish& publish)
+    {
+        AuthoredTrackEditTransaction transaction{track_};
+        transaction.candidate().removeTrackDevice(id);
+        edit(std::move(transaction), publish);
+    }
+
+    void ApplicationService::setDeviceProperties(coaster::TrackDeviceId id, bool enabled,
+        double start, double end, double force, const Publish& publish)
+    {
+        auto device = deviceById(track_, id);
+        device.enabled = enabled;
+        device.startStationMeters = start;
+        device.endStationMeters = end;
+        device.maximumForceNewtons = force;
+        if (device.accelerationProfile)
+        {
+            // Match the fallback editor: an interval resize stretches the final
+            // segment, retaining interior stations, values, types and IDs. Core
+            // rejects a new extent that would invert that segment.
+            device.accelerationProfile->segments.back().transition.domainEnd =
+                coaster::trackDeviceLengthMeters(device, track_.trackLengthMeters(),
+                    track_.layoutMode() == coaster::LayoutMode::Circuit);
+        }
+        if (device == deviceById(track_, id)) return;
+        AuthoredTrackEditTransaction transaction{track_};
+        transaction.candidate().updateTrackDevice(device);
+        edit(std::move(transaction), publish);
+    }
+
+    std::uint64_t ApplicationService::beginProfileDrag(ProfileTarget target, ProfileEdit request)
+    {
+        profileDrag_.reset();
+        using Operation = ProfileEditOperation;
+        const bool boundary = request.operation == Operation::MoveBegin || request.operation == Operation::MoveEnd;
+        if (!boundary && request.operation != Operation::BeginValue && request.operation != Operation::EndValue)
+            throw std::invalid_argument("Only profile values and interior boundaries can be dragged.");
+        coaster::ChannelProfile profile;
+        double coordinateScale = 1, displayToAuthored = 1, extent = 0;
+        if (target.owner == ProfileOwner::Region)
+        {
+            if (static_cast<unsigned>(target.channel) >= profileChannelCount)
+                throw std::invalid_argument("Unknown profile channel.");
+            const auto& section = track_.section(target.ownerId);
+            coordinateScale = track_.physicalSettings().metersPerCoordinateUnit;
+            const auto styles = coaster::isForceDrivenSection(section)
+                ? forceDrivenRowStyles(coordinateScale) : rateProfileRowStyles(coordinateScale);
+            displayToAuthored = styles[static_cast<unsigned>(target.channel)].displayToAuthored;
+            profile = sectionProfileChannel(section, target.channel);
+            extent = coaster::sectionLength(section);
+        }
+        else if (target.owner == ProfileOwner::Device)
+        {
+            const auto device = deviceById(track_, target.ownerId);
+            if (!device.accelerationProfile) throw std::invalid_argument("Track Device uses Constant acceleration.");
+            profile = *device.accelerationProfile;
+            extent = coaster::trackDeviceLengthMeters(device, track_.trackLengthMeters(),
+                track_.layoutMode() == coaster::LayoutMode::Circuit);
+        }
+        else throw std::invalid_argument("Unknown profile owner.");
+        if (!coaster::findChannelSegmentTransition(profile, request.segmentId))
+            throw std::invalid_argument("Unknown profile segment.");
+        if (boundary && !profileBoundaryMoveBounds(profile, request.segmentId,
+                request.operation == Operation::MoveBegin ? ScalarProfileEndpoint::Begin : ScalarProfileEndpoint::End))
+            throw std::invalid_argument("The outer distance boundary is pinned to the profile extent.");
+        const auto token = nextProfileDragToken_++;
+        profileDrag_ = ProfileDrag{token, revision_, target, request, profile, std::move(profile),
+            coordinateScale, displayToAuthored, extent};
+        return token;
+    }
+
+    std::uint64_t ApplicationService::profileDragRevision(std::uint64_t token) const
+    {
+        if (!profileDrag_ || profileDrag_->token != token)
+            throw std::invalid_argument("This Timeline drag is no longer active.");
+        return profileDrag_->revision;
+    }
+
+    const coaster::ChannelProfile& ApplicationService::previewProfileDrag(std::uint64_t token,
+        double value, double snapIncrement)
+    {
+        const auto expected = profileDragRevision(token);
+        try
+        {
+            if (expected != revision_) throw std::invalid_argument("Document changed. The Timeline drag was canceled.");
+            if (!std::isfinite(value) || !std::isfinite(snapIncrement) || snapIncrement < 0)
+                throw std::invalid_argument("Drag value and snapping increment must be finite; snapping cannot be negative.");
+            auto& drag = *profileDrag_;
+            auto candidate = drag.original;
+            auto request = drag.edit;
+            const auto snap = snapIncrement > 0 ? std::optional<double>{snapIncrement} : std::nullopt;
+            if (request.operation == ProfileEditOperation::MoveBegin || request.operation == ProfileEditOperation::MoveEnd)
+            {
+                const auto endpoint = request.operation == ProfileEditOperation::MoveBegin
+                    ? ScalarProfileEndpoint::Begin : ScalarProfileEndpoint::End;
+                const auto bounds = profileBoundaryMoveBounds(candidate, request.segmentId, endpoint);
+                const auto* transition = coaster::findChannelSegmentTransition(candidate, request.segmentId);
+                const double distance = endpoint == ScalarProfileEndpoint::Begin ? transition->domainBegin : transition->domainEnd;
+                request.value = proposeBoundaryDistanceDrag(distance, value / drag.coordinateScale - distance,
+                    1, 1, *bounds, snap ? std::optional<double>{*snap / drag.coordinateScale} : std::nullopt) * drag.coordinateScale;
+            }
+            else request.value = proposeMarkerValueDrag(value, 0, 1, 1, snap);
+            applyProfileEdit(candidate, request, drag.coordinateScale, drag.displayToAuthored);
+            coaster::validateChannelProfile(candidate, drag.extent);
+            if (drag.target.owner == ProfileOwner::Device)
+                for (const auto& segment : candidate.segments)
+                    if (segment.transition.valueBegin < 0 || segment.transition.valueEnd < 0)
+                        throw std::invalid_argument("Acceleration magnitude cannot be negative. Drag canceled.");
+            drag.candidate = std::move(candidate);
+            return drag.candidate;
+        }
+        catch (...) { cancelProfileDrag(token); throw; }
+    }
+
+    void ApplicationService::commitProfileDrag(std::uint64_t token, const Publish& publish)
+    {
+        const auto expected = profileDragRevision(token);
+        auto drag = std::move(*profileDrag_);
+        profileDrag_.reset();
+        if (expected != revision_) throw std::invalid_argument("Document changed. The Timeline drag was canceled.");
+        if (drag.original == drag.candidate) return;
+        AuthoredTrackEditTransaction transaction{track_};
+        if (drag.target.owner == ProfileOwner::Region)
+            sectionProfileChannel(transaction.candidate().section(drag.target.ownerId), drag.target.channel) = std::move(drag.candidate);
+        else
+        {
+            auto device = deviceById(track_, drag.target.ownerId);
+            device.accelerationProfile = std::move(drag.candidate);
+            transaction.candidate().updateTrackDevice(device);
+        }
+        // The existing preparation/publication/commit path creates one history
+        // entry. Staged previews need no continuous-history rollback machinery.
+        edit(std::move(transaction), publish);
+    }
+
+    void ApplicationService::cancelProfileDrag(std::uint64_t token) noexcept
+    {
+        if (profileDrag_ && profileDrag_->token == token) profileDrag_.reset();
     }
 
     void ApplicationService::restoreHistory(bool undo, const Publish& publish)

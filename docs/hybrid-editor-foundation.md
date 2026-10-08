@@ -63,7 +63,7 @@ safety fallback, not the application's shutdown mechanism.
 
 ## Interop contract
 
-`editor/native/QuantumNative.h` defines ABI 1 for 64-bit processes with natural
+`editor/native/QuantumNative.h` defines ABI 2 for 64-bit processes with natural
 8-byte alignment. It contains fixed-width values, caller-owned buffers, UTF-8
 paths, non-reused numeric session tokens, explicit results, and bounded errors.
 No C++ objects, Vulkan handles, or exceptions cross it. Snapshot size/version
@@ -145,8 +145,10 @@ Rate and force-driven Regions use the existing native channel mapping; planar
 arcs do not pretend to have scalar profiles. Track Devices mode shows authored
 device state, Constant/Custom acceleration controls and native custom profiles.
 Changing to Constant removes the custom profile through native history; Undo can
-restore it. Device creation, interval/force editing and the full interaction
-toolset remain in the fallback frontend for now.
+restore it. Device creation/deletion, interval/force/enable controls and direct
+profile editing are now available in Avalonia. See
+[Timeline and Track Device authoring](hybrid-timeline-track-devices.md) for the
+gesture contract, native preview/commit behavior and validation handoff.
 
 This phase deliberately uses a fixed pane arrangement. Floating docking and
 layout persistence are not implemented. Native-window popups are configured
@@ -171,8 +173,8 @@ can reference the existing generated PNGs when packaging is implemented.
 
 | Workflow | Hybrid responsibility and migration status |
 | --- | --- |
-| Timeline / Transition Editor | Real distance-domain authoring pane and native commands now; direct graph hit-testing, drag/snap/zoom and full diagnostics parity remain. |
-| Track Devices | Native mode/profile editing now; creation, placement, enable controls and live device-force diagnostics remain. |
+| Timeline / Transition Editor | Native profiles, graph selection, value/boundary dragging, optional snapping, pan/zoom and numeric editing are available; full diagnostics parity remains. |
+| Track Devices | Native create/delete/select, interval/force/enable, Constant/Custom, direct custom-profile editing and selected-interval viewport lines are available; live device-force diagnostics remain. |
 | Train | Preserve Configuration → native Preview → Summary/Diagnostics as a dedicated workspace; the current footer summary is not the final Train UI. |
 | Supports | Native document/support generation is retained; migrate authoring forms and existing 3D picking/manipulation in a dedicated workspace. |
 | Simulator / Math / newer diagnostics | Extend managed workspace composition around the existing native viewport, snapshots and diagnostics; do not replace the native simulation with UI calculations. |
@@ -192,8 +194,8 @@ dialog input, camera gestures, popup airspace, or monitor DPI. Those require
 separate visual and input checks. Automated correctness, bounded visual smoke,
 and maintainer visual approval must be reported separately.
 
-Full Train, Supports, Simulator/Math/diagnostics and the remaining Track Device
-and Transition Editor interactions remain in the fallback frontend. The next
-major migration should bring those engineering workspaces across as one
-coherent upgrade, extending the same native service and preserving current
-QUANTUM's feature baseline.
+Full Train, Supports and Simulator/Math/diagnostics remain in the fallback
+frontend. Direct Timeline and Track Device authoring is implemented locally;
+physical interaction and visual approval remain with the maintainer. Supports
+is the next major workspace after that approval. The current fixed pane layout
+and the renderer, simulation and document ownership contracts remain intact.

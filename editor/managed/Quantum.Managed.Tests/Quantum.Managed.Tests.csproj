@@ -5,5 +5,5 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../Quantum.Managed/Quantum.Managed.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../Quantum.Managed/Quantum.Managed.csproj" /><ProjectReference Include="../Quantum.Editor/Quantum.Editor.csproj" /></ItemGroup>
 </Project>

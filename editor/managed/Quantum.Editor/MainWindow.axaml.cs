@@ -15,6 +15,7 @@ public sealed partial class MainWindow : Window
     internal EditorViewModel Model => model;
     internal ViewportHost HostedViewport => viewport;
     internal Rect TimelineBounds => Timeline.Bounds;
+    internal ProfilePlot TimelinePlot => Timeline.AuthoringPlot;
     private bool closeApproved, closePending;
     public MainWindow()
     {

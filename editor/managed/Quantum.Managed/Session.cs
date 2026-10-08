@@ -5,6 +5,7 @@ namespace Quantum.Managed;
 public enum SessionCommand : uint { Play = 1, Pause, Reset, SetInitialSpeed, Undo, Redo, SetRegionLength }
 public enum ViewportAction : uint { Orbit = 1, Pan, Zoom, Frame, Move, Focus }
 public enum ProfileOperation : uint { BeginValue, EndValue, TransitionType, Split, Remove, MoveBegin, MoveEnd }
+public enum DeviceKind : uint { Launch, Brake }
 public sealed record TransitionChoice(uint Type, string Name) { public override string ToString() => Name; }
 public sealed record ProfileSegment(uint OwnerKind, ulong OwnerId, uint Channel, uint Id, uint TransitionType,
     uint Unit, double Begin, double End, double ValueBegin, double ValueEnd, ReadOnlyCollection<double> Samples)
@@ -17,7 +18,7 @@ public sealed record ProfileSegment(uint OwnerKind, ulong OwnerId, uint Channel,
 public sealed record TrackDevice(ulong Id, string Name, uint Kind, bool Enabled, bool Custom,
     double Start, double End, double Acceleration, double MaximumForce)
 {
-    public string Label => Name.Length == 0 ? $"{(Kind == 0 ? "Launch" : "Brake")} {Id}" : Name;
+    public string Label => $"{(Name.Length == 0 ? "Device" : Name)} · #{Id} · {(Kind == 0 ? "Launch" : "Brake")}";
     public string Summary => $"{Start:F2} → {End:F2} m · {(Enabled ? "Enabled" : "Disabled")} · {MaximumForce:F0} N limit";
     public override string ToString() => Label;
 }
@@ -57,15 +58,16 @@ public sealed unsafe class Session : IDisposable
     private ulong authoringRevision;
     private NativeProfile[] profileBuffer = [];
     private NativeDevice[] deviceBuffer = [];
+    private NativeProfile[] dragBuffer = [];
     private ReadOnlyCollection<ProfileSegment> profiles = Array.AsReadOnly(Array.Empty<ProfileSegment>());
     private ReadOnlyCollection<TrackDevice> devices = Array.AsReadOnly(Array.Empty<TrackDevice>());
     public ReadOnlyCollection<TransitionChoice> TransitionTypes { get; }
     private bool disposed;
     public Session()
     {
-        if (nint.Size != 8 || Native.qn_abi_version() != 1 || sizeof(NativeSnapshot) != 104 || sizeof(NativeRegion) != 112 || sizeof(NativeCommand) != 24
+        if (nint.Size != 8 || Native.qn_abi_version() != 2 || sizeof(NativeSnapshot) != 104 || sizeof(NativeRegion) != 112 || sizeof(NativeCommand) != 24
             || sizeof(NativeProfile) != 328 || sizeof(NativeDevice) != 184 || sizeof(NativeAuthoringSnapshot) != 24 || sizeof(NativeProfileCommand) != 48)
-            throw new NotSupportedException("QUANTUM requires a matching ABI 1 in a 64-bit process.");
+            throw new NotSupportedException("QUANTUM requires a matching ABI 2 in a 64-bit process. Rebuild and stage the native runtime.");
         Check(Native.qn_create(out var id, out var error), error);
         handle = new SessionHandle(id);
         try
@@ -143,9 +145,7 @@ public sealed unsafe class Session : IDisposable
             }
             Check(result, error);
             if (summary.Revision != revision) throw new InvalidOperationException("Document changed during authoring snapshot.");
-            profiles = Array.AsReadOnly(profileBuffer.Take((int)summary.ProfileCount).Select(p => new ProfileSegment(
-                p.OwnerKind, p.OwnerId, p.Channel, p.SegmentId, p.TransitionType, p.Unit, p.Begin, p.End,
-                p.ValueBegin, p.ValueEnd, p.CopySamples())).ToArray());
+            profiles = MapProfiles(profileBuffer, summary.ProfileCount);
             devices = Array.AsReadOnly(deviceBuffer.Take((int)summary.DeviceCount).Select(d => new TrackDevice(
                 d.Id, d.Label(), d.Kind, d.Enabled != 0, d.Custom != 0, d.Start, d.End, d.Acceleration, d.MaximumForce)).ToArray());
             authoringRevision = summary.Revision; return;
@@ -163,6 +163,53 @@ public sealed unsafe class Session : IDisposable
     public void SetDeviceAcceleration(ulong device, ulong revision, bool custom, double acceleration)
     {
         RequireOpen(); Check(Native.qn_device_acceleration(handle, device, revision, custom ? 1u : 0u, acceleration, out var error), error);
+    }
+    private static ReadOnlyCollection<ProfileSegment> MapProfiles(NativeProfile[] buffer, uint count) =>
+        Array.AsReadOnly(buffer.Take((int)count).Select(p => new ProfileSegment(
+            p.OwnerKind, p.OwnerId, p.Channel, p.SegmentId, p.TransitionType, p.Unit, p.Begin, p.End,
+            p.ValueBegin, p.ValueEnd, p.CopySamples())).ToArray());
+    public ulong BeginProfileDrag(ProfileSegment target, ulong revision, ProfileOperation operation)
+    {
+        RequireOpen();
+        NativeProfileCommand command = new() { OwnerKind = target.OwnerKind, OwnerId = target.OwnerId,
+            Channel = target.Channel, SegmentId = target.Id, ExpectedRevision = revision, Operation = (uint)operation };
+        Check(Native.qn_profile_drag_begin(handle, in command, out var token, out var error), error);
+        return token;
+    }
+    public ReadOnlyCollection<ProfileSegment> PreviewProfileDrag(ulong token, double value, double snapIncrement = 0)
+    {
+        RequireOpen();
+        for (var attempt = 0; attempt < 2; ++attempt)
+        {
+            int result; uint count; NativeError error;
+            fixed (NativeProfile* buffer = dragBuffer)
+                result = Native.qn_profile_drag_preview(handle, token, value, snapIncrement, buffer, (uint)dragBuffer.Length, out count, out error);
+            if (result == 3) { dragBuffer = new NativeProfile[count]; continue; }
+            Check(result, error);
+            return MapProfiles(dragBuffer, count);
+        }
+        throw new InvalidOperationException("Drag preview capacity changed repeatedly.");
+    }
+    public void FinishProfileDrag(ulong token, bool commit)
+    {
+        RequireOpen(); Check(Native.qn_profile_drag_finish(handle, token, commit ? 1u : 0u, out var error), error);
+    }
+    public ulong CreateDevice(ulong revision, DeviceKind kind)
+    {
+        RequireOpen(); Check(Native.qn_device_create(handle, revision, (uint)kind, out var device, out var error), error);
+        return device;
+    }
+    public void DeleteDevice(ulong revision, ulong device)
+    {
+        RequireOpen(); Check(Native.qn_device_delete(handle, revision, device, out var error), error);
+    }
+    public void SetDeviceProperties(ulong revision, ulong device, bool enabled, double start, double end, double force)
+    {
+        RequireOpen(); Check(Native.qn_device_properties(handle, revision, device, enabled ? 1u : 0u, start, end, force, out var error), error);
+    }
+    public void SelectDevice(ulong revision, ulong device)
+    {
+        RequireOpen(); Check(Native.qn_select_device(handle, revision, device, out var error), error);
     }
     public void Update(double seconds) { RequireOpen(); Check(Native.qn_update(handle, seconds, out var error), error); }
     public void OpenViewport(string? descriptor, nint window)

@@ -24,6 +24,9 @@ public:
     void captureTrain(uint64_t revision, uint64_t generation,
         std::span<const quantum::renderer::LineVertex> train,
         std::span<const quantum::renderer::StaticMeshInstance> meshes);
+    void captureDevice(uint64_t revision, uint64_t selected,
+        const quantum::coaster::AuthoredTrack& track,
+        const quantum::editor::CenterlineVisualization& geometry);
     void input(uint32_t action, double x, double y, double z, double value);
     void requireOwnerThread() const;
     uint32_t takeShortcuts() noexcept;
@@ -46,5 +49,7 @@ private:
     uint64_t trainRevision_ = 0, trainGeneration_ = 0;
     bool trainDirty_ = false;
     std::vector<quantum::renderer::LineVertex> train_;
+    std::vector<quantum::renderer::LineVertex> device_, lines_;
+    uint64_t deviceRevision_ = 0, selectedDevice_ = 0;
     std::vector<quantum::renderer::StaticMeshInstance> meshes_;
 };

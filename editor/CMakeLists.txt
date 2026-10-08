@@ -9,6 +9,7 @@ add_library(QuantumApplication STATIC
     src/SupportVisualization.cpp
     src/TrainMeshPresentation.cpp
     src/TrackStylePresentation.cpp
+    src/TrackDevicePresentation.cpp
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
     src/ViewportTrackAnchors.cpp)
@@ -23,6 +24,9 @@ if(BUILD_TESTING)
     add_executable(QuantumApplicationServiceTests ${PROJECT_SOURCE_DIR}/tests/ApplicationServiceTests.cpp)
     target_link_libraries(QuantumApplicationServiceTests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.Service COMMAND QuantumApplicationServiceTests)
+    add_executable(QuantumTimelineAuthoringTests ${PROJECT_SOURCE_DIR}/tests/TimelineAuthoringTests.cpp)
+    target_link_libraries(QuantumTimelineAuthoringTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TimelineAuthoring COMMAND QuantumTimelineAuthoringTests)
 endif()
 
 if(QUANTUM_ENABLE_HYBRID_EDITOR)

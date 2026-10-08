@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-/* ABI 1: 64-bit process, natural 8-byte alignment, UTF-8 strings.
+/* ABI 2: 64-bit process, natural 8-byte alignment, UTF-8 strings.
    Tokens are non-reused IDs, never addresses. All buffers are caller-owned.
    Calls are serialized per session; viewport calls require its UI thread. */
 typedef uint64_t QnSession;
@@ -96,6 +96,26 @@ QN_API QnResult QN_CALL qn_transition_types(QnTransitionType* types, uint32_t ca
 QN_API QnResult QN_CALL qn_profile_command(QnSession session, const QnProfileCommand* command, QnError* error);
 QN_API QnResult QN_CALL qn_device_acceleration(QnSession session, uint64_t device,
     uint64_t expected_revision, uint32_t custom, double acceleration, QnError* error);
+/* Preview is native analytical data only. Document revision/history and the
+   simulation stay unchanged until finish(commit=1). Cancel is idempotent;
+   tokens prevent late input from touching a later gesture. snap=0 disables
+   snapping; otherwise it is in the displayed unit (metres for boundaries). */
+QN_API QnResult QN_CALL qn_profile_drag_begin(QnSession session, const QnProfileCommand* command,
+    uint64_t* token, QnError* error);
+QN_API QnResult QN_CALL qn_profile_drag_preview(QnSession session, uint64_t token,
+    double value, double snap, QnProfileSegment* profiles, uint32_t capacity,
+    uint32_t* count, QnError* error);
+QN_API QnResult QN_CALL qn_profile_drag_finish(QnSession session, uint64_t token,
+    uint32_t commit, QnError* error);
+QN_API QnResult QN_CALL qn_device_create(QnSession session, uint64_t expected_revision,
+    uint32_t kind, uint64_t* device, QnError* error);
+QN_API QnResult QN_CALL qn_device_delete(QnSession session, uint64_t expected_revision,
+    uint64_t device, QnError* error);
+QN_API QnResult QN_CALL qn_device_properties(QnSession session, uint64_t expected_revision,
+    uint64_t device, uint32_t enabled, double start, double end, double force, QnError* error);
+/* Transient viewport selection, zero clears. No authored/history changes. */
+QN_API QnResult QN_CALL qn_select_device(QnSession session, uint64_t expected_revision,
+    uint64_t device, QnError* error);
 QN_API QnResult QN_CALL qn_update(QnSession session, double seconds, QnError* error);
 /* Borrowed host: 1=HWND, 2=X11 XID; 0/0 standalone validation window.
    Avalonia positions/sizes the child. frame dimensions are physical pixels. */

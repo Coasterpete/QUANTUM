@@ -87,6 +87,17 @@ int main(int argc, char** argv)
             && largeService.centerline().visualization().sectionSlices.size() == 200,
             "Large authored Route remains native");
         if (argc == 2) largeService.save(argv[1]);
+        const auto drag = largeService.beginProfileDrag({quantum::editor::ProfileOwner::Region, 199},
+            {1, quantum::editor::ProfileEditOperation::EndValue});
+        const auto previewBegin = std::chrono::steady_clock::now();
+        for (int i = 0; i < 100; ++i) static_cast<void>(largeService.previewProfileDrag(drag, i * .001));
+        const auto previewMilliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - previewBegin).count();
+        const auto commitBegin = std::chrono::steady_clock::now();
+        largeService.commitProfileDrag(drag);
+        const auto commitMilliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - commitBegin).count();
+        largeService.restoreHistory(true);
+        require(!largeService.history().isDirty(), "Large Route gesture Undo restores clean baseline");
+        std::cout << "200-Region drag: 100 native previews " << previewMilliseconds << " ms; full commit " << commitMilliseconds << " ms.\n";
         largeService.setRegionLength(199, 61);
         largeService.restoreHistory(true);
         require(largeService.track().section(199).length == 60, "Large Route edit/history roundtrip");

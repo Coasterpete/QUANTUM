@@ -1,4 +1,5 @@
 #include "QuantumNative.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -37,7 +38,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc >= 2 && qn_abi_version() == 1, "Test input/ABI");
+        require(argc >= 2 && qn_abi_version() == 2, "Test input/ABI");
         QnSession session = 0;
         require(qn_create(nullptr, &error) == QN_INVALID_ARGUMENT, "Missing output");
         ok(qn_create(&session, &error));
@@ -139,6 +140,82 @@ int main(int argc, char** argv)
         require(authoring.profile_count == previousCount + 1, "Profile split uses native segment IDs");
         require(qn_profile_command(session, &profileEdit, &error) == QN_CONFLICT, "Stale profile edit rejected");
         command(session, QN_UNDO);
+        refreshProfiles();
+        const auto dragBaseline = snapshot(session, regions);
+        const auto baselineProfile = profiles[0];
+        QnProfileCommand dragRequest{0, baselineProfile.channel, baselineProfile.segment_id, 1, 0, 0,
+            baselineProfile.owner_id, authoring.revision, 0};
+        uint64_t token = 0;
+        ok(qn_profile_drag_begin(session, &dragRequest, &token, &error));
+        require(token != 0, "Native gesture token");
+        uint32_t previewCount = 0;
+        require(qn_profile_drag_preview(session, token, baselineProfile.value_end + .01, 0,
+            nullptr, 0, &previewCount, &error) == QN_BUFFER_TOO_SMALL && previewCount > 0, "Preview buffer sizing");
+        std::vector<QnProfileSegment> candidate(previewCount);
+        for (int move = 1; move <= 100; ++move)
+            ok(qn_profile_drag_preview(session, token, baselineProfile.value_end + move * .001, 0,
+                candidate.data(), previewCount, &previewCount, &error));
+        require(snapshot(session, regions).revision == dragBaseline.revision,
+            "Preview does not mutate authored revision");
+        ok(qn_profile_drag_finish(session, token, 1, &error));
+        require(snapshot(session, regions).revision == dragBaseline.revision + 1, "One gesture one revision");
+        command(session, QN_UNDO); refreshProfiles();
+        require(profiles[0].value_end == baselineProfile.value_end, "One Undo restores full gesture");
+        command(session, QN_REDO); refreshProfiles();
+        require(std::abs(profiles[0].value_end - baselineProfile.value_end - .1) < 1e-12, "Redo restores latest candidate");
+        dragRequest.expected_revision = authoring.revision;
+        uint64_t canceled = 0, replacement = 0;
+        ok(qn_profile_drag_begin(session, &dragRequest, &canceled, &error));
+        ok(qn_profile_drag_begin(session, &dragRequest, &replacement, &error));
+        ok(qn_profile_drag_finish(session, canceled, 0, &error));
+        require(qn_profile_drag_preview(session, canceled, 0, 0, candidate.data(), previewCount, &previewCount, &error) == QN_INVALID_ARGUMENT,
+            "Old token cannot mutate replacement gesture");
+        ok(qn_profile_drag_preview(session, replacement, baselineProfile.value_end + .2, 0, candidate.data(),
+            static_cast<uint32_t>(candidate.size()), &previewCount, &error));
+        ok(qn_profile_drag_finish(session, replacement, 0, &error));
+        require(snapshot(session, regions).revision == authoring.revision, "Cancel leaves history revision intact");
+        ok(qn_profile_drag_begin(session, &dragRequest, &token, &error));
+        require(qn_profile_drag_preview(session, token, std::nan(""), 0, candidate.data(),
+            static_cast<uint32_t>(candidate.size()), &previewCount, &error) == QN_INVALID_ARGUMENT,
+            "Invalid preview rejects gesture");
+        require(qn_profile_drag_finish(session, token, 1, &error) == QN_INVALID_ARGUMENT,
+            "Rejected preview cannot be accidentally committed");
+        ok(qn_profile_drag_finish(session, token, 0, &error));
+        ok(qn_profile_drag_begin(session, &dragRequest, &token, &error));
+        command(session, QN_UNDO);
+        const auto revisionAfterUndo = snapshot(session, regions).revision;
+        require(qn_profile_drag_finish(session, token, 1, &error) == QN_CONFLICT, "Stale gesture commit rejects safely");
+        require(snapshot(session, regions).revision == revisionAfterUndo, "Stale commit preserves newer document");
+
+        uint64_t newDevice = 0;
+        ok(qn_device_create(session, revisionAfterUndo, 0, &newDevice, &error));
+        const auto createdRevision = snapshot(session, regions).revision;
+        require(qn_device_create(session, revisionAfterUndo, 1, &replacement, &error) == QN_CONFLICT,
+            "Stale device creation rejected");
+        ok(qn_select_device(session, createdRevision, newDevice, &error));
+        require(snapshot(session, regions).revision == createdRevision, "Viewport selection is transient");
+        require(qn_select_device(session, createdRevision, UINT64_MAX, &error) == QN_INVALID_ARGUMENT,
+            "Unknown selection rejected");
+        ok(qn_device_properties(session, createdRevision, newDevice, 0, 1, 10, 5000, &error));
+        const auto placedRevision = snapshot(session, regions).revision;
+        require(qn_device_properties(session, placedRevision, newDevice, 1, 1, 1, 5000, &error) == QN_INVALID_ARGUMENT,
+            "Empty device interval rejected");
+        require(qn_device_properties(session, placedRevision, newDevice, 1, 1, 10, 0, &error) == QN_INVALID_ARGUMENT,
+            "Zero force rejected");
+        require(snapshot(session, regions).revision == placedRevision, "Rejected device properties preserve history");
+        ok(qn_device_acceleration(session, newDevice, placedRevision, 1, 2, &error));
+        refreshProfiles();
+        const auto customProfile = std::find_if(profiles.begin(), profiles.begin() + authoring.profile_count,
+            [newDevice](const auto& p) { return p.owner_kind == 1 && p.owner_id == newDevice; });
+        require(customProfile != profiles.begin() + authoring.profile_count, "Created Custom device has native samples");
+        QnProfileCommand customDrag{1, 3, customProfile->segment_id, 1, 0, 0, newDevice, authoring.revision, 0};
+        ok(qn_profile_drag_begin(session, &customDrag, &token, &error));
+        ok(qn_profile_drag_preview(session, token, 3, 0, candidate.data(), static_cast<uint32_t>(candidate.size()), &previewCount, &error));
+        ok(qn_profile_drag_finish(session, token, 1, &error));
+        const auto beforeDelete = snapshot(session, regions).revision;
+        ok(qn_device_delete(session, beforeDelete, newDevice, &error));
+        command(session, QN_UNDO); command(session, QN_REDO);
+        ok(qn_select_device(session, snapshot(session, regions).revision, 0, &error));
         command(session, QN_PLAY);
         ok(qn_update(session, 1.0 / 60, &error));
         state = snapshot(session, regions);

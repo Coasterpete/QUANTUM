@@ -95,6 +95,7 @@ using (var deviceSession = new Session())
     }
     finally { File.Delete(temporary); }
 }
+await TimelineChecks.Run();
 var disposedController = new SessionController();
 disposedController.Dispose(); disposedController.Dispose();
 Expect<ObjectDisposedException>(() => disposedController.Submit(_ => { }));

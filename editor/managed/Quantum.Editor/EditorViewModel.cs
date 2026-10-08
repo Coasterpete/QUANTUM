@@ -16,7 +16,7 @@ public sealed class EditorCommand(Func<Task> action, Func<bool> enabled) : IComm
 }
 public enum UnsavedChoice { Cancel, Save, Discard }
 
-public sealed class EditorViewModel : INotifyPropertyChanged
+public sealed partial class EditorViewModel : INotifyPropertyChanged
 {
     public SessionController Controller { get; }
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -32,6 +32,8 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     private string profileBegin = "", profileEnd = "", profileDistance = "", deviceAcceleration = "";
     private TransitionChoice? selectedTransition;
     private int deviceMode;
+    private string deviceStart = "", deviceEnd = "", deviceForce = "";
+    private bool deviceEnabled;
     public IReadOnlyList<TransitionChoice> TransitionTypes => Controller.Session.TransitionTypes;
     public IReadOnlyList<ProfileSegment> VisibleProfiles { get; private set; } = [];
     public EditorCommand ApplyProfileBeginCommand { get; }
@@ -42,6 +44,10 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     public EditorCommand MoveProfileBeginCommand { get; }
     public EditorCommand MoveProfileEndCommand { get; }
     public EditorCommand ApplyDeviceCommand { get; }
+    public EditorCommand CreateLaunchCommand { get; }
+    public EditorCommand CreateBrakeCommand { get; }
+    public EditorCommand DeleteDeviceCommand { get; }
+    public EditorCommand ApplyDevicePropertiesCommand { get; }
     private readonly List<EditorCommand> commands = [];
     public EditorCommand NewCommand { get; }
     public EditorCommand OpenCommand { get; }
@@ -90,23 +96,40 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         ApplyProfileEndCommand = Add(() => EditProfile(ProfileOperation.EndValue, ProfileEnd), () => HasProfile);
         ApplyTransitionCommand = Add(() => EditProfile(ProfileOperation.TransitionType), () => HasProfile && SelectedTransition is not null);
         SplitProfileCommand = Add(() => EditProfile(ProfileOperation.Split, ProfileDistance), () => HasProfile);
-        RemoveProfileCommand = Add(() => EditProfile(ProfileOperation.Remove), () => HasProfile);
-        MoveProfileBeginCommand = Add(() => EditProfile(ProfileOperation.MoveBegin, ProfileDistance), () => HasProfile);
-        MoveProfileEndCommand = Add(() => EditProfile(ProfileOperation.MoveEnd, ProfileDistance), () => HasProfile);
+        RemoveProfileCommand = Add(() => EditProfile(ProfileOperation.Remove), () => CanRemoveProfile);
+        MoveProfileBeginCommand = Add(() => EditProfile(ProfileOperation.MoveBegin, ProfileDistance), () => CanMoveProfileBegin);
+        MoveProfileEndCommand = Add(() => EditProfile(ProfileOperation.MoveEnd, ProfileDistance), () => CanMoveProfileEnd);
         ApplyDeviceCommand = Add(() => Run(async () =>
         {
             if (SelectedDevice is not { } device || Snapshot is not { } snapshot) return;
-            var acceleration = ParsePositive(DeviceAcceleration, "Acceleration magnitude", true);
+            var acceleration = ParsePositive(DeviceAcceleration, "Acceleration magnitude");
             await Controller.Submit(s => s.SetDeviceAcceleration(device.Id, snapshot.Revision, DeviceMode == 1, acceleration));
         }), () => SelectedDevice is not null);
+        CreateLaunchCommand = Add(() => CreateDevice(DeviceKind.Launch), () => Snapshot?.TotalLength > 0);
+        CreateBrakeCommand = Add(() => CreateDevice(DeviceKind.Brake), () => Snapshot?.TotalLength > 0);
+        DeleteDeviceCommand = Add(() => Run(async () =>
+        {
+            if (SelectedDevice is { } device && Snapshot is { } snapshot)
+                await Controller.Submit(s => s.DeleteDevice(snapshot.Revision, device.Id));
+        }), () => HasDevice);
+        ApplyDevicePropertiesCommand = Add(() => Run(async () =>
+        {
+            if (SelectedDevice is not { } device || Snapshot is not { } snapshot) return;
+            var start = ParsePositive(DeviceStart, "Start station", true);
+            var end = ParsePositive(DeviceEnd, "End station", true);
+            var force = ParsePositive(DeviceForce, "Force limit");
+            var enabled = DeviceEnabled;
+            await Controller.Submit(s => s.SetDeviceProperties(snapshot.Revision, device.Id, enabled, start, end, force));
+        }), () => HasDevice);
     }
     private EditorCommand Add(Func<Task> action, Func<bool>? enabled = null)
     {
-        var command = new EditorCommand(action, () => !Busy && (enabled?.Invoke() ?? true));
+        var command = new EditorCommand(action, () => !Busy && !InteractionActive && (enabled?.Invoke() ?? true));
         commands.Add(command); return command;
     }
-    public bool Busy { get => busy; private set { busy = value; Changed(); RefreshCommands(); Changed(nameof(Activity)); } }
-    public string Activity => Busy ? "Working…" : "Ready";
+    public bool Busy { get => busy; private set { busy = value; Changed(); Changed(nameof(CanInteract)); RefreshCommands(); Changed(nameof(Activity)); } }
+    public bool CanInteract => !Busy;
+    public string Activity => Busy ? "Working…" : InteractionActive ? "Profile preview" : "Ready";
     public string Error { get => error; set { error = value; Changed(); Changed(nameof(HasError)); } }
     public bool HasError => Error.Length != 0;
     public string Title => $"QUANTUM — {DocumentName}{(Snapshot?.Dirty == true ? " *" : "")}";
@@ -119,29 +142,47 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     public Region? Selected
     {
         get => selected;
-        set { selected = value; Changed(); Changed(nameof(HasSelection)); Length = value?.Length.ToString("G12", CultureInfo.CurrentCulture) ?? ""; RefreshProfiles(); RefreshCommands(); }
+        set { if (selected?.Index != value?.Index) CancelForSelection(); selected = value; Changed(); Changed(nameof(HasSelection)); Length = value?.Length.ToString("G12", CultureInfo.CurrentCulture) ?? ""; RefreshProfiles(); RefreshCommands(); }
     }
     public bool HasSelection => Selected is not null;
-    public int TimelineSource { get => timelineSource; set { timelineSource = value; Changed(); Changed(nameof(IsDeviceTimeline)); RefreshProfiles(); } }
+    public int TimelineSource { get => timelineSource; set { if (timelineSource != value) CancelForSelection(); timelineSource = value; Changed(); Changed(nameof(IsDeviceTimeline)); RefreshProfiles(); SynchronizeDeviceSelection(); } }
     public bool IsDeviceTimeline => TimelineSource == 1;
     public string TimelineContext => IsDeviceTimeline ? SelectedDevice?.Summary ?? "No authored Track Devices in this document"
         : Selected is { } region ? $"{region.Name} · track {region.Station} · local distance in metres" : "Select an authored Region";
     public bool HasProfile => SelectedProfile is not null;
+    public bool HasDevice => SelectedDevice is not null;
+    private IEnumerable<ProfileSegment> SelectedChannel => VisibleProfiles.Where(p => p.Channel == SelectedProfile?.Channel);
+    public bool CanMoveProfileBegin => SelectedProfile is { } p && SelectedChannel.Any(other => other.Begin < p.Begin);
+    public bool CanMoveProfileEnd => SelectedProfile is { } p && SelectedChannel.Any(other => other.End > p.End);
+    public bool CanRemoveProfile => SelectedChannel.Count() > 1;
+    public string ProfileDescription => SelectedProfile is { } p
+        ? $"{p.ChannelName} · #{p.Id} · {TransitionTypes.FirstOrDefault(t => t.Type == p.TransitionType)?.Name} · {(p.ValueBegin == p.ValueEnd ? "flat endpoints" : p.ValueEnd > p.ValueBegin ? "rising" : "falling")}"
+        : "Select a segment in the graph or list";
     public string ProfileBegin { get => profileBegin; set { profileBegin = value; Changed(); } }
     public string ProfileEnd { get => profileEnd; set { profileEnd = value; Changed(); } }
     public string ProfileDistance { get => profileDistance; set { profileDistance = value; Changed(); } }
     public string DeviceAcceleration { get => deviceAcceleration; set { deviceAcceleration = value; Changed(); } }
     public int DeviceMode { get => deviceMode; set { deviceMode = value; Changed(); } }
+    public string DeviceStart { get => deviceStart; set { deviceStart = value; Changed(); } }
+    public string DeviceEnd { get => deviceEnd; set { deviceEnd = value; Changed(); } }
+    public string DeviceForce { get => deviceForce; set { deviceForce = value; Changed(); } }
+    public bool DeviceEnabled { get => deviceEnabled; set { deviceEnabled = value; Changed(); } }
     public TransitionChoice? SelectedTransition { get => selectedTransition; set { selectedTransition = value; Changed(); RefreshCommands(); } }
     public TrackDevice? SelectedDevice
     {
         get => selectedDevice;
         set
         {
-            selectedDevice = value; Changed();
+            if (selectedDevice?.Id != value?.Id) CancelForSelection();
+            selectedDevice = value; Changed(); Changed(nameof(HasDevice));
             DeviceMode = value?.Custom == true ? 1 : 0;
             DeviceAcceleration = value?.Acceleration.ToString("G12", CultureInfo.CurrentCulture) ?? "";
+            DeviceStart = value?.Start.ToString("G12", CultureInfo.CurrentCulture) ?? "";
+            DeviceEnd = value?.End.ToString("G12", CultureInfo.CurrentCulture) ?? "";
+            DeviceForce = value?.MaximumForce.ToString("G12", CultureInfo.CurrentCulture) ?? "";
+            DeviceEnabled = value?.Enabled == true;
             RefreshProfiles(); RefreshCommands();
+            SynchronizeDeviceSelection();
         }
     }
     public ProfileSegment? SelectedProfile
@@ -149,7 +190,9 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         get => selectedProfile;
         set
         {
-            selectedProfile = value; Changed(); Changed(nameof(HasProfile));
+            if (!SameTarget(selectedProfile, value)) CancelForSelection();
+            selectedProfile = value; Changed(); Changed(nameof(HasProfile)); Changed(nameof(ProfileDescription));
+            Changed(nameof(CanMoveProfileBegin)); Changed(nameof(CanMoveProfileEnd)); Changed(nameof(CanRemoveProfile));
             ProfileBegin = value?.ValueBegin.ToString("G12", CultureInfo.CurrentCulture) ?? "";
             ProfileEnd = value?.ValueEnd.ToString("G12", CultureInfo.CurrentCulture) ?? "";
             ProfileDistance = value is null ? "" : ((value.Begin + value.End) / 2).ToString("G12", CultureInfo.CurrentCulture);
@@ -163,8 +206,11 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         VisibleProfiles = Snapshot?.Profiles.Where(p => IsDeviceTimeline ? p.OwnerKind == 1 && p.OwnerId == SelectedDevice?.Id
             : p.OwnerKind == 0 && p.OwnerId == Selected?.Index).ToArray() ?? [];
         Changed(nameof(VisibleProfiles)); Changed(nameof(TimelineContext));
+        Changed(nameof(GraphProfiles));
         SelectedProfile = VisibleProfiles.FirstOrDefault(p => previous is not null && p.OwnerKind == previous.OwnerKind
             && p.OwnerId == previous.OwnerId && p.Channel == previous.Channel && p.Id == previous.Id)
+            ?? VisibleProfiles.FirstOrDefault(p => previous is not null && p.OwnerKind == previous.OwnerKind
+                && p.OwnerId == previous.OwnerId && p.Channel == previous.Channel)
             ?? VisibleProfiles.FirstOrDefault();
     }
     private Task EditProfile(ProfileOperation operation, string? input = null) => Run(async () =>
@@ -178,6 +224,9 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     });
     public void Publish(SessionSnapshot next)
     {
+        if (InteractionActive && endingDrag && Busy) return;
+        if (InteractionActive && next.Revision != dragRevision)
+        { CancelForSelection(); Error = "Document changed. The Timeline drag was canceled."; }
         var changedRoute = Snapshot?.Revision != next.Revision;
         // ItemsSource replacement can synchronously clear ListBox selection.
         // Capture its identity before notifying the Route binding.
@@ -208,7 +257,13 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         if (Busy) return;
         Busy = true; Error = "";
         try { await operation(); if (Controller.Latest is { } latest) Publish(latest); Changed(nameof(DocumentName)); Changed(nameof(Title)); }
-        catch (Exception failure) { Error = failure.Message; }
+        catch (Exception failure)
+        {
+            Error = failure.Message;
+            if (Controller.Latest is { } latest) Publish(latest);
+            SelectedProfile = selectedProfile;
+            SelectedDevice = selectedDevice;
+        }
         finally { Busy = false; }
     }
     private async Task<bool> Save(bool choosePath)
@@ -230,11 +285,29 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     public async Task<bool> ConfirmClose()
     {
         if (Busy) { Error = "Wait for the current operation to finish before closing."; return false; }
+        if (InteractionActive) await EndProfileDragAsync(false);
         Busy = true;
         try { return await AllowReplacement(); }
         catch (Exception failure) { Error = failure.Message; return false; }
         finally { Busy = false; }
     }
     private void RefreshCommands() { foreach (var command in commands) command.Refresh(); }
+    private Task CreateDevice(DeviceKind kind) => Run(async () =>
+    {
+        if (Snapshot is not { } snapshot) return;
+        ulong id = 0;
+        await Controller.Submit(s => id = s.CreateDevice(snapshot.Revision, kind));
+        if (Controller.Latest is { } latest)
+        { Publish(latest); SelectedDevice = latest.Devices.First(d => d.Id == id); }
+    });
+    private async void SynchronizeDeviceSelection()
+    {
+        if (Snapshot is not { } snapshot) return;
+        var id = IsDeviceTimeline ? SelectedDevice?.Id ?? 0 : 0;
+        try { await Controller.Submit(s => s.SelectDevice(snapshot.Revision, id)); }
+        catch (QuantumException failure) { if (failure.Code != 8) Error = failure.Message; }
+        catch (ObjectDisposedException) { }
+        catch (TaskCanceledException) { }
+    }
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

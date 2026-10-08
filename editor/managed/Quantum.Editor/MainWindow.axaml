@@ -12,7 +12,7 @@
     <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
   </Window.KeyBindings>
-  <Grid RowDefinitions="Auto,Auto,*,5,260,Auto,Auto">
+  <Grid RowDefinitions="Auto,Auto,*,5,320,Auto,Auto">
     <Menu Background="{StaticResource QuantumPane}">
       <MenuItem Header="_File">
         <MenuItem Header="_New" InputGesture="Ctrl+N" Command="{Binding NewCommand}" />

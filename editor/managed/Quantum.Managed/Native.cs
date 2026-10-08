@@ -109,6 +109,20 @@ internal static unsafe partial class Native
         in NativeProfileCommand command, out NativeError error);
     [LibraryImport(Library)] internal static partial int qn_device_acceleration(SessionHandle session,
         ulong device, ulong revision, uint custom, double acceleration, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_profile_drag_begin(SessionHandle session,
+        in NativeProfileCommand command, out ulong token, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_profile_drag_preview(SessionHandle session,
+        ulong token, double value, double snap, NativeProfile* profiles, uint capacity, out uint count, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_profile_drag_finish(SessionHandle session,
+        ulong token, uint commit, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_device_create(SessionHandle session,
+        ulong revision, uint kind, out ulong device, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_device_delete(SessionHandle session,
+        ulong revision, ulong device, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_device_properties(SessionHandle session,
+        ulong revision, ulong device, uint enabled, double start, double end, double force, out NativeError error);
+    [LibraryImport(Library)] internal static partial int qn_select_device(SessionHandle session,
+        ulong revision, ulong device, out NativeError error);
     [LibraryImport(Library)] internal static partial int qn_update(SessionHandle session, double seconds, out NativeError error);
     [LibraryImport(Library)] internal static partial int qn_viewport_open(SessionHandle session, uint platform, ulong window, out NativeError error);
     [LibraryImport(Library)] internal static partial int qn_viewport_frame(SessionHandle session, uint width, uint height, out NativeError error);

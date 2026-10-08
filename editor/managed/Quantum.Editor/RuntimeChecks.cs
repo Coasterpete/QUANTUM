@@ -11,6 +11,62 @@ namespace Quantum.Editor;
 // controller and child host. It cannot approve visuals or physical input/DPI.
 internal static class RuntimeChecks
 {
+    // One short live-host check. No screenshot campaign, DPI sweep, popup
+    // cycling or simulated physical approval; the maintainer owns visual QA.
+    public static async Task RunAuthoringSmoke(MainWindow window, string fixture, string report,
+        IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var checks = new List<string>();
+        var watch = Stopwatch.StartNew();
+        string? failure = null;
+        var model = window.Model;
+        void Require(bool condition, string name)
+        {
+            if (!condition) throw new InvalidOperationException($"{name}: {model.Error}");
+            checks.Add(name);
+        }
+        try
+        {
+            await Task.Delay(300);
+            Require(window.HostedViewport.IsReady && window.HostedViewport.FrameCount > 0, "Embedded Vulkan presents frames");
+            model.ConfirmUnsaved = () => Task.FromResult(UnsavedChoice.Discard);
+            model.PickFile = _ => Task.FromResult<string?>(fixture);
+            await model.OpenCommand.ExecuteAsync();
+            Require(model.Error.Length == 0 && model.HasProfile, "Open populates live Timeline bindings");
+            var target = model.SelectedProfile!;
+            await model.BeginProfileDragAsync(target, Quantum.Managed.ProfileOperation.EndValue);
+            model.QueueProfileDrag(target.ValueEnd + .01);
+            await model.EndProfileDragAsync(true);
+            Require(model.Error.Length == 0 && model.SelectedProfile!.Id == target.Id, "Synthetic value gesture and stable selection");
+            await model.UndoCommand.ExecuteAsync(); await model.RedoCommand.ExecuteAsync();
+            Require(model.Error.Length == 0, "Live native gesture history commands");
+            model.TimelineSource = 1;
+            await model.CreateLaunchCommand.ExecuteAsync();
+            Require(model.Error.Length == 0 && model.HasDevice, "Create/select device with real Timeline bindings");
+            model.DeviceMode = 1; model.DeviceAcceleration = "2";
+            await model.ApplyDeviceCommand.ExecuteAsync();
+            Require(model.Error.Length == 0 && model.SelectedDevice!.Custom && model.SelectedProfile?.Channel == 3, "Custom acceleration bound graph");
+            await Task.Delay(350);
+            Require(window.TimelinePlot.Bounds.Width > 100 && window.TimelinePlot.Bounds.Height > 60
+                && window.TimelinePlot.Profiles.Count > 0, "Authoring plot arranged with native samples");
+            Require(window.HostedViewport.FrameCount > 2, "Native viewport continues presenting with device selection");
+        }
+        catch (Exception error) { failure = error.ToString(); }
+        finally
+        {
+            await File.WriteAllTextAsync(report, JsonSerializer.Serialize(new
+            {
+                passed = failure is null, checks, elapsed_ms = watch.Elapsed.TotalMilliseconds,
+                viewport_frames = window.HostedViewport.FrameCount,
+                physical_pointer_testing = false, maintainer_visual_approval = "pending", failure
+            }, new JsonSerializerOptions { WriteIndented = true }));
+            model.ConfirmUnsaved = () => Task.FromResult(UnsavedChoice.Discard);
+            window.Close();
+            await Task.Delay(150);
+            desktop.Shutdown(failure is null ? 0 : 1);
+        }
+    }
+
     public static async Task Run(MainWindow window, string fixture, string report,
         IClassicDesktopStyleApplicationLifetime desktop)
     {
