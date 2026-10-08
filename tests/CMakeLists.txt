@@ -2924,3 +2924,8 @@ add_test(NAME QuantumCore.SupportSolidGeometry
     COMMAND QuantumCoreSupportSolidGeometryTests)
 set_tests_properties(QuantumCore.SupportSolidGeometry PROPERTIES
     LABELS "core;coaster;supports;appearance;rendering")
+
+add_executable(QuantumCoreRideOperationsTests RideOperationsTests.cpp)
+target_link_libraries(QuantumCoreRideOperationsTests PRIVATE Quantum::Core)
+add_test(NAME QuantumCore.RideOperations COMMAND QuantumCoreRideOperationsTests)
+set_tests_properties(QuantumCore.RideOperations PROPERTIES LABELS "core;physics;operations")

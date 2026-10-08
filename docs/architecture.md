@@ -1158,6 +1158,10 @@ complete coaster operations simulation. Physics consumes the canonical
 does not depend on rendered `TrackGeometryFamily` or `TrackStylePreset` rail,
 mesh, tube, or hardware details.
 
+Ride hardware now supplies native commands and interlocks above this solver; see
+[Ride Hardware and Operations](ride-hardware-operations.md) for configuration,
+occupancy, gate state and the bounded transfer/infrastructure model.
+
 ### Train-solver performance diagnostics
 
 The CPU train solver remains the reference and correctness implementation for

@@ -17,6 +17,9 @@ target_sources(
         src/TrackPhysicalSettings.cpp
         src/TrackConfiguration.cpp
         src/TrackStyle.cpp
+        src/RideHardware.cpp
+        src/RideHardwareJson.cpp
+        src/physics/RideOperations.cpp
         src/TrackDevices.cpp
         src/TrainConfiguration.cpp
         src/BSplineCurve.cpp
@@ -49,6 +52,9 @@ target_sources(
         include/quantum/coaster/TrackPhysicalSettings.hpp
         include/quantum/coaster/TrackConfiguration.hpp
         include/quantum/coaster/TrackStyle.hpp
+        include/quantum/coaster/RideHardware.hpp
+        include/quantum/coaster/RideHardwareSerialization.hpp
+        include/quantum/physics/RideOperations.hpp
         include/quantum/coaster/TrackDevices.hpp
         include/quantum/coaster/TrainConfiguration.hpp
         include/quantum/coaster/PlanarArcRegion.hpp

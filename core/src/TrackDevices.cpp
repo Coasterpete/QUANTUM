@@ -14,8 +14,11 @@ namespace quantum::coaster
             throw std::invalid_argument("Track device next ID must be nonzero.");
         // Legacy construction paths temporarily hold zero sections. An empty
         // collection imposes no station-domain constraint on that state.
-        if (collection.devices.empty())
+        if (collection.devices.empty() && collection.infrastructure.empty())
+        {
+            validateRideHardware(collection, trackLengthMeters, circuit);
             return;
+        }
         if (!std::isfinite(trackLengthMeters) || trackLengthMeters <= 0.0)
             throw std::invalid_argument("Track devices require a positive finite track length.");
 
@@ -26,8 +29,7 @@ namespace quantum::coaster
             if (device.id == 0 || !ids.insert(device.id).second)
                 throw std::invalid_argument("Track device IDs must be nonzero and unique.");
             greatestId = std::max(greatestId, device.id);
-            if (device.kind != TrackDeviceKind::Launch
-                && device.kind != TrackDeviceKind::Brake)
+            if (device.kind > TrackDeviceKind::Access)
                 throw std::invalid_argument("Unknown track device kind.");
             if (device.name.empty())
                 throw std::invalid_argument("Track device name must not be empty.");
@@ -50,6 +52,8 @@ namespace quantum::coaster
             // Validate optional acceleration profile.
             if (device.accelerationProfile.has_value())
             {
+                if (!supportsAccelerationProfile(device.kind))
+                    throw std::invalid_argument("This hardware does not use an acceleration profile.");
                 const double deviceLength = trackDeviceLengthMeters(device,
                     trackLengthMeters, circuit);
                 if (deviceLength <= 0.0)
@@ -75,6 +79,7 @@ namespace quantum::coaster
         }
         if (collection.nextId <= greatestId)
             throw std::invalid_argument("Track device next ID must exceed every allocated ID.");
+        validateRideHardware(collection, trackLengthMeters, circuit);
     }
 
     double trackDeviceLengthMeters(const TrackDevice& device,

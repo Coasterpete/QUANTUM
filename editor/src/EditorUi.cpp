@@ -5955,8 +5955,7 @@ namespace quantum::editor
         {
             ImGui::PushID(static_cast<int>(device.id));
             const std::string label = device.name + "  ["
-                + (device.kind == coaster::TrackDeviceKind::Launch
-                    ? "Launch" : "Brake") + "]";
+                + coaster::trackDeviceKindName(device.kind) + "]";
             if (ImGui::Selectable(label.c_str(),
                     selectedTrackDeviceId_ == device.id))
                 selectTrackDevice(device.id);
@@ -5998,8 +5997,7 @@ namespace quantum::editor
             }
             ImGui::Separator();
             ImGui::Text("%s #%llu",
-                selected->kind == coaster::TrackDeviceKind::Launch
-                    ? "Launch" : "Brake",
+                coaster::trackDeviceKindName(selected->kind),
                 static_cast<unsigned long long>(selected->id));
             bool commit = false;
             if (ImGui::Checkbox("Enabled", &deviceEditBuffer_.enabled))
@@ -6019,6 +6017,8 @@ namespace quantum::editor
             commit |= ImGui::IsItemDeactivatedAfterEdit();
 
             ImGui::Separator();
+            if (coaster::supportsAccelerationProfile(selected->kind))
+            {
             ImGui::TextUnformatted("Acceleration");
 
             const char* modeNames[] = {"Constant", "Custom Profile"};
@@ -6052,6 +6052,7 @@ namespace quantum::editor
                 drawDeviceAccelerationProfileEditor(deviceEditBuffer_, commit);
             }
 
+            }
             ImGui::InputDouble("Max force (N)",
                 &deviceEditBuffer_.maximumForceNewtons,
                 0.0, 0.0, "%.0f");

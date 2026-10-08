@@ -14,6 +14,8 @@ namespace quantum::physics
     {
         coaster::TrackDeviceId id = 0;
         bool armed = false;
+        std::optional<double> signedAccelerationCommand;
+        bool compensateGravity = false;
     };
 
     [[nodiscard]] std::vector<TrackDeviceRuntimeState>
@@ -42,5 +44,6 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const TrainDefinition& train,
         const TrainPose& pose,
-        double signedVelocityMetersPerSecond);
+        double signedVelocityMetersPerSecond,
+        double gravityAccelerationMetersPerSecondSquared = 9.80665);
 }

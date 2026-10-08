@@ -175,11 +175,11 @@ can reference the existing generated PNGs when packaging is implemented.
 | --- | --- |
 | Track Start / Layout | Native numeric position/orientation, marker selection, Move/Rotate gestures, staged ghost preview and one-action history are available; see [placement handoff](hybrid-track-start-placement.md). |
 | Timeline / Transition Editor | Native profiles, graph selection, value/boundary dragging, optional snapping, pan/zoom and numeric editing are available; full diagnostics parity remains. |
-| Track Devices | Native create/delete/select, interval/force/enable, Constant/Custom, direct custom-profile editing and selected-interval viewport lines are available; live device-force diagnostics remain. |
+| Ride Hardware | Existing Track Device authoring is retained, with native transport/lift/station/block/transfer/access configurations, runtime telemetry, commands, interlocks and selected mechanism outlines. See [Ride Hardware and Operations](ride-hardware-operations.md). |
 | Train | Preserve Configuration → native Preview → Summary/Diagnostics as a dedicated workspace; the current footer summary is not the final Train UI. |
 | Supports | Structure/node/member authoring, attachments, foundations, profiles, dimensions, end treatments and native picking are available in the Supports workspace; move gizmos, generated-run tools and appearance controls remain in fallback. |
 | Simulator / Math / newer diagnostics | Extend managed workspace composition around the existing native viewport, snapshots and diagnostics; do not replace the native simulation with UI calculations. |
-| Machinery and Lua ride logic | Future operations/ride sequencing belongs alongside Timeline; machinery physics remains native. Runtime/scripting APIs require their own concrete milestone and are not implemented here. |
+| Machinery and Lua ride logic | Native operations, kinematic transfer/access state and command seams are implemented. Alternate-track routing, general-mechanics backend integration and Lua remain later milestones. |
 
 These homes extend the current Grid/UserControl composition and concrete native
 service. No docking registry, generic event bus, machinery framework or scripting

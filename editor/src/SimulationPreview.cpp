@@ -397,6 +397,23 @@ namespace quantum::editor
         deviceRuntimeStates_ =
             physics::initialTrackDeviceRuntimeStates(trackDevices_);
         lastDeviceForces_ = {};
+        operations_.reset(trackDevices_);
+        if (compiledTrack_ && pose_ && dynamicsState_)
+        {
+            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+            operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+                compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
+            deviceRuntimeStates_ = operations_.forceControls();
+        }
+    }
+
+    void SimulationPreview::hardwareCommand(coaster::TrackDeviceId id, physics::HardwareCommand command, double value, std::uint64_t target)
+    {
+        if (!isAvailable()) throw std::invalid_argument("Simulation preview is unavailable.");
+        operations_.command(id, command, value, target);
+        const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+        operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+            compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
     }
 
     const physics::TrackDeviceForceResult&
@@ -444,6 +461,15 @@ namespace quantum::editor
         pose_ = initialPose_;
         previousPose_ = initialPose_;
         renderPose_ = initialPose_;
+        try
+        {
+            operations_.reset(trackDevices_);
+            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+            operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+                compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
+            deviceRuntimeStates_ = operations_.forceControls();
+        }
+        catch (const std::exception& error) { setUnavailable(error.what()); return; }
         rebuildVertices();
     }
 
@@ -539,10 +565,15 @@ namespace quantum::editor
                 const double previousVelocity =
                     dynamicsState_->signedVelocityMetersPerSecond;
                 const auto stepBegin = std::chrono::steady_clock::now();
+                const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond);
+                operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+                    compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit);
+                deviceRuntimeStates_ = operations_.forceControls();
                 lastDeviceForces_ = physics::evaluateTrackDeviceForces(
                     trackDevices_, deviceRuntimeStates_, *compiledTrack_,
                     trainDefinition_, *pose_,
-                    dynamicsState_->signedVelocityMetersPerSecond);
+                    dynamicsState_->signedVelocityMetersPerSecond, environment_.gravityAccelerationMetersPerSecondSquared);
+                operations_.recordForces(lastDeviceForces_);
                 physics::TrainStepResult result = physics::stepTrain(
                     *compiledTrack_,
                     trainDefinition_,
@@ -903,6 +934,7 @@ namespace quantum::editor
         lastGpuBogieQueries_.clear();
         trackDevices_.clear();
         deviceRuntimeStates_.clear();
+        operations_ = {};
         lastDeviceForces_ = {};
         gpuTrackReady_ = false;
         error_ = std::move(error);

@@ -78,6 +78,8 @@ namespace quantum::editor
     PreparedDocument ApplicationService::prepare(coaster::AuthoredTrack track,
         DocumentPreparationTelemetry* telemetry)
     {
+        coaster::validateTrackDevices(track.trackDevices(), track.trackLengthMeters(),
+            track.layoutMode() == coaster::LayoutMode::Circuit);
         using Clock = std::chrono::steady_clock;
         auto start = telemetry ? Clock::now() : Clock::time_point{};
         auto centerline = createCenterlineVisualization(track, track.trackStyle());
@@ -287,6 +289,9 @@ namespace quantum::editor
         if (!std::isfinite(acceleration) || acceleration < 0)
             throw std::invalid_argument("Acceleration magnitude must be finite and nonnegative.");
         auto device = deviceById(track_, id);
+        if (device.kind == coaster::TrackDeviceKind::Block || device.kind == coaster::TrackDeviceKind::Access)
+            throw std::invalid_argument("This hardware has no train-force controller.");
+        if (custom && !coaster::supportsAccelerationProfile(device.kind)) throw std::invalid_argument("This hardware does not use acceleration profiles.");
         device.targetAccelerationMetersPerSecondSquared = acceleration;
         if (custom && !device.accelerationProfile)
         {
@@ -306,17 +311,22 @@ namespace quantum::editor
 
     coaster::TrackDeviceId ApplicationService::createDevice(coaster::TrackDeviceKind kind, const Publish& publish)
     {
-        if (kind != coaster::TrackDeviceKind::Launch && kind != coaster::TrackDeviceKind::Brake)
+        if (kind > coaster::TrackDeviceKind::Access)
             throw std::invalid_argument("Unknown Track Device kind.");
         AuthoredTrackEditTransaction transaction{track_};
         const bool launch = kind == coaster::TrackDeviceKind::Launch;
-        coaster::TrackDevice device;
-        device.kind = kind;
-        device.name = launch ? "Launch" : "Brake";
+        coaster::TrackDevice device = coaster::makeTrackDevice(kind);
         const double length = track_.trackLengthMeters();
         device.startStationMeters = launch ? 0 : length * .5;
         device.endStationMeters = launch ? length * .25 : length * .75;
         device.targetAccelerationMetersPerSecondSquared = launch ? 3 : 4;
+        if (kind > coaster::TrackDeviceKind::Brake)
+        {
+            device.startStationMeters = 0;
+            device.endStationMeters = length * .75;
+            if (auto* station = std::get_if<coaster::StationConfiguration>(&device.configuration))
+                station->stopStationMeters = length * .5;
+        }
         const auto id = transaction.candidate().addTrackDevice(std::move(device));
         edit(std::move(transaction), publish);
         return id;
@@ -349,6 +359,43 @@ namespace quantum::editor
         if (device == deviceById(track_, id)) return;
         AuthoredTrackEditTransaction transaction{track_};
         transaction.candidate().updateTrackDevice(device);
+        edit(std::move(transaction), publish);
+    }
+
+    void ApplicationService::setHardwareConfiguration(coaster::TrackDeviceId id,
+        const coaster::HardwareConfiguration& configuration, const Publish& publish)
+    {
+        auto device = deviceById(track_, id);
+        if (device.configuration == configuration) return;
+        if (const auto* previous = std::get_if<coaster::TransferConfiguration>(&device.configuration))
+            if (const auto* updated = std::get_if<coaster::TransferConfiguration>(&configuration))
+            {
+                if (updated->nextAlignmentId < previous->nextAlignmentId)
+                    throw std::invalid_argument("Transfer alignment allocator cannot move backwards.");
+                for (const auto& alignment : updated->alignments)
+                    if (alignment.id < previous->nextAlignmentId && std::none_of(previous->alignments.begin(), previous->alignments.end(),
+                        [&](const auto& old) { return old.id == alignment.id; }))
+                        throw std::invalid_argument("Deleted transfer alignment IDs cannot be reused.");
+            }
+        device.configuration = configuration;
+        AuthoredTrackEditTransaction transaction{track_};
+        transaction.candidate().updateTrackDevice(device);
+        edit(std::move(transaction), publish);
+    }
+    void ApplicationService::setInfrastructure(const std::vector<coaster::TrackInfrastructure>& infrastructure,
+        std::uint64_t nextId, const Publish& publish)
+    {
+        auto devices = track_.trackDevices();
+        if (nextId < devices.nextInfrastructureId)
+            throw std::invalid_argument("Infrastructure allocator cannot move backwards.");
+        for (const auto& item : infrastructure)
+            if (item.id < devices.nextInfrastructureId && std::none_of(devices.infrastructure.begin(), devices.infrastructure.end(),
+                [&](const auto& old) { return old.id == item.id; }))
+                throw std::invalid_argument("Deleted infrastructure IDs cannot be reused.");
+        devices.infrastructure = infrastructure; devices.nextInfrastructureId = nextId;
+        if (devices == track_.trackDevices()) return;
+        AuthoredTrackEditTransaction transaction{track_};
+        transaction.candidate().setTrackDevices(devices);
         edit(std::move(transaction), publish);
     }
 

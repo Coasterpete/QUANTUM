@@ -6,15 +6,21 @@
 #include <vector>
 
 #include <quantum/coaster/GeometricSection.hpp>
+#include <quantum/coaster/RideHardware.hpp>
 
 namespace quantum::coaster
 {
-    using TrackDeviceId = std::uint64_t;
-
     enum class TrackDeviceKind : std::uint8_t
     {
         Launch,
-        Brake
+        Brake,
+        Transport,
+        ChainLift,
+        CableLift,
+        Station,
+        Block,
+        Transfer,
+        Access
     };
 
     // Authored, renderer-neutral physical command. Stations are SI metres
@@ -36,6 +42,7 @@ namespace quantum::coaster
         // The profile values represent commanded acceleration magnitude
         // (always >= 0). For brakes, the physical force opposes travel.
         std::optional<ChannelProfile> accelerationProfile;
+        HardwareConfiguration configuration;
 
         [[nodiscard]] friend bool operator==(
             const TrackDevice& a, const TrackDevice& b)
@@ -48,7 +55,8 @@ namespace quantum::coaster
                 && a.endStationMeters == b.endStationMeters
                 && a.targetAccelerationMetersPerSecondSquared == b.targetAccelerationMetersPerSecondSquared
                 && a.maximumForceNewtons == b.maximumForceNewtons
-                && a.accelerationProfile == b.accelerationProfile;
+                && a.accelerationProfile == b.accelerationProfile
+                && a.configuration == b.configuration;
         }
     };
 
@@ -56,10 +64,19 @@ namespace quantum::coaster
     {
         TrackDeviceId nextId = 1;
         std::vector<TrackDevice> devices;
+        std::uint64_t nextInfrastructureId = 1;
+        std::vector<TrackInfrastructure> infrastructure;
 
         [[nodiscard]] friend bool operator==(
             const TrackDeviceCollection&, const TrackDeviceCollection&) = default;
     };
+
+    [[nodiscard]] const char* trackDeviceKindName(TrackDeviceKind kind);
+    [[nodiscard]] TrackDeviceKind trackDeviceKindFromName(const std::string& name);
+    [[nodiscard]] TrackDevice makeTrackDevice(TrackDeviceKind kind);
+    [[nodiscard]] bool supportsAccelerationProfile(TrackDeviceKind kind) noexcept;
+    void validateRideHardware(const TrackDeviceCollection& collection,
+        double trackLengthMeters, bool circuit);
 
     // Half-open [start,end) intervals. Circuit start > end wraps through
     // station zero; start == end is invalid. Open tracks require start < end

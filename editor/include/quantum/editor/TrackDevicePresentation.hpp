@@ -1,5 +1,6 @@
 #pragma once
 #include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/physics/RideOperations.hpp>
 
 namespace quantum::editor
 {
@@ -9,4 +10,7 @@ namespace quantum::editor
     [[nodiscard]] std::vector<renderer::LineVertex> createTrackDeviceSelectionVertices(
         const coaster::AuthoredTrack& track, const CenterlineVisualization& geometry,
         coaster::TrackDeviceId selected);
+    [[nodiscard]] std::vector<renderer::LineVertex> createHardwareMechanismVertices(
+        const coaster::AuthoredTrack& track, const CenterlineVisualization& geometry,
+        coaster::TrackDeviceId selected, const physics::HardwareRuntime* runtime);
 }

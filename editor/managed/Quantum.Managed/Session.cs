@@ -5,7 +5,7 @@ namespace Quantum.Managed;
 public enum SessionCommand : uint { Play = 1, Pause, Reset, SetInitialSpeed, Undo, Redo, SetRegionLength }
 public enum ViewportAction : uint { Orbit = 1, Pan, Zoom, Frame, Move, Focus, FrameSupport, PickSupport, FrameTrackStart, TransformDown, TransformMove, TransformUp, TransformCancel }
 public enum ProfileOperation : uint { BeginValue, EndValue, TransitionType, Split, Remove, MoveBegin, MoveEnd }
-public enum DeviceKind : uint { Launch, Brake }
+public enum DeviceKind : uint { Launch, Brake, Transport, ChainLift, CableLift, Station, Block, Transfer, Access }
 public sealed record TransitionChoice(uint Type, string Name) { public override string ToString() => Name; }
 public sealed record ProfileSegment(uint OwnerKind, ulong OwnerId, uint Channel, uint Id, uint TransitionType,
     uint Unit, double Begin, double End, double ValueBegin, double ValueEnd, ReadOnlyCollection<double> Samples)
@@ -18,7 +18,7 @@ public sealed record ProfileSegment(uint OwnerKind, ulong OwnerId, uint Channel,
 public sealed record TrackDevice(ulong Id, string Name, uint Kind, bool Enabled, bool Custom,
     double Start, double End, double Acceleration, double MaximumForce)
 {
-    public string Label => $"{(Name.Length == 0 ? "Device" : Name)} · #{Id} · {(Kind == 0 ? "Launch" : "Brake")}";
+    public string Label => $"{(Name.Length == 0 ? "Device" : Name)} · #{Id} · {((DeviceKind)Kind).ToString()}";
     public string Summary => $"{Start:F2} → {End:F2} m · {(Enabled ? "Enabled" : "Disabled")} · {MaximumForce:F0} N limit";
     public override string ToString() => Label;
 }
@@ -41,7 +41,7 @@ public sealed record Region(uint Index, uint Kind, uint Construction, double Sta
 public sealed record SessionSnapshot(ulong Revision, ulong Tick, double Speed, double Station,
     double InitialSpeed, uint CarCount, double TrainMass, double TotalLength, uint Playback,
     bool Available, bool Dirty, bool CanUndo, bool CanRedo, double PhysicsMs, ReadOnlyCollection<Region> Route,
-    ReadOnlyCollection<ProfileSegment> Profiles, ReadOnlyCollection<TrackDevice> Devices, SupportSnapshot Supports, PlacementSnapshot Placement)
+    ReadOnlyCollection<ProfileSegment> Profiles, ReadOnlyCollection<TrackDevice> Devices, SupportSnapshot Supports, PlacementSnapshot Placement, HardwareSnapshot Hardware)
 {
     public double TimeSeconds => Tick / 240.0;
     public string PlaybackLabel => Available ? Playback switch { 1 => "Playing", 2 => "Paused", _ => "Stopped" } : "Preview unavailable";
@@ -65,12 +65,12 @@ public sealed unsafe partial class Session : IDisposable
     private bool disposed;
     public Session()
     {
-        if (nint.Size != 8 || Native.qn_abi_version() != 4 || sizeof(NativeSnapshot) != 104 || sizeof(NativeRegion) != 112 || sizeof(NativeCommand) != 24
+        if (nint.Size != 8 || Native.qn_abi_version() != 5 || sizeof(NativeSnapshot) != 104 || sizeof(NativeRegion) != 112 || sizeof(NativeCommand) != 24
             || sizeof(NativeProfile) != 328 || sizeof(NativeDevice) != 184 || sizeof(NativeAuthoringSnapshot) != 24 || sizeof(NativeProfileCommand) != 48
             || sizeof(NativeSupportSnapshot) != 64 || sizeof(NativeSupportStructure) != 272 || sizeof(NativeSupportNode) != 88
             || sizeof(NativeSupportMember) != 1096 || sizeof(NativeSupportConnection) != 520 || sizeof(NativeSupportCommand) != 88
             || sizeof(NativePlacement) != 184 || sizeof(NativePose) != 56 || sizeof(NativeTransformCommand) != 32 || sizeof(TransformIntent) != 48)
-            throw new NotSupportedException("QUANTUM requires a matching ABI 4 in a 64-bit process. Rebuild and stage the native runtime.");
+            throw new NotSupportedException("QUANTUM requires a matching ABI 5 in a 64-bit process. Rebuild and stage the native runtime.");
         Check(Native.qn_create(out var id, out var error), error);
         handle = new SessionHandle(id);
         try
@@ -119,7 +119,7 @@ public sealed unsafe partial class Session : IDisposable
             RefreshAuthoring(summary.Revision);
             return new(summary.Revision, summary.Tick, summary.Speed, summary.Station, summary.InitialSpeed,
                 summary.CarCount, summary.TrainMass, summary.TotalLength, summary.Playback, summary.Available != 0,
-                summary.Dirty != 0, summary.CanUndo != 0, summary.CanRedo != 0, summary.PhysicsMs, route, profiles, devices, ReadSupports(summary.Revision), ReadPlacement());
+                summary.Dirty != 0, summary.CanUndo != 0, summary.CanRedo != 0, summary.PhysicsMs, route, profiles, devices, ReadSupports(summary.Revision), ReadPlacement(), ReadHardware(summary.Revision));
         }
         throw new InvalidOperationException("Document changed repeatedly during snapshot sizing.");
     }

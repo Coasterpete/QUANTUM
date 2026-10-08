@@ -1,6 +1,8 @@
 #include "QuantumNative.h"
 #include "NativeViewport.hpp"
 #include <quantum/editor/ApplicationService.hpp>
+#include <quantum/coaster/RideHardwareSerialization.hpp>
+#include <nlohmann/json.hpp>
 #include <quantum/editor/RegionSummary.hpp>
 #include <quantum/editor/TransitionTypePresets.hpp>
 #include <algorithm>
@@ -33,6 +35,7 @@ namespace
         std::uint64_t authoringRevision = 0;
         std::vector<QnProfileSegment> profiles;
         std::vector<QnDevice> devices;
+        nlohmann::json hardwareConfiguration = nlohmann::json::array();
         QnProfileCommand dragCommand{};
         std::uint64_t dragToken = 0;
         std::uint64_t selectedDevice = 0;
@@ -155,6 +158,7 @@ namespace
         if (state.authoringRevision == app.revision()) return;
         std::vector<QnProfileSegment> profiles;
         std::vector<QnDevice> devices;
+        nlohmann::json hardwareConfiguration = nlohmann::json::array();
         const auto& track = app.track();
         const auto scale = track.physicalSettings().metersPerCoordinateUnit;
         for (std::size_t region = 0; region < track.sectionCount(); ++region)
@@ -169,6 +173,8 @@ namespace
         }
         for (const auto& device : track.trackDevices().devices)
         {
+            hardwareConfiguration.push_back({{"id", device.id}, {"configuration",
+                nlohmann::json::parse(quantum::coaster::serializeRideHardwareConfiguration(device))}});
             QnDevice row{}; row.id = device.id; row.kind = static_cast<uint32_t>(device.kind);
             row.enabled = device.enabled; row.custom = device.accelerationProfile.has_value();
             row.start_station = device.startStationMeters; row.end_station = device.endStationMeters;
@@ -177,6 +183,7 @@ namespace
             if (device.accelerationProfile) appendProfileSamples(profiles, *device.accelerationProfile, 1, device.id, 3, 2, 1, 1);
         }
         state.profiles = std::move(profiles); state.devices = std::move(devices);
+        state.hardwareConfiguration = std::move(hardwareConfiguration);
         state.authoringRevision = app.revision();
     }
     void requireRevision(const Session& state, uint64_t revision)
@@ -283,7 +290,7 @@ static_assert(sizeof(QnSupportConnection) == 520 && sizeof(QnSupportMember) == 1
 static_assert(sizeof(QnSupportSnapshot) == 64 && sizeof(QnSupportCommand) == 88);
 static_assert(sizeof(QnPose) == 56 && sizeof(QnPlacementSnapshot) == 184);
 static_assert(sizeof(QnTransformCommand) == 32 && sizeof(QnTransformIntent) == 48);
-uint32_t QN_CALL qn_abi_version() { return 4; }
+uint32_t QN_CALL qn_abi_version() { return 5; }
 QnResult QN_CALL qn_create(QnSession* out, QnError* error)
 {
     if (out) *out = 0;
@@ -523,7 +530,7 @@ QnResult QN_CALL qn_device_create(QnSession handle, uint64_t revision, uint32_t 
 {
     if (device) *device = 0;
     return boundary(error, [&] {
-        if (!device || kind > 1) throw std::invalid_argument("Invalid device kind/output.");
+        if (!device || kind > 8) throw std::invalid_argument("Invalid device kind/output.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
         *device = state->application.createDevice(static_cast<quantum::coaster::TrackDeviceKind>(kind));
     });
@@ -552,6 +559,85 @@ QnResult QN_CALL qn_select_device(QnSession handle, uint64_t revision, uint64_t 
                 state->application.track().trackDevices().devices.end(), [device](const auto& d) { return d.id == device; }))
             throw std::invalid_argument("Unknown Track Device selection.");
         state->selectedDevice = device;
+    });
+}
+QnResult QN_CALL qn_hardware_snapshot(QnSession handle, uint64_t revision,
+    char* buffer, uint32_t capacity, uint32_t* required, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!required || (!buffer && capacity)) throw std::invalid_argument("Invalid hardware snapshot buffer.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        refreshAuthoring(*state);
+        using nlohmann::json;
+        json result = {{"revision", revision}, {"hardware", state->hardwareConfiguration},
+            {"nextInfrastructureId", state->application.track().trackDevices().nextInfrastructureId},
+            {"infrastructure", json::parse(quantum::coaster::serializeTrackInfrastructure(state->application.track().trackDevices().infrastructure))}};
+        for (auto& item : result["hardware"])
+        {
+            const auto id = item["id"].get<uint64_t>();
+            const auto& runtime = state->application.preview().operations().hardware();
+            const auto h = std::find_if(runtime.begin(), runtime.end(), [id](const auto& value) { return value.id == id; });
+            if (h == runtime.end()) { item["state"] = "Preview unavailable"; continue; }
+            item["state"] = h->state; item["interlockReason"] = h->interlockReason;
+            item["runtimeEnabled"] = h->enabled;
+            item["occupiedBogieCount"] = h->occupancy.bogies.size();
+            std::size_t carCount = 0;
+            json trainIds = json::array();
+            for (const auto& train : h->occupancy.trains) { carCount += train.carCount; trainIds.push_back(train.id); }
+            item["occupiedCarCount"] = carCount; item["trainIds"] = std::move(trainIds);
+            item["entered"] = h->occupancy.entered; item["exited"] = h->occupancy.exited;
+            item["commandedSpeed"] = h->commandedSpeedMetersPerSecond;
+            item["commandedAcceleration"] = h->commandedAccelerationMetersPerSecondSquared;
+            item["direction"] = h->actualSpeedMetersPerSecond > 0 ? 1 : h->actualSpeedMetersPerSecond < 0 ? -1 : 0;
+            item["actualSpeed"] = h->actualSpeedMetersPerSecond; item["appliedForce"] = h->appliedForceNewtons;
+            item["aligned"] = h->aligned; item["stopped"] = h->stopped; item["movementPermitted"] = h->movementPermitted;
+            if (const auto* station = std::get_if<quantum::physics::StationRuntime>(&h->mechanism))
+            { item["dispatchRequested"] = station->dispatchRequested; item["dispatchPermitted"] = station->dispatchPermitted; }
+            if (const auto* transfer = std::get_if<quantum::physics::TransferRuntime>(&h->mechanism))
+            { item["alignment"] = transfer->alignment; item["targetAlignment"] = transfer->target; item["position"] = transfer->positionMeters;
+              item["locked"] = transfer->phase == quantum::physics::TransferRuntime::Phase::Locked; }
+            if (const auto* gate = std::get_if<quantum::physics::AccessRuntime>(&h->mechanism))
+            { item["position"] = gate->fraction; item["locked"] = gate->locked; item["interlocked"] = gate->interlocked || gate->protectedByOperation; }
+        }
+        const auto text = result.dump();
+        if (text.size() >= std::numeric_limits<uint32_t>::max()) throw std::invalid_argument("Hardware snapshot is too large.");
+        *required = static_cast<uint32_t>(text.size() + 1);
+        if (capacity < *required) throw Failure(QN_BUFFER_TOO_SMALL, "Hardware snapshot buffer is too small.");
+        std::memcpy(buffer, text.c_str(), *required);
+    });
+}
+QnResult QN_CALL qn_hardware_configuration(QnSession handle, uint64_t revision, uint64_t device, const char* text, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!text) throw std::invalid_argument("Hardware configuration is required.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        const auto& devices = state->application.track().trackDevices().devices;
+        auto found = std::find_if(devices.begin(), devices.end(), [device](const auto& d) { return d.id == device; });
+        if (found == devices.end()) throw std::invalid_argument("Unknown hardware ID.");
+        quantum::coaster::HardwareConfiguration config;
+        try { config = quantum::coaster::deserializeRideHardwareConfiguration(found->kind, text); }
+        catch (const std::exception& e) { throw std::invalid_argument(e.what()); }
+        state->application.setHardwareConfiguration(device, config);
+    });
+}
+QnResult QN_CALL qn_hardware_command(QnSession handle, uint64_t revision, uint64_t device, uint32_t command, double value, uint64_t target, QnError* error)
+{
+    return boundary(error, [&] {
+        if (command > static_cast<uint32_t>(quantum::physics::HardwareCommand::SetAccessInterlocked))
+            throw std::invalid_argument("Unknown runtime hardware command.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        state->application.preview().hardwareCommand(device, static_cast<quantum::physics::HardwareCommand>(command), value, target);
+    });
+}
+QnResult QN_CALL qn_infrastructure_configuration(QnSession handle, uint64_t revision, const char* text, uint64_t nextId, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!text) throw std::invalid_argument("Infrastructure configuration is required.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        std::vector<quantum::coaster::TrackInfrastructure> items;
+        try { items = quantum::coaster::deserializeTrackInfrastructure(text); }
+        catch (const std::exception& e) { throw std::invalid_argument(e.what()); }
+        state->application.setInfrastructure(items, nextId);
     });
 }
 QnResult QN_CALL qn_update(QnSession handle, double seconds, QnError* error)
@@ -710,7 +796,7 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
                 app.track().startPose(), app.transformPreview(), app.track().physicalSettings().metersPerCoordinateUnit,
                 app.centerline().visualization());
             viewport->captureTrain(revision, app.preview().vertexGeneration(), app.preview().vertices(), app.preview().meshInstances());
-            viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization());
+            viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization(), app.preview().operations());
             viewport->captureSupports(revision, state->supportSelectionRevision, state->supportWorkspace,
                 state->selectedSupport, app.track().supports(), app.supports());
             if (state->viewportGeometryGeneration != geometryGeneration)

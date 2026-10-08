@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-/* ABI 4: 64-bit process, natural 8-byte alignment, UTF-8 strings.
+/* ABI 5: 64-bit process, natural 8-byte alignment, UTF-8 strings.
    Tokens are non-reused IDs, never addresses. All buffers are caller-owned.
    Calls are serialized per session; viewport calls require its UI thread. */
 typedef uint64_t QnSession;
@@ -202,6 +202,17 @@ QN_API QnResult QN_CALL qn_device_properties(QnSession session, uint64_t expecte
 /* Transient viewport selection, zero clears. No authored/history changes. */
 QN_API QnResult QN_CALL qn_select_device(QnSession session, uint64_t expected_revision,
     uint64_t device, QnError* error);
+/* ABI 5 hardware boundary: bounded UTF-8 JSON snapshots/configurations contain
+   QUANTUM values only. required includes NUL; capacity failure writes no payload.
+   Runtime commands do not edit document/history. All calls check revision. */
+QN_API QnResult QN_CALL qn_hardware_snapshot(QnSession session, uint64_t expected_revision,
+    char* json, uint32_t capacity, uint32_t* required, QnError* error);
+QN_API QnResult QN_CALL qn_hardware_configuration(QnSession session, uint64_t expected_revision,
+    uint64_t device, const char* json, QnError* error);
+QN_API QnResult QN_CALL qn_hardware_command(QnSession session, uint64_t expected_revision,
+    uint64_t device, uint32_t command, double value, uint64_t target, QnError* error);
+QN_API QnResult QN_CALL qn_infrastructure_configuration(QnSession session, uint64_t expected_revision,
+    const char* json, uint64_t next_id, QnError* error);
 QN_API QnResult QN_CALL qn_update(QnSession session, double seconds, QnError* error);
 /* Borrowed host: 1=HWND, 2=X11 XID; 0/0 standalone validation window.
    Avalonia positions/sizes the child. frame dimensions are physical pixels. */

@@ -291,10 +291,23 @@ void NativeViewport::captureTrain(uint64_t revision, uint64_t generation,
 }
 void NativeViewport::captureDevice(uint64_t revision, uint64_t selected,
     const quantum::coaster::AuthoredTrack& track,
-    const quantum::editor::CenterlineVisualization& geometry)
+    const quantum::editor::CenterlineVisualization& geometry,
+    const quantum::physics::RideOperations& operations)
 {
-    if (revision == deviceRevision_ && selected == selectedDevice_) return;
+    const auto found = std::find_if(operations.hardware().begin(), operations.hardware().end(), [selected](const auto& h) { return h.id == selected; });
+    const auto* runtime = found == operations.hardware().end() ? nullptr : &*found;
+    double position = 0;
+    if (runtime)
+    {
+        if (const auto* t = std::get_if<quantum::physics::TransferRuntime>(&runtime->mechanism)) position = t->positionMeters;
+        if (const auto* g = std::get_if<quantum::physics::AccessRuntime>(&runtime->mechanism)) position = g->fraction;
+    }
+    const auto label = runtime ? runtime->state : std::string{};
+    if (position == deviceMechanismPosition_ && label == deviceMechanismState_ && revision == deviceRevision_ && selected == selectedDevice_) return;
     device_ = quantum::editor::createTrackDeviceSelectionVertices(track, geometry, selected);
+    auto mechanism = quantum::editor::createHardwareMechanismVertices(track, geometry, selected, runtime);
+    device_.insert(device_.end(), mechanism.begin(), mechanism.end());
+    deviceMechanismPosition_ = position; deviceMechanismState_ = label;
     deviceRevision_ = revision; selectedDevice_ = selected; trainDirty_ = true;
 }
 void NativeViewport::input(uint32_t action, double x, double y, double z, double value)

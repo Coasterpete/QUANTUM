@@ -1,3 +1,4 @@
+#include <quantum/coaster/RideHardwareSerialization.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
 
 #include <nlohmann/json.hpp>
@@ -2337,7 +2338,7 @@ TrackStylePreset deserializeTrackStyle(
         {
             json deviceJson = {
                 {"id", device.id},
-                {"kind", device.kind == TrackDeviceKind::Launch ? "Launch" : "Brake"},
+                {"kind", trackDeviceKindName(device.kind)},
                 {"name", device.name},
                 {"enabled", device.enabled},
                 {"startStationMeters", device.startStationMeters},
@@ -2350,9 +2351,14 @@ TrackStylePreset deserializeTrackStyle(
             {
                 deviceJson["accelerationProfile"] = serializeChannelProfile(device.accelerationProfile.value());
             }
+            if (device.configuration.index() != 0)
+                deviceJson["configuration"] = json::parse(serializeRideHardwareConfiguration(device));
             devicesJson.push_back(std::move(deviceJson));
         }
         root["trackDevices"] = {
+            {"schemaVersion", 2},
+            {"nextInfrastructureId", track.trackDevices().nextInfrastructureId},
+            {"infrastructure", json::parse(serializeTrackInfrastructure(track.trackDevices().infrastructure))},
             {"nextId", track.trackDevices().nextId},
             {"devices", std::move(devicesJson)}
         };
@@ -2650,7 +2656,13 @@ TrackStylePreset deserializeTrackStyle(
                 requireObject(root, "trackDevices", "root");
                 const json& collectionJson = root["trackDevices"];
                 requireNoUnknownFields(collectionJson,
-                    {"nextId", "devices"}, "trackDevices");
+                    {"nextId", "devices", "schemaVersion", "nextInfrastructureId", "infrastructure"}, "trackDevices");
+                if (collectionJson.contains("schemaVersion")
+                    && (!collectionJson["schemaVersion"].is_number_integer() || collectionJson["schemaVersion"] != 2))
+                    throw std::runtime_error("Unsupported ride hardware schemaVersion.");
+                if (!collectionJson.contains("schemaVersion")
+                    && (collectionJson.contains("infrastructure") || collectionJson.contains("nextInfrastructureId")))
+                    throw std::runtime_error("Ride infrastructure requires hardware schemaVersion 2.");
                 requireInteger(collectionJson, "nextId", "trackDevices");
                 requireArray(collectionJson, "devices", "trackDevices");
                 if (collectionJson["nextId"] < 0)
@@ -2669,7 +2681,7 @@ TrackStylePreset deserializeTrackStyle(
                     static const std::vector<std::string> deviceAllowed = {"id", "kind", "name",
                         "enabled", "startStationMeters", "endStationMeters",
                         "targetAccelerationMetersPerSecondSquared",
-                        "maximumForceNewtons", "accelerationProfile"};
+                        "maximumForceNewtons", "accelerationProfile", "configuration"};
                     requireNoUnknownFields(item, deviceAllowed, path);
                     requireInteger(item, "id", path);
                     if (item["id"] < 0)
@@ -2686,9 +2698,11 @@ TrackStylePreset deserializeTrackStyle(
                     TrackDevice device;
                     device.id = item["id"].get<TrackDeviceId>();
                     const std::string kind = item["kind"].get<std::string>();
-                    if (kind == "Launch") device.kind = TrackDeviceKind::Launch;
-                    else if (kind == "Brake") device.kind = TrackDeviceKind::Brake;
-                    else throw std::runtime_error(path + ".kind: unknown device kind");
+                    device.kind = trackDeviceKindFromName(kind);
+                    if (item.contains("configuration") && !collectionJson.contains("schemaVersion"))
+                        throw std::runtime_error("Typed ride hardware requires schemaVersion 2.");
+                    if (item.contains("configuration"))
+                        device.configuration = deserializeRideHardwareConfiguration(device.kind, item["configuration"].dump());
                     device.name = item["name"].get<std::string>();
                     device.enabled = item["enabled"].get<bool>();
                     device.startStationMeters = item["startStationMeters"].get<double>();
@@ -2705,6 +2719,14 @@ TrackStylePreset deserializeTrackStyle(
                     }
                     collection.devices.push_back(std::move(device));
                 }
+                if (collectionJson.contains("nextInfrastructureId"))
+                {
+                    requireInteger(collectionJson, "nextInfrastructureId", "trackDevices");
+                    if (collectionJson["nextInfrastructureId"] <= 0) throw std::runtime_error("Invalid infrastructure next ID.");
+                    collection.nextInfrastructureId = collectionJson["nextInfrastructureId"].get<std::uint64_t>();
+                }
+                if (collectionJson.contains("infrastructure"))
+                    collection.infrastructure = deserializeTrackInfrastructure(collectionJson["infrastructure"].dump());
                 track.setTrackDevices(collection);
             }
 

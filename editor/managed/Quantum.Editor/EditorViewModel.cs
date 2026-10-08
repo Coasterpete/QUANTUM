@@ -121,6 +121,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             var enabled = DeviceEnabled;
             await Controller.Submit(s => s.SetDeviceProperties(snapshot.Revision, device.Id, enabled, start, end, force));
         }), () => HasDevice);
+        InitializeHardwareCommands();
         InitializeSupportCommands();
         InitializePlacementCommands();
     }
@@ -147,7 +148,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         set { if (selected?.Index != value?.Index) CancelForSelection(); selected = value; Changed(); Changed(nameof(HasSelection)); Length = value?.Length.ToString("G12", CultureInfo.CurrentCulture) ?? ""; RefreshProfiles(); RefreshCommands(); }
     }
     public bool HasSelection => Selected is not null;
-    public int TimelineSource { get => timelineSource; set { if (timelineSource != value) CancelForSelection(); timelineSource = value; Changed(); Changed(nameof(IsDeviceTimeline)); RefreshProfiles(); SynchronizeDeviceSelection(); } }
+    public int TimelineSource { get => timelineSource; set { if (timelineSource != value) CancelForSelection(); timelineSource = value; Changed(); Changed(nameof(IsDeviceTimeline)); Changed(nameof(ShowProfileEditor)); Changed(nameof(ShowHardwareState)); RefreshProfiles(); SynchronizeDeviceSelection(); } }
     public bool IsDeviceTimeline => TimelineSource == 1;
     public string TimelineContext => IsDeviceTimeline ? SelectedDevice?.Summary ?? "No authored Track Devices in this document"
         : Selected is { } region ? $"{region.Name} · track {region.Station} · local distance in metres" : "Select an authored Region";
@@ -183,6 +184,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             DeviceEnd = value?.End.ToString("G12", CultureInfo.CurrentCulture) ?? "";
             DeviceForce = value?.MaximumForce.ToString("G12", CultureInfo.CurrentCulture) ?? "";
             DeviceEnabled = value?.Enabled == true;
+            SeedHardware();
             RefreshProfiles(); RefreshCommands();
             SynchronizeDeviceSelection();
         }
@@ -241,7 +243,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         publishingSnapshot = true;
         PublishPlacement(next.Placement, changedRoute);
         PublishSupports(next.Supports, changedRoute);
-        Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry));
+        Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry)); Changed(nameof(HardwareTelemetry));
         if (changedRoute)
         {
             Selected = next.Route.FirstOrDefault(r => r.Index == selectedIndex) ?? next.Route.FirstOrDefault();

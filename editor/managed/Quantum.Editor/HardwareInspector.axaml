@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.HardwareInspector" x:DataType="local:EditorViewModel">
+  <StackPanel Spacing="6" IsVisible="{Binding HasDevice}">
+    <TextBlock Classes="heading" Text="OPERATION CONFIGURATION" />
+    <StackPanel IsVisible="{Binding HasSpeedControllerHardware}" Spacing="5">
+      <TextBlock Text="Response limit · m/s²" /><TextBox Text="{Binding DeviceAcceleration}" />
+      <Button Content="Apply response limit" Command="{Binding ApplyDeviceCommand}" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding HasHardwareSpeed}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Command speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareSpeed}" MinHeight="28" /></Grid>
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding HasHardwareDirection}">
+      <ComboBox SelectedIndex="{Binding HardwareDirection}"><ComboBoxItem Content="Forward / positive travel" /><ComboBoxItem Content="Reverse / negative travel" /></ComboBox>
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsLaunchHardware}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Target speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28" /></Grid>
+      <TextBlock Classes="muted" Text="Leave target blank for continuous launch." TextWrapping="Wrap" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsBrakeHardware}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Trim speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28" /></Grid>
+      <CheckBox Content="Hold at zero target speed" IsChecked="{Binding HardwareHolding}" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsChainHardware}">
+      <CheckBox Content="Anti-rollback after pickup engagement" IsChecked="{Binding HardwareAntiRollback}" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsCableHardware}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Catch return · seconds" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareReturn}" MinHeight="28" /></Grid>
+      <CheckBox Content="Catch car initially available" IsChecked="{Binding HardwareAvailable}" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsStationHardware}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Stop station · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareStop}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Alignment tolerance · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareAlignmentTolerance}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Stopped tolerance · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareStoppedTolerance}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Downstream block ID" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareBlock}" MinHeight="28" /></Grid>
+      <CheckBox Content="Require gates locked" IsChecked="{Binding HardwareRequireLocked}" />
+      <Button Content="Request dispatch" Command="{Binding DispatchCommand}" MinHeight="28" Padding="7,3" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding HasGateReferences}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Access gate IDs" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareGates}" MinHeight="28" /></Grid>
+      <TextBlock Classes="muted" Text="Comma-separated gate IDs. Referenced gates must be enabled and closed. Block ID 0 leaves the station unlinked." TextWrapping="Wrap" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsTransferHardware}">
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Stopped tolerance · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareStoppedTolerance}" MinHeight="28" /></Grid>
+      <TextBlock Text="Home alignment" /><ComboBox ItemsSource="{Binding TransferAlignments}" SelectedItem="{Binding SelectedHomeAlignment}" />
+      <TextBlock Text="Destination / move target" /><ComboBox ItemsSource="{Binding TransferAlignments}" SelectedItem="{Binding SelectedAlignment}" />
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Destination name" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding AlignmentName}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Lateral offset · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding AlignmentOffset}" MinHeight="28" /></Grid>
+      <ComboBox SelectedIndex="{Binding AlignmentKind}"><ComboBoxItem Content="Main track" /><ComboBoxItem Content="Storage" /><ComboBoxItem Content="Maintenance" /></ComboBox>
+      <Button Content="Apply destination" Command="{Binding ApplyAlignmentCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Add storage destination" Command="{Binding AddAlignmentCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Delete destination" Command="{Binding DeleteAlignmentCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Move to selected destination" Command="{Binding TransferMoveCommand}" MinHeight="28" Padding="7,3" />
+      <TextBlock Text="Alternate-track train traversal is pending. This proof moves and locks the native mechanism." Classes="muted" TextWrapping="Wrap" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding IsAccessHardware}">
+      <ComboBox SelectedIndex="{Binding GateRole}"><ComboBoxItem Content="Station" /><ComboBoxItem Content="Queue / loading" /><ComboBoxItem Content="Maintenance" /><ComboBoxItem Content="Catwalk" /><ComboBoxItem Content="Transfer" /><ComboBoxItem Content="Storage" /><ComboBoxItem Content="Barrier" /></ComboBox>
+      <ComboBox SelectedIndex="{Binding GateMotion}"><ComboBoxItem Content="Swing / hinged" /><ComboBoxItem Content="Slide" /></ComboBox>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Open angle · degrees" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateAngle}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Slide travel · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateTravel}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Movement · seconds" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateDuration}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Lateral offset · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateLateral}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Vertical offset · m" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateVertical}" MinHeight="28" /></Grid>
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Closed yaw · degrees" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateYaw}" MinHeight="28" /></Grid>
+      <CheckBox Content="Initially open" IsChecked="{Binding GateInitiallyOpen}" />
+      <CheckBox Content="Initially locked" IsChecked="{Binding GateInitiallyLocked}" />
+      <CheckBox Content="Initially interlocked" IsChecked="{Binding GateInitiallyInterlocked}" />
+      <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Optional GLB appearance" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding GateMesh}" MinHeight="28" /></Grid>
+      <TextBlock Text="Mesh reference is authored; engineering gate lines are shown in this milestone." Classes="muted" TextWrapping="Wrap" />
+      <Button Content="Unlock" Command="{Binding UnlockGateCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Open" Command="{Binding OpenGateCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Close" Command="{Binding CloseGateCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Lock" Command="{Binding LockGateCommand}" MinHeight="28" Padding="7,3" />
+    </StackPanel>
+    <StackPanel Spacing="5" IsVisible="{Binding HasLiftHardware}">
+      <Button Content="Set runtime available" Command="{Binding HardwareAvailableCommand}" MinHeight="28" Padding="7,3" />
+      <Button Content="Set runtime unavailable" Command="{Binding HardwareUnavailableCommand}" MinHeight="28" Padding="7,3" />
+    </StackPanel>
+      <Button Content="Apply hardware configuration" Command="{Binding ApplyHardwareCommand}" MinHeight="28" Padding="7,3" />
+    <Separator /><TextBlock Classes="heading" Text="NATIVE RUNTIME" />
+    <TextBlock Classes="technical" Text="{Binding HardwareTelemetry}" TextWrapping="Wrap" />
+  </StackPanel>
+</UserControl>

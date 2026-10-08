@@ -6,7 +6,7 @@
       <Grid ColumnDefinitions="Auto,210,*" ColumnSpacing="14">
         <TextBlock Classes="heading" Text="TIMELINE / TRANSITION EDITOR" VerticalAlignment="Center" />
         <ComboBox Grid.Column="1" SelectedIndex="{Binding TimelineSource}" MinHeight="28">
-          <ComboBoxItem Content="Region profiles" /><ComboBoxItem Content="Track Devices" />
+          <ComboBoxItem Content="Region profiles" /><ComboBoxItem Content="Ride Hardware" />
         </ComboBox>
         <TextBlock Grid.Column="2" Classes="technical muted" Text="{Binding TimelineContext}" VerticalAlignment="Center" TextWrapping="Wrap" />
       </Grid>
@@ -17,6 +17,8 @@
               <Button Content="Add Launch" Command="{Binding CreateLaunchCommand}" MinHeight="28" Padding="7,3" />
               <Button Content="Add Brake" Command="{Binding CreateBrakeCommand}" MinHeight="28" Padding="7,3" />
             </StackPanel>
+            <ComboBox ItemsSource="{Binding HardwareChoices}" SelectedItem="{Binding SelectedHardwareChoice}" />
+            <Button Content="Add ride hardware" Command="{Binding CreateHardwareCommand}" MinHeight="28" />
             <ComboBox ItemsSource="{Binding Snapshot.Devices}" SelectedItem="{Binding SelectedDevice}" HorizontalAlignment="Stretch" MinHeight="28" />
             <Button Content="Delete selected device" Command="{Binding DeleteDeviceCommand}" MinHeight="28" Padding="7,3" HorizontalAlignment="Left" />
           </StackPanel>
@@ -25,7 +27,7 @@
             <ListBox.ItemTemplate><DataTemplate x:DataType="managed:ProfileSegment"><TextBlock Classes="technical" Text="{Binding Summary}" TextWrapping="Wrap" /></DataTemplate></ListBox.ItemTemplate>
           </ListBox>
         </Grid>
-        <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="4">
+        <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="4" IsVisible="{Binding ShowProfileEditor}">
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Classes="technical" Text="{Binding ProfileDescription}" TextWrapping="Wrap" VerticalAlignment="Center" />
             <Button Grid.Column="1" Content="Frame profile" Click="FrameProfileClicked" MinHeight="26" Padding="7,3" ToolTip.Tip="Show the full profile · F or Home with graph focus" />
@@ -33,27 +35,32 @@
           <local:ProfilePlot x:Name="Plot" Grid.Row="1" Profiles="{Binding GraphProfiles}" Selected="{Binding SelectedProfile}" CanEdit="{Binding CanInteract}" />
           <TextBlock Grid.Row="2" Classes="muted" FontSize="11" Text="{Binding DragStatus}" TextWrapping="Wrap" />
         </Grid>
+        <StackPanel Grid.Column="1" IsVisible="{Binding ShowHardwareState}" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Classes="heading" Text="{Binding HardwareContentDescription}" TextWrapping="Wrap" />
+          <TextBlock Classes="technical" Text="{Binding HardwareTelemetry}" TextWrapping="Wrap" />
+        </StackPanel>
         <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="7">
             <StackPanel Spacing="5" IsVisible="{Binding IsDeviceTimeline}" IsEnabled="{Binding !InteractionActive}">
-              <TextBlock Text="TRACK DEVICE · stations in metres" Classes="heading" />
+              <TextBlock Text="RIDE HARDWARE · stations in metres" Classes="heading" />
               <StackPanel IsVisible="{Binding HasDevice}" Spacing="5">
                 <Grid ColumnDefinitions="48,*,48,*" ColumnSpacing="5">
                   <TextBlock Text="Start" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding DeviceStart}" MinHeight="28" />
                   <TextBlock Grid.Column="2" Text="End" VerticalAlignment="Center" /><TextBox Grid.Column="3" Text="{Binding DeviceEnd}" MinHeight="28" />
                 </Grid>
-                <Grid ColumnDefinitions="80,*,Auto" ColumnSpacing="5">
+                <Grid ColumnDefinitions="80,*,Auto" ColumnSpacing="5" IsVisible="{Binding HasForceHardware}">
                   <TextBlock Text="Force limit · N" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding DeviceForce}" MinHeight="28" />
-                  <CheckBox Grid.Column="2" Content="Enabled" IsChecked="{Binding DeviceEnabled}" />
                 </Grid>
-                <Button Content="Apply interval / force / enabled" Command="{Binding ApplyDevicePropertiesCommand}" MinHeight="28" Padding="7,3" />
+                <CheckBox Content="Enabled" IsChecked="{Binding DeviceEnabled}" />
+                <Button Content="Apply placement / enabled" Command="{Binding ApplyDevicePropertiesCommand}" MinHeight="28" Padding="7,3" />
                 <TextBlock Classes="muted" FontSize="11" Text="Interval changes stretch the final Custom segment. Circuit intervals may wrap past station zero." TextWrapping="Wrap" />
-                <Grid ColumnDefinitions="*,90,Auto" ColumnSpacing="4">
+                <Grid ColumnDefinitions="*,90,Auto" ColumnSpacing="4" IsVisible="{Binding HasAccelerationProfileHardware}">
                   <ComboBox SelectedIndex="{Binding DeviceMode}" MinHeight="28"><ComboBoxItem Content="Constant" /><ComboBoxItem Content="Custom" /></ComboBox>
                   <TextBox Grid.Column="1" Text="{Binding DeviceAcceleration}" MinHeight="28" ToolTip.Tip="Positive Constant acceleration / seed for a new Custom profile, m/s². Existing Custom values use the segment editor below." />
                   <Button Grid.Column="2" Content="Apply mode" Command="{Binding ApplyDeviceCommand}" MinHeight="28" Padding="7,3" />
                 </Grid>
               </StackPanel>
+              <local:HardwareInspector />
               <Separator />
             </StackPanel>
             <StackPanel Spacing="5" IsVisible="{Binding HasProfile}" IsEnabled="{Binding !InteractionActive}">
@@ -64,7 +71,7 @@
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6"><TextBox Text="{Binding ProfileDistance}" MinHeight="28" ToolTip.Tip="Local distance in metres; outer boundaries remain pinned" /><Button Grid.Column="1" Content="Split" Command="{Binding SplitProfileCommand}" MinHeight="28" Padding="8,3" /><Button Grid.Column="2" Content="Remove" Command="{Binding RemoveProfileCommand}" MinHeight="28" Padding="8,3" /></Grid>
               <StackPanel Orientation="Horizontal" Spacing="6"><Button Content="Move begin" Command="{Binding MoveProfileBeginCommand}" ToolTip.Tip="The first begin is pinned to zero" MinHeight="28" Padding="8,3" /><Button Content="Move end" Command="{Binding MoveProfileEndCommand}" ToolTip.Tip="The final end is pinned to the profile extent" MinHeight="28" Padding="8,3" /></StackPanel>
             </StackPanel>
-            <Grid ColumnDefinitions="Auto,*,*" ColumnSpacing="6" IsEnabled="{Binding !InteractionActive}">
+            <Grid IsVisible="{Binding ShowProfileEditor}" ColumnDefinitions="Auto,*,*" ColumnSpacing="6" IsEnabled="{Binding !InteractionActive}">
               <CheckBox Content="Snap" IsChecked="{Binding SnapEnabled}" ToolTip.Tip="Optional engineering increments; native boundary clamping still applies" />
               <TextBox Grid.Column="1" Text="{Binding DistanceSnap}" MinHeight="28" ToolTip.Tip="Distance snapping increment · metres" />
               <TextBox Grid.Column="2" Text="{Binding ValueSnap}" MinHeight="28" ToolTip.Tip="Value snapping increment · current channel's displayed units" />

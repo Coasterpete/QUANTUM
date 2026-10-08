@@ -38,7 +38,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc >= 2 && qn_abi_version() == 4, "Test input/ABI");
+        require(argc >= 2 && qn_abi_version() == 5, "Test input/ABI");
         QnSession session = 0;
         require(qn_create(nullptr, &error) == QN_INVALID_ARGUMENT, "Missing output");
         ok(qn_create(&session, &error));

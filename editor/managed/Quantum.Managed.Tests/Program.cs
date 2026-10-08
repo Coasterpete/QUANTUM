@@ -96,6 +96,7 @@ using (var deviceSession = new Session())
     finally { File.Delete(temporary); }
 }
 await TimelineChecks.Run();
+await HardwareChecks.Run();
 await SupportChecks.Run();
 await PlacementChecks.Run(fixture);
 var disposedController = new SessionController();

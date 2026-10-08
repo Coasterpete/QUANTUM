@@ -5,6 +5,7 @@
 #include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
+#include <quantum/physics/RideOperations.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/renderer/Renderer.hpp>
 
@@ -99,6 +100,8 @@ namespace quantum::editor
         // Device-only document edits refresh operational inputs without
         // recompiling canonical geometry or uploading track buffers.
         void setTrackDevices(const coaster::TrackDeviceCollection& devices);
+        [[nodiscard]] const physics::RideOperations& operations() const noexcept { return operations_; }
+        void hardwareCommand(coaster::TrackDeviceId id, physics::HardwareCommand command, double value = 0, std::uint64_t target = 0);
         [[nodiscard]] const physics::TrackDeviceForceResult&
             lastDeviceForces() const noexcept;
 
@@ -171,6 +174,7 @@ namespace quantum::editor
         physics::TrainDefinition trainDefinition_;
         std::vector<coaster::TrackDevice> trackDevices_;
         std::vector<physics::TrackDeviceRuntimeState> deviceRuntimeStates_;
+        physics::RideOperations operations_;
         physics::TrackDeviceForceResult lastDeviceForces_;
         std::optional<physics::TrainDynamicsState> initialState_;
         std::optional<physics::TrainDynamicsState> dynamicsState_;

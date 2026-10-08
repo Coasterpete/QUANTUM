@@ -119,6 +119,10 @@ namespace quantum::editor
         void setDeviceProperties(coaster::TrackDeviceId device, bool enabled,
             double startMeters, double endMeters, double maximumForceNewtons,
             const Publish& publish = {});
+        void setHardwareConfiguration(coaster::TrackDeviceId id,
+            const coaster::HardwareConfiguration& configuration, const Publish& publish = {});
+        void setInfrastructure(const std::vector<coaster::TrackInfrastructure>& infrastructure,
+            std::uint64_t nextId, const Publish& publish = {});
         using SupportPublish = std::function<void(const SupportVisualization&)>;
         // Returns the allocated ID for creation, zero for other operations.
         // Support-only edits retain solved track geometry and simulation state.

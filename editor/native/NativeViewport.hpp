@@ -1,4 +1,5 @@
 #pragma once
+#include <quantum/physics/RideOperations.hpp>
 #include "QuantumNative.h"
 #include <quantum/editor/ViewportTransformHandles.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
@@ -28,7 +29,8 @@ public:
         std::span<const quantum::renderer::StaticMeshInstance> meshes);
     void captureDevice(uint64_t revision, uint64_t selected,
         const quantum::coaster::AuthoredTrack& track,
-        const quantum::editor::CenterlineVisualization& geometry);
+        const quantum::editor::CenterlineVisualization& geometry,
+        const quantum::physics::RideOperations& operations);
     struct SupportPickIntent
     {
         uint64_t revision, selectionRevision;
@@ -78,6 +80,8 @@ private:
     bool trainDirty_ = false;
     std::vector<quantum::renderer::LineVertex> train_;
     std::vector<quantum::renderer::LineVertex> device_, lines_;
+    double deviceMechanismPosition_ = -1;
+    std::string deviceMechanismState_;
     uint64_t deviceRevision_ = 0, selectedDevice_ = 0;
     std::vector<quantum::renderer::StaticMeshInstance> meshes_;
     quantum::editor::SupportVisualization supportPicking_;
