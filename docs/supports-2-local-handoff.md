@@ -2,10 +2,16 @@
 
 Branch: `codex/supports-2-structural-styles`.
 
+Implementation commit: `3a42c4456971bf84b662745047f605096a49a951`.
+A second local fixture commit lowers only the acceptance document's ground
+plane to its -5 m footing elevation and raises its landing 5 cm above that
+plane. It does not change new-document defaults. The local HEAD is reported
+in the chat and can be retrieved with `git log -1 --oneline`.
+
 Started from local `codex/operations-ride-hardware-2`, HEAD
 `04241a4a8f0a97a09d45b3a67e37734632dd5711`. No reset, push, PR, or screenshot
-publication. The implementation commit is the local HEAD reported in the chat;
-`git log -1 --oneline` retrieves it. The maintainer's previously untracked
+publication. Both local commits are reported in the chat;
+`git log -2 --oneline` retrieves them. The maintainer's previously untracked
 `assets/materials/{concrete,fiberglass,grout,metal}/` directories remain untracked
 and outside this patch.
 
@@ -48,6 +54,11 @@ Validation succeeded; disassembly declares only `Shader` capability and uses
 `OpKill`, with no DemoteToHelperInvocation capability. The SDK path above records
 this machine's verification command; project CMake resolves tools normally.
 `git diff --check` passed.
+
+After the fixture-only correction, QuantumSupports2Tests was rebuilt, the
+acceptance file was regenerated with an exact native serialize/reload comparison,
+and QuantumApplication.Supports2 passed again (1/1). Its fixture ground is -5 m;
+the landing top is -4.95 m, avoiding the original ground occlusion/coincident plane.
 
 Exact CTest names:
 

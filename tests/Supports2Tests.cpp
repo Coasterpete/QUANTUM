@@ -339,6 +339,7 @@ namespace
     void writeDemo(const char* path)
     {
         auto t=curvedTrack();
+        auto ground=t.ground();ground.elevation=-5;t.setGround(ground);
         for (unsigned family=0;family<5;++family)
         {
             const auto style=static_cast<SupportStyleFamily>(family);
@@ -355,10 +356,14 @@ namespace
         TrackInfrastructure cat;cat.id=1;cat.name="Bank-following catwalk";cat.startStationMeters=3;cat.endStationMeters=48;cat.verticalOffsetMeters=-.25;cat.accessGates={gate};
         auto platform=cat;platform.id=2;platform.name="Maintenance platform";platform.kind=InfrastructureKind::Platform;
         platform.worldPlacement=true;platform.worldStartMeters={15,2,-.25};platform.worldEndMeters={19,2,-.25};platform.widthMeters=2;
-        auto stairs=platform;stairs.id=3;stairs.name="Ground stairs";stairs.kind=InfrastructureKind::Stairs;stairs.worldStartMeters={19,2,-.25};stairs.worldEndMeters={24,2,-5};
-        auto landing=platform;landing.id=4;landing.name="Ground landing";landing.kind=InfrastructureKind::Landing;landing.worldStartMeters={24,2,-5};landing.worldEndMeters={26,2,-5};
+        auto stairs=platform;stairs.id=3;stairs.name="Ground stairs";stairs.kind=InfrastructureKind::Stairs;stairs.worldStartMeters={19,2,-.25};stairs.worldEndMeters={24,2,-4.95};
+        auto landing=platform;landing.id=4;landing.name="Ground landing";landing.kind=InfrastructureKind::Landing;landing.worldStartMeters={24,2,-4.95};landing.worldEndMeters={26,2,-4.95};
         devices.infrastructure={cat,platform,stairs,landing};devices.nextInfrastructureId=5;t.setTrackDevices(devices);
-        std::ofstream file(path);file<<serializeCoasterDocument(t);if(!file)throw std::runtime_error("Could not write support acceptance document.");
+        const auto serialized=serializeCoasterDocument(t);
+        const auto reload=deserializeCoasterDocument(serialized);
+        if (!reload || serializeCoasterDocument(*reload)!=serialized)
+            throw std::runtime_error("Support acceptance document failed its deterministic roundtrip.");
+        std::ofstream file(path);file<<serialized;if(!file)throw std::runtime_error("Could not write support acceptance document.");
     }
 }
 int main(int argc,char** argv)

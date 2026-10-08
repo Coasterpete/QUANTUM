@@ -22,7 +22,7 @@
             0.46000000834465027,
             1.0
         ],
-        "elevation": 0.0,
+        "elevation": -5.0,
         "enabled": true,
         "metallic": 0.0,
         "normalTexture": "",
@@ -1097,7 +1097,7 @@
                 "worldEndMeters": [
                     24.0,
                     2.0,
-                    -5.0
+                    -4.95
                 ],
                 "worldPlacement": true,
                 "worldStartMeters": [
@@ -1129,13 +1129,13 @@
                 "worldEndMeters": [
                     26.0,
                     2.0,
-                    -5.0
+                    -4.95
                 ],
                 "worldPlacement": true,
                 "worldStartMeters": [
                     24.0,
                     2.0,
-                    -5.0
+                    -4.95
                 ]
             }
         ],
