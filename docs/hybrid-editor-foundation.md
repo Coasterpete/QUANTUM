@@ -50,7 +50,7 @@ remain SI acceleration magnitude over the device-local metre domain.
 The UI thread owns the platform child and all viewport calls. Avalonia positions
 and destroys that child. Native SDL wraps its HWND or X11 XID without owning the
 platform handle, and the existing `VulkanContext` renders directly into it.
-ImGui is used inside this path only to present the native viewport texture.
+ImGui presents the native viewport texture and native support selection overlays.
 Pixels never travel through managed arrays. A single visible viewport is
 supported per process because SDL events and the ImGui presenter are process
 resources; multiple headless sessions are supported.
@@ -63,7 +63,7 @@ safety fallback, not the application's shutdown mechanism.
 
 ## Interop contract
 
-`editor/native/QuantumNative.h` defines ABI 2 for 64-bit processes with natural
+`editor/native/QuantumNative.h` defines ABI 3 for 64-bit processes with natural
 8-byte alignment. It contains fixed-width values, caller-owned buffers, UTF-8
 paths, non-reused numeric session tokens, explicit results, and bounded errors.
 No C++ objects, Vulkan handles, or exceptions cross it. Snapshot size/version
@@ -176,7 +176,7 @@ can reference the existing generated PNGs when packaging is implemented.
 | Timeline / Transition Editor | Native profiles, graph selection, value/boundary dragging, optional snapping, pan/zoom and numeric editing are available; full diagnostics parity remains. |
 | Track Devices | Native create/delete/select, interval/force/enable, Constant/Custom, direct custom-profile editing and selected-interval viewport lines are available; live device-force diagnostics remain. |
 | Train | Preserve Configuration → native Preview → Summary/Diagnostics as a dedicated workspace; the current footer summary is not the final Train UI. |
-| Supports | Native document/support generation is retained; migrate authoring forms and existing 3D picking/manipulation in a dedicated workspace. |
+| Supports | Structure/node/member authoring, attachments, foundations, profiles, dimensions, end treatments and native picking are available in the Supports workspace; move gizmos, generated-run tools and appearance controls remain in fallback. |
 | Simulator / Math / newer diagnostics | Extend managed workspace composition around the existing native viewport, snapshots and diagnostics; do not replace the native simulation with UI calculations. |
 | Machinery and Lua ride logic | Future operations/ride sequencing belongs alongside Timeline; machinery physics remains native. Runtime/scripting APIs require their own concrete milestone and are not implemented here. |
 
@@ -194,8 +194,9 @@ dialog input, camera gestures, popup airspace, or monitor DPI. Those require
 separate visual and input checks. Automated correctness, bounded visual smoke,
 and maintainer visual approval must be reported separately.
 
-Full Train, Supports and Simulator/Math/diagnostics remain in the fallback
-frontend. Direct Timeline and Track Device authoring is implemented locally;
-physical interaction and visual approval remain with the maintainer. Supports
-is the next major workspace after that approval. The current fixed pane layout
+Full Train and Simulator/Math/diagnostics remain in the fallback frontend.
+Direct Timeline, Track Device and manual Supports authoring are implemented
+locally; physical interaction and visual approval remain with the maintainer.
+See [Supports workspace](hybrid-supports-workspace.md) for ownership, workflows,
+verification and remaining spatial-tool parity. The current fixed pane layout
 and the renderer, simulation and document ownership contracts remain intact.

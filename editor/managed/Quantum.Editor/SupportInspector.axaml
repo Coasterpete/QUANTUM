@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Quantum.Editor"
+             x:Class="Quantum.Editor.SupportInspector" x:DataType="local:EditorViewModel">
+  <Grid RowDefinitions="Auto,*">
+    <Border Padding="16,14" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
+      <StackPanel Spacing="5"><TextBlock Classes="heading" Text="SUPPORT INSPECTOR" />
+        <TextBlock Text="{Binding SupportHeading}" FontSize="18" TextWrapping="Wrap" />
+        <TextBlock Classes="muted" Text="{Binding SupportContext}" FontSize="12" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="16" Spacing="10" IsEnabled="{Binding CanInteract}">
+        <TextBlock IsVisible="{Binding !HasSupportStructure}" Text="Create a structure, add nodes, then connect two nodes to create a member." TextWrapping="Wrap" Classes="muted" />
+        <Expander Header="Structure" IsExpanded="True" IsVisible="{Binding HasSupportStructure}" HorizontalAlignment="Stretch">
+          <StackPanel Spacing="7">
+            <TextBox Text="{Binding StructureName}" ToolTip.Tip="Structure identity uses the stable native ID, independent of its name." />
+            <WrapPanel Orientation="Horizontal"><Button Content="Rename" Command="{Binding RenameSupportStructureCommand}" Margin="0,0,5,5" />
+              <Button Content="Delete structure" Command="{Binding DeleteSupportStructureCommand}" Margin="0,0,0,5" ToolTip.Tip="Deletes the structure and its contents. Undo restores them." /></WrapPanel>
+            <Button Content="Frame selection" Command="{Binding FrameSupportCommand}" />
+          </StackPanel>
+        </Expander>
+        <StackPanel IsVisible="{Binding HasSupportNode}" Spacing="8">
+          <Separator /><TextBlock Classes="heading" Text="NODE POSITION · metres" />
+          <TextBlock Text="{Binding SelectedSupportNode.AnchorLabel}" Classes="muted" />
+          <Grid ColumnDefinitions="24,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="5" ColumnSpacing="5">
+            <TextBlock Text="X" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding NodeX}" IsReadOnly="{Binding IsAttachedSupportNode}" />
+            <TextBlock Grid.Row="1" Text="Y" VerticalAlignment="Center" /><TextBox Grid.Row="1" Grid.Column="1" Text="{Binding NodeY}" IsReadOnly="{Binding IsAttachedSupportNode}" />
+            <TextBlock Grid.Row="2" Text="Z" VerticalAlignment="Center" /><TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NodeZ}" IsReadOnly="{Binding IsAttachedSupportNode}" />
+          </Grid>
+          <Button Content="Apply position" Command="{Binding MoveSupportNodeCommand}" />
+          <TextBlock Text="Resolved world position" Classes="muted" FontSize="11" />
+          <TextBlock Text="{Binding SelectedSupportNode.ResolvedPosition}" Classes="technical" TextWrapping="Wrap" />
+          <TextBlock IsVisible="{Binding IsAttachedSupportNode}" Text="Track evaluation controls world position. XYZ above is the stored fallback position used on detach." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <Separator /><TextBlock Classes="heading" Text="TRACK ATTACHMENT · metres" />
+          <TextBlock Text="Cumulative station" /><TextBox Text="{Binding AttachmentStation}" />
+          <TextBlock Text="Lateral offset" /><TextBox Text="{Binding AttachmentLateral}" />
+          <TextBlock Text="Vertical offset" /><TextBox Text="{Binding AttachmentVertical}" />
+          <WrapPanel><Button Content="Attach / apply offsets" Command="{Binding AttachSupportNodeCommand}" Margin="0,0,5,5" />
+            <Button Content="Detach" Command="{Binding DetachSupportNodeCommand}" Margin="0,0,0,5" /></WrapPanel>
+          <TextBlock Text="Clear Foundation before attaching. Clear dependent end treatments before removing an anchor." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <Separator /><TextBlock Classes="heading" Text="FOUNDATION" />
+          <WrapPanel><Button Content="Mark foundation" Command="{Binding SetSupportFoundationCommand}" Margin="0,0,5,5" />
+            <Button Content="Clear foundation" Command="{Binding ClearSupportFoundationCommand}" Margin="0,0,0,5" /></WrapPanel>
+          <TextBlock Text="A foundation keeps its authored position; this marker does not project to terrain." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+        </StackPanel>
+        <Expander Header="Connect nodes" IsExpanded="True" IsVisible="{Binding HasSupportStructure}" HorizontalAlignment="Stretch">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Start node" /><ComboBox ItemsSource="{Binding SupportNodes}" SelectedItem="{Binding MemberStartNode}" HorizontalAlignment="Stretch" />
+            <TextBlock Text="End node" /><ComboBox ItemsSource="{Binding SupportNodes}" SelectedItem="{Binding MemberEndNode}" HorizontalAlignment="Stretch" />
+            <Button Content="Create member" Command="{Binding CreateSupportMemberCommand}" />
+          </StackPanel>
+        </Expander>
+        <StackPanel IsVisible="{Binding HasSupportMember}" Spacing="8">
+          <Separator /><TextBlock Classes="heading" Text="MEMBER · ENDPOINTS" />
+          <TextBlock Text="{Binding SelectedSupportMember.Label}" />
+          <TextBlock Text="{Binding MemberMetadata}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <TextBlock Classes="heading" Text="PROFILE / DIMENSIONS · metres" />
+          <ComboBox SelectedIndex="{Binding MemberShape}" HorizontalAlignment="Stretch"><ComboBoxItem Content="Circular" /><ComboBoxItem Content="Rectangular" /></ComboBox>
+          <TextBlock Text="Width / diameter" /><TextBox Text="{Binding MemberWidth}" />
+          <TextBlock IsVisible="{Binding IsRectangularMember}" Text="Height" /><TextBox IsVisible="{Binding IsRectangularMember}" Text="{Binding MemberHeight}" />
+          <TextBlock Text="Wall thickness" /><TextBox Text="{Binding MemberWall}" />
+          <TextBlock Text="Zero wall thickness is solid. A hollow section needs a wall smaller than half its smallest dimension." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <Button Content="Apply profile / dimensions" Command="{Binding ApplySupportProfileCommand}" />
+          <Separator /><TextBlock Classes="heading" Text="END CONNECTION" />
+          <ComboBox SelectedIndex="{Binding ConnectionEnd}" HorizontalAlignment="Stretch"><ComboBoxItem Content="Start end" /><ComboBoxItem Content="End end" /></ComboBox>
+          <TextBlock Text="{Binding ConnectionContext}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <ComboBox SelectedIndex="{Binding ConnectionTreatment}" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="None" /><ComboBoxItem Content="Mitered cut" /><ComboBoxItem Content="End cap" />
+            <ComboBoxItem Content="Plate" /><ComboBoxItem Content="Flange" /><ComboBoxItem Content="Splice" />
+            <ComboBoxItem Content="Saddle" /><ComboBoxItem Content="Clamp" /><ComboBoxItem Content="Base" /><ComboBoxItem Content="Footing" />
+          </ComboBox>
+          <Button Content="Apply treatment" Command="{Binding ApplySupportTreatmentCommand}" />
+          <TextBlock Text="Connector asset" /><TextBox Text="{Binding ConnectorAsset}" PlaceholderText="assets://support/… .glb" IsReadOnly="{Binding !CanEditConnectorAsset}" />
+          <Button Content="Apply asset / clear if empty" Command="{Binding ApplySupportAssetCommand}" />
+          <TextBlock Text="{Binding ConnectionMetadata}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
+          <Button IsVisible="{Binding HasConnectionPlacement}" Content="Clear local placement" Command="{Binding ClearSupportPlacementCommand}" />
+          <TextBlock Text="Connections are native authored metadata. Detailed connector meshes and splice pairing remain future work." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

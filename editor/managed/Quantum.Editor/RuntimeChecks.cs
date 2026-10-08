@@ -9,7 +9,7 @@ namespace Quantum.Editor;
 
 // Opt-in live application regression check. It exercises the real commands,
 // controller and child host. It cannot approve visuals or physical input/DPI.
-internal static class RuntimeChecks
+internal static partial class RuntimeChecks
 {
     // One short live-host check. No screenshot campaign, DPI sweep, popup
     // cycling or simulated physical approval; the maintainer owns visual QA.

@@ -9,6 +9,9 @@ if(BUILD_TESTING)
     target_link_libraries(QuantumNativeTests PRIVATE QuantumNative)
     add_test(NAME QuantumApplication.NativeBoundary COMMAND QuantumNativeTests
         "${PROJECT_SOURCE_DIR}/smoke-tests/modern-steel-validation.quantum")
+    add_executable(QuantumSupportBoundaryTests QuantumSupportBoundaryTests.cpp)
+    target_link_libraries(QuantumSupportBoundaryTests PRIVATE QuantumNative Quantum::Core)
+    add_test(NAME QuantumApplication.SupportBoundary COMMAND QuantumSupportBoundaryTests)
 endif()
 add_custom_command(TARGET QuantumNative POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:QuantumNative>/shaders"

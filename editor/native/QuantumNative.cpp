@@ -27,6 +27,8 @@ namespace
         std::uint64_t routeRevision = 0;
         // Only the viewport owner thread reads/writes this publication marker.
         std::uint64_t viewportRevision = 0;
+        std::uint64_t viewportGeometryGeneration = 0;
+        std::uint64_t documentEpoch = 1, viewportFramedEpoch = 0;
         std::vector<QnRegion> regions;
         std::uint64_t authoringRevision = 0;
         std::vector<QnProfileSegment> profiles;
@@ -34,6 +36,12 @@ namespace
         QnProfileCommand dragCommand{};
         std::uint64_t dragToken = 0;
         std::uint64_t selectedDevice = 0;
+        std::uint64_t supportRevision = 0, supportSelectionRevision = 1;
+        std::vector<QnSupportStructure> supportStructures;
+        std::vector<QnSupportNode> supportNodes;
+        std::vector<QnSupportMember> supportMembers;
+        std::optional<quantum::editor::SupportSelection> selectedSupport;
+        bool supportWorkspace = false;
         bool closed = false;
         Session()
         {
@@ -171,7 +179,69 @@ namespace
     void requireRevision(const Session& state, uint64_t revision)
     {
         if (state.application.revision() != revision)
-            throw Failure(QN_CONFLICT, "Document changed. Refresh the Timeline and try again.");
+            throw Failure(QN_CONFLICT, "Document changed. Refresh the workspace and try again.");
+    }
+    void selectSupport(Session& state, std::optional<quantum::editor::SupportSelection> selection)
+    {
+        if (selection == state.selectedSupport) return;
+        state.selectedSupport = selection;
+        ++state.supportSelectionRevision;
+    }
+    void refreshSupports(Session& state)
+    {
+        auto& app = state.application;
+        if (state.selectedSupport && !quantum::editor::supportSelectionExists(app.track().supports(), *state.selectedSupport))
+        {
+            const quantum::editor::SupportSelection parent{state.selectedSupport->structureId,
+                quantum::editor::SupportSelectionKind::Structure, 0};
+            selectSupport(state, quantum::editor::supportSelectionExists(app.track().supports(), parent)
+                ? std::optional{parent} : std::nullopt);
+        }
+        if (state.supportRevision == app.revision()) return;
+        std::vector<QnSupportStructure> structures;
+        std::vector<QnSupportNode> nodes;
+        std::vector<QnSupportMember> members;
+        const auto scale = app.track().physicalSettings().metersPerCoordinateUnit;
+        const auto& visualization = app.supports();
+        std::size_t nodeIndex = 0;
+        const auto copyConnection = [](const auto& source) -> QnSupportConnection
+        {
+            QnSupportConnection result{};
+            if (!source) return result;
+            result.treatment = static_cast<uint32_t>(source->treatment) + 1;
+            result.flags = (source->localPlacement ? 1u : 0u) | (source->mounting ? 2u : 0u);
+            if (source->asset)
+            {
+                copyLabel(result.asset, sizeof(result.asset), source->asset->path);
+                if (source->asset->path.size() >= sizeof(result.asset)) result.flags |= 4;
+            }
+            return result;
+        };
+        for (const auto& structure : app.track().supports().structures)
+        {
+            QnSupportStructure row{structure.id, static_cast<uint32_t>(structure.nodes.size()),
+                static_cast<uint32_t>(structure.members.size()), structure.generatedWoodenRun.has_value()};
+            copyLabel(row.name, sizeof(row.name), structure.name); structures.push_back(row);
+            for (const auto& node : structure.nodes)
+            {
+                const auto position = node.position * scale;
+                // Visualization preserves authored node order and owns resolved
+                // track-frame evaluation. Managed code receives only its result.
+                const auto resolved = visualization.nodes.at(nodeIndex++).position * scale;
+                const auto attachment = node.trackAttachment.value_or(quantum::coaster::TrackAttachment{});
+                nodes.push_back({structure.id, node.id, node.trackAttachment ? 1u : node.foundation ? 2u : 0u, 0,
+                    position.x, position.y, position.z, resolved.x, resolved.y, resolved.z,
+                    attachment.station * scale, attachment.lateralOffset * scale, attachment.verticalOffset * scale});
+            }
+            for (const auto& member : structure.members)
+                members.push_back({structure.id, member.id, member.startNodeId, member.endNodeId,
+                    static_cast<uint32_t>(member.profile.shape), static_cast<uint32_t>(member.role),
+                    static_cast<uint32_t>(member.orientation), member.orientationReference.has_value(),
+                    member.profile.outerDimensions.x * scale, member.profile.outerDimensions.y * scale,
+                    member.profile.wallThickness * scale, copyConnection(member.startConnection), copyConnection(member.endConnection)});
+        }
+        state.supportStructures = std::move(structures); state.supportNodes = std::move(nodes);
+        state.supportMembers = std::move(members); state.supportRevision = app.revision();
     }
     void requireProfileCommand(const QnProfileCommand* command)
     {
@@ -198,7 +268,10 @@ static_assert(sizeof(QnRegion) == 112);
 static_assert(sizeof(QnCommand) == 24);
 static_assert(sizeof(QnProfileSegment) == 328 && sizeof(QnDevice) == 184);
 static_assert(sizeof(QnAuthoringSnapshot) == 24 && sizeof(QnProfileCommand) == 48);
-uint32_t QN_CALL qn_abi_version() { return 2; }
+static_assert(sizeof(QnSupportStructure) == 272 && sizeof(QnSupportNode) == 88);
+static_assert(sizeof(QnSupportConnection) == 520 && sizeof(QnSupportMember) == 1096);
+static_assert(sizeof(QnSupportSnapshot) == 64 && sizeof(QnSupportCommand) == 88);
+uint32_t QN_CALL qn_abi_version() { return 3; }
 QnResult QN_CALL qn_create(QnSession* out, QnError* error)
 {
     if (out) *out = 0;
@@ -230,6 +303,8 @@ QnResult QN_CALL qn_new(QnSession handle, QnError* error)
     return boundary(error, [&] {
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         state->application.newDocument();
+        ++state->documentEpoch;
+        selectSupport(*state, std::nullopt);
     });
 }
 QnResult QN_CALL qn_open(QnSession handle, const char* path, QnError* error)
@@ -238,6 +313,8 @@ QnResult QN_CALL qn_open(QnSession handle, const char* path, QnError* error)
         const auto input = utf8Path(path);
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         state->application.open(input);
+        ++state->documentEpoch;
+        selectSupport(*state, std::nullopt);
     });
 }
 QnResult QN_CALL qn_save(QnSession handle, const char* path, QnError* error)
@@ -472,6 +549,85 @@ QnResult QN_CALL qn_update(QnSession handle, double seconds, QnError* error)
         state->application.update(seconds);
     });
 }
+QnResult QN_CALL qn_support_snapshot(QnSession handle, QnSupportSnapshot* out,
+    QnSupportStructure* structures, uint32_t structureCapacity,
+    QnSupportNode* nodes, uint32_t nodeCapacity, QnSupportMember* members,
+    uint32_t memberCapacity, uint64_t knownRevision, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!out || out->size != sizeof(*out) || out->version != 1
+            || (!structures && structureCapacity) || (!nodes && nodeCapacity) || (!members && memberCapacity))
+            throw std::invalid_argument("Invalid support snapshot size/version or buffers.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        refreshSupports(*state);
+        *out = {sizeof(*out), 1, state->application.revision(), state->supportSelectionRevision,
+            state->supportRevision, static_cast<uint32_t>(state->supportStructures.size()),
+            static_cast<uint32_t>(state->supportNodes.size()), static_cast<uint32_t>(state->supportMembers.size()),
+            state->supportWorkspace};
+        if (state->selectedSupport)
+        {
+            out->selection_kind = static_cast<uint32_t>(state->selectedSupport->kind) + 1;
+            out->selection_structure = state->selectedSupport->structureId;
+            out->selection_element = state->selectedSupport->elementId;
+        }
+        if (knownRevision == out->revision) return;
+        if (structureCapacity < out->structure_count || nodeCapacity < out->node_count || memberCapacity < out->member_count)
+            throw Failure(QN_BUFFER_TOO_SMALL, "Support snapshot buffer is too small.");
+        std::copy(state->supportStructures.begin(), state->supportStructures.end(), structures);
+        std::copy(state->supportNodes.begin(), state->supportNodes.end(), nodes);
+        std::copy(state->supportMembers.begin(), state->supportMembers.end(), members);
+    });
+}
+QnResult QN_CALL qn_support_command(QnSession handle, const QnSupportCommand* command,
+    const char* text, uint32_t* created, QnError* error)
+{
+    if (created) *created = 0;
+    return boundary(error, [&] {
+        if (!command || !created || command->operation > QN_SUPPORT_CLEAR_PLACEMENT
+            || command->shape > 1 || command->member_end > 1 || command->treatment > 8)
+            throw std::invalid_argument("Invalid support command or enum value.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        requireRevision(*state, command->expected_revision);
+        using namespace quantum::editor;
+        SupportEdit request{static_cast<SupportOperation>(command->operation)};
+        request.structureId = command->structure_id; request.elementId = command->element_id;
+        request.startNodeId = command->start_node; request.endNodeId = command->end_node;
+        const auto scale = state->application.track().physicalSettings().metersPerCoordinateUnit;
+        request.position = glm::dvec3{command->x, command->y, command->z} / scale;
+        request.attachment = {command->x / scale, command->y / scale, command->z / scale};
+        request.profile = {static_cast<quantum::coaster::SupportMemberProfileShape>(command->shape),
+            {command->width / scale, command->height / scale}, command->wall / scale};
+        request.memberEnd = static_cast<quantum::coaster::SupportMemberEnd>(command->member_end);
+        request.treatment = static_cast<quantum::coaster::SupportMemberEndTreatment>(command->treatment);
+        request.text = text ? text : "";
+        *created = state->application.editSupport(request);
+    });
+}
+QnResult QN_CALL qn_select_support(QnSession handle, uint64_t revision,
+    uint32_t kind, uint32_t structure, uint32_t element, QnError* error)
+{
+    return boundary(error, [&] {
+        if (kind > 3 || (!kind && (structure || element)) || (kind == 1 && element))
+            throw std::invalid_argument("Invalid support selection kind/identity.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        std::optional<quantum::editor::SupportSelection> selection;
+        if (kind)
+        {
+            selection = {structure, static_cast<quantum::editor::SupportSelectionKind>(kind - 1), element};
+            if (!quantum::editor::supportSelectionExists(state->application.track().supports(), *selection))
+                throw std::invalid_argument("Unknown support selection.");
+        }
+        selectSupport(*state, selection);
+    });
+}
+QnResult QN_CALL qn_support_workspace(QnSession handle, uint32_t active, QnError* error)
+{
+    return boundary(error, [&] {
+        if (active > 1) throw std::invalid_argument("Invalid support workspace state.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        state->supportWorkspace = active != 0;
+    });
+}
 QnResult QN_CALL qn_viewport_open(QnSession handle, uint32_t platform, uint64_t window, QnError* error)
 {
     return boundary(error, [&] {
@@ -483,6 +639,8 @@ QnResult QN_CALL qn_viewport_open(QnSession handle, uint32_t platform, uint64_t 
         viewport->open(platform, window, state->application.centerline().visualization());
         state->viewport = std::move(viewport);
         state->viewportRevision = 0;
+        state->viewportGeometryGeneration = 0;
+        state->viewportFramedEpoch = 0;
         viewportActive = true;
     });
 }
@@ -497,6 +655,16 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
         std::optional<quantum::coaster::GroundAppearance> ground;
         NativeViewport* viewport;
         uint64_t revision;
+        uint64_t geometryGeneration;
+        uint64_t documentEpoch;
+        bool frameTrack;
+        const auto acceptPick = [&](Session& state, NativeViewport& viewport)
+        {
+            if (const auto pick = viewport.takeSupportPick(); pick && state.supportWorkspace
+                && pick->revision == state.application.revision() && pick->selectionRevision == state.supportSelectionRevision
+                && (!pick->selection || quantum::editor::supportSelectionExists(state.application.track().supports(), *pick->selection)))
+                selectSupport(state, pick->selection);
+        };
         {
             // A document rebuild/file operation may take longer than a frame.
             // Retain the last presented image instead of blocking UI input.
@@ -505,24 +673,43 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
             requireOpen(*state);
             if (!state->viewport) throw Failure(QN_UNAVAILABLE, "Viewport is not open.");
             viewport = state->viewport.get(); viewport->requireOwnerThread();
+            acceptPick(*state, *viewport);
             auto& app = state->application;
+            refreshSupports(*state);
             revision = app.revision();
+            geometryGeneration = app.centerline().generation();
+            documentEpoch = state->documentEpoch;
+            // Keep spatial authoring framing through support Undo/Redo; file
+            // replacement still frames the new document. Route retains its
+            // established automatic framing after geometry edits.
+            frameTrack = !state->supportWorkspace || state->viewportFramedEpoch != documentEpoch;
             viewport->captureTrain(revision, app.preview().vertexGeneration(), app.preview().vertices(), app.preview().meshInstances());
-            viewport->captureDevice(revision, state->selectedDevice, app.track(), app.centerline().visualization());
-            if (state->viewportRevision != revision)
+            viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization());
+            viewport->captureSupports(revision, state->supportSelectionRevision, state->supportWorkspace,
+                state->selectedSupport, app.track().supports(), app.supports());
+            if (state->viewportGeometryGeneration != geometryGeneration)
             {
                 geometry = app.centerline().visualization();
-                supports = app.supports();
                 ground = app.track().ground();
+            }
+            if (state->viewportRevision != revision)
+            {
+                supports = app.supports();
             }
         }
         // A session reference keeps the state alive. Destroy rejects an open
         // viewport; viewport close/frame can only occur on this same thread.
         const bool presented = viewport->frame(width, height, geometry ? &*geometry : nullptr,
-            supports ? &*supports : nullptr, ground ? &*ground : nullptr);
-        if (geometry && presented)
+            supports ? &*supports : nullptr, ground ? &*ground : nullptr, frameTrack);
+        if (presented)
         {
             state->viewportRevision = revision;
+            state->viewportGeometryGeneration = geometryGeneration;
+            state->viewportFramedEpoch = documentEpoch;
+            // A click is transient selection only. A long worker edit must not
+            // block presentation; pending input can be consumed next frame.
+            std::unique_lock lock(state->mutex, std::try_to_lock);
+            if (lock.owns_lock()) acceptPick(*state, *viewport);
         }
     });
     return busy ? QN_BUSY : result;
@@ -556,7 +743,7 @@ QnResult QN_CALL qn_viewport_close(QnSession handle, QnError* error)
 QnResult QN_CALL qn_viewport_input(QnSession handle, uint32_t action, double x, double y, double z, double seconds, QnError* error)
 {
     return boundary(error, [&] {
-        if (action < 1 || action > 6 || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(seconds))
+        if (action < 1 || action > 8 || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(seconds))
             throw std::invalid_argument("Invalid viewport camera input.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         if (!state->viewport) throw Failure(QN_UNAVAILABLE, "Viewport is not open.");

@@ -111,8 +111,12 @@ public sealed partial class MainWindow : Window
             (1, model.UndoCommand), (2, model.RedoCommand), (4, model.SaveCommand),
             (8, model.OpenCommand), (16, model.NewCommand), (32, model.SaveAsCommand)
         }) if ((intents & bit) != 0) command.Execute(null);
-        if ((intents & 64) != 0) LengthField.Focus();
-        if ((intents & 128) != 0) RouteList.Focus();
+        if (model.IsSupportsWorkspace && (intents & (64 | 128)) != 0) SupportsTree.FocusStructures();
+        else
+        {
+            if ((intents & 64) != 0) LengthField.Focus();
+            if ((intents & 128) != 0) RouteList.Focus();
+        }
     }
     private void CloseClicked(object? sender, RoutedEventArgs e) => Close();
     private void PresentationChanged(object? sender, SelectionChangedEventArgs e)

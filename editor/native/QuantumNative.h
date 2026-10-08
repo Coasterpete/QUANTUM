@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-/* ABI 2: 64-bit process, natural 8-byte alignment, UTF-8 strings.
+/* ABI 3: 64-bit process, natural 8-byte alignment, UTF-8 strings.
    Tokens are non-reused IDs, never addresses. All buffers are caller-owned.
    Calls are serialized per session; viewport calls require its UI thread. */
 typedef uint64_t QnSession;
@@ -69,6 +69,58 @@ typedef struct QnProfileCommand {
     uint64_t owner_id, expected_revision;
     double value;
 } QnProfileCommand;
+
+/* Support distances are SI metres at this boundary. IDs retain the native
+   uint32_t structure/local-element namespaces. Connection treatment is
+   0=None, 1..9=native treatments; flags: placement=1, mounting=2,
+   asset display truncated=4. Commands preserve unedited native metadata. */
+typedef struct QnSupportStructure {
+    uint32_t id, node_count, member_count, generated;
+    char name[256];
+} QnSupportStructure;
+typedef struct QnSupportNode {
+    uint32_t structure_id, id, anchor, reserved; /* 0 free, 1 track, 2 foundation */
+    double x, y, z, resolved_x, resolved_y, resolved_z, station, lateral, vertical;
+} QnSupportNode;
+typedef struct QnSupportConnection {
+    uint32_t treatment, flags;
+    char asset[512];
+} QnSupportConnection;
+typedef struct QnSupportMember {
+    uint32_t structure_id, id, start_node, end_node, shape, role, orientation, has_reference;
+    double width, height, wall;
+    QnSupportConnection start_connection, end_connection;
+} QnSupportMember;
+typedef struct QnSupportSnapshot {
+    uint32_t size, version;
+    uint64_t revision, selection_revision, presentation_revision;
+    uint32_t structure_count, node_count, member_count, active;
+    uint32_t selection_kind, selection_structure, selection_element, reserved;
+} QnSupportSnapshot;
+typedef struct QnSupportCommand {
+    uint64_t expected_revision;
+    uint32_t operation, structure_id, element_id, start_node, end_node, shape, member_end, treatment;
+    double x, y, z, width, height, wall;
+} QnSupportCommand;
+enum { QN_SUPPORT_CREATE_STRUCTURE, QN_SUPPORT_DELETE_STRUCTURE, QN_SUPPORT_RENAME_STRUCTURE,
+    QN_SUPPORT_CREATE_NODE, QN_SUPPORT_DELETE_NODE, QN_SUPPORT_MOVE_NODE,
+    QN_SUPPORT_SET_ATTACHMENT, QN_SUPPORT_CLEAR_ATTACHMENT, QN_SUPPORT_SET_FOUNDATION,
+    QN_SUPPORT_CLEAR_FOUNDATION, QN_SUPPORT_CREATE_MEMBER, QN_SUPPORT_DELETE_MEMBER,
+    QN_SUPPORT_SET_PROFILE, QN_SUPPORT_SET_TREATMENT, QN_SUPPORT_CLEAR_CONNECTION,
+    QN_SUPPORT_SET_ASSET, QN_SUPPORT_CLEAR_PLACEMENT };
+
+QN_API QnResult QN_CALL qn_support_snapshot(QnSession session, QnSupportSnapshot* summary,
+    QnSupportStructure* structures, uint32_t structure_capacity,
+    QnSupportNode* nodes, uint32_t node_capacity, QnSupportMember* members,
+    uint32_t member_capacity, uint64_t known_revision, QnError* error);
+/* text is a UTF-8 structure name or logical connector asset; may be null.
+   For SetAttachment x/y/z mean station/lateral/vertical. Returns allocated ID. */
+QN_API QnResult QN_CALL qn_support_command(QnSession session, const QnSupportCommand* command,
+    const char* text, uint32_t* created, QnError* error);
+/* Selection kind: 0 clear, 1 structure, 2 node, 3 member. Transient only. */
+QN_API QnResult QN_CALL qn_select_support(QnSession session, uint64_t expected_revision,
+    uint32_t kind, uint32_t structure, uint32_t element, QnError* error);
+QN_API QnResult QN_CALL qn_support_workspace(QnSession session, uint32_t active, QnError* error);
 
 QN_API uint32_t QN_CALL qn_abi_version(void);
 QN_API QnResult QN_CALL qn_create(QnSession* session, QnError* error);
@@ -130,7 +182,8 @@ QN_API QnResult QN_CALL qn_viewport_shortcuts(QnSession session, uint32_t* short
 /* Display-only: 0 shaded, 1 wireframe, 2 shaded/wireframe, 3 reference curves. */
 QN_API QnResult QN_CALL qn_viewport_presentation(QnSession session, uint32_t mode, QnError* error);
 /* 1=orbit radians, 2=pan physical pixels, 3=wheel, 4=frame, 5=local move,
-   6=focus borrowed child after managed keyboard navigation. */
+   6=focus borrowed child after managed keyboard navigation, 7=frame support selection,
+   8=select support at normalized x/y (same native picking as SDL clicks). */
 QN_API QnResult QN_CALL qn_viewport_input(QnSession session, uint32_t action,
     double x, double y, double z, double seconds, QnError* error);
 #ifdef __cplusplus

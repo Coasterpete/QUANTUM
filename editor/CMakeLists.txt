@@ -1,5 +1,6 @@
 add_library(QuantumApplication STATIC
     src/ApplicationService.cpp
+    src/ApplicationService.Supports.cpp
     src/CenterlineVisualization.cpp
     src/DocumentHistory.cpp
     src/DocumentState.cpp
@@ -7,6 +8,7 @@ add_library(QuantumApplication STATIC
     src/RiderLoadDiagnostics.cpp
     src/SimulationPreview.cpp
     src/SupportVisualization.cpp
+    src/SupportPicking.cpp
     src/TrainMeshPresentation.cpp
     src/TrackStylePresentation.cpp
     src/TrackDevicePresentation.cpp
@@ -27,6 +29,9 @@ if(BUILD_TESTING)
     add_executable(QuantumTimelineAuthoringTests ${PROJECT_SOURCE_DIR}/tests/TimelineAuthoringTests.cpp)
     target_link_libraries(QuantumTimelineAuthoringTests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.TimelineAuthoring COMMAND QuantumTimelineAuthoringTests)
+    add_executable(QuantumSupportsWorkspaceTests ${PROJECT_SOURCE_DIR}/tests/SupportsWorkspaceTests.cpp)
+    target_link_libraries(QuantumSupportsWorkspaceTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.SupportsWorkspace COMMAND QuantumSupportsWorkspaceTests)
 endif()
 
 if(QUANTUM_ENABLE_HYBRID_EDITOR)
@@ -37,7 +42,6 @@ if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QUANTUM
     src/main.cpp
-    src/SupportPicking.cpp
     src/SupportNodeManipulation.cpp
     src/CoasterSetupUi.cpp
     src/EditorIcons.cpp

@@ -44,6 +44,27 @@ namespace quantum::editor
         ProfileChannel channel = ProfileChannel::Roll;
     };
 
+    enum class SupportOperation
+    {
+        CreateStructure, DeleteStructure, RenameStructure, CreateNode, DeleteNode,
+        MoveNode, SetAttachment, ClearAttachment, SetFoundation, ClearFoundation,
+        CreateMember, DeleteMember, SetProfile, SetTreatment, ClearConnection,
+        SetConnectorAsset, ClearConnectionPlacement
+    };
+    // Core units throughout; the managed boundary converts its SI form values.
+    struct SupportEdit
+    {
+        SupportOperation operation;
+        coaster::SupportStructureId structureId = 0;
+        coaster::SupportElementId elementId = 0, startNodeId = 0, endNodeId = 0;
+        glm::dvec3 position{0.0};
+        coaster::TrackAttachment attachment;
+        coaster::SupportMemberProfile profile;
+        coaster::SupportMemberEnd memberEnd = coaster::SupportMemberEnd::Start;
+        coaster::SupportMemberEndTreatment treatment = coaster::SupportMemberEndTreatment::MiteredCut;
+        std::string text;
+    };
+
     // Native application state shared by the ImGui and managed frontends.
     // The caller serializes access; GPU publication stays on its window thread.
     class ApplicationService
@@ -83,6 +104,11 @@ namespace quantum::editor
         void setDeviceProperties(coaster::TrackDeviceId device, bool enabled,
             double startMeters, double endMeters, double maximumForceNewtons,
             const Publish& publish = {});
+        using SupportPublish = std::function<void(const SupportVisualization&)>;
+        // Returns the allocated ID for creation, zero for other operations.
+        // Support-only edits retain solved track geometry and simulation state.
+        [[nodiscard]] std::uint32_t editSupport(const SupportEdit& request,
+            const SupportPublish& publish = {});
 
         // A gesture owns only a native analytical candidate. It never changes
         // document/history/simulation until full preparation succeeds at commit.

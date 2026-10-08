@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Quantum.Editor" xmlns:managed="using:Quantum.Managed"
+             x:Class="Quantum.Editor.SupportsBrowser" x:DataType="local:EditorViewModel">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,*" RowSpacing="6">
+    <StackPanel Margin="12,12,12,4" Spacing="5">
+      <TextBlock Classes="heading" Text="SUPPORTS" />
+      <TextBlock Classes="muted" Text="{Binding SupportSummary}" FontSize="12" TextWrapping="Wrap" />
+      <Button Content="+ Structure" Command="{Binding CreateSupportStructureCommand}" HorizontalAlignment="Left" />
+    </StackPanel>
+    <StackPanel Grid.Row="1" Margin="12,0" Spacing="6">
+      <ComboBox x:Name="Structures" ItemsSource="{Binding SupportStructures}" SelectedItem="{Binding SelectedStructure}" HorizontalAlignment="Stretch" />
+      <TextBlock Text="{Binding SelectedStructure.Summary}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
+    </StackPanel>
+    <Grid Grid.Row="2" Margin="12,4,12,0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
+      <TextBlock Classes="heading" Text="NODES" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="+" Command="{Binding CreateSupportNodeCommand}" ToolTip.Tip="Create a free node. Selected node gives the starting location plus 1 metre in X." />
+      <Button Grid.Column="2" Content="Delete" Command="{Binding DeleteSupportNodeCommand}" ToolTip.Tip="Connected members must be deleted first." />
+    </Grid>
+    <ListBox Grid.Row="3" ItemsSource="{Binding SupportNodes}" SelectedItem="{Binding SelectedSupportNode}" Background="Transparent" BorderThickness="0">
+      <ListBox.ItemTemplate><DataTemplate x:DataType="managed:SupportNode">
+        <StackPanel Spacing="3"><TextBlock Text="{Binding Label}" /><TextBlock Classes="technical muted" Text="{Binding ResolvedPosition}" FontSize="11" /></StackPanel>
+      </DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+    <Grid Grid.Row="4" Margin="12,4,12,0" ColumnDefinitions="*,Auto" ColumnSpacing="4">
+      <TextBlock Classes="heading" Text="MEMBERS" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Delete" Command="{Binding DeleteSupportMemberCommand}" />
+    </Grid>
+    <ListBox Grid.Row="5" ItemsSource="{Binding SupportMembers}" SelectedItem="{Binding SelectedSupportMember}" Background="Transparent" BorderThickness="0">
+      <ListBox.ItemTemplate><DataTemplate x:DataType="managed:SupportMember">
+        <StackPanel Spacing="3"><TextBlock Text="{Binding Label}" /><TextBlock Classes="technical muted" Text="{Binding Summary}" FontSize="11" TextWrapping="Wrap" /></StackPanel>
+      </DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+  </Grid>
+</UserControl>

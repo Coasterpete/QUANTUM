@@ -39,6 +39,9 @@
           <TextBlock Text="QUANTUM" FontWeight="Bold" FontSize="21" LetterSpacing="3" />
           <Border Background="{StaticResource QuantumBorder}" Width="1" Height="24" />
           <StackPanel><TextBlock Text="{Binding DocumentName}" FontWeight="SemiBold" /><TextBlock Classes="muted" FontSize="12" Text="Coaster design workspace" /></StackPanel>
+          <ComboBox SelectedIndex="{Binding WorkspaceMode}" IsEnabled="{Binding !InteractionActive}" MinWidth="125">
+            <ComboBoxItem Content="Route" /><ComboBoxItem Content="Supports" />
+          </ComboBox>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
           <Button Content="Open" Command="{Binding OpenCommand}" ToolTip.Tip="Open a QUANTUM document · Ctrl+O" />
@@ -49,7 +52,7 @@
       </Grid>
     </Border>
     <Grid Grid.Row="2" ColumnDefinitions="270,5,*,5,310" x:Name="Workspace" MinHeight="200">
-      <Border Classes="pane" MinWidth="190">
+      <Border Classes="pane" MinWidth="190" IsVisible="{Binding IsRouteWorkspace}">
         <Grid RowDefinitions="Auto,*">
           <Border Padding="16,16,16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="6"><TextBlock Classes="heading" Text="ROUTE" /><TextBlock Text="Authored Regions" FontSize="19" /><TextBlock Classes="muted" Text="{Binding RouteSummary}" FontSize="12" /></StackPanel>
@@ -63,6 +66,7 @@
           </ListBox>
         </Grid>
       </Border>
+      <Border Classes="pane" MinWidth="190" IsVisible="{Binding IsSupportsWorkspace}"><local:SupportsBrowser x:Name="SupportsTree" /></Border>
       <GridSplitter Grid.Column="1" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Focusable="True" />
       <Grid Grid.Column="2" RowDefinitions="Auto,*,Auto" MinWidth="300">
         <Border Padding="14,10" Background="{StaticResource QuantumRaised}">
@@ -73,10 +77,10 @@
             <Button Grid.Column="2" Content="Frame track" Command="{Binding FrameCommand}" ToolTip.Tip="Fit the complete track in view · F in viewport" /></Grid>
         </Border>
         <Border Grid.Row="1" x:Name="ViewportContainer" ClipToBounds="True" Background="#17222C"><local:ViewportHost x:Name="Viewport" Focusable="True" /></Border>
-        <Border Grid.Row="2" Padding="14,9" Background="{StaticResource QuantumRaised}"><TextBlock Classes="muted" FontSize="12" Text="Right drag: orbit   ·   Middle drag: pan   ·   Wheel: zoom   ·   WASD: move   ·   F: frame" TextWrapping="Wrap" /></Border>
+        <Border Grid.Row="2" Padding="14,9" Background="{StaticResource QuantumRaised}"><TextBlock Classes="muted" FontSize="12" Text="{Binding ViewportInstructions}" TextWrapping="Wrap" /></Border>
       </Grid>
       <GridSplitter Grid.Column="3" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Focusable="True" />
-      <Border Grid.Column="4" Classes="pane" MinWidth="250">
+      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsRouteWorkspace}">
         <Grid RowDefinitions="Auto,*">
           <Border Padding="16,16,16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="6"><TextBlock Classes="heading" Text="INSPECTOR" /><TextBlock Text="{Binding Selected.Name, TargetNullValue='Select a Region'}" FontSize="19" /><TextBlock Classes="muted" Text="{Binding Selected.Type, TargetNullValue='Choose an authored Region in Route'}" FontSize="12" /></StackPanel>
@@ -103,6 +107,7 @@
           </ScrollViewer>
         </Grid>
       </Border>
+      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsSupportsWorkspace}"><local:SupportInspector /></Border>
     </Grid>
     <GridSplitter Grid.Row="3" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Focusable="True" />
     <local:TimelinePane Grid.Row="4" x:Name="Timeline" MinHeight="200" />

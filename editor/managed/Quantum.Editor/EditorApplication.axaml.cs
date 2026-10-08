@@ -25,6 +25,11 @@ public sealed partial class EditorApplication : Application
                     desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                     window.Opened += async (_, _) => await RuntimeChecks.RunAuthoringSmoke(window, smokeFixture, smokeReport, desktop);
                 }
+                else if (desktop.Args is ["--verify-supports-smoke", var supportFixture, var supportReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunSupportsSmoke(window, supportFixture, supportReport, desktop);
+                }
             }
             catch (Exception error)
             {

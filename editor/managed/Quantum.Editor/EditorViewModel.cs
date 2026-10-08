@@ -121,6 +121,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             var enabled = DeviceEnabled;
             await Controller.Submit(s => s.SetDeviceProperties(snapshot.Revision, device.Id, enabled, start, end, force));
         }), () => HasDevice);
+        InitializeSupportCommands();
     }
     private EditorCommand Add(Func<Task> action, Func<bool>? enabled = null)
     {
@@ -234,6 +235,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         var profile = SelectedProfile;
         var deviceId = SelectedDevice?.Id;
         Snapshot = next;
+        PublishSupports(next.Supports, changedRoute);
         Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry));
         if (changedRoute)
         {
@@ -263,6 +265,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             if (Controller.Latest is { } latest) Publish(latest);
             SelectedProfile = selectedProfile;
             SelectedDevice = selectedDevice;
+            ApplySupportSelection(Snapshot?.Supports.Selection ?? new(SupportSelectionKind.None, 0), true);
         }
         finally { Busy = false; }
     }
@@ -303,7 +306,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     private async void SynchronizeDeviceSelection()
     {
         if (Snapshot is not { } snapshot) return;
-        var id = IsDeviceTimeline ? SelectedDevice?.Id ?? 0 : 0;
+        var id = IsDeviceTimeline && !IsSupportsWorkspace ? SelectedDevice?.Id ?? 0 : 0;
         try { await Controller.Submit(s => s.SelectDevice(snapshot.Revision, id)); }
         catch (QuantumException failure) { if (failure.Code != 8) Error = failure.Message; }
         catch (ObjectDisposedException) { }

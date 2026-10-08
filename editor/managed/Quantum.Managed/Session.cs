@@ -3,7 +3,7 @@ using System.Collections.ObjectModel;
 namespace Quantum.Managed;
 
 public enum SessionCommand : uint { Play = 1, Pause, Reset, SetInitialSpeed, Undo, Redo, SetRegionLength }
-public enum ViewportAction : uint { Orbit = 1, Pan, Zoom, Frame, Move, Focus }
+public enum ViewportAction : uint { Orbit = 1, Pan, Zoom, Frame, Move, Focus, FrameSupport, PickSupport }
 public enum ProfileOperation : uint { BeginValue, EndValue, TransitionType, Split, Remove, MoveBegin, MoveEnd }
 public enum DeviceKind : uint { Launch, Brake }
 public sealed record TransitionChoice(uint Type, string Name) { public override string ToString() => Name; }
@@ -41,7 +41,7 @@ public sealed record Region(uint Index, uint Kind, uint Construction, double Sta
 public sealed record SessionSnapshot(ulong Revision, ulong Tick, double Speed, double Station,
     double InitialSpeed, uint CarCount, double TrainMass, double TotalLength, uint Playback,
     bool Available, bool Dirty, bool CanUndo, bool CanRedo, double PhysicsMs, ReadOnlyCollection<Region> Route,
-    ReadOnlyCollection<ProfileSegment> Profiles, ReadOnlyCollection<TrackDevice> Devices)
+    ReadOnlyCollection<ProfileSegment> Profiles, ReadOnlyCollection<TrackDevice> Devices, SupportSnapshot Supports)
 {
     public double TimeSeconds => Tick / 240.0;
     public string PlaybackLabel => Available ? Playback switch { 1 => "Playing", 2 => "Paused", _ => "Stopped" } : "Preview unavailable";
@@ -49,7 +49,7 @@ public sealed record SessionSnapshot(ulong Revision, ulong Tick, double Speed, d
 
 // Snapshot/command calls have one controller owner. Viewport methods may run
 // concurrently on the UI thread; the native session serializes CPU access.
-public sealed unsafe class Session : IDisposable
+public sealed unsafe partial class Session : IDisposable
 {
     private readonly SessionHandle handle;
     private NativeRegion[] regionBuffer = new NativeRegion[1];
@@ -65,9 +65,11 @@ public sealed unsafe class Session : IDisposable
     private bool disposed;
     public Session()
     {
-        if (nint.Size != 8 || Native.qn_abi_version() != 2 || sizeof(NativeSnapshot) != 104 || sizeof(NativeRegion) != 112 || sizeof(NativeCommand) != 24
-            || sizeof(NativeProfile) != 328 || sizeof(NativeDevice) != 184 || sizeof(NativeAuthoringSnapshot) != 24 || sizeof(NativeProfileCommand) != 48)
-            throw new NotSupportedException("QUANTUM requires a matching ABI 2 in a 64-bit process. Rebuild and stage the native runtime.");
+        if (nint.Size != 8 || Native.qn_abi_version() != 3 || sizeof(NativeSnapshot) != 104 || sizeof(NativeRegion) != 112 || sizeof(NativeCommand) != 24
+            || sizeof(NativeProfile) != 328 || sizeof(NativeDevice) != 184 || sizeof(NativeAuthoringSnapshot) != 24 || sizeof(NativeProfileCommand) != 48
+            || sizeof(NativeSupportSnapshot) != 64 || sizeof(NativeSupportStructure) != 272 || sizeof(NativeSupportNode) != 88
+            || sizeof(NativeSupportMember) != 1096 || sizeof(NativeSupportConnection) != 520 || sizeof(NativeSupportCommand) != 88)
+            throw new NotSupportedException("QUANTUM requires a matching ABI 3 in a 64-bit process. Rebuild and stage the native runtime.");
         Check(Native.qn_create(out var id, out var error), error);
         handle = new SessionHandle(id);
         try
@@ -116,7 +118,7 @@ public sealed unsafe class Session : IDisposable
             RefreshAuthoring(summary.Revision);
             return new(summary.Revision, summary.Tick, summary.Speed, summary.Station, summary.InitialSpeed,
                 summary.CarCount, summary.TrainMass, summary.TotalLength, summary.Playback, summary.Available != 0,
-                summary.Dirty != 0, summary.CanUndo != 0, summary.CanRedo != 0, summary.PhysicsMs, route, profiles, devices);
+                summary.Dirty != 0, summary.CanUndo != 0, summary.CanRedo != 0, summary.PhysicsMs, route, profiles, devices, ReadSupports(summary.Revision));
         }
         throw new InvalidOperationException("Document changed repeatedly during snapshot sizing.");
     }

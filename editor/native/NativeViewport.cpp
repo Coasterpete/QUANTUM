@@ -1,5 +1,7 @@
 #include "NativeViewport.hpp"
 #include <quantum/editor/TrackDevicePresentation.hpp>
+#include <quantum/editor/SupportPicking.hpp>
+#include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <imgui_impl_vulkan.h>
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -113,10 +115,21 @@ void NativeViewport::retireTexture(void* object) noexcept
 bool NativeViewport::frame(uint32_t width, uint32_t height,
     const quantum::editor::CenterlineVisualization* geometry,
     const quantum::editor::SupportVisualization* supports,
-    const quantum::coaster::GroundAppearance* ground)
+    const quantum::coaster::GroundAppearance* ground, bool frameTrack)
 {
     requireOwnerThread(); ImGui::SetCurrentContext(imgui_);
     if (!width || !height) return false;
+    width_ = width; height_ = height;
+    int inputWidth = 0, inputHeight = 0;
+    if (!SDL_GetWindowSize(window_, &inputWidth, &inputHeight))
+        throw std::runtime_error(std::string("SDL host size query failed: ") + SDL_GetError());
+    const auto pick = [&](double x, double y) -> std::optional<quantum::editor::SupportSelection>
+    {
+        if (!supportActive_ || supports || geometry || inputWidth <= 0 || inputHeight <= 0
+            || x < 0 || y < 0 || x > inputWidth || y > inputHeight) return std::nullopt;
+        const auto scale = static_cast<double>(width) / inputWidth;
+        return pickSupportAt(x / inputWidth, y / inputHeight, scale);
+    };
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
@@ -129,6 +142,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
                 camera_.orbit(event.motion.xrel * .005, event.motion.yrel * .005);
             else if (event.motion.state & SDL_BUTTON_MMASK)
                 camera_.pan(event.motion.xrel, event.motion.yrel, width_, height_);
+            else hoveredSupport_ = pick(event.motion.x, event.motion.y);
         }
         else if (event.type == SDL_EVENT_MOUSE_WHEEL) camera_.zoom(event.wheel.y);
         else if (event.type == SDL_EVENT_KEY_DOWN)
@@ -155,6 +169,11 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
         {
             focusViewport(window_);
             shortcuts_ |= 256u;
+            if (supportActive_ && !supports && !geometry && event.button.button == SDL_BUTTON_LEFT)
+            {
+                selectedSupport_ = pick(event.button.x, event.button.y);
+                supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
+            }
             if ((event.button.button == SDL_BUTTON_RIGHT || event.button.button == SDL_BUTTON_MIDDLE)
                 && !SDL_CaptureMouse(true))
                 SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Viewport mouse capture failed: %s", SDL_GetError());
@@ -163,7 +182,9 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
         {
             if (!SDL_CaptureMouse(false))
                 SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Viewport mouse release failed: %s", SDL_GetError());
+            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) hoveredSupport_.reset();
         }
+        else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) hoveredSupport_.reset();
     }
     width_ = width; height_ = height;
     int logicalWidth = 0, logicalHeight = 0;
@@ -192,7 +213,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
         renderer_.updateTrackCurveVertices(geometry->vertices, geometry->verticesPerCurve);
         renderer_.updateRenderableTrack(geometry->renderableTrack);
         camera_.setBounds(geometry->minimumPosition, geometry->maximumPosition);
-        camera_.frame(static_cast<double>(pixelWidth) / pixelHeight);
+        if (frameTrack) camera_.frame(static_cast<double>(pixelWidth) / pixelHeight);
     }
     if (supports)
     {
@@ -215,6 +236,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
     io.DisplayFramebufferScale = ImVec2(1, 1); io.DeltaTime = 1.0f / 60;
     ImGui_ImplVulkan_NewFrame(); ImGui::NewFrame();
     ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)texture_), ImVec2(0, 0), io.DisplaySize);
+    if (supportActive_) drawSupportOverlay();
     ImGui::Render(); renderer_.drawFrame();
     if (swapchainGeneration_ != renderer_.swapchainGeneration())
     {
@@ -261,6 +283,116 @@ void NativeViewport::input(uint32_t action, double x, double y, double z, double
     case 4: camera_.frame(static_cast<double>(width_) / height_); break;
     case 5: camera_.moveLocal(x, y, z, std::clamp(value, 0.0, 0.1)); break;
     case 6: focusViewport(window_); break;
+    case 7: frameSupportSelection(); break;
+    case 8:
+        if (!supportActive_) throw std::invalid_argument("Open Supports before selecting support geometry.");
+        selectedSupport_ = pickSupportAt(x, y);
+        supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
+        break;
+    }
+}
+std::optional<quantum::editor::SupportSelection> NativeViewport::pickSupportAt(
+    double x, double y, double pixelScale) const
+{
+    const auto hit = quantum::editor::pickSupport(supportPicking_, camera_, {x, y}, width_, height_,
+        quantum::editor::supportNodeHitRadiusPixels * pixelScale,
+        quantum::editor::supportMemberHitTolerancePixels * pixelScale);
+    return hit ? std::optional{hit->selection} : std::nullopt;
+}
+void NativeViewport::captureSupports(uint64_t revision, uint64_t selectionRevision, bool active,
+    std::optional<quantum::editor::SupportSelection> selection,
+    const quantum::coaster::SupportCollection& supports,
+    const quantum::editor::SupportVisualization& visualization)
+{
+    if (revision != supportRevision_)
+    {
+        // Picking needs the native double metadata, not another copy of solid
+        // batches or GPU resources. All arrays are revision-cached.
+        supportPicking_.nodes = visualization.nodes;
+        supportPicking_.members = visualization.members;
+        supportAnchors_.clear(); supportConnections_.clear();
+        std::size_t memberIndex = 0;
+        for (const auto& structure : supports.structures)
+        {
+            for (const auto& node : structure.nodes)
+                supportAnchors_.push_back(node.trackAttachment ? 1u : node.foundation ? 2u : 0u);
+            for (const auto& member : structure.members)
+            {
+                const auto& visual = visualization.members.at(memberIndex++);
+                if (member.startConnection) supportConnections_.emplace_back(visual.startPosition, visual.selection);
+                if (member.endConnection) supportConnections_.emplace_back(visual.endPosition, visual.selection);
+            }
+        }
+        supportRevision_ = revision;
+        hoveredSupport_.reset();
+    }
+    if (supportActive_ != active) { hoveredSupport_.reset(); supportPick_.reset(); }
+    supportActive_ = active; selectedSupport_ = selection; supportSelectionRevision_ = selectionRevision;
+}
+std::optional<NativeViewport::SupportPickIntent> NativeViewport::takeSupportPick() noexcept
+{
+    return std::exchange(supportPick_, std::nullopt);
+}
+void NativeViewport::drawSupportOverlay()
+{
+    using namespace quantum::editor;
+    auto* draw = ImGui::GetBackgroundDrawList();
+    const auto& display = ImGui::GetIO().DisplaySize;
+    draw->PushClipRect({0, 0}, display, true);
+    const auto screen = [&](const glm::dvec3& point) -> std::optional<ImVec2>
+    {
+        const auto projected = projectViewportPoint(camera_, point, static_cast<double>(width_) / height_);
+        if (!projected) return std::nullopt;
+        return ImVec2{static_cast<float>(projected->normalizedPosition.x * display.x),
+            static_cast<float>(projected->normalizedPosition.y * display.y)};
+    };
+    const auto selected = [&](const SupportSelection& value)
+    {
+        return selectedSupport_ && (selectedSupport_ == value
+            || (selectedSupport_->kind == SupportSelectionKind::Structure && selectedSupport_->structureId == value.structureId));
+    };
+    constexpr ImU32 normal = IM_COL32(112, 200, 222, 255), highlight = IM_COL32(255, 200, 80, 255);
+    constexpr ImU32 hover = IM_COL32(240, 240, 245, 255), outline = IM_COL32(10, 15, 20, 255);
+    for (const auto& member : supportPicking_.members)
+    {
+        if (!selected(member.selection) && hoveredSupport_ != member.selection) continue;
+        const auto start = screen(member.startPosition), end = screen(member.endPosition);
+        if (!start || !end) continue;
+        draw->AddLine(*start, *end, outline, 5);
+        draw->AddLine(*start, *end, selected(member.selection) ? highlight : hover, 3);
+    }
+    for (std::size_t i = 0; i < supportPicking_.nodes.size(); ++i)
+    {
+        const auto& node = supportPicking_.nodes[i]; const auto center = screen(node.position);
+        if (!center) continue;
+        const auto color = selected(node.selection) ? highlight : hoveredSupport_ == node.selection ? hover : normal;
+        const float radius = selected(node.selection) ? 5.0f : 3.5f;
+        draw->AddCircleFilled(*center, radius + 1.5f, outline, 16);
+        draw->AddCircleFilled(*center, radius, color, 16);
+        if (supportAnchors_[i] == 2) draw->AddRect({center->x - 7, center->y - 7}, {center->x + 7, center->y + 7}, color);
+        if (selected(node.selection) && supportAnchors_[i])
+            draw->AddText({center->x + 9, center->y - 7}, color, supportAnchors_[i] == 1 ? "TRACK" : "FOUNDATION");
+    }
+    for (const auto& [position, selection] : supportConnections_)
+        if (selected(selection))
+            if (const auto point = screen(position)) draw->AddCircle(*point, 8, highlight, 16, 2);
+    draw->PopClipRect();
+}
+void NativeViewport::frameSupportSelection()
+{
+    if (!selectedSupport_) return;
+    auto view = supportPicking_;
+    const auto keep = [&](const auto& value)
+    {
+        return selectedSupport_->kind == quantum::editor::SupportSelectionKind::Structure
+            ? value.selection.structureId == selectedSupport_->structureId : value.selection == selectedSupport_;
+    };
+    std::erase_if(view.nodes, [&](const auto& n) { return !keep(n); });
+    std::erase_if(view.members, [&](const auto& m) { return !keep(m); });
+    if (const auto bounds = quantum::editor::supportVisualizationBounds(view))
+    {
+        const auto padding = glm::dvec3{0.5};
+        camera_.frameBounds(bounds->first - padding, bounds->second + padding, static_cast<double>(width_) / height_);
     }
 }
 void NativeViewport::close() noexcept

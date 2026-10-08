@@ -500,6 +500,18 @@ states enter the existing whole-document `DocumentHistory`, so Undo/Redo needs
 no support-specific stack. New documents remain empty; the existing opt-in
 interactive-authoring demo supplies a small deterministic A-frame.
 
+The Avalonia Supports workspace uses `ApplicationService::editSupport` for
+manual graph edits, attachments/foundations, member profiles and end treatments.
+It validates a native candidate and support presentation before committing one
+native history state. Support-only edits retain solved track geometry and live
+simulation. `QuantumNative` ABI 3 copies revision-cached support rows in metres;
+Core coordinates, track frames, mounting, persistence and history remain native.
+The hosted viewport reuses `pickSupport`, draws native selection overlays, and
+publishes transient stable-ID selection back to the managed browser/Inspector.
+Numeric movement is available; the ImGui move gizmo, generated-run tools and
+appearance controls remain in the fallback. See
+[Hybrid Supports workspace](hybrid-supports-workspace.md) for the handoff.
+
 ### Implemented region kinds
 
 The authored region variant currently has two kinds:
