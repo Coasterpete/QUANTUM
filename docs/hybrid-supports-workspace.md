@@ -102,8 +102,9 @@ rings indicate authored end metadata, not detailed connector meshes.
 
 Right-drag orbit, middle-drag pan, wheel, WASD and F remain. Frame selection fits
 the current support object. Support-only edits keep the camera; support Undo/Redo
-also retains framing. File replacement frames the new document. Route retains
-its established automatic framing for geometry edits.
+also retains framing. File replacement frames the new document. Track Start
+migration now preserves Route camera framing through edits and history as well;
+use Frame track / layout or Frame Track Start explicitly.
 
 Picking intents carry the captured document and selection revisions. Stale intents
 are dropped, and clicks during changed-scene publication are ignored. CPU session
@@ -216,7 +217,7 @@ and simulation still feel correct after switching workspaces.
   identifiers are marked truncated and read-only in the hybrid form; focused
   treatment edits still preserve the full native identifier. Structure rename
   applies the entered text explicitly.
-- ABI 3 requires rebuilding/staging matching managed and native binaries. This
+- ABI 4 requires rebuilding/staging matching managed and native binaries. This
   does not change `.quantum` compatibility.
 - No Linux build/runtime, physical pointer feel, DPI behavior or comprehensive
   whole-project test suite was verified. The focused suites above are the evidence.
@@ -234,7 +235,7 @@ This handoff does not start that work.
    typed intent; it owns values, never document/GPU pointers.
 2. `editor/src/ApplicationService.Supports.cpp`: `editSupport`, candidate copies,
    `std::optional` anchors/end metadata, validation, publication and commit order.
-3. `editor/native/QuantumNative.h`: fixed-width ABI 3 support rows and commands.
+3. `editor/native/QuantumNative.h`: fixed-width support rows and commands (current ABI 4).
 4. `editor/native/QuantumNative.cpp`: `refreshSupports`, `qn_support_command`,
    `qn_support_snapshot`, `qn_select_support` and stale viewport intent handling.
 5. `editor/native/NativeViewport.cpp`: `captureSupports`, `pickSupportAt`,

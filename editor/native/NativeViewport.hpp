@@ -1,4 +1,6 @@
 #pragma once
+#include "QuantumNative.h"
+#include <quantum/editor/ViewportTransformHandles.hpp>
 #include <quantum/editor/CenterlineVisualization.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/SupportVisualization.hpp>
@@ -41,11 +43,23 @@ public:
     void requireOwnerThread() const;
     uint32_t takeShortcuts() noexcept;
     void setPresentation(uint32_t mode);
+    struct TrackStartPickIntent { uint64_t revision, selectionRevision; };
+    void capturePlacement(uint64_t revision, uint64_t selectionRevision, uint64_t presentationRevision,
+        bool active, bool selected, quantum::editor::StartPoseTransformMode mode,
+        const quantum::coaster::AuthoredStartPose& authored,
+        std::optional<quantum::coaster::AuthoredStartPose> candidate, double coordinateScale,
+        const quantum::editor::CenterlineVisualization& geometry);
+    [[nodiscard]] std::optional<TrackStartPickIntent> takeTrackStartPick() noexcept;
+    [[nodiscard]] QnTransformIntent takeTransformIntent() noexcept;
+    void cancelTransformInput() noexcept;
 private:
     void close() noexcept;
     static void retireTexture(void* self) noexcept;
     void drawSupportOverlay();
     void frameSupportSelection();
+    void drawPlacementOverlay();
+    void placementPointer(uint32_t phase, const glm::dvec2& pointer, double pixelScale = 1);
+    void queueTransform(uint32_t phase, const glm::dvec2& pointer);
     [[nodiscard]] std::optional<quantum::editor::SupportSelection> pickSupportAt(
         double normalizedX, double normalizedY, double pixelScale = 1) const;
     SDL_Window* window_ = nullptr;
@@ -73,4 +87,21 @@ private:
     std::optional<SupportPickIntent> supportPick_;
     uint64_t supportRevision_ = 0, supportSelectionRevision_ = 0;
     bool supportActive_ = false;
+    quantum::coaster::AuthoredStartPose displayedStartPose_;
+    uint64_t placementRevision_ = 0, placementSelectionRevision_ = 0, placementPresentationRevision_ = 0;
+    bool placementActive_ = true, startSelected_ = false, startHovered_ = false, placementPreview_ = false;
+    double coordinateScale_ = 1, pixelScale_ = 1;
+    quantum::editor::StartPoseTransformMode transformMode_ = quantum::editor::StartPoseTransformMode::Select;
+    std::optional<quantum::editor::StartPoseTransformAxis> hoveredAxis_;
+    std::optional<TrackStartPickIntent> startPick_;
+    struct PointerTransform
+    {
+        QnTransformIntent intent;
+        glm::dvec2 start, origin, direction;
+        double metersPerPixel, initialAngle;
+    };
+    std::optional<PointerTransform> pointerTransform_;
+    QnTransformIntent transformIntent_{};
+    uint64_t nextTransformIntent_ = 1;
+    std::vector<quantum::renderer::LineVertex> placementGhost_;
 };

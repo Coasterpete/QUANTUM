@@ -32,7 +32,7 @@ public sealed partial class EditorViewModel
     public bool IsRouteWorkspace => !IsSupportsWorkspace;
     public string ViewportInstructions => IsSupportsWorkspace
         ? "Left click: select node / member · Right drag: orbit · Middle drag: pan · Wheel: zoom · Numeric move in Inspector"
-        : "Right drag: orbit · Middle drag: pan · Wheel: zoom · WASD: move · F: frame";
+        : "Diamond: Track Start · Move / Rotate in Track Layout · Right drag: orbit · Middle drag: pan · Wheel: zoom · F: frame · Esc: cancel";
     public IReadOnlyList<SupportStructure> SupportStructures { get; private set; } = [];
     public IReadOnlyList<SupportNode> SupportNodes { get; private set; } = [];
     public IReadOnlyList<SupportMember> SupportMembers { get; private set; } = [];

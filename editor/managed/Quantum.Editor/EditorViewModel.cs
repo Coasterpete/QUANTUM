@@ -122,6 +122,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             await Controller.Submit(s => s.SetDeviceProperties(snapshot.Revision, device.Id, enabled, start, end, force));
         }), () => HasDevice);
         InitializeSupportCommands();
+        InitializePlacementCommands();
     }
     private EditorCommand Add(Func<Task> action, Func<bool>? enabled = null)
     {
@@ -130,7 +131,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     }
     public bool Busy { get => busy; private set { busy = value; Changed(); Changed(nameof(CanInteract)); RefreshCommands(); Changed(nameof(Activity)); } }
     public bool CanInteract => !Busy;
-    public string Activity => Busy ? "Working…" : InteractionActive ? "Profile preview" : "Ready";
+    public string Activity => Busy ? "Working…" : TransformInteractionActive ? "Placement preview" : InteractionActive ? "Profile preview" : "Ready";
     public string Error { get => error; set { error = value; Changed(); Changed(nameof(HasError)); } }
     public bool HasError => Error.Length != 0;
     public string Title => $"QUANTUM — {DocumentName}{(Snapshot?.Dirty == true ? " *" : "")}";
@@ -225,9 +226,11 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     });
     public void Publish(SessionSnapshot next)
     {
-        if (InteractionActive && endingDrag && Busy) return;
-        if (InteractionActive && next.Revision != dragRevision)
+        if (Busy && (endingDrag || endingTransform)) return;
+        if (ProfileInteractionActive && next.Revision != dragRevision)
         { CancelForSelection(); Error = "Document changed. The Timeline drag was canceled."; }
+        if (TransformInteractionActive && next.Revision != transformRevision)
+        { CancelForSelection(); Error = "Document changed. The placement drag was canceled."; }
         var changedRoute = Snapshot?.Revision != next.Revision;
         // ItemsSource replacement can synchronously clear ListBox selection.
         // Capture its identity before notifying the Route binding.
@@ -235,6 +238,8 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         var profile = SelectedProfile;
         var deviceId = SelectedDevice?.Id;
         Snapshot = next;
+        publishingSnapshot = true;
+        PublishPlacement(next.Placement, changedRoute);
         PublishSupports(next.Supports, changedRoute);
         Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry));
         if (changedRoute)
@@ -245,6 +250,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             RefreshProfiles(profile);
         }
         RefreshCommands();
+        publishingSnapshot = false;
     }
     private static double ParsePositive(string text, string name, bool allowZero = false)
     {
@@ -289,6 +295,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     {
         if (Busy) { Error = "Wait for the current operation to finish before closing."; return false; }
         if (InteractionActive) await EndProfileDragAsync(false);
+        if (TransformInteractionActive) await EndTransformAsync(false);
         Busy = true;
         try { return await AllowReplacement(); }
         catch (Exception failure) { Error = failure.Message; return false; }

@@ -138,18 +138,28 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
         // production editor uses; C# toolbar actions use the explicit API.
         if (event.type == SDL_EVENT_MOUSE_MOTION)
         {
-            if (event.motion.state & SDL_BUTTON_RMASK)
+            const glm::dvec2 pointer{event.motion.x * static_cast<double>(width) / std::max(1, inputWidth),
+                event.motion.y * static_cast<double>(height) / std::max(1, inputHeight)};
+            if (pointerTransform_ && !(event.motion.state & SDL_BUTTON_LMASK)) cancelTransformInput();
+            else if (pointerTransform_) placementPointer(1, pointer, static_cast<double>(width) / std::max(1, inputWidth));
+            else if (event.motion.state & SDL_BUTTON_RMASK)
                 camera_.orbit(event.motion.xrel * .005, event.motion.yrel * .005);
             else if (event.motion.state & SDL_BUTTON_MMASK)
                 camera_.pan(event.motion.xrel, event.motion.yrel, width_, height_);
-            else hoveredSupport_ = pick(event.motion.x, event.motion.y);
+            else
+            {
+                hoveredSupport_ = pick(event.motion.x, event.motion.y);
+                placementPointer(1, pointer, static_cast<double>(width) / std::max(1, inputWidth));
+            }
         }
-        else if (event.type == SDL_EVENT_MOUSE_WHEEL) camera_.zoom(event.wheel.y);
+        else if (event.type == SDL_EVENT_MOUSE_WHEEL && !pointerTransform_) camera_.zoom(event.wheel.y);
         else if (event.type == SDL_EVENT_KEY_DOWN)
         {
             // Native-child focus bypasses Avalonia routed keys. Forward product
             // shortcuts as intents; document work still runs on the controller.
-            if (event.key.key == SDLK_TAB)
+            if (event.key.key == SDLK_ESCAPE)
+            { cancelTransformInput(); shortcuts_ |= 512u; }
+            else if (event.key.key == SDLK_TAB)
                 shortcuts_ |= (event.key.mod & SDL_KMOD_SHIFT) ? 128u : 64u;
             else if (event.key.mod & SDL_KMOD_CTRL)
             {
@@ -159,14 +169,15 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
                 else if (event.key.key == SDLK_O) shortcuts_ |= 8u;
                 else if (event.key.key == SDLK_N) shortcuts_ |= 16u;
             }
-            else if (event.key.key == SDLK_F) camera_.frame(static_cast<double>(width_) / height_);
-            else if (event.key.key == SDLK_W) camera_.moveLocal(1, 0, 0, .05);
-            else if (event.key.key == SDLK_S) camera_.moveLocal(-1, 0, 0, .05);
-            else if (event.key.key == SDLK_A) camera_.moveLocal(0, -1, 0, .05);
-            else if (event.key.key == SDLK_D) camera_.moveLocal(0, 1, 0, .05);
+            else if (!pointerTransform_ && event.key.key == SDLK_F) camera_.frame(static_cast<double>(width_) / height_);
+            else if (!pointerTransform_ && event.key.key == SDLK_W) camera_.moveLocal(1, 0, 0, .05);
+            else if (!pointerTransform_ && event.key.key == SDLK_S) camera_.moveLocal(-1, 0, 0, .05);
+            else if (!pointerTransform_ && event.key.key == SDLK_A) camera_.moveLocal(0, -1, 0, .05);
+            else if (!pointerTransform_ && event.key.key == SDLK_D) camera_.moveLocal(0, 1, 0, .05);
         }
         else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
         {
+            if (event.button.button != SDL_BUTTON_LEFT) cancelTransformInput();
             focusViewport(window_);
             shortcuts_ |= 256u;
             if (supportActive_ && !supports && !geometry && event.button.button == SDL_BUTTON_LEFT)
@@ -174,17 +185,28 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
                 selectedSupport_ = pick(event.button.x, event.button.y);
                 supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
             }
+            if (placementActive_ && !geometry && !supports && event.button.button == SDL_BUTTON_LEFT)
+                placementPointer(0, {event.button.x * static_cast<double>(width) / std::max(1, inputWidth),
+                    event.button.y * static_cast<double>(height) / std::max(1, inputHeight)},
+                    static_cast<double>(width) / std::max(1, inputWidth));
             if ((event.button.button == SDL_BUTTON_RIGHT || event.button.button == SDL_BUTTON_MIDDLE)
                 && !SDL_CaptureMouse(true))
                 SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Viewport mouse capture failed: %s", SDL_GetError());
         }
         else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP || event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
         {
+            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) cancelTransformInput();
+            else if (event.button.button == SDL_BUTTON_LEFT)
+                placementPointer(2, {event.button.x * static_cast<double>(width) / std::max(1, inputWidth),
+                    event.button.y * static_cast<double>(height) / std::max(1, inputHeight)},
+                    static_cast<double>(width) / std::max(1, inputWidth));
             if (!SDL_CaptureMouse(false))
                 SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Viewport mouse release failed: %s", SDL_GetError());
             if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) hoveredSupport_.reset();
         }
-        else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) hoveredSupport_.reset();
+        else if (event.type == SDL_EVENT_WINDOW_HIDDEN) cancelTransformInput();
+        else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
+        { hoveredSupport_.reset(); startHovered_ = false; hoveredAxis_.reset(); }
     }
     width_ = width; height_ = height;
     int logicalWidth = 0, logicalHeight = 0;
@@ -227,6 +249,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
     {
         lines_.assign(train_.begin(), train_.end());
         lines_.insert(lines_.end(), device_.begin(), device_.end());
+        lines_.insert(lines_.end(), placementGhost_.begin(), placementGhost_.end());
         renderer_.updateTrainPreviewVertices(lines_);
         renderer_.updateDynamicMeshInstances(meshes_);
         trainDirty_ = false;
@@ -237,6 +260,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
     ImGui_ImplVulkan_NewFrame(); ImGui::NewFrame();
     ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)texture_), ImVec2(0, 0), io.DisplaySize);
     if (supportActive_) drawSupportOverlay();
+    drawPlacementOverlay();
     ImGui::Render(); renderer_.drawFrame();
     if (swapchainGeneration_ != renderer_.swapchainGeneration())
     {
@@ -289,6 +313,12 @@ void NativeViewport::input(uint32_t action, double x, double y, double z, double
         selectedSupport_ = pickSupportAt(x, y);
         supportPick_ = {supportRevision_, supportSelectionRevision_, selectedSupport_};
         break;
+    case 9:
+        camera_.frameSphere(displayedStartPose_.position, 5 / coordinateScale_, static_cast<double>(width_) / height_);
+        break;
+    case 10: case 11: case 12:
+        placementPointer(action - 10, {x * width_, y * height_}, pixelScale_); break;
+    case 13: cancelTransformInput(); break;
     }
 }
 std::optional<quantum::editor::SupportSelection> NativeViewport::pickSupportAt(

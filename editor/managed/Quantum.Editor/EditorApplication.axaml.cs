@@ -30,6 +30,11 @@ public sealed partial class EditorApplication : Application
                     desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                     window.Opened += async (_, _) => await RuntimeChecks.RunSupportsSmoke(window, supportFixture, supportReport, desktop);
                 }
+                else if (desktop.Args is ["--verify-placement-smoke", var placementFixture, var placementReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunPlacementSmoke(window, placementFixture, placementReport, desktop);
+                }
             }
             catch (Exception error)
             {

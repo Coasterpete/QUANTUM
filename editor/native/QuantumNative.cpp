@@ -42,6 +42,9 @@ namespace
         std::vector<QnSupportMember> supportMembers;
         std::optional<quantum::editor::SupportSelection> selectedSupport;
         bool supportWorkspace = false;
+        uint64_t placementSelectionRevision = 1;
+        bool selectedTrackStart = false;
+        quantum::editor::StartPoseTransformMode transformMode = quantum::editor::StartPoseTransformMode::Select;
         bool closed = false;
         Session()
         {
@@ -187,6 +190,13 @@ namespace
         state.selectedSupport = selection;
         ++state.supportSelectionRevision;
     }
+    void selectTrackStart(Session& state, bool selected, quantum::editor::StartPoseTransformMode mode)
+    {
+        if (state.selectedTrackStart == selected && state.transformMode == mode) return;
+        state.application.cancelTransform();
+        state.selectedTrackStart = selected; state.transformMode = mode;
+        ++state.placementSelectionRevision;
+    }
     void refreshSupports(Session& state)
     {
         auto& app = state.application;
@@ -271,7 +281,9 @@ static_assert(sizeof(QnAuthoringSnapshot) == 24 && sizeof(QnProfileCommand) == 4
 static_assert(sizeof(QnSupportStructure) == 272 && sizeof(QnSupportNode) == 88);
 static_assert(sizeof(QnSupportConnection) == 520 && sizeof(QnSupportMember) == 1096);
 static_assert(sizeof(QnSupportSnapshot) == 64 && sizeof(QnSupportCommand) == 88);
-uint32_t QN_CALL qn_abi_version() { return 3; }
+static_assert(sizeof(QnPose) == 56 && sizeof(QnPlacementSnapshot) == 184);
+static_assert(sizeof(QnTransformCommand) == 32 && sizeof(QnTransformIntent) == 48);
+uint32_t QN_CALL qn_abi_version() { return 4; }
 QnResult QN_CALL qn_create(QnSession* out, QnError* error)
 {
     if (out) *out = 0;
@@ -305,6 +317,7 @@ QnResult QN_CALL qn_new(QnSession handle, QnError* error)
         state->application.newDocument();
         ++state->documentEpoch;
         selectSupport(*state, std::nullopt);
+        selectTrackStart(*state, false, quantum::editor::StartPoseTransformMode::Select);
     });
 }
 QnResult QN_CALL qn_open(QnSession handle, const char* path, QnError* error)
@@ -315,6 +328,7 @@ QnResult QN_CALL qn_open(QnSession handle, const char* path, QnError* error)
         state->application.open(input);
         ++state->documentEpoch;
         selectSupport(*state, std::nullopt);
+        selectTrackStart(*state, false, quantum::editor::StartPoseTransformMode::Select);
     });
 }
 QnResult QN_CALL qn_save(QnSession handle, const char* path, QnError* error)
@@ -447,6 +461,7 @@ QnResult QN_CALL qn_profile_drag_begin(QnSession handle, const QnProfileCommand*
         if (!token) throw std::invalid_argument("Missing drag token output.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         requireRevision(*state, command->expected_revision);
+        if (state->application.transformPreview()) throw Failure(QN_BUSY, "Finish the authored transform before starting a Timeline gesture.");
         const quantum::editor::ProfileTarget target{command->owner_kind == 0
             ? quantum::editor::ProfileOwner::Region : quantum::editor::ProfileOwner::Device,
             command->owner_id, static_cast<quantum::editor::ProfileChannel>(command->channel)};
@@ -625,7 +640,12 @@ QnResult QN_CALL qn_support_workspace(QnSession handle, uint32_t active, QnError
     return boundary(error, [&] {
         if (active > 1) throw std::invalid_argument("Invalid support workspace state.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
-        state->supportWorkspace = active != 0;
+        if (state->supportWorkspace != (active != 0))
+        {
+            state->application.cancelTransform();
+            ++state->placementSelectionRevision;
+            state->supportWorkspace = active != 0;
+        }
     });
 }
 QnResult QN_CALL qn_viewport_open(QnSession handle, uint32_t platform, uint64_t window, QnError* error)
@@ -664,6 +684,9 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
                 && pick->revision == state.application.revision() && pick->selectionRevision == state.supportSelectionRevision
                 && (!pick->selection || quantum::editor::supportSelectionExists(state.application.track().supports(), *pick->selection)))
                 selectSupport(state, pick->selection);
+            if (const auto pick = viewport.takeTrackStartPick(); pick && !state.supportWorkspace
+                && pick->revision == state.application.revision() && pick->selectionRevision == state.placementSelectionRevision)
+                selectTrackStart(state, true, state.transformMode);
         };
         {
             // A document rebuild/file operation may take longer than a frame.
@@ -679,10 +702,13 @@ QnResult QN_CALL qn_viewport_frame(QnSession handle, uint32_t width, uint32_t he
             revision = app.revision();
             geometryGeneration = app.centerline().generation();
             documentEpoch = state->documentEpoch;
-            // Keep spatial authoring framing through support Undo/Redo; file
-            // replacement still frames the new document. Route retains its
-            // established automatic framing after geometry edits.
-            frameTrack = !state->supportWorkspace || state->viewportFramedEpoch != documentEpoch;
+            // Spatial authoring edits and Undo/Redo preserve the user's view.
+            // File replacement frames once; other framing is explicit.
+            frameTrack = state->viewportFramedEpoch != documentEpoch;
+            viewport->capturePlacement(revision, state->placementSelectionRevision, app.transformPresentationRevision(),
+                !state->supportWorkspace, state->selectedTrackStart, state->transformMode,
+                app.track().startPose(), app.transformPreview(), app.track().physicalSettings().metersPerCoordinateUnit,
+                app.centerline().visualization());
             viewport->captureTrain(revision, app.preview().vertexGeneration(), app.preview().vertices(), app.preview().meshInstances());
             viewport->captureDevice(revision, state->supportWorkspace ? 0 : state->selectedDevice, app.track(), app.centerline().visualization());
             viewport->captureSupports(revision, state->supportSelectionRevision, state->supportWorkspace,
@@ -736,6 +762,7 @@ QnResult QN_CALL qn_viewport_close(QnSession handle, QnError* error)
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         if (!state->viewport) return;
         state->viewport->requireOwnerThread();
+        state->application.cancelTransform();
         std::lock_guard viewLock(viewportMutex);
         state->viewport.reset(); viewportActive = false;
     });
@@ -743,11 +770,20 @@ QnResult QN_CALL qn_viewport_close(QnSession handle, QnError* error)
 QnResult QN_CALL qn_viewport_input(QnSession handle, uint32_t action, double x, double y, double z, double seconds, QnError* error)
 {
     return boundary(error, [&] {
-        if (action < 1 || action > 8 || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(seconds))
+        if (action < 1 || action > 13 || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(seconds))
             throw std::invalid_argument("Invalid viewport camera input.");
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         if (!state->viewport) throw Failure(QN_UNAVAILABLE, "Viewport is not open.");
-        state->viewport->requireOwnerThread(); state->viewport->input(action, x, y, z, seconds);
+        state->viewport->requireOwnerThread();
+        if (action == 9)
+        {
+            auto& app = state->application;
+            state->viewport->capturePlacement(app.revision(), state->placementSelectionRevision, app.transformPresentationRevision(),
+                !state->supportWorkspace, state->selectedTrackStart, state->transformMode,
+                app.track().startPose(), app.transformPreview(), app.track().physicalSettings().metersPerCoordinateUnit,
+                app.centerline().visualization());
+        }
+        state->viewport->input(action, x, y, z, seconds);
     });
 }
 QnResult QN_CALL qn_viewport_presentation(QnSession handle, uint32_t mode, QnError* error)
@@ -757,5 +793,104 @@ QnResult QN_CALL qn_viewport_presentation(QnSession handle, uint32_t mode, QnErr
         auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
         if (!state->viewport) throw Failure(QN_UNAVAILABLE, "Viewport is not open.");
         state->viewport->setPresentation(mode);
+    });
+}
+
+QnResult QN_CALL qn_placement_snapshot(QnSession handle, QnPlacementSnapshot* out, QnError* error)
+{
+    return boundary(error, [&] {
+        if (!out || out->size != sizeof(*out) || out->version != 1)
+            throw std::invalid_argument("Placement snapshot size/version mismatch.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        auto& app = state->application;
+        const auto scale = app.track().physicalSettings().metersPerCoordinateUnit;
+        const auto copyPose = [scale](const quantum::coaster::AuthoredStartPose& pose) -> QnPose {
+            return {pose.position.x * scale, pose.position.y * scale, pose.position.z * scale,
+                pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z};
+        };
+        const auto preview = app.transformPreview();
+        const auto angles = glm::degrees(quantum::editor::startPoseAngles(app.track().startPose()));
+        *out = {sizeof(*out), 1, app.revision(), state->placementSelectionRevision,
+            app.revision() + app.transformPresentationRevision() + state->placementSelectionRevision,
+            state->selectedTrackStart, static_cast<uint32_t>(state->transformMode), !state->supportWorkspace,
+            preview.has_value(), copyPose(app.track().startPose()), copyPose(preview.value_or(app.track().startPose())),
+            angles.x, angles.y, angles.z};
+    });
+}
+QnResult QN_CALL qn_placement_edit(QnSession handle, uint64_t revision,
+    uint32_t operation, double x, double y, double z, QnError* error)
+{
+    return boundary(error, [&] {
+        if (operation > 1) throw std::invalid_argument("Unknown Track Start numeric edit.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        if (operation == 0) state->application.setTrackStartPosition({x, y, z});
+        else state->application.setTrackStartAngles({x, y, z});
+    });
+}
+QnResult QN_CALL qn_track_start_select(QnSession handle, uint64_t revision, uint32_t selected, uint32_t mode, QnError* error)
+{
+    return boundary(error, [&] {
+        if (selected > 1 || mode > 2) throw std::invalid_argument("Unknown Track Start selection or tool.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, revision);
+        selectTrackStart(*state, selected != 0, static_cast<quantum::editor::StartPoseTransformMode>(mode));
+    });
+}
+QnResult QN_CALL qn_transform_begin(QnSession handle, const QnTransformCommand* command, uint64_t* token, QnError* error)
+{
+    if (token) *token = 0;
+    return boundary(error, [&] {
+        if (!command || !token || command->target != 0 || command->mode < 1 || command->mode > 2 || command->axis > 2)
+            throw std::invalid_argument("Invalid authored transform request.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state); requireRevision(*state, command->expected_revision);
+        if (command->selection_revision != state->placementSelectionRevision || state->supportWorkspace || !state->selectedTrackStart)
+            throw Failure(QN_CONFLICT, "Selection changed. Transform canceled.");
+        if (state->dragToken) throw Failure(QN_BUSY, "Finish the Timeline gesture before starting a transform.");
+        *token = state->application.beginTransform(quantum::editor::TransformTarget::TrackStart,
+            static_cast<quantum::editor::StartPoseTransformMode>(command->mode),
+            static_cast<quantum::editor::StartPoseTransformAxis>(command->axis));
+    });
+}
+QnResult QN_CALL qn_transform_preview(QnSession handle, uint64_t token, double amount, QnError* error)
+{
+    return boundary(error, [&] {
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        try { requireRevision(*state, state->application.transformRevision(token)); }
+        catch (const Failure&) { state->application.cancelTransform(); throw; }
+        state->application.previewTransform(token, amount);
+    });
+}
+QnResult QN_CALL qn_transform_finish(QnSession handle, uint64_t token, uint32_t commit, QnError* error)
+{
+    return boundary(error, [&] {
+        if (commit > 1) throw std::invalid_argument("Unknown transform finish operation.");
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        if (commit)
+        {
+            try { requireRevision(*state, state->application.transformRevision(token)); }
+            catch (const Failure&) { state->application.cancelTransform(); throw; }
+        }
+        state->application.finishTransform(token, commit != 0);
+    });
+}
+QnResult QN_CALL qn_viewport_transform_intent(QnSession handle, QnTransformIntent* intent, QnError* error)
+{
+    bool busy = false;
+    const auto result = boundary(error, [&] {
+        if (!intent) throw std::invalid_argument("Missing transform intent output.");
+        *intent = {};
+        auto state = session(handle); std::unique_lock lock(state->mutex, std::try_to_lock);
+        if (!lock.owns_lock()) { busy = true; return; }
+        requireOpen(*state);
+        if (!state->viewport) throw Failure(QN_UNAVAILABLE, "Viewport is not open.");
+        state->viewport->requireOwnerThread(); *intent = state->viewport->takeTransformIntent();
+    });
+    return busy ? QN_BUSY : result;
+}
+QnResult QN_CALL qn_viewport_cancel_transform(QnSession handle, QnError* error)
+{
+    return boundary(error, [&] {
+        auto state = session(handle); std::lock_guard lock(state->mutex); requireOpen(*state);
+        if (!state->viewport) return;
+        state->viewport->requireOwnerThread(); state->viewport->cancelTransformInput();
     });
 }

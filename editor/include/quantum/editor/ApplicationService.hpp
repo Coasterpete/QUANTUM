@@ -37,6 +37,9 @@ namespace quantum::editor
     };
 
     enum class ProfileOwner { Region, Device };
+    // This small authored-transform seam currently targets Track Start. Add a
+    // concrete target only when its workspace migrates; no scene graph needed.
+    enum class TransformTarget { TrackStart };
     struct ProfileTarget
     {
         ProfileOwner owner = ProfileOwner::Region;
@@ -92,6 +95,18 @@ namespace quantum::editor
         void save(const std::filesystem::path& path);
         void setRegionLength(std::size_t index, double meters, const Publish& publish = {});
         void setInitialSpeed(double metersPerSecond, const Publish& publish = {});
+        void setTrackStartPosition(const glm::dvec3& meters, const Publish& publish = {});
+        void setTrackStartAngles(const glm::dvec3& pitchYawRollDegrees, const Publish& publish = {});
+        [[nodiscard]] std::uint64_t beginTransform(TransformTarget target,
+            StartPoseTransformMode mode, StartPoseTransformAxis axis);
+        // Cumulative SI metres / radians relative to the gesture's original
+        // pose. Invalid proposals preserve the last accepted candidate.
+        void previewTransform(std::uint64_t token, double amount);
+        void finishTransform(std::uint64_t token, bool commit, const Publish& publish = {});
+        void cancelTransform() noexcept;
+        [[nodiscard]] std::uint64_t transformRevision(std::uint64_t token) const;
+        [[nodiscard]] std::optional<coaster::AuthoredStartPose> transformPreview() const noexcept;
+        [[nodiscard]] std::uint64_t transformPresentationRevision() const noexcept { return transformPresentationRevision_; }
         void editRegionProfile(std::size_t region, ProfileChannel channel,
             ProfileEdit edit, const Publish& publish = {});
         void editDeviceProfile(coaster::TrackDeviceId device, ProfileEdit edit,
@@ -148,6 +163,17 @@ namespace quantum::editor
     private:
         void replace(PreparedDocument prepared);
         void edit(AuthoredTrackEditTransaction transaction, const Publish& publish);
+        void setTrackStartPose(const coaster::AuthoredStartPose& pose, const Publish& publish);
+        struct TransformGesture
+        {
+            std::uint64_t token, revision;
+            TransformTarget target;
+            StartPoseTransformMode mode;
+            StartPoseTransformAxis axis;
+            coaster::AuthoredStartPose original, candidate;
+        };
+        std::optional<TransformGesture> transform_;
+        std::uint64_t nextTransformToken_ = 1, transformPresentationRevision_ = 1;
         struct ProfileDrag
         {
             std::uint64_t token, revision;

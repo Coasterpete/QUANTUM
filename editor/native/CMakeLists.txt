@@ -1,4 +1,4 @@
-add_library(QuantumNative SHARED QuantumNative.cpp NativeViewport.cpp)
+add_library(QuantumNative SHARED QuantumNative.cpp NativeViewport.cpp NativeViewport.Placement.cpp)
 target_include_directories(QuantumNative PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(QuantumNative PRIVATE QuantumApplication SDL3::SDL3 imgui::imgui)
 target_compile_definitions(QuantumNative PRIVATE QUANTUM_NATIVE_EXPORTS)
@@ -12,6 +12,9 @@ if(BUILD_TESTING)
     add_executable(QuantumSupportBoundaryTests QuantumSupportBoundaryTests.cpp)
     target_link_libraries(QuantumSupportBoundaryTests PRIVATE QuantumNative Quantum::Core)
     add_test(NAME QuantumApplication.SupportBoundary COMMAND QuantumSupportBoundaryTests)
+    add_executable(QuantumPlacementBoundaryTests QuantumPlacementBoundaryTests.cpp)
+    target_link_libraries(QuantumPlacementBoundaryTests PRIVATE QuantumNative Quantum::Core)
+    add_test(NAME QuantumApplication.PlacementBoundary COMMAND QuantumPlacementBoundaryTests)
 endif()
 add_custom_command(TARGET QuantumNative POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:QuantumNative>/shaders"

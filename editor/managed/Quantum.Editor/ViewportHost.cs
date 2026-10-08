@@ -11,6 +11,8 @@ public sealed class ViewportHost : NativeControlHost
     public uint PresentationMode { get; set; }
     public event Action<string>? Failed;
     public event Action<uint>? Shortcuts;
+    public event Action<TransformIntent>? TransformInput;
+    public event Action? ClosingViewport;
     public bool IsReady { get; private set; }
     public uint FrameCount { get; private set; }
     private readonly DispatcherTimer timer;
@@ -30,10 +32,11 @@ public sealed class ViewportHost : NativeControlHost
             if (!IsReady || Session is null || e.KeyModifiers != KeyModifiers.None) return;
             var forward = e.Key == Key.W ? 1 : e.Key == Key.S ? -1 : 0;
             var lateral = e.Key == Key.A ? -1 : e.Key == Key.D ? 1 : 0;
-            if (e.Key != Key.F && forward == 0 && lateral == 0) return;
+            if (e.Key != Key.F && e.Key != Key.Escape && forward == 0 && lateral == 0) return;
             try
             {
-                if (e.Key == Key.F) Session.Camera(ViewportAction.Frame);
+                if (e.Key == Key.Escape) { Session.CancelViewportTransform(); Shortcuts?.Invoke(512); }
+                else if (e.Key == Key.F) Session.Camera(ViewportAction.Frame);
                 else Session.Camera(ViewportAction.Move, forward, lateral, seconds: .05);
                 e.Handled = true;
             }
@@ -55,6 +58,8 @@ public sealed class ViewportHost : NativeControlHost
                 FrameCount++;
                 var intents = Session.TakeViewportShortcuts();
                 if (intents != 0) Shortcuts?.Invoke(intents);
+                var transform = Session.TakeTransformIntent();
+                if (transform.Phase != 0) TransformInput?.Invoke(transform);
             }
             catch (Exception error) { timer.Stop(); Failed?.Invoke(error.Message); }
         };
@@ -81,6 +86,7 @@ public sealed class ViewportHost : NativeControlHost
     {
         timer.Stop();
         if (!IsReady) return;
+        ClosingViewport?.Invoke();
         Session?.CloseViewport();
         IsReady = false;
     }

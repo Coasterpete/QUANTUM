@@ -121,6 +121,7 @@ namespace quantum::editor
 
     void ApplicationService::replace(PreparedDocument prepared)
     {
+        cancelTransform();
         profileDrag_.reset();
         centerline_.setTrackStyle(prepared.track.trackStyle());
         track_ = std::move(prepared.track);

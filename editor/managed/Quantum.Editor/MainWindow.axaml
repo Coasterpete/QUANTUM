@@ -26,7 +26,7 @@
         <MenuItem Header="_Undo" InputGesture="Ctrl+Z" Command="{Binding UndoCommand}" />
         <MenuItem Header="_Redo" InputGesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
       </MenuItem>
-      <MenuItem Header="_View"><MenuItem Header="Frame track" Command="{Binding FrameCommand}" /></MenuItem>
+      <MenuItem Header="_View"><MenuItem Header="Frame track / layout" Command="{Binding FrameCommand}" /><MenuItem Header="Frame Track Start" Command="{Binding FrameTrackStartCommand}" /></MenuItem>
       <MenuItem Header="_Simulation">
         <MenuItem Header="Play" Command="{Binding PlayCommand}" />
         <MenuItem Header="Pause" Command="{Binding PauseCommand}" />
@@ -55,7 +55,7 @@
       <Border Classes="pane" MinWidth="190" IsVisible="{Binding IsRouteWorkspace}">
         <Grid RowDefinitions="Auto,*">
           <Border Padding="16,16,16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
-            <StackPanel Spacing="6"><TextBlock Classes="heading" Text="ROUTE" /><TextBlock Text="Authored Regions" FontSize="19" /><TextBlock Classes="muted" Text="{Binding RouteSummary}" FontSize="12" /></StackPanel>
+            <StackPanel Spacing="6"><TextBlock Classes="heading" Text="ROUTE" /><Button Content="Track Start / Layout" Command="{Binding SelectTrackStartCommand}" /><TextBlock Text="Authored Regions" FontSize="19" /><TextBlock Classes="muted" Text="{Binding RouteSummary}" FontSize="12" /></StackPanel>
           </Border>
           <ListBox x:Name="RouteList" Grid.Row="1" ItemsSource="{Binding Snapshot.Route}" SelectedItem="{Binding Selected}" Background="Transparent" BorderThickness="0">
             <ListBox.ItemTemplate>
@@ -83,12 +83,15 @@
       <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsRouteWorkspace}">
         <Grid RowDefinitions="Auto,*">
           <Border Padding="16,16,16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
-            <StackPanel Spacing="6"><TextBlock Classes="heading" Text="INSPECTOR" /><TextBlock Text="{Binding Selected.Name, TargetNullValue='Select a Region'}" FontSize="19" /><TextBlock Classes="muted" Text="{Binding Selected.Type, TargetNullValue='Choose an authored Region in Route'}" FontSize="12" /></StackPanel>
+            <StackPanel Spacing="6"><TextBlock Classes="heading" Text="INSPECTOR" /><TextBlock Text="Route / Layout" FontSize="19" /></StackPanel>
           </Border>
           <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="16" Spacing="12">
+              <local:TrackLayoutInspector />
+              <Separator />
               <StackPanel IsVisible="{Binding HasSelection}" Spacing="10">
                 <TextBlock Classes="heading" Text="REGION GEOMETRY" />
+                <TextBlock Text="{Binding Selected.Name}" FontSize="19" /><TextBlock Classes="muted" Text="{Binding Selected.Type}" />
                 <TextBlock Text="Length · meters" />
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6"><TextBox x:Name="LengthField" Text="{Binding Length}" PlaceholderText="Length in meters" /><Button Grid.Column="1" Content="Apply" Command="{Binding ApplyLengthCommand}" /></Grid>
                 <TextBlock Classes="muted" FontSize="12" Text="Rescales the Region's authored distance domain. Changes are validated and can be undone." TextWrapping="Wrap" />

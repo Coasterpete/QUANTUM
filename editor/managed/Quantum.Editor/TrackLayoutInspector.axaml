@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.TrackLayoutInspector" x:DataType="local:EditorViewModel">
+  <StackPanel Spacing="8">
+    <TextBlock Classes="heading" Text="TRACK LAYOUT" />
+    <TextBlock Text="Track Start" FontSize="19" />
+    <TextBlock Text="Place the whole coaster in the world." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+    <Button Content="Select Track Start" Command="{Binding SelectTrackStartCommand}" HorizontalAlignment="Stretch" />
+    <TextBlock Text="Position · metres" FontWeight="SemiBold" />
+    <Grid ColumnDefinitions="24,*,24" RowDefinitions="Auto,Auto,Auto" RowSpacing="5" ColumnSpacing="5">
+      <TextBlock Text="X" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding LayoutX}" IsEnabled="{Binding !InteractionActive}" /><TextBlock Grid.Column="2" Text="m" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="1" Text="Y" VerticalAlignment="Center" /><TextBox Grid.Row="1" Grid.Column="1" Text="{Binding LayoutY}" IsEnabled="{Binding !InteractionActive}" /><TextBlock Grid.Row="1" Grid.Column="2" Text="m" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="2" Text="Z" VerticalAlignment="Center" /><TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LayoutZ}" IsEnabled="{Binding !InteractionActive}" /><TextBlock Grid.Row="2" Grid.Column="2" Text="m" VerticalAlignment="Center" />
+    </Grid>
+    <Button Content="Apply position" Command="{Binding ApplyTrackStartPositionCommand}" HorizontalAlignment="Stretch" />
+    <TextBlock Text="Increase Z to raise the whole coaster." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+    <TextBlock Text="Orientation · degrees" FontWeight="SemiBold" Margin="0,6,0,0" />
+    <Grid ColumnDefinitions="48,*,24" RowDefinitions="Auto,Auto,Auto" RowSpacing="5" ColumnSpacing="5">
+      <TextBlock Text="Pitch" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding LayoutPitch}" IsEnabled="{Binding !InteractionActive}" /><TextBlock Grid.Column="2" Text="°" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="1" Text="Yaw" VerticalAlignment="Center" /><TextBox Grid.Row="1" Grid.Column="1" Text="{Binding LayoutYaw}" IsEnabled="{Binding !InteractionActive}" /><TextBlock Grid.Row="1" Grid.Column="2" Text="°" VerticalAlignment="Center" />
+      <TextBlock Grid.Row="2" Text="Roll" VerticalAlignment="Center" /><TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LayoutRoll}" IsEnabled="{Binding !InteractionActive}" /><TextBlock Grid.Row="2" Grid.Column="2" Text="°" VerticalAlignment="Center" />
+    </Grid>
+    <Button Content="Apply orientation" Command="{Binding ApplyTrackStartOrientationCommand}" HorizontalAlignment="Stretch" />
+    <TextBlock Text="Positive pitch turns the initial forward axis downward. Yaw turns +X toward +Y; roll turns +Y toward +Z." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+    <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+      <Button Content="Move" Command="{Binding MoveTrackStartCommand}" HorizontalAlignment="Stretch" />
+      <Button Grid.Column="1" Content="Rotate" Command="{Binding RotateTrackStartCommand}" HorizontalAlignment="Stretch" />
+    </Grid>
+    <Button Content="Frame Track Start" Command="{Binding FrameTrackStartCommand}" HorizontalAlignment="Stretch" />
+    <TextBlock Text="{Binding TrackStartStatus}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+    <TextBlock Text="{Binding PlacementPreview}" Classes="technical" FontSize="11" TextWrapping="Wrap" />
+  </StackPanel>
+</UserControl>

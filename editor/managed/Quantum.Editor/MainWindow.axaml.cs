@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Input;
 using Avalonia.Platform.Storage;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -25,10 +26,17 @@ public sealed partial class MainWindow : Window
         controller = new SessionController();
         model = new EditorViewModel(controller);
         DataContext = model;
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key != Key.Escape || !model.InteractionActive) return;
+            _ = model.EndTransformAsync(false); _ = model.EndProfileDragAsync(false); e.Handled = true;
+        }, RoutingStrategies.Tunnel);
         model.PickFile = PickFile;
         model.ConfirmUnsaved = ConfirmUnsaved;
         viewport = Viewport;
         ConnectViewport(viewport);
+        model.TransformCanceled += CancelViewportTransform;
+        Deactivated += (_, _) => { _ = model.EndTransformAsync(false); };
         // Read Latest in a bounded UI timer: worker publication cannot queue
         // unbounded dispatcher callbacks while a file dialog blocks the UI.
         var snapshots = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -60,6 +68,14 @@ public sealed partial class MainWindow : Window
         host.PresentationMode = (uint)Math.Max(0, PresentationChoice.SelectedIndex);
         host.Failed += error => model.Error = error;
         host.Shortcuts += HandleViewportShortcuts;
+        host.TransformInput += intent => { _ = model.ReceiveTransformIntentAsync(intent); };
+        host.ClosingViewport += () => { _ = model.EndTransformAsync(false); };
+    }
+    private void CancelViewportTransform()
+    {
+        if (!viewport.IsReady) return;
+        try { viewport.Session?.CancelViewportTransform(); }
+        catch (Exception error) { model.Error = error.Message; }
     }
     internal void RecreateViewport()
     {
@@ -106,6 +122,7 @@ public sealed partial class MainWindow : Window
     private void HandleViewportShortcuts(uint intents)
     {
         if ((intents & 256) != 0) viewport.Focus();
+        if ((intents & 512) != 0) { _ = model.EndTransformAsync(false); _ = model.EndProfileDragAsync(false); }
         foreach (var (bit, command) in new (uint, EditorCommand)[]
         {
             (1, model.UndoCommand), (2, model.RedoCommand), (4, model.SaveCommand),

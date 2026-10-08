@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-/* ABI 3: 64-bit process, natural 8-byte alignment, UTF-8 strings.
+/* ABI 4: 64-bit process, natural 8-byte alignment, UTF-8 strings.
    Tokens are non-reused IDs, never addresses. All buffers are caller-owned.
    Calls are serialized per session; viewport calls require its UI thread. */
 typedef uint64_t QnSession;
@@ -43,6 +43,40 @@ typedef struct QnCommand {
     uint64_t expected_revision;
     double value;
 } QnCommand;
+
+/* Position is SI metres; orientation is the canonical native quaternion.
+   Inspector angles are degrees, Z(yaw)*Y(pitch)*X(roll), converted natively.
+   Positive pitch turns +X toward -Z. Candidate is transient, never saved. */
+typedef struct QnPose { double x, y, z, qw, qx, qy, qz; } QnPose;
+typedef struct QnPlacementSnapshot {
+    uint32_t size, version;
+    uint64_t revision, selection_revision, presentation_revision;
+    uint32_t selected, mode, active, preview;
+    QnPose authored, candidate;
+    double pitch, yaw, roll;
+} QnPlacementSnapshot;
+typedef struct QnTransformCommand {
+    uint64_t expected_revision, selection_revision;
+    uint32_t target, mode, axis, reserved; /* target 0 Track Start; mode 1 Move, 2 Rotate; axis 0/1/2 X/Y/Z */
+} QnTransformCommand;
+typedef struct QnTransformIntent {
+    uint64_t id, revision, selection_revision;
+    uint32_t phase, target, mode, axis; /* phase 0 none, 1 preview, 2 release, 3 cancel */
+    double amount; /* cumulative SI metres or radians */
+} QnTransformIntent;
+QN_API QnResult QN_CALL qn_placement_snapshot(QnSession session, QnPlacementSnapshot* snapshot, QnError* error);
+/* operation 0 position XYZ metres; 1 orientation Pitch/Yaw/Roll degrees. */
+QN_API QnResult QN_CALL qn_placement_edit(QnSession session, uint64_t revision,
+    uint32_t operation, double x, double y, double z, QnError* error);
+QN_API QnResult QN_CALL qn_track_start_select(QnSession session, uint64_t revision,
+    uint32_t selected, uint32_t mode, QnError* error);
+QN_API QnResult QN_CALL qn_transform_begin(QnSession session, const QnTransformCommand* command, uint64_t* token, QnError* error);
+QN_API QnResult QN_CALL qn_transform_preview(QnSession session, uint64_t token, double amount, QnError* error);
+QN_API QnResult QN_CALL qn_transform_finish(QnSession session, uint64_t token, uint32_t commit, QnError* error);
+/* UI-thread input is coalesced to the latest cumulative proposal plus its
+   terminal phase. Even an entire drag in one frame retains a single ID. */
+QN_API QnResult QN_CALL qn_viewport_transform_intent(QnSession session, QnTransformIntent* intent, QnError* error);
+QN_API QnResult QN_CALL qn_viewport_cancel_transform(QnSession session, QnError* error);
 
 /* Authored workspace values. Curves are sampled natively for display only;
    edits always change analytic profiles, never these samples. */
@@ -176,14 +210,16 @@ QN_API QnResult QN_CALL qn_viewport_open(QnSession session, uint32_t platform, u
 QN_API QnResult QN_CALL qn_viewport_frame(QnSession session, uint32_t width, uint32_t height, QnError* error);
 QN_API QnResult QN_CALL qn_viewport_close(QnSession session, QnError* error);
 /* Bits: Undo=1, Redo=2, Save=4, Open=8, New=16, SaveAs=32,
-   next pane=64, previous pane=128, synchronize host focus=256.
+   next pane=64, previous pane=128, synchronize host focus=256, cancel=512.
    Consumes pending native-child input intents. */
 QN_API QnResult QN_CALL qn_viewport_shortcuts(QnSession session, uint32_t* shortcuts, QnError* error);
 /* Display-only: 0 shaded, 1 wireframe, 2 shaded/wireframe, 3 reference curves. */
 QN_API QnResult QN_CALL qn_viewport_presentation(QnSession session, uint32_t mode, QnError* error);
 /* 1=orbit radians, 2=pan physical pixels, 3=wheel, 4=frame, 5=local move,
    6=focus borrowed child after managed keyboard navigation, 7=frame support selection,
-   8=select support at normalized x/y (same native picking as SDL clicks). */
+   8=select support at normalized x/y (same native picking as SDL clicks),
+   9=frame Track Start; 10/11/12=normalized transform down/move/up,
+   13=cancel pointer input (same path used by SDL and bounded smoke). */
 QN_API QnResult QN_CALL qn_viewport_input(QnSession session, uint32_t action,
     double x, double y, double z, double seconds, QnError* error);
 #ifdef __cplusplus

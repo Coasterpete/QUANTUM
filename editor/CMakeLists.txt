@@ -1,6 +1,7 @@
 add_library(QuantumApplication STATIC
     src/ApplicationService.cpp
     src/ApplicationService.Supports.cpp
+    src/ApplicationService.Placement.cpp
     src/CenterlineVisualization.cpp
     src/DocumentHistory.cpp
     src/DocumentState.cpp
@@ -14,7 +15,8 @@ add_library(QuantumApplication STATIC
     src/TrackDevicePresentation.cpp
     src/TransitionEditorModel.cpp
     src/ViewportCamera.cpp
-    src/ViewportTrackAnchors.cpp)
+    src/ViewportTrackAnchors.cpp
+    src/ViewportTransformHandles.cpp)
 if(WIN32)
     target_sources(QuantumApplication PRIVATE src/DocumentFileWindows.cpp)
 endif()
@@ -32,6 +34,10 @@ if(BUILD_TESTING)
     add_executable(QuantumSupportsWorkspaceTests ${PROJECT_SOURCE_DIR}/tests/SupportsWorkspaceTests.cpp)
     target_link_libraries(QuantumSupportsWorkspaceTests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.SupportsWorkspace COMMAND QuantumSupportsWorkspaceTests)
+    add_executable(QuantumTrackPlacementTests ${PROJECT_SOURCE_DIR}/tests/TrackPlacementTests.cpp)
+    target_link_libraries(QuantumTrackPlacementTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TrackPlacement COMMAND QuantumTrackPlacementTests
+        "${PROJECT_SOURCE_DIR}/smoke-tests/modern-steel-validation.quantum")
 endif()
 
 if(QUANTUM_ENABLE_HYBRID_EDITOR)

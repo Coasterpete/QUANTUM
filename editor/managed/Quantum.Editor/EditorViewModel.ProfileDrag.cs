@@ -15,10 +15,11 @@ public sealed partial class EditorViewModel
     private bool endingDrag;
     private bool snapEnabled;
     private string distanceSnap = "0.5", valueSnap = "0.1";
-    public bool InteractionActive => dragTarget is not null;
+    private bool ProfileInteractionActive => dragTarget is not null;
+    public bool InteractionActive => ProfileInteractionActive || TransformInteractionActive;
     public event Action? ProfileDragCanceled;
     public IReadOnlyList<ProfileSegment> GraphProfiles => previewProfiles ?? VisibleProfiles;
-    public string DragStatus => InteractionActive ? "Native profile preview · release to commit · Esc cancels"
+    public string DragStatus => ProfileInteractionActive ? "Native profile preview · release to commit · Esc cancels"
         : "Circles: value · squares: distance · crossed squares: pinned · wheel: zoom · middle drag: pan";
     public bool SnapEnabled { get => snapEnabled; set { snapEnabled = value; Changed(); } }
     public string DistanceSnap { get => distanceSnap; set { distanceSnap = value; Changed(); } }
@@ -59,7 +60,7 @@ public sealed partial class EditorViewModel
     }
     public void QueueProfileDrag(double value)
     {
-        if (!InteractionActive || endingDrag) return;
+        if (!ProfileInteractionActive || endingDrag) return;
         var snap = 0.0;
         if (SnapEnabled)
         {
@@ -108,7 +109,7 @@ public sealed partial class EditorViewModel
     }
     public async Task EndProfileDragAsync(bool commit)
     {
-        if (!InteractionActive) return;
+        if (!ProfileInteractionActive) return;
         var generation = dragGeneration;
         if (!commit)
         {
@@ -125,7 +126,7 @@ public sealed partial class EditorViewModel
         await dragStart;
         StartPreviewPump();
         await previewPump;
-        if (generation != dragGeneration || !InteractionActive) return;
+        if (generation != dragGeneration || !ProfileInteractionActive) return;
         Busy = true;
         try
         {
@@ -142,7 +143,11 @@ public sealed partial class EditorViewModel
         }
         finally { Busy = false; }
     }
-    private void CancelForSelection() { if (InteractionActive) _ = EndProfileDragAsync(false); }
+    private void CancelForSelection()
+    {
+        if (ProfileInteractionActive) _ = EndProfileDragAsync(false);
+        if (TransformInteractionActive && !publishingSnapshot) _ = EndTransformAsync(false);
+    }
     private void ClearDrag()
     {
         dragTarget = null; dragToken = 0; pendingDrag = null; previewProfiles = null; endingDrag = false;

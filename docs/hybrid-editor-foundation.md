@@ -63,7 +63,7 @@ safety fallback, not the application's shutdown mechanism.
 
 ## Interop contract
 
-`editor/native/QuantumNative.h` defines ABI 3 for 64-bit processes with natural
+`editor/native/QuantumNative.h` defines ABI 4 for 64-bit processes with natural
 8-byte alignment. It contains fixed-width values, caller-owned buffers, UTF-8
 paths, non-reused numeric session tokens, explicit results, and bounded errors.
 No C++ objects, Vulkan handles, or exceptions cross it. Snapshot size/version
@@ -173,6 +173,7 @@ can reference the existing generated PNGs when packaging is implemented.
 
 | Workflow | Hybrid responsibility and migration status |
 | --- | --- |
+| Track Start / Layout | Native numeric position/orientation, marker selection, Move/Rotate gestures, staged ghost preview and one-action history are available; see [placement handoff](hybrid-track-start-placement.md). |
 | Timeline / Transition Editor | Native profiles, graph selection, value/boundary dragging, optional snapping, pan/zoom and numeric editing are available; full diagnostics parity remains. |
 | Track Devices | Native create/delete/select, interval/force/enable, Constant/Custom, direct custom-profile editing and selected-interval viewport lines are available; live device-force diagnostics remain. |
 | Train | Preserve Configuration → native Preview → Summary/Diagnostics as a dedicated workspace; the current footer summary is not the final Train UI. |

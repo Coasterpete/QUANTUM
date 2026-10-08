@@ -97,6 +97,7 @@ using (var deviceSession = new Session())
 }
 await TimelineChecks.Run();
 await SupportChecks.Run();
+await PlacementChecks.Run(fixture);
 var disposedController = new SessionController();
 disposedController.Dispose(); disposedController.Dispose();
 Expect<ObjectDisposedException>(() => disposedController.Submit(_ => { }));
