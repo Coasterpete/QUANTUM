@@ -13,7 +13,10 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
     <AvaloniaResource Include="../../assets/fonts/Overpass/overpass-regular.otf" Link="Assets/overpass-regular.otf" />
-    <AvaloniaResource Include="../../assets/fonts/Red_Hat_Mono/static/RedHatMono-Regular.ttf" Link="Assets/RedHatMono-Regular.ttf" />
+    <AvaloniaResource Include="../../assets/fonts/Overpass/overpass-semibold.otf" Link="Assets/overpass-semibold.otf" />
+    <AvaloniaResource Include="../../assets/fonts/Overpass/overpass-mono-regular.otf" Link="Assets/overpass-mono-regular.otf" />
+    <None Include="../../assets/fonts/Overpass/LICENSE.md" Link="licenses/Overpass/LICENSE.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../assets/fonts/Overpass/README.md" Link="licenses/Overpass/README.md" CopyToOutputDirectory="PreserveNewest" />
     <AvaloniaResource Include="../../../assets/icons/quantum/quantum.ico" Link="Assets/quantum.ico" />
   </ItemGroup>
 </Project>

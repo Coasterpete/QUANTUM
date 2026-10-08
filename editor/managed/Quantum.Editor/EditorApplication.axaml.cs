@@ -6,9 +6,11 @@ using Avalonia.Markup.Xaml;
 namespace Quantum.Editor;
 public sealed partial class EditorApplication : Application
 {
+    public IReadOnlyList<string> FontDiagnostics { get; private set; } = [];
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
     public override void OnFrameworkInitializationCompleted()
     {
+        FontDiagnostics = QuantumFonts.Initialize(this);
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             try

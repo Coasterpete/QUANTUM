@@ -3,14 +3,14 @@
     <DataTemplate x:Key="TrainFieldTemplate" x:DataType="local:TrainField">
       <Grid ColumnDefinitions="*,110" ColumnSpacing="6" Margin="0,3">
         <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-        <TextBox Grid.Column="1" Text="{Binding Value}"/>
+        <TextBox Classes="numeric" Grid.Column="1" Text="{Binding Value}"/>
       </Grid>
     </DataTemplate>
   </UserControl.Resources>
   <Grid RowDefinitions="Auto,*,Auto">
     <StackPanel Margin="14" Spacing="6">
       <TextBlock Classes="heading" Text="SELECTED CAR"/>
-      <TextBlock Text="{Binding SelectedCar.Name}" FontSize="18"/>
+      <TextBlock Text="{Binding SelectedCar.Name}" FontSize="{DynamicResource QuantumSectionSize}"/>
       <TextBlock IsVisible="{Binding !HasCar}" Text="Select a car in the consist." Classes="muted"/>
     </StackPanel>
     <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
@@ -59,7 +59,7 @@
         </local:InspectorSection>
         <local:InspectorSection Header="Advanced" SectionKey="train.advanced">
           <StackPanel Spacing="6">
-            <TextBlock Text="{Binding CarEngineeringSummary}" TextWrapping="Wrap" Classes="muted" FontSize="11"/>
+            <TextBlock Text="{Binding CarEngineeringSummary}" TextWrapping="Wrap" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}"/>
             <ItemsControl ItemsSource="{Binding CarAdvancedFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
             <Button Content="Apply with box inertia" Command="{Binding BoxInertiaCommand}" ToolTip.Tip="Explicit native uniform-box approximation from staged mass and body dimensions. Commits all car fields."/>
             <Button Content="Validate proposal" Command="{Binding ValidateCarCommand}" ToolTip.Tip="Check the proposal without committing. Results appear in Diagnostics."/>
@@ -70,11 +70,11 @@
             <TextBlock Text="Train name"/>
             <TextBox Text="{Binding AuthoredTrainName}"/>
             <TextBlock Text="Default connector · m"/>
-            <TextBox Text="{Binding DefaultConnectorLength}"/>
+            <TextBox Classes="numeric" Text="{Binding DefaultConnectorLength}"/>
             <ItemsControl ItemsSource="{Binding TrainDefaultFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
             <TextBlock IsVisible="{Binding TrainDefaultsPending}" Text="● Modified defaults · not applied" Classes="pending"/>
             <WrapPanel>
-              <Button Content="Apply defaults" Command="{Binding ApplyTrainDefaultsCommand}"/>
+              <Button Classes="primary" Content="Apply defaults" Command="{Binding ApplyTrainDefaultsCommand}"/>
               <Button Content="Revert defaults" Command="{Binding RevertTrainDefaultsCommand}"/>
             </WrapPanel>
           </StackPanel>
@@ -82,7 +82,7 @@
       </StackPanel>
     </ScrollViewer>
     <StackPanel Grid.Row="2" Margin="10" Spacing="5" IsVisible="{Binding HasCar}">
-      <TextBlock Text="Apply car stops and resets the preview." Classes="muted" FontSize="11"/>
+      <TextBlock Text="Apply car stops and resets the preview." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}"/>
       <TextBlock IsVisible="{Binding CarPending}" Text="● Modified car · not applied" Classes="pending"/>
       <WrapPanel>
         <Button Content="Apply car" Classes="primary" Command="{Binding ApplyCarCommand}"/>

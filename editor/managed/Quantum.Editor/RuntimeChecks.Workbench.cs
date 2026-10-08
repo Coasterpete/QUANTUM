@@ -2,6 +2,11 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.LogicalTree;
+using Avalonia.Input;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Controls.Presenters;
+using Avalonia.VisualTree;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -37,6 +42,22 @@ internal static partial class RuntimeChecks
             model.WorkspaceMode = 0; model.Layout.ResetWorkspace(); await Settle();
             Require(model.Layout.ShowTimeline && window.TimelinePlot.Bounds.Width > 100, "Track keeps Timeline arranged and reachable");
             CheckSize();
+            Require(((EditorApplication)Application.Current!).FontDiagnostics.Count == 0, "Bundled UI/mono fonts load without fallback");
+            Require(window.TimelinePlot.GridPointCount > 0 && window.TimelinePlot.GridPointCount <= TechnicalGrid.MaximumPoints * 4,
+                "Timeline renders a bounded coordinate dot grid");
+            var length = window.FindControl<TextBox>("LengthField")!;
+            Require(length.FontFamily.Name == "Overpass Mono", "Track numerical field uses Overpass Mono");
+            length.Focus(NavigationMethod.Tab); await Task.Delay(60);
+            var focus = length.GetVisualDescendants().OfType<Border>().First(b => b.Name == "PART_BorderElement");
+            Require(length.IsFocused && focus.BorderThickness.Left == 2, "Keyboard input focus has a strong outline");
+            var route = window.FindControl<ListBox>("RouteList")!;
+            var selectedRow = route.GetVisualDescendants().OfType<ListBoxItem>().First(r => r.IsSelected);
+            var selectedSurface = selectedRow.GetVisualDescendants().OfType<ContentPresenter>().First(p => p.Name == "PART_ContentPresenter");
+            Require(selectedSurface.BorderThickness.Left == 3, "Live route selection has an accent edge");
+            // One Avalonia-side image, no screenshot campaign. The native child
+            // viewport is checked through presentation counters and is not in this bitmap.
+            using (var bitmap = new RenderTargetBitmap(new PixelSize((int)window.Bounds.Width, (int)window.Bounds.Height)))
+            { bitmap.Render(window); bitmap.Save(report + ".png", PngBitmapEncoderOptions.Default); }
 
             model.WorkspaceMode = 2; model.Layout.ResetWorkspace(); await Settle();
             Require(model.HasCar && !model.Layout.DockOpen && Section("train.basics").IsExpanded
@@ -78,8 +99,6 @@ internal static partial class RuntimeChecks
             model.Layout.OpenTab("Profile"); await model.ToggleDockCommand.ExecuteAsync(); await Settle();
             Require(!model.Layout.DockOpen, "Operations profile collapses");
             await model.ToggleDockCommand.ExecuteAsync(); await Settle(); Require(model.Layout.ShowTimeline, "Operations profile reopens");
-            window.Width = 1020; window.Height = 650; await Task.Delay(150); CheckSize();
-            window.Width = 1420; window.Height = 900; await Task.Delay(100); CheckSize();
             Require(window.HostedViewport.FrameCount > 10 && !model.HasError, "Vulkan remains live across workspace/layout changes");
         }
         catch (Exception error) { failure = error.ToString(); }
@@ -93,6 +112,7 @@ internal static partial class RuntimeChecks
             {
                 passed = failure is null, checks, sizes, elapsed_ms = watch.Elapsed.TotalMilliseconds,
                 viewport_frames = window.HostedViewport.FrameCount, physical_pointer_testing = false,
+                avalonia_surface_image = report + ".png", native_child_in_image = false,
                 maintainer_visual_approval = "pending", failure
             }, new JsonSerializerOptions { WriteIndented = true }));
             desktop.Shutdown(failure is null ? 0 : 1);

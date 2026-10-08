@@ -12,8 +12,8 @@
         <ComboBoxItem Content="Landing"/>
       </ComboBox>
       <TextBlock Text="Start / end station · metres"/>
-      <TextBox Text="{Binding InfrastructureStart}"/>
-      <TextBox Text="{Binding InfrastructureEnd}"/>
+      <TextBox Classes="numeric" Text="{Binding InfrastructureStart}"/>
+      <TextBox Classes="numeric" Text="{Binding InfrastructureEnd}"/>
       <ComboBox SelectedIndex="{Binding InfrastructureSide}" HorizontalAlignment="Stretch">
         <ComboBoxItem Content="Left"/>
         <ComboBoxItem Content="Right"/>
@@ -21,10 +21,10 @@
       <local:InspectorSection Header="Geometry / appearance / access" SectionKey="supports.infrastructure-details">
         <StackPanel Spacing="6">
           <TextBlock Text="Lateral / vertical offset · metres"/>
-          <TextBox Text="{Binding InfrastructureLateral}"/>
-          <TextBox Text="{Binding InfrastructureVertical}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureLateral}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureVertical}"/>
           <TextBlock Text="Width · metres"/>
-          <TextBox Text="{Binding InfrastructureWidth}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureWidth}"/>
           <ComboBox SelectedIndex="{Binding InfrastructureDeck}" HorizontalAlignment="Stretch">
             <ComboBoxItem Content="Solid plate"/>
             <ComboBoxItem Content="Grating"/>
@@ -38,26 +38,26 @@
           <CheckBox Content="Inner guardrail" IsChecked="{Binding InfrastructureInner}"/>
           <CheckBox Content="Outer guardrail" IsChecked="{Binding InfrastructureOuter}"/>
           <TextBlock Text="Rail height / post spacing · metres"/>
-          <TextBox Text="{Binding InfrastructureRailHeight}"/>
-          <TextBox Text="{Binding InfrastructurePostSpacing}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureRailHeight}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructurePostSpacing}"/>
           <CheckBox Content="Use explicit world endpoints" IsChecked="{Binding InfrastructureWorld}"/>
           <StackPanel IsVisible="{Binding InfrastructureWorld}" Spacing="5">
             <TextBlock Text="Start X, Y, Z · metres"/>
-            <TextBox Text="{Binding InfrastructureWorldStart}"/>
+            <TextBox Classes="numeric" Text="{Binding InfrastructureWorldStart}"/>
             <TextBlock Text="End X, Y, Z · metres"/>
-            <TextBox Text="{Binding InfrastructureWorldEnd}"/>
+            <TextBox Classes="numeric" Text="{Binding InfrastructureWorldEnd}"/>
           </StackPanel>
           <TextBlock Text="Stair maximum rise · metres"/>
-          <TextBox Text="{Binding InfrastructureRise}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureRise}"/>
           <TextBlock Text="Access gate IDs · comma separated"/>
-          <TextBox Text="{Binding InfrastructureGates}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureGates}"/>
         </StackPanel>
       </local:InspectorSection>
       <Button Content="Inspect referenced gate / Operations" Command="{Binding SelectInfrastructureGateCommand}"/>
       <Button Classes="primary" IsVisible="{Binding !HasInfrastructure}" Content="Create infrastructure" Command="{Binding CreateInfrastructureCommand}"/>
       <Button Classes="primary" IsVisible="{Binding HasInfrastructure}" Content="Apply infrastructure" Command="{Binding ApplyInfrastructureCommand}"/>
-      <Button IsVisible="{Binding HasInfrastructure}" Content="Remove infrastructure" Command="{Binding DeleteInfrastructureCommand}"/>
-      <TextBlock Text="ⓘ Details" ToolTip.Tip="Track-relative decks follow grade, bank and curves. World endpoints stay fixed. Stair routing is explicit; step geometry is procedural. Access motion and interlocks remain in Ride Operations." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+      <Button Classes="destructive" IsVisible="{Binding HasInfrastructure}" Content="Remove infrastructure" Command="{Binding DeleteInfrastructureCommand}"/>
+      <TextBlock Text="ⓘ Details" ToolTip.Tip="Track-relative decks follow grade, bank and curves. World endpoints stay fixed. Stair routing is explicit; step geometry is procedural. Access motion and interlocks remain in Ride Operations." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
     </StackPanel>
   </StackPanel>
 </UserControl>

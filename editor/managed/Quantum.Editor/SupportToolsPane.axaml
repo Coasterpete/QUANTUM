@@ -13,24 +13,24 @@
             <ComboBoxItem Content="Custom"/>
           </ComboBox>
           <TextBlock Text="Station · metres"/>
-          <TextBox Text="{Binding FrameStation}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameStation}"/>
           <TextBlock Text="Bent width / post spacing · metres"/>
-          <TextBox Text="{Binding FrameWidth}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameWidth}"/>
           <TextBlock Text="Foundation world Z · metres"/>
-          <TextBox Text="{Binding FrameElevation}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameElevation}"/>
           <TextBlock Text="Attachment vertical offset · metres"/>
-          <TextBox Text="{Binding FrameVertical}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameVertical}"/>
           <TextBlock Text="Post size · metres"/>
-          <TextBox Text="{Binding FramePost}"/>
+          <TextBox Classes="numeric" Text="{Binding FramePost}"/>
           <TextBlock Text="Beam depth · metres"/>
-          <TextBox Text="{Binding FrameBeam}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameBeam}"/>
           <TextBlock Text="Brace size · metres"/>
-          <TextBox Text="{Binding FrameBrace}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameBrace}"/>
           <TextBlock Text="Foundation footprint · metres"/>
-          <TextBox Text="{Binding FrameFooting}"/>
+          <TextBox Classes="numeric" Text="{Binding FrameFooting}"/>
           <Button Classes="primary" Content="Generate Frame" Command="{Binding GenerateFrameCommand}"/>
           <Button Content="Apply selected frame parameters" Command="{Binding RegenerateFrameCommand}" IsVisible="{Binding HasGeneratedFrame}"/>
-          <TextBlock Text="Creates editable native nodes and members. Parameter edits retain frame IDs and explicit member/material overrides. Existing Wooden Run generation remains available in the native editor." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock Text="Creates editable native nodes and members. Parameter edits retain frame IDs and explicit member/material overrides. Existing Wooden Run generation remains available in the native editor." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
         </StackPanel>
       </local:InspectorSection>
       <Button Content="Add infrastructure" Command="{Binding NewInfrastructureDraftCommand}" Classes="primary"/>

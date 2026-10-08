@@ -18,6 +18,19 @@ No generated instances, variable fonts, webfonts, or additional weights.
 The ImGui font atlas owns the font data; EditorFonts contains borrowed handles.
 Missing or unreadable bundled fonts retain the existing explicit startup error.
 
+## Avalonia workbench
+
+The managed workbench embeds Regular and Semibold Overpass plus Regular Overpass
+Mono, using these same unmodified v3.0.5 assets. `QuantumTokens.axaml` centralizes
+the families and type scale. Semibold supplies heading emphasis; Overpass Mono
+supplies numeric fields, graph rulers and technical/runtime readouts. The managed
+runtime copies this README and `LICENSE.md` into `licenses/Overpass/`.
+
+`QuantumFonts.Initialize` checks packaged assets and resolved family/weight at
+startup. Missing resources use a proportional or monospace fallback, with a named
+trace/stderr diagnostic; the managed window remains usable. This fallback policy
+is separate from the retained native ImGui font-atlas startup policy above.
+
 SHA-256 of upstream files:
 
 - `LICENSE.md`: `3236e099bead8e30bc7fff46c76728bc59c1c5dc9948b07440f5e62c81d3be54`

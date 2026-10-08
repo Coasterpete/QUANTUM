@@ -12,6 +12,11 @@ if (args is ["--verify-workbench-binding"])
     WorkbenchChecks.VerifyDockBinding();
     return;
 }
+if (args is ["--verify-visual", var repository])
+{
+    VisualChecks.Run(repository);
+    return;
+}
 var fixture = args.Single();
 for (var cycle = 0; cycle < 5; ++cycle)
 {

@@ -3,8 +3,8 @@
     <ScrollViewer IsVisible="{Binding Layout.ShowSummary}" HorizontalScrollBarVisibility="Disabled">
       <StackPanel Margin="16" Spacing="10">
         <TextBlock Classes="heading" Text="TRAIN SUMMARY"/>
-        <TextBlock Text="{Binding TrainSummary}" FontSize="20"/>
-        <TextBlock Text="{Binding TrainPreviewStatus}" Classes="muted" TextWrapping="Wrap"/>
+        <TextBlock Classes="technical" Text="{Binding TrainSummary}" FontSize="{DynamicResource QuantumSectionSize}"/>
+        <TextBlock Text="{Binding TrainPreviewStatus}" Classes="runtime" TextWrapping="Wrap"/>
         <local:InspectorSection Header="Engineering details" SectionKey="train.summary-details">
           <StackPanel Spacing="6">
             <TextBlock Text="{Binding TrainSummaryDetails}" Classes="technical" TextWrapping="Wrap" Margin="0,10"/>

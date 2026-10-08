@@ -1,21 +1,21 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.HardwareInspector" x:DataType="local:EditorViewModel">
   <StackPanel Spacing="6" IsVisible="{Binding HasDevice}">
     <TextBlock Classes="heading" Text="AUTHORED HARDWARE"/>
-    <TextBlock Text="{Binding SelectedDevice.Name}" FontSize="18"/>
-    <TextBlock Text="{Binding SelectedDevice.Summary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-    <TextBlock Text="Fields are staged. Apply stops and resets preview." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding SelectedDevice.Name}" FontSize="{DynamicResource QuantumSectionSize}"/>
+    <TextBlock Text="{Binding SelectedDevice.Summary}" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
+    <TextBlock Text="Fields are staged. Apply stops and resets preview." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
     <TextBlock Text="{Binding HardwarePendingStatus}" Classes="pending" TextWrapping="Wrap"/>
     <local:InspectorSection Header="Placement" SectionKey="operations.placement" ToolTip.Tip="Intervals can wrap station zero. Interval edits stretch the final Custom segment. Apply commits only placement, force and enabled state.">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="48,*,48,*" ColumnSpacing="5">
           <TextBlock Text="Start" VerticalAlignment="Center"/>
-          <TextBox Grid.Column="1" Text="{Binding DeviceStart}" MinHeight="28"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding DeviceStart}" MinHeight="28"/>
           <TextBlock Grid.Column="2" Text="End" VerticalAlignment="Center"/>
-          <TextBox Grid.Column="3" Text="{Binding DeviceEnd}" MinHeight="28"/>
+          <TextBox Classes="numeric" Grid.Column="3" Text="{Binding DeviceEnd}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="80,*,Auto" ColumnSpacing="5" IsVisible="{Binding HasForceHardware}">
-          <TextBlock Text="Force limit · N" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding DeviceForce}" MinHeight="28"/>
+          <TextBlock Text="Force limit · N" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding DeviceForce}" MinHeight="28"/>
         </Grid>
         <CheckBox Content="Enabled" IsChecked="{Binding DeviceEnabled}"/>
         <Button Classes="primary" Content="Apply placement" Command="{Binding ApplyDevicePropertiesCommand}" MinHeight="28" Padding="7,3"/>
@@ -24,8 +24,8 @@
     </local:InspectorSection>
     <StackPanel Spacing="5" IsVisible="{Binding HasHardwareSpeed}">
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-        <TextBlock Text="Command speed · m/s" VerticalAlignment="Center" FontSize="11"/>
-        <TextBox x:Name="HardwareSpeedField" Grid.Column="1" Text="{Binding HardwareSpeed}" MinHeight="28"/>
+        <TextBlock Text="Command speed · m/s" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+        <TextBox Classes="numeric" x:Name="HardwareSpeedField" Grid.Column="1" Text="{Binding HardwareSpeed}" MinHeight="28"/>
       </Grid>
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding HasHardwareDirection}">
@@ -36,15 +36,15 @@
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding IsLaunchHardware}">
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-        <TextBlock Text="Target speed · m/s" VerticalAlignment="Center" FontSize="11"/>
-        <TextBox Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28"/>
+        <TextBlock Text="Target speed · m/s" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+        <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28"/>
       </Grid>
       <TextBlock Classes="muted" Text="ⓘ Details" ToolTip.Tip="Limits propulsion in the selected direction; does not set velocity or brake. Blank removes the limit. Apply hardware configuration to commit." TextWrapping="Wrap"/>
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding IsBrakeHardware}">
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-        <TextBlock Text="Trim speed · m/s" VerticalAlignment="Center" FontSize="11"/>
-        <TextBox Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28"/>
+        <TextBlock Text="Trim speed · m/s" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+        <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28"/>
       </Grid>
       <CheckBox Content="Hold at zero target speed" IsChecked="{Binding HardwareHolding}"/>
     </StackPanel>
@@ -53,30 +53,30 @@
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding IsCableHardware}">
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-        <TextBlock Text="Catch return · seconds" VerticalAlignment="Center" FontSize="11"/>
-        <TextBox Grid.Column="1" Text="{Binding HardwareReturn}" MinHeight="28"/>
+        <TextBlock Text="Catch return · seconds" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+        <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareReturn}" MinHeight="28"/>
       </Grid>
       <CheckBox Content="Catch car initially available" IsChecked="{Binding HardwareAvailable}"/>
     </StackPanel>
     <StackPanel IsVisible="{Binding IsStationHardware}">
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Stop station · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding HardwareStop}" MinHeight="28"/>
+          <TextBlock Text="Stop station · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareStop}" MinHeight="28"/>
         </Grid>
     </StackPanel>
     <local:InspectorSection Header="Station / interlocks" SectionKey="operations.station" IsVisible="{Binding IsStationHardware}">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Alignment tolerance · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding HardwareAlignmentTolerance}" MinHeight="28"/>
+          <TextBlock Text="Alignment tolerance · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareAlignmentTolerance}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Stopped tolerance · m/s" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding HardwareStoppedTolerance}" MinHeight="28"/>
+          <TextBlock Text="Stopped tolerance · m/s" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareStoppedTolerance}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Downstream block ID" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding HardwareBlock}" MinHeight="28"/>
+          <TextBlock Text="Downstream block ID" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareBlock}" MinHeight="28"/>
         </Grid>
         <CheckBox Content="Require gates locked" IsChecked="{Binding HardwareRequireLocked}"/>
       </StackPanel>
@@ -84,8 +84,8 @@
     <local:InspectorSection Header="Gate references" SectionKey="operations.interlocks" IsVisible="{Binding HasGateReferences}">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Access gate IDs" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding HardwareGates}" MinHeight="28"/>
+          <TextBlock Text="Access gate IDs" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareGates}" MinHeight="28"/>
         </Grid>
         <TextBlock Classes="muted" Text="ⓘ Details" ToolTip.Tip="Comma-separated gate IDs. Referenced gates must be enabled and closed. Block ID 0 leaves the station unlinked." TextWrapping="Wrap"/>
       </StackPanel>
@@ -93,20 +93,20 @@
     <local:InspectorSection Header="Destinations / storage" SectionKey="operations.destinations" IsVisible="{Binding IsTransferHardware}">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Stopped tolerance · m/s" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding HardwareStoppedTolerance}" MinHeight="28"/>
+          <TextBlock Text="Stopped tolerance · m/s" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding HardwareStoppedTolerance}" MinHeight="28"/>
         </Grid>
         <TextBlock Text="Home alignment"/>
         <ComboBox ItemsSource="{Binding TransferAlignments}" SelectedItem="{Binding SelectedHomeAlignment}"/>
         <TextBlock Text="Destination / move target"/>
         <ComboBox ItemsSource="{Binding TransferAlignments}" SelectedItem="{Binding SelectedAlignment}"/>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Destination name" VerticalAlignment="Center" FontSize="11"/>
+          <TextBlock Text="Destination name" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
           <TextBox Grid.Column="1" Text="{Binding AlignmentName}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Lateral offset · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding AlignmentOffset}" MinHeight="28"/>
+          <TextBlock Text="Lateral offset · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding AlignmentOffset}" MinHeight="28"/>
         </Grid>
         <ComboBox SelectedIndex="{Binding AlignmentKind}">
           <ComboBoxItem Content="Main track"/>
@@ -116,7 +116,7 @@
         <TextBlock Text="● Modified destination · not applied" IsVisible="{Binding AlignmentPending}" Classes="pending"/>
         <Button Content="Apply destination + configuration" Command="{Binding ApplyAlignmentCommand}" MinHeight="28" Padding="7,3"/>
         <Button Content="Add storage destination" Command="{Binding AddAlignmentCommand}" MinHeight="28" Padding="7,3"/>
-        <Button Content="Delete destination" Command="{Binding DeleteAlignmentCommand}" MinHeight="28" Padding="7,3"/>
+        <Button Classes="destructive" Content="Delete destination" Command="{Binding DeleteAlignmentCommand}" MinHeight="28" Padding="7,3"/>
         <TextBlock Text="Alternate-track train traversal is pending. This proof moves and locks the native mechanism." Classes="muted" TextWrapping="Wrap"/>
       </StackPanel>
     </local:InspectorSection>
@@ -136,46 +136,46 @@
           <ComboBoxItem Content="Solid gate / door / barrier"/>
         </ComboBox>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Gate width · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateWidth}"/>
+          <TextBlock Text="Gate width · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateWidth}"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Gate height · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateHeight}"/>
+          <TextBlock Text="Gate height · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateHeight}"/>
         </Grid>
         <ComboBox SelectedIndex="{Binding GateMotion}">
           <ComboBoxItem Content="Swing / hinged"/>
           <ComboBoxItem Content="Slide"/>
         </ComboBox>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Open angle · degrees" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateAngle}" MinHeight="28"/>
+          <TextBlock Text="Open angle · degrees" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateAngle}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Slide travel · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateTravel}" MinHeight="28"/>
+          <TextBlock Text="Slide travel · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateTravel}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Movement · seconds" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateDuration}" MinHeight="28"/>
+          <TextBlock Text="Movement · seconds" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateDuration}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Lateral offset · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateLateral}" MinHeight="28"/>
+          <TextBlock Text="Lateral offset · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateLateral}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Vertical offset · m" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateVertical}" MinHeight="28"/>
+          <TextBlock Text="Vertical offset · m" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateVertical}" MinHeight="28"/>
         </Grid>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Closed yaw · degrees" VerticalAlignment="Center" FontSize="11"/>
-          <TextBox Grid.Column="1" Text="{Binding GateYaw}" MinHeight="28"/>
+          <TextBlock Text="Closed yaw · degrees" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding GateYaw}" MinHeight="28"/>
         </Grid>
         <CheckBox Content="Initially open" IsChecked="{Binding GateInitiallyOpen}"/>
         <CheckBox Content="Initially locked" IsChecked="{Binding GateInitiallyLocked}"/>
         <CheckBox Content="Initially interlocked" IsChecked="{Binding GateInitiallyInterlocked}"/>
         <Grid ColumnDefinitions="130,*" ColumnSpacing="5">
-          <TextBlock Text="Optional GLB appearance" VerticalAlignment="Center" FontSize="11"/>
+          <TextBlock Text="Optional GLB appearance" VerticalAlignment="Center" FontSize="{DynamicResource QuantumHelperSize}"/>
           <TextBox Grid.Column="1" Text="{Binding GateMesh}" MinHeight="28"/>
         </Grid>
         <TextBlock Text="Mesh reference is authored; engineering gate lines are shown in this milestone." Classes="muted" TextWrapping="Wrap"/>
@@ -190,15 +190,15 @@
             <ComboBoxItem Content="Constant"/>
             <ComboBoxItem Content="Custom"/>
           </ComboBox>
-          <TextBox Grid.Column="1" Text="{Binding DeviceAcceleration}" MinHeight="28" ToolTip.Tip="Positive Constant acceleration / seed for a new Custom profile, m/s². Existing Custom values use the segment editor below."/>
-          <Button Grid.Column="2" Content="Apply mode" Command="{Binding ApplyDeviceCommand}" MinHeight="28" Padding="7,3"/>
+          <TextBox Classes="numeric" Grid.Column="1" Text="{Binding DeviceAcceleration}" MinHeight="28" ToolTip.Tip="Positive Constant acceleration / seed for a new Custom profile, m/s². Existing Custom values use the segment editor below."/>
+          <Button Classes="primary" Grid.Column="2" Content="Apply mode" Command="{Binding ApplyDeviceCommand}" MinHeight="28" Padding="7,3"/>
         </Grid>
         <TextBlock IsVisible="{Binding HardwareAccelerationPending}" Text="● Modified profile mode · not applied" Classes="pending"/>
         <Button Content="Open profile" Command="{Binding OpenHardwareProfileCommand}"/>
         <StackPanel IsVisible="{Binding HasSpeedControllerHardware}" Spacing="5">
           <TextBlock Text="Response limit · m/s²"/>
-          <TextBox Text="{Binding DeviceAcceleration}"/>
-          <Button Content="Apply response limit" Command="{Binding ApplyDeviceCommand}"/>
+          <TextBox Classes="numeric" Text="{Binding DeviceAcceleration}"/>
+          <Button Classes="primary" Content="Apply response limit" Command="{Binding ApplyDeviceCommand}"/>
         </StackPanel>
       </StackPanel>
     </local:InspectorSection>

@@ -11,11 +11,11 @@
         <DataTemplate x:DataType="managed:TrackDevice">
           <StackPanel Spacing="4">
             <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-            <TextBlock Text="{Binding Summary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Summary}" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
           </StackPanel>
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>
-    <Button Grid.Row="2" Margin="12" Content="Remove hardware" Command="{Binding DeleteDeviceCommand}"/>
+    <Button Classes="destructive" Grid.Row="2" Margin="12" Content="Remove hardware" Command="{Binding DeleteDeviceCommand}"/>
   </Grid>
 </UserControl>

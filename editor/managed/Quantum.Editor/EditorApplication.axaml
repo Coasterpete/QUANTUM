@@ -1,46 +1,21 @@
-<Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor"
+<Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="Quantum.Editor.EditorApplication" RequestedThemeVariant="Dark">
   <Application.Resources>
-    <SolidColorBrush x:Key="QuantumBase">#15191F</SolidColorBrush>
-    <SolidColorBrush x:Key="QuantumPane">#20252D</SolidColorBrush>
-    <SolidColorBrush x:Key="QuantumRaised">#2A3039</SolidColorBrush>
-    <SolidColorBrush x:Key="QuantumBorder">#39414C</SolidColorBrush>
-    <SolidColorBrush x:Key="QuantumAccent">#77C5C3</SolidColorBrush>
-    <SolidColorBrush x:Key="QuantumText">#E2E6EB</SolidColorBrush>
-    <SolidColorBrush x:Key="QuantumMuted">#A6B0BD</SolidColorBrush>
-    <FontFamily x:Key="QuantumBody">avares://Quantum.Editor/Assets#Overpass</FontFamily>
-    <FontFamily x:Key="QuantumTechnical">avares://Quantum.Editor/Assets#Red Hat Mono</FontFamily>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://Quantum.Editor/Theme/QuantumTokens.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
     <FluentTheme DensityStyle="Compact">
       <FluentTheme.Palettes>
-        <ColorPaletteResources x:Key="Dark" Accent="#77C5C3" RegionColor="#20252D" ListLow="#20252D" ListMedium="#34494E" />
+        <ColorPaletteResources x:Key="Dark" Accent="{StaticResource QuantumAccentColor}"
+                               RegionColor="{StaticResource QuantumSurfaceColor}"
+                               ListLow="{StaticResource QuantumSurfaceColor}"
+                               ListMedium="{StaticResource QuantumSelectionColor}" />
       </FluentTheme.Palettes>
     </FluentTheme>
-    <Style Selector="Window">
-      <Setter Property="Background" Value="{StaticResource QuantumBase}" />
-      <Setter Property="FontFamily" Value="{StaticResource QuantumBody}" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="Foreground" Value="{StaticResource QuantumText}" />
-    </Style>
-    <Style Selector="TextBlock.heading">
-      <Setter Property="Foreground" Value="{StaticResource QuantumAccent}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="12" />
-      <Setter Property="LetterSpacing" Value="1.2" />
-    </Style>
-    <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="{StaticResource QuantumMuted}" /></Style>
-    <Style Selector="TextBlock.pending"><Setter Property="Foreground" Value="#E7C77A" /><Setter Property="FontSize" Value="12" /></Style>
-    <Style Selector="TextBlock.runtime"><Setter Property="Foreground" Value="{StaticResource QuantumMuted}" /></Style>
-    <Style Selector="Expander"><Setter Property="Margin" Value="0,3" /></Style>
-    <Style Selector="TextBlock.technical"><Setter Property="FontFamily" Value="{StaticResource QuantumTechnical}" /><Setter Property="FontSize" Value="12" /></Style>
-    <Style Selector="Border.pane"><Setter Property="Background" Value="{StaticResource QuantumPane}" /></Style>
-    <Style Selector="Button"><Setter Property="MinHeight" Value="32" /><Setter Property="Padding" Value="12,5" /></Style>
-    <Style Selector="Button.primary"><Setter Property="Background" Value="#345B5D" /></Style>
-    <Style Selector="Button:disabled"><Setter Property="Opacity" Value="0.45" /></Style>
-    <Style Selector="ListBoxItem"><Setter Property="Padding" Value="10,10" /><Setter Property="Margin" Value="4,2" /></Style>
-    <Style Selector="ListBoxItem:selected"><Setter Property="Background" Value="#34494E" /></Style>
-    <Style Selector="TextBox"><Setter Property="MinHeight" Value="34" /></Style>
-    <Style Selector="GridSplitter"><Setter Property="Background" Value="{StaticResource QuantumBorder}" /></Style>
+    <StyleInclude Source="avares://Quantum.Editor/Theme/QuantumControls.axaml" />
   </Application.Styles>
 </Application>

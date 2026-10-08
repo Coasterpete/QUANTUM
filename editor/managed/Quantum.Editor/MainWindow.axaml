@@ -9,8 +9,8 @@
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}"/>
     <KeyBinding Gesture="Ctrl+T" Command="{Binding OpenTimelineCommand}"/>
   </Window.KeyBindings>
-  <Grid x:Name="Workbench" RowDefinitions="Auto,Auto,*,5,Auto,Auto,Auto">
-    <Menu Background="{StaticResource QuantumPane}">
+  <Grid x:Name="Workbench" RowDefinitions="Auto,Auto,*,7,Auto,Auto,Auto">
+    <Menu Background="{StaticResource QuantumSurface0}">
       <MenuItem Header="_File">
         <MenuItem Header="_New" InputGesture="Ctrl+N" Command="{Binding NewCommand}"/>
         <MenuItem Header="_Open…" InputGesture="Ctrl+O" Command="{Binding OpenCommand}"/>
@@ -40,13 +40,13 @@
     <Border Grid.Row="1" Padding="16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto">
         <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-          <TextBlock Text="QUANTUM" FontWeight="Bold" FontSize="21" LetterSpacing="3"/>
+          <TextBlock Text="QUANTUM" FontWeight="SemiBold" FontSize="{DynamicResource QuantumTitleSize}" LetterSpacing="3"/>
           <Border Background="{StaticResource QuantumBorder}" Width="1" Height="24"/>
           <StackPanel>
             <TextBlock Text="{Binding DocumentName}" FontWeight="SemiBold"/>
-            <TextBlock Classes="muted" FontSize="12" Text="Coaster design workspace"/>
+            <TextBlock Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" Text="Coaster design workspace"/>
           </StackPanel>
-          <ComboBox SelectedIndex="{Binding WorkspaceMode}" IsEnabled="{Binding !InteractionActive}" MinWidth="125">
+          <ComboBox Classes="workspace" SelectedIndex="{Binding WorkspaceMode}" IsEnabled="{Binding !InteractionActive}" MinWidth="125">
             <ComboBoxItem Content="Track"/>
             <ComboBoxItem Content="Supports"/>
             <ComboBoxItem Content="Train"/>
@@ -61,15 +61,15 @@
         </StackPanel>
       </Grid>
     </Border>
-    <Grid Grid.Row="2" ColumnDefinitions="240,5,*,5,310" x:Name="Workspace" MinHeight="260">
+    <Grid Grid.Row="2" ColumnDefinitions="240,7,*,7,310" x:Name="Workspace" MinHeight="260">
       <Border Classes="pane" MinWidth="190" IsVisible="{Binding IsRouteWorkspace}">
         <Grid RowDefinitions="Auto,*">
           <Border Padding="16,16,16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="6">
               <TextBlock Classes="heading" Text="ROUTE"/>
               <Button Content="Track Start / Layout" Command="{Binding SelectTrackStartCommand}"/>
-              <TextBlock Text="Authored Regions" FontSize="19"/>
-              <TextBlock Classes="muted" Text="{Binding RouteSummary}" FontSize="12"/>
+              <TextBlock Text="Authored Regions" FontSize="{DynamicResource QuantumSectionSize}"/>
+              <TextBlock Classes="muted" Text="{Binding RouteSummary}" FontSize="{DynamicResource QuantumHelperSize}"/>
             </StackPanel>
           </Border>
           <ListBox x:Name="RouteList" Grid.Row="1" ItemsSource="{Binding Snapshot.Route}" SelectedItem="{Binding Selected}" Background="Transparent" BorderThickness="0">
@@ -77,7 +77,7 @@
               <DataTemplate x:DataType="managed:Region">
                 <StackPanel Spacing="4">
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding Summary}" FontSize="12"/>
+                  <TextBlock Text="{Binding Summary}" FontSize="{DynamicResource QuantumHelperSize}"/>
                   <TextBlock Classes="technical muted" Text="{Binding Station}"/>
                 </StackPanel>
               </DataTemplate>
@@ -96,7 +96,7 @@
       </Border>
       <GridSplitter x:Name="BrowserSplitter" Grid.Column="1" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Focusable="True"/>
       <Grid Grid.Column="2" RowDefinitions="Auto,*,Auto" MinWidth="300">
-        <Border Padding="14,10" Background="{StaticResource QuantumRaised}">
+        <Border Padding="14,10" Background="{StaticResource QuantumSurface2}">
           <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
             <TextBlock Classes="heading" Text="{Binding ViewportHeading}" VerticalAlignment="Center"/>
             <ComboBox x:Name="PresentationChoice" Grid.Column="1" SelectedIndex="0" SelectionChanged="PresentationChanged" IsEnabled="{Binding !Busy}" MinWidth="130" ToolTip.Tip="Viewport display style">
@@ -129,20 +129,20 @@
             </Button>
           </Grid>
         </Border>
-        <Border Grid.Row="1" x:Name="ViewportContainer" ClipToBounds="True" Background="#17222C">
+        <Border Grid.Row="1" x:Name="ViewportContainer" ClipToBounds="True" Background="{DynamicResource QuantumCanvas}">
           <local:ViewportHost x:Name="Viewport" Focusable="True"/>
         </Border>
-        <Border Grid.Row="2" Padding="14,9" Background="{StaticResource QuantumRaised}">
-          <TextBlock Classes="muted" FontSize="12" Text="{Binding ViewportInstructions}" TextWrapping="Wrap"/>
+        <Border Grid.Row="2" Padding="14,9" Background="{StaticResource QuantumSurface2}">
+          <TextBlock Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" Text="{Binding ViewportInstructions}" TextWrapping="Wrap"/>
         </Border>
       </Grid>
       <GridSplitter x:Name="InspectorSplitter" Grid.Column="3" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Focusable="True"/>
-      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsRouteWorkspace}">
+      <Border Grid.Column="4" Classes="pane inspector" MinWidth="250" IsVisible="{Binding IsRouteWorkspace}">
         <Grid RowDefinitions="Auto,*">
           <Border Padding="16,16,16,12" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="6">
               <TextBlock Classes="heading" Text="INSPECTOR"/>
-              <TextBlock Text="Route / Layout" FontSize="19"/>
+              <TextBlock Text="Route / Layout" FontSize="{DynamicResource QuantumSectionSize}"/>
             </StackPanel>
           </Border>
           <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
@@ -151,14 +151,14 @@
               <Separator/>
               <StackPanel IsVisible="{Binding ShowRegionInspector}" Spacing="10">
                 <TextBlock Classes="heading" Text="REGION GEOMETRY"/>
-                <TextBlock Text="{Binding Selected.Name}" FontSize="19"/>
+                <TextBlock Text="{Binding Selected.Name}" FontSize="{DynamicResource QuantumSectionSize}"/>
                 <TextBlock Classes="muted" Text="{Binding Selected.Type}"/>
                 <TextBlock Text="Length · meters"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                  <TextBox x:Name="LengthField" Text="{Binding Length}" PlaceholderText="Length in meters"/>
-                  <Button Grid.Column="1" Content="Apply" Command="{Binding ApplyLengthCommand}"/>
+                  <TextBox Classes="numeric" x:Name="LengthField" Text="{Binding Length}" PlaceholderText="Length in meters"/>
+                  <Button Classes="primary" Grid.Column="1" Content="Apply" Command="{Binding ApplyLengthCommand}"/>
                 </Grid>
-                <TextBlock Classes="muted" FontSize="11" Text="ⓘ Length changes reset preview" ToolTip.Tip="Rescales the Region’s authored distance domain. Changes are validated and can be undone."/>
+                <TextBlock Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" Text="ⓘ Length changes reset preview" ToolTip.Tip="Rescales the Region’s authored distance domain. Changes are validated and can be undone."/>
                 <local:InspectorSection Header="Geometry / placement" SectionKey="track.geometry">
                   <StackPanel Spacing="8">
                     <TextBlock Text="Station range"/>
@@ -178,43 +178,37 @@
                   <TextBlock Classes="heading" Text="PREVIEW SETUP"/>
                   <TextBlock Text="Initial speed · m/s"/>
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                    <TextBox Text="{Binding InitialSpeed}"/>
-                    <Button Grid.Column="1" Content="Apply" Command="{Binding ApplySpeedCommand}"/>
+                    <TextBox Classes="numeric" Text="{Binding InitialSpeed}"/>
+                    <Button Classes="primary" Grid.Column="1" Content="Apply" Command="{Binding ApplySpeedCommand}"/>
                   </Grid>
-                  <TextBlock Classes="muted" FontSize="12" Text="Editing the track or initial speed resets the preview to its initial state." TextWrapping="Wrap"/>
+                  <TextBlock Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" Text="Editing the track or initial speed resets the preview to its initial state." TextWrapping="Wrap"/>
                 </StackPanel>
               </local:InspectorSection>
             </StackPanel>
           </ScrollViewer>
         </Grid>
       </Border>
-      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsSupportsWorkspace}">
+      <Border Grid.Column="4" Classes="pane inspector" MinWidth="250" IsVisible="{Binding IsSupportsWorkspace}">
         <local:SupportInspector/>
       </Border>
-      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsTrainWorkspace}">
+      <Border Grid.Column="4" Classes="pane inspector" MinWidth="250" IsVisible="{Binding IsTrainWorkspace}">
         <local:TrainInspector/>
       </Border>
-      <Border Grid.Column="4" Classes="pane" MinWidth="250" IsVisible="{Binding IsOperationsWorkspace}">
+      <Border Grid.Column="4" Classes="pane inspector" MinWidth="250" IsVisible="{Binding IsOperationsWorkspace}">
         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
           <local:HardwareInspector Margin="14" IsEnabled="{Binding CanInteract}"/>
         </ScrollViewer>
       </Border>
     </Grid>
     <GridSplitter x:Name="DockSplitter" Grid.Row="3" IsVisible="{Binding Layout.DockOpen}" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Focusable="True"/>
-    <Grid Grid.Row="4" x:Name="BottomDock" RowDefinitions="Auto,*" Background="{StaticResource QuantumPane}">
-      <Grid ColumnDefinitions="*,Auto" Margin="8,3">
-        <ListBox ItemsSource="{Binding Layout.Tabs}" SelectedItem="{Binding Layout.SelectedTab, Mode=OneWay}" IsEnabled="{Binding !InteractionActive}" Tapped="DockTabTapped" KeyUp="DockTabKeyUp" Background="Transparent" BorderThickness="0">
+    <Grid Grid.Row="4" x:Name="BottomDock" RowDefinitions="Auto,*" Background="{DynamicResource QuantumSurface1}">
+      <Grid ColumnDefinitions="*,Auto" Margin="8,6">
+        <ListBox Classes="dockTabs" ItemsSource="{Binding Layout.Tabs}" SelectedItem="{Binding Layout.SelectedTab, Mode=OneWay}" IsEnabled="{Binding !InteractionActive}" Tapped="DockTabTapped" KeyUp="DockTabKeyUp" Background="Transparent" BorderThickness="0">
           <ListBox.ItemsPanel>
             <ItemsPanelTemplate>
               <StackPanel Orientation="Horizontal"/>
             </ItemsPanelTemplate>
           </ListBox.ItemsPanel>
-          <ListBox.Styles>
-            <Style Selector="ListBoxItem">
-              <Setter Property="Padding" Value="12,4"/>
-              <Setter Property="Margin" Value="2,0"/>
-            </Style>
-          </ListBox.Styles>
         </ListBox>
         <Button Grid.Column="1" Content="{Binding Layout.ToggleLabel}" Command="{Binding ToggleDockCommand}" MinHeight="28" ToolTip.Tip="Collapse or reopen the current dock page. Ctrl+T opens Timeline."/>
       </Grid>
@@ -233,10 +227,10 @@
         </ScrollViewer>
       </Grid>
     </Grid>
-    <Border Grid.Row="5" Background="#492D32" Padding="16,10" IsVisible="{Binding HasError}">
-      <TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFCECE"/>
+    <Border Grid.Row="5" Background="{DynamicResource QuantumErrorSurface}" Padding="16,10" IsVisible="{Binding HasError}">
+      <StackPanel Spacing="4"><TextBlock Text="⚠ ERROR" Classes="error heading"/><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Classes="error"/></StackPanel>
     </Border>
-    <Border Grid.Row="6" Padding="16,12" Background="{StaticResource QuantumPane}" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,1,0,0">
+    <Border Grid.Row="6" Padding="16,12" Background="{StaticResource QuantumSurface0}" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,1,0,0">
       <Grid ColumnDefinitions="Auto,*,Auto">
         <StackPanel Orientation="Horizontal" Spacing="6">
           <Button Content="▶  Play" Classes="primary" Command="{Binding PlayCommand}"/>

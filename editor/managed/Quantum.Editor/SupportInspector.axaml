@@ -3,8 +3,8 @@
     <Border Padding="16,14" BorderBrush="{StaticResource QuantumBorder}" BorderThickness="0,0,0,1">
       <StackPanel Spacing="5">
         <TextBlock Classes="heading" Text="SUPPORT INSPECTOR"/>
-        <TextBlock Text="{Binding SupportHeading}" FontSize="18" TextWrapping="Wrap"/>
-        <TextBlock Classes="muted" Text="{Binding SupportContext}" FontSize="12" TextWrapping="Wrap"/>
+        <TextBlock Text="{Binding SupportHeading}" FontSize="{DynamicResource QuantumSectionSize}" TextWrapping="Wrap"/>
+        <TextBlock Classes="muted" Text="{Binding SupportContext}" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
       </StackPanel>
     </Border>
     <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
@@ -16,7 +16,7 @@
             <TextBox Text="{Binding StructureName}" ToolTip.Tip="Structure identity uses the stable native ID, independent of its name."/>
             <WrapPanel Orientation="Horizontal">
               <Button Content="Rename" Command="{Binding RenameSupportStructureCommand}" Margin="0,0,5,5"/>
-              <Button Content="Delete structure" Command="{Binding DeleteSupportStructureCommand}" Margin="0,0,0,5" ToolTip.Tip="Deletes the structure and its contents. Undo restores them."/>
+              <Button Classes="destructive" Content="Delete structure" Command="{Binding DeleteSupportStructureCommand}" Margin="0,0,0,5" ToolTip.Tip="Deletes the structure and its contents. Undo restores them."/>
             </WrapPanel>
             <Button Content="Frame selection" Command="{Binding FrameSupportCommand}"/>
           </StackPanel>
@@ -33,7 +33,7 @@
               <ComboBoxItem Content="Custom"/>
             </ComboBox>
             <Button Content="Apply family defaults" Command="{Binding ApplySupportStyleCommand}"/>
-            <TextBlock Text="Explicit profiles and material overrides are preserved. New members inherit the family profile." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+            <TextBlock Text="Explicit profiles and material overrides are preserved. New members inherit the family profile." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
             <TextBlock Text="Structure material"/>
             <ComboBox SelectedIndex="{Binding StructureMaterial}" HorizontalAlignment="Stretch">
               <ComboBoxItem Content="Use family default"/>
@@ -43,15 +43,15 @@
               <ComboBoxItem Content="Concrete"/>
             </ComboBox>
             <TextBlock Text="Tint · RGB hex"/>
-            <TextBox Text="{Binding StructureTint}"/>
+            <TextBox Classes="numeric" Text="{Binding StructureTint}"/>
             <TextBlock Text="Longitudinal repeat · metres"/>
-            <TextBox Text="{Binding StructureRepeat}"/>
+            <TextBox Classes="numeric" Text="{Binding StructureRepeat}"/>
             <TextBlock Text="Across repeat · metres"/>
-            <TextBox Text="{Binding StructureAcross}"/>
+            <TextBox Classes="numeric" Text="{Binding StructureAcross}"/>
             <TextBlock Text="Roughness · 0.045–1"/>
-            <TextBox Text="{Binding StructureRoughness}"/>
+            <TextBox Classes="numeric" Text="{Binding StructureRoughness}"/>
             <Button Content="Apply material / UV scale" Command="{Binding ApplyStructureMaterialCommand}"/>
-            <TextBlock Text="ⓘ Details" ToolTip.Tip="Member override → Structure override → Family default. Repeat scale is a physical distance, independent of shape." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+            <TextBlock Text="ⓘ Details" ToolTip.Tip="Member override → Structure override → Family default. Repeat scale is a physical distance, independent of shape." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
           </StackPanel>
         </local:InspectorSection>
         <StackPanel IsVisible="{Binding ShowSupportNode}" Spacing="8">
@@ -60,31 +60,31 @@
           <TextBlock Text="{Binding SelectedSupportNode.AnchorLabel}" Classes="muted"/>
           <Grid ColumnDefinitions="24,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="5" ColumnSpacing="5">
             <TextBlock Text="X" VerticalAlignment="Center"/>
-            <TextBox Grid.Column="1" Text="{Binding NodeX}" IsReadOnly="{Binding IsAttachedSupportNode}"/>
+            <TextBox Classes="numeric" Grid.Column="1" Text="{Binding NodeX}" IsReadOnly="{Binding IsAttachedSupportNode}"/>
             <TextBlock Grid.Row="1" Text="Y" VerticalAlignment="Center"/>
-            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding NodeY}" IsReadOnly="{Binding IsAttachedSupportNode}"/>
+            <TextBox Classes="numeric" Grid.Row="1" Grid.Column="1" Text="{Binding NodeY}" IsReadOnly="{Binding IsAttachedSupportNode}"/>
             <TextBlock Grid.Row="2" Text="Z" VerticalAlignment="Center"/>
-            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NodeZ}" IsReadOnly="{Binding IsAttachedSupportNode}"/>
+            <TextBox Classes="numeric" Grid.Row="2" Grid.Column="1" Text="{Binding NodeZ}" IsReadOnly="{Binding IsAttachedSupportNode}"/>
           </Grid>
-          <Button Content="Apply position" Command="{Binding MoveSupportNodeCommand}"/>
-          <TextBlock Text="Resolved world position" Classes="muted" FontSize="11"/>
+          <Button Classes="primary" Content="Apply position" Command="{Binding MoveSupportNodeCommand}"/>
+          <TextBlock Text="Resolved world position" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}"/>
           <TextBlock Text="{Binding SelectedSupportNode.ResolvedPosition}" Classes="technical" TextWrapping="Wrap"/>
-          <TextBlock IsVisible="{Binding IsAttachedSupportNode}" Text="Track evaluation controls world position. XYZ above is the stored fallback position used on detach." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock IsVisible="{Binding IsAttachedSupportNode}" Text="Track evaluation controls world position. XYZ above is the stored fallback position used on detach." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
           <local:InspectorSection Header="Track attachment" SectionKey="supports.attachment">
             <StackPanel Spacing="6">
               <Separator/>
               <TextBlock Classes="heading" Text="TRACK ATTACHMENT · metres"/>
               <TextBlock Text="Cumulative station"/>
-              <TextBox Text="{Binding AttachmentStation}"/>
+              <TextBox Classes="numeric" Text="{Binding AttachmentStation}"/>
               <TextBlock Text="Lateral offset"/>
-              <TextBox Text="{Binding AttachmentLateral}"/>
+              <TextBox Classes="numeric" Text="{Binding AttachmentLateral}"/>
               <TextBlock Text="Vertical offset"/>
-              <TextBox Text="{Binding AttachmentVertical}"/>
+              <TextBox Classes="numeric" Text="{Binding AttachmentVertical}"/>
               <WrapPanel>
                 <Button Content="Attach / apply offsets" Command="{Binding AttachSupportNodeCommand}" Margin="0,0,5,5"/>
                 <Button Content="Detach" Command="{Binding DetachSupportNodeCommand}" Margin="0,0,0,5"/>
               </WrapPanel>
-              <TextBlock Text="Clear Foundation before attaching. Clear dependent end treatments before removing an anchor." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+              <TextBlock Text="Clear Foundation before attaching. Clear dependent end treatments before removing an anchor." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
             </StackPanel>
           </local:InspectorSection>
           <local:InspectorSection Header="Foundation" SectionKey="supports.foundation">
@@ -95,7 +95,7 @@
                 <Button Content="Mark foundation" Command="{Binding SetSupportFoundationCommand}" Margin="0,0,5,5"/>
                 <Button Content="Clear foundation" Command="{Binding ClearSupportFoundationCommand}" Margin="0,0,0,5"/>
               </WrapPanel>
-              <TextBlock Text="A foundation keeps its authored position; this marker does not project to terrain." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+              <TextBlock Text="A foundation keeps its authored position; this marker does not project to terrain." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
               <StackPanel IsVisible="{Binding IsFoundationSupportNode}" Spacing="5">
                 <ComboBox SelectedIndex="{Binding FoundationKind}" HorizontalAlignment="Stretch">
                   <ComboBoxItem Content="Footing"/>
@@ -104,9 +104,9 @@
                   <ComboBoxItem Content="Foundation block"/>
                 </ComboBox>
                 <TextBlock Text="Width / depth / height · metres; zero derives size" TextWrapping="Wrap"/>
-                <TextBox Text="{Binding FoundationWidth}"/>
-                <TextBox Text="{Binding FoundationDepth}"/>
-                <TextBox Text="{Binding FoundationHeight}"/>
+                <TextBox Classes="numeric" Text="{Binding FoundationWidth}"/>
+                <TextBox Classes="numeric" Text="{Binding FoundationDepth}"/>
+                <TextBox Classes="numeric" Text="{Binding FoundationHeight}"/>
                 <Button Content="Apply foundation geometry" Command="{Binding ApplyFoundationShapeCommand}"/>
               </StackPanel>
             </StackPanel>
@@ -125,7 +125,7 @@
           <Separator/>
           <TextBlock Classes="heading" Text="MEMBER · ENDPOINTS"/>
           <TextBlock Text="{Binding SelectedSupportMember.Label}"/>
-          <TextBlock Text="{Binding MemberMetadata}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding MemberMetadata}" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
           <local:InspectorSection Header="Section" SectionKey="supports.section">
             <StackPanel Spacing="6">
               <TextBlock Classes="heading" Text="PROFILE / DIMENSIONS · metres"/>
@@ -136,13 +136,13 @@
                 <ComboBoxItem Content="I / H section"/>
               </ComboBox>
               <TextBlock Text="Width / diameter"/>
-              <TextBox Text="{Binding MemberWidth}"/>
+              <TextBox Classes="numeric" Text="{Binding MemberWidth}"/>
               <TextBlock IsVisible="{Binding IsRectangularMember}" Text="Height"/>
-              <TextBox IsVisible="{Binding IsRectangularMember}" Text="{Binding MemberHeight}"/>
+              <TextBox Classes="numeric" IsVisible="{Binding IsRectangularMember}" Text="{Binding MemberHeight}"/>
               <TextBlock Text="Wall thickness"/>
-              <TextBox Text="{Binding MemberWall}"/>
-              <TextBlock Text="ⓘ Details" ToolTip.Tip="Zero wall thickness is solid. A hollow section needs a wall smaller than half its smallest dimension." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-              <TextBlock Text="{Binding ProfileInheritance}" Classes="muted" FontSize="11"/>
+              <TextBox Classes="numeric" Text="{Binding MemberWall}"/>
+              <TextBlock Text="ⓘ Details" ToolTip.Tip="Zero wall thickness is solid. A hollow section needs a wall smaller than half its smallest dimension." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
+              <TextBlock Text="{Binding ProfileInheritance}" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}"/>
               <Button Content="Apply profile / dimensions" Command="{Binding ApplySupportProfileCommand}"/>
               <Button Content="Use family profile default" Command="{Binding UseStyleProfileCommand}"/>
             </StackPanel>
@@ -157,13 +157,13 @@
                 <ComboBoxItem Content="Concrete"/>
               </ComboBox>
               <TextBlock Text="Tint · RGB hex"/>
-              <TextBox Text="{Binding MemberTint}"/>
+              <TextBox Classes="numeric" Text="{Binding MemberTint}"/>
               <TextBlock Text="Longitudinal repeat · metres"/>
-              <TextBox Text="{Binding MemberRepeat}"/>
+              <TextBox Classes="numeric" Text="{Binding MemberRepeat}"/>
               <TextBlock Text="Across repeat · metres"/>
-              <TextBox Text="{Binding MemberAcross}"/>
+              <TextBox Classes="numeric" Text="{Binding MemberAcross}"/>
               <TextBlock Text="Roughness · 0.045–1"/>
-              <TextBox Text="{Binding MemberRoughness}"/>
+              <TextBox Classes="numeric" Text="{Binding MemberRoughness}"/>
               <Button Content="Apply member material" Command="{Binding ApplyMemberMaterialCommand}"/>
             </StackPanel>
           </local:InspectorSection>
@@ -175,7 +175,7 @@
                 <ComboBoxItem Content="Start end"/>
                 <ComboBoxItem Content="End end"/>
               </ComboBox>
-              <TextBlock Text="{Binding ConnectionContext}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+              <TextBlock Text="{Binding ConnectionContext}" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
               <ComboBox SelectedIndex="{Binding ConnectionTreatment}" HorizontalAlignment="Stretch">
                 <ComboBoxItem Content="None"/>
                 <ComboBoxItem Content="Mitered cut"/>
@@ -192,9 +192,9 @@
               <TextBlock Text="Connector asset"/>
               <TextBox Text="{Binding ConnectorAsset}" PlaceholderText="assets://support/… .glb" IsReadOnly="{Binding !CanEditConnectorAsset}"/>
               <Button Content="Apply asset / clear if empty" Command="{Binding ApplySupportAssetCommand}"/>
-              <TextBlock Text="{Binding ConnectionMetadata}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+              <TextBlock Text="{Binding ConnectionMetadata}" Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
               <Button IsVisible="{Binding HasConnectionPlacement}" Content="Clear local placement" Command="{Binding ClearSupportPlacementCommand}"/>
-              <TextBlock Text="ⓘ Details" ToolTip.Tip="Native plates, flanges, saddles, clamps and bases follow the authored end frame. Splice pairing and fabrication detail remain future work." Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+              <TextBlock Text="ⓘ Details" ToolTip.Tip="Native plates, flanges, saddles, clamps and bases follow the authored end frame. Splice pairing and fabrication detail remain future work." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
             </StackPanel>
           </local:InspectorSection>
         </StackPanel>

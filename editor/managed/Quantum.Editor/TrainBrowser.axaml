@@ -7,13 +7,13 @@
         <StackPanel Spacing="6">
           <TextBlock Text="Cars per train · 1–32"/>
           <Grid ColumnDefinitions="*,Auto">
-            <TextBox Text="{Binding TrainCarCount}"/>
+            <TextBox Classes="numeric" Text="{Binding TrainCarCount}"/>
             <Button Grid.Column="1" Content="Resize" Command="{Binding ResizeTrainCommand}"/>
           </Grid>
           <TextBlock Text="Initial speed · m/s"/>
           <Grid ColumnDefinitions="*,Auto">
-            <TextBox Text="{Binding InitialSpeed}"/>
-            <Button Grid.Column="1" Content="Apply" Command="{Binding ApplySpeedCommand}"/>
+            <TextBox Classes="numeric" Text="{Binding InitialSpeed}"/>
+            <Button Classes="primary" Grid.Column="1" Content="Apply" Command="{Binding ApplySpeedCommand}"/>
           </Grid>
         </StackPanel>
       </local:InspectorSection>
@@ -36,7 +36,7 @@
     </ListBox>
     <WrapPanel Grid.Row="2" Margin="10">
       <Button Content="Duplicate" Command="{Binding DuplicateCarCommand}"/>
-      <Button Content="Remove" Command="{Binding RemoveCarCommand}"/>
+      <Button Classes="destructive" Content="Remove" Command="{Binding RemoveCarCommand}"/>
       <Button Content="↑" Command="{Binding MoveCarUpCommand}"/>
       <Button Content="↓" Command="{Binding MoveCarDownCommand}"/>
     </WrapPanel>

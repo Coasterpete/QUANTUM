@@ -1,0 +1,273 @@
+<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- State selectors target Fluent template parts; setting only the outer control is insufficient. -->
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource QuantumBackground}" />
+    <Setter Property="FontFamily" Value="{DynamicResource QuantumUIFont}" />
+    <Setter Property="FontSize" Value="{DynamicResource QuantumBodySize}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+  </Style>
+  <Style Selector="TextBlock.heading">
+    <Setter Property="FontFamily" Value="{DynamicResource QuantumUIFontMedium}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumAccent}" />
+    <Setter Property="FontWeight" Value="{DynamicResource QuantumHeadingWeight}" />
+    <Setter Property="FontSize" Value="{DynamicResource QuantumHelperSize}" />
+    <Setter Property="LetterSpacing" Value="1" />
+  </Style>
+  <Style Selector="TextBlock.title">
+    <Setter Property="FontFamily" Value="{DynamicResource QuantumUIFontBold}" />
+    <Setter Property="FontWeight" Value="{DynamicResource QuantumHeadingWeight}" />
+    <Setter Property="FontSize" Value="{DynamicResource QuantumSectionSize}" />
+  </Style>
+  <Style Selector="TextBlock.muted">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextSecondary}" />
+  </Style>
+  <Style Selector="TextBlock.pending">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumWarning}" />
+    <Setter Property="FontSize" Value="{DynamicResource QuantumHelperSize}" />
+  </Style>
+  <Style Selector="TextBlock.technical, TextBlock.runtime, TextBox.numeric">
+    <Setter Property="TextElement.FontFamily" Value="{DynamicResource QuantumMonoFont}" />
+    <Setter Property="TextElement.FontSize" Value="{DynamicResource QuantumTechnicalSize}" />
+  </Style>
+  <Style Selector="TextBlock.runtime">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumRuntime}" />
+  </Style>
+  <Style Selector="TextBlock.error">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumError}" />
+  </Style>
+  <Style Selector="TextBlock.warning">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumWarning}" />
+  </Style>
+  <Style Selector="TextBlock.info">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumInfo}" />
+  </Style>
+  <Style Selector="TextBlock.success">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumSuccess}" />
+  </Style>
+  <Style Selector="Border.pane">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface0}" />
+  </Style>
+  <Style Selector="Border.inspector">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface1}" />
+  </Style>
+  <Style Selector="Border.runtime">
+    <Setter Property="Background" Value="{DynamicResource QuantumRuntimeSurface}" />
+  </Style>
+  <Style Selector="Border.dock">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface1}" />
+  </Style>
+  <Style Selector="Button">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="{DynamicResource QuantumButtonPadding}" />
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface2}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource QuantumControlRadius}" />
+  </Style>
+  <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurfaceRaised}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface0}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+  </Style>
+  <Style Selector="Button.primary /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumOnAccent}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumAccent}" />
+  </Style>
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumAccentHover}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumOnAccent}" />
+  </Style>
+  <Style Selector="Button.primary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumAccentPressed}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumOnAccent}" />
+  </Style>
+  <Style Selector="Button.destructive /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface2}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumError}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumError}" />
+  </Style>
+  <Style Selector="Button.destructive:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumErrorSurface}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumError}" />
+  </Style>
+  <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface0}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextDisabled}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorder}" />
+  </Style>
+  <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="ListBox">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="ListBoxItem">
+    <Setter Property="Padding" Value="10,9" />
+    <Setter Property="Margin" Value="4,2" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="{DynamicResource QuantumControlRadius}" />
+  </Style>
+  <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurfaceRaised}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+  </Style>
+  <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSelection}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumAccent}" />
+  </Style>
+  <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource QuantumSelectionHover}" />
+  </Style>
+  <Style Selector="ListBoxItem:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="ListBox.dockTabs ListBoxItem">
+    <Setter Property="Padding" Value="12,6" />
+    <Setter Property="Margin" Value="2,0" />
+    <Setter Property="BorderThickness" Value="0,0,0,3" />
+  </Style>
+  <Style Selector="ListBox.dockTabs ListBoxItem:selected">
+    <Setter Property="FontWeight" Value="{DynamicResource QuantumHeadingWeight}" />
+  </Style>
+  <Style Selector="TextBox, ComboBox">
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Background" Value="{DynamicResource QuantumInputBackground}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="{DynamicResource QuantumInputPadding}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource QuantumControlRadius}" />
+  </Style>
+  <Style Selector="TextBox">
+    <Setter Property="CaretBrush" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="SelectionBrush" Value="{DynamicResource QuantumSelection}" />
+    <Setter Property="SelectionForegroundBrush" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="PlaceholderForeground" Value="{DynamicResource QuantumTextMuted}" />
+  </Style>
+  <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement, ComboBox:pointerover /template/ Border#Background">
+    <Setter Property="Background" Value="{DynamicResource QuantumInputBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement, ComboBox:focus-visible /template/ Border#Background">
+    <Setter Property="Background" Value="{DynamicResource QuantumInputBackground}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="ComboBox:focus-visible /template/ Border#HighlightBackground">
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputFocus}" />
+  </Style>
+  <Style Selector="ComboBox:focus-visible /template/ ContentControl#ContentPresenter, ComboBox:focus-visible /template/ PathIcon#DropDownGlyph">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+  </Style>
+  <Style Selector="ComboBox.workspace">
+    <Setter Property="FontFamily" Value="{DynamicResource QuantumUIFontMedium}" />
+    <Setter Property="FontWeight" Value="{DynamicResource QuantumHeadingWeight}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumAccent}" />
+    <Setter Property="Background" Value="{DynamicResource QuantumSelection}" />
+  </Style>
+  <Style Selector="TextBox:disabled /template/ Border#PART_BorderElement, ComboBox:disabled /template/ Border#Background">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface0}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorder}" />
+  </Style>
+  <Style Selector="TextBox:disabled, ComboBox:disabled /template/ ContentControl#ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextDisabled}" />
+  </Style>
+  <Style Selector="TextBox:read-only /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource QuantumRuntimeSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorder}" />
+  </Style>
+  <Style Selector="TextBox:invalid /template/ Border#PART_BorderElement, TextBox:error /template/ Border#PART_BorderElement, ComboBox:error /template/ Border#Background">
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumError}" />
+  </Style>
+  <Style Selector="ComboBox /template/ Border#PopupBorder">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="Expander">
+    <Setter Property="Margin" Value="0,4" />
+    <Setter Property="Padding" Value="{DynamicResource QuantumSectionPadding}" />
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface0}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorder}" />
+    <Setter Property="MinHeight" Value="34" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+    <Setter Property="FontFamily" Value="{DynamicResource QuantumUIFontMedium}" />
+    <Setter Property="FontWeight" Value="{DynamicResource QuantumHeadingWeight}" />
+    <Setter Property="FontSize" Value="{DynamicResource QuantumBodySize}" />
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface2}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader /template/ Border#ToggleButtonBackground">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorder}" />
+  </Style>
+  <Style Selector="Expander:expanded /template/ ToggleButton#ExpanderHeader /template/ Border#ToggleButtonBackground">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurfaceRaised}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
+    <Setter Property="Background" Value="{DynamicResource QuantumSelectionInactive}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:focus-visible /template/ Border#ToggleButtonBackground">
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader /template/ Path#ExpandCollapseChevron">
+    <Setter Property="Stroke" Value="{DynamicResource QuantumAccent}" />
+  </Style>
+  <Style Selector="GridSplitter">
+    <Setter Property="Background" Value="{DynamicResource QuantumBorder}" />
+    <Setter Property="MinWidth" Value="7" />
+    <Setter Property="MinHeight" Value="7" />
+  </Style>
+  <Style Selector="GridSplitter:pointerover, GridSplitter:pressed, GridSplitter:focus-visible">
+    <Setter Property="Background" Value="{DynamicResource QuantumInputFocus}" />
+  </Style>
+  <Style Selector="ScrollViewer">
+    <Setter Property="AllowAutoHide" Value="False" />
+  </Style>
+  <Style Selector="ScrollBar /template/ Thumb">
+    <Setter Property="Background" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="FlyoutPresenter, MenuFlyoutPresenter, ToolTip">
+    <Setter Property="FontFamily" Value="{DynamicResource QuantumUIFont}" />
+    <Setter Property="FontSize" Value="{DynamicResource QuantumBodySize}" />
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="Background" Value="{DynamicResource QuantumSurface1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumBorderStrong}" />
+  </Style>
+  <Style Selector="MenuItem:pointerover">
+    <Setter Property="Background" Value="{DynamicResource QuantumSurfaceRaised}" />
+  </Style>
+  <Style Selector="TabItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="{DynamicResource QuantumSelection}" />
+  </Style>
+  <Style Selector="TabItem:selected /template/ Border#PART_SelectedPipe">
+    <Setter Property="Background" Value="{DynamicResource QuantumAccent}" />
+    <Setter Property="Height" Value="3" />
+  </Style>
+  <Style Selector="TabItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource QuantumTextPrimary}" />
+    <Setter Property="FontWeight" Value="{DynamicResource QuantumHeadingWeight}" />
+  </Style>
+  <Style Selector="TabItem:focus-visible /template/ Border#PART_LayoutRoot">
+    <Setter Property="BorderBrush" Value="{DynamicResource QuantumInputFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+</Styles>

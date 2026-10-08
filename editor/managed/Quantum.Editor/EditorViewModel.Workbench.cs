@@ -7,7 +7,7 @@ public sealed partial class EditorViewModel
     public WorkbenchLayout Layout { get; }
     public bool IsOperationsWorkspace => WorkspaceMode == 3;
     public string ViewportHeading => IsTrainWorkspace ? "TRAIN PREVIEW" : "DESIGN VIEW";
-    public string PlaybackSummary => Snapshot is { } s ? $"{s.PlaybackLabel} · {s.Speed:F2} m/s" : "Loading…";
+    public string PlaybackSummary => Snapshot is { } s ? $"{s.PlaybackLabel} · {s.TimeSeconds:F2} s · {s.Speed:F2} m/s · station {s.Station:F2} m" : "Loading…";
     public bool IsTrackStartSelected => Snapshot?.Placement.Selected == true;
     public bool ShowRegionInspector => HasSelection && !IsTrackStartSelected;
     public bool ShowSupportEmpty => !HasSupportStructure && !InspectInfrastructure;
