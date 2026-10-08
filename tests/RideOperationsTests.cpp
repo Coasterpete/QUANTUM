@@ -4,9 +4,11 @@
 #include <quantum/coaster/TrainConfiguration.hpp>
 #include <nlohmann/json.hpp>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 
 namespace
 {
@@ -131,6 +133,154 @@ namespace
             dynamics = result.state; pose = std::move(result.telemetry.pose);
         }
     };
+    void targetSpeedComparisons()
+    {
+        // Only target changes between these runs. The same short device,
+        // spatial Custom profile, loaded train and production solver are used.
+        auto launch = device(TrackDeviceKind::Launch, 1, 30, 100);
+        ChannelProfile profile;
+        profile.nextSegmentId = 2;
+        profile.segments.push_back({1, {0, 70, 2, 3, math::TransitionType::Linear}});
+        launch.accelerationProfile = profile;
+        for (const auto direction : {HardwareDirection::Forward, HardwareDirection::Reverse})
+        {
+            const int sign = static_cast<int>(direction);
+            std::vector<double> exitSpeeds;
+            for (const auto target : {std::optional<double>{}, std::optional<double>{10}, std::optional<double>{25}})
+            {
+                launch.configuration = LaunchConfiguration{target, direction};
+                Scenario s({launch}, sign > 0 ? 40 : 90, sign * 5);
+                bool exited = false;
+                double maximumSpeed = 5;
+                for (int tick = 0; tick < 6000; ++tick)
+                {
+                    s.tick();
+                    const auto& h = state(s.operations, 1);
+                    const double speed = sign * s.dynamics.signedVelocityMetersPerSecond;
+                    maximumSpeed = std::max(maximumSpeed, speed);
+                    require(sign * h.appliedForceNewtons >= 0, "Launch target must never command braking");
+                    if (!target) require(!h.targetSpeedLimited, "Unset target never reports active limiting");
+                    if (h.occupancy.clear()) { exited = true; break; }
+                }
+                require(exited, "Controlled launch train must exit the short interval");
+                const double speed = sign * s.dynamics.signedVelocityMetersPerSecond;
+                exitSpeeds.push_back(speed);
+                if (target == 10)
+                    require(maximumSpeed <= 10.02 && speed > 9.8, "10 m/s target constrains native speed in either direction");
+                if (target == 25)
+                    require(speed > 12 && speed < 25, "Insufficient distance may leave a launch below target");
+                std::cout << "Launch comparison direction=" << sign << " target="
+                    << (target ? std::to_string(*target) : "unset") << " exit=" << speed
+                    << " max=" << maximumSpeed << " m/s\n";
+            }
+            require(exitSpeeds[0] > exitSpeeds[1] + 2, "Changing only target must change native train response");
+            require(exitSpeeds[0] == exitSpeeds[2], "Unreached target preserves the same Custom propulsion trajectory");
+
+            launch.configuration = LaunchConfiguration{3, direction};
+            Scenario above({launch}, 60, sign * 5);
+            for (int tick = 0; tick < 120; ++tick)
+            {
+                above.tick();
+                require(state(above.operations, 1).appliedForceNewtons == 0,
+                    "Below-current-speed target releases launch propulsion");
+                require(sign * above.dynamics.signedVelocityMetersPerSecond > 3,
+                    "Below-current-speed target does not assign velocity");
+                require(state(above.operations, 1).targetSpeedLimited
+                    && state(above.operations, 1).profileAccelerationMetersPerSecondSquared > 0,
+                    "Telemetry retains the profile request when target releases propulsion");
+            }
+
+            // Inspect the final fraction of a fixed tick: profile is sampled at
+            // each bogie, then constrained by directed speed error, then force.
+            launch.configuration = LaunchConfiguration{10, direction};
+            Scenario near({launch}, 60, sign * 9.999);
+            auto forces = evaluateTrackDeviceForces(near.hardware, near.operations.forceControls(),
+                near.track, near.train, near.pose, near.dynamics.signedVelocityMetersPerSecond);
+            require(std::abs(forces.devices[0].commandedAccelerationMetersPerSecondSquared - .24) < 1e-9,
+                "Target constrains Custom acceleration by remaining speed / fixed timestep");
+            require(forces.devices[0].targetSpeedLimited && forces.devices[0].profileAccelerationMetersPerSecondSquared > 2,
+                "Telemetry distinguishes profile request from target-limited command");
+            require(near.hardware[0].accelerationProfile == profile, "Limiter leaves authored Custom profile intact");
+            near.hardware[0].maximumForceNewtons = 100;
+            forces = evaluateTrackDeviceForces(near.hardware, near.operations.forceControls(),
+                near.track, near.train, near.pose, near.dynamics.signedVelocityMetersPerSecond);
+            require(std::abs(forces.devices[0].appliedForceNewtons - sign * 100) < 1e-9,
+                "Whole-device force cap still applies after target limiting");
+
+            auto heavier = near.train;
+            heavier.cars[0].loadout.massKilograms += 1000;
+            const auto heavierPose = solveTrainPose(near.track, heavier, near.dynamics.generalizedReferenceLocation);
+            const auto heavierForces = evaluateTrackDeviceForces(near.hardware, near.operations.forceControls(),
+                near.track, heavier, heavierPose, near.dynamics.signedVelocityMetersPerSecond);
+            require(std::abs(heavierForces.devices[0].appliedForceNewtons - sign * 100) < 1e-9,
+                "Loaded mass cannot bypass the whole-device force cap");
+            const auto lightStep = stepTrain(near.track, near.train, {}, near.dynamics, {}, forces.applications);
+            const auto heavyStep = stepTrain(near.track, heavier, {}, near.dynamics, {}, heavierForces.applications);
+            const auto lightCoast = stepTrain(near.track, near.train, {}, near.dynamics);
+            const auto heavyCoast = stepTrain(near.track, heavier, {}, near.dynamics);
+            require(sign * (heavyStep.state.signedVelocityMetersPerSecond - heavyCoast.state.signedVelocityMetersPerSecond)
+                < sign * (lightStep.state.signedVelocityMetersPerSecond - lightCoast.state.signedVelocityMetersPerSecond),
+                "The train solver retains loaded-mass authority under force saturation");
+
+            Scenario partial({launch}, 99.9, sign * 9.999);
+            partial.tick();
+            require(state(partial.operations, 1).occupancy.bogies.size() == 1,
+                "Target limiter operates with partial occupancy");
+            require(sign * partial.dynamics.signedVelocityMetersPerSecond <= 10.02,
+                "Partial occupancy does not bypass target limiting");
+
+            launch.accelerationProfile.reset();
+            Scenario constant({launch}, 60, sign * 9.999);
+            constant.tick();
+            require(state(constant.operations, 1).targetSpeedLimited
+                && state(constant.operations, 1).profileAccelerationMetersPerSecondSquared == 4,
+                "Constant acceleration uses the same target limiter");
+            launch.accelerationProfile = profile;
+            for (auto& segment : launch.accelerationProfile->segments)
+                segment.transition.valueBegin = segment.transition.valueEnd = 0;
+            Scenario zero({launch}, 60, sign * 5);
+            zero.tick();
+            require(state(zero.operations, 1).appliedForceNewtons == 0 && !state(zero.operations, 1).targetSpeedLimited,
+                "A target does not replace a zero Custom profile with propulsion");
+            launch.accelerationProfile = profile;
+        }
+
+        // Gravity can exceed a propulsion target. The launch is not a trim brake.
+        launch.configuration = LaunchConfiguration{10, HardwareDirection::Forward};
+        Scenario downhill({launch}, 60, 12, -.3);
+        for (int tick = 0; tick < 120; ++tick)
+        {
+            downhill.tick();
+            require(state(downhill.operations, 1).appliedForceNewtons == 0, "Above-target downhill launch supplies no force");
+        }
+        require(downhill.dynamics.signedVelocityMetersPerSecond > 12,
+            "Gravity remains authoritative above a launch propulsion target");
+
+        // Transport and lifts use the shared signed-error servo, not the
+        // one-sided launch limiter. They can slow an overspeed train.
+        for (const auto kind : {TrackDeviceKind::Transport, TrackDeviceKind::ChainLift, TrackDeviceKind::CableLift})
+        {
+            std::vector<double> speeds;
+            for (const double target : {2., 6.})
+            {
+                auto d = device(kind, 1, 0, 200);
+                if (kind == TrackDeviceKind::Transport) d.configuration = TransportConfiguration{target};
+                if (kind == TrackDeviceKind::ChainLift) d.configuration = ChainLiftConfiguration{target};
+                if (kind == TrackDeviceKind::CableLift) d.configuration = CableLiftConfiguration{target};
+                Scenario s({d}, 20, 5);
+                for (int tick = 0; tick < 480; ++tick) s.tick();
+                speeds.push_back(s.dynamics.signedVelocityMetersPerSecond);
+                require(std::abs(speeds.back() - target) < .08, "Transport/lift speed reaches native solver through bounded forces");
+            }
+            require(speeds[1] - speeds[0] > 3.8, "Transport/lift authored speed changes physical response");
+        }
+        auto reverseTires = device(TrackDeviceKind::Transport, 1, 0, 200);
+        reverseTires.configuration = TransportConfiguration{2, HardwareDirection::Reverse};
+        Scenario reverse({reverseTires}, 80, -5);
+        for (int tick = 0; tick < 480; ++tick) reverse.tick();
+        require(std::abs(reverse.dynamics.signedVelocityMetersPerSecond + 2) < .08,
+            "Shared transport servo compares signed reverse speed correctly");
+    }
     void liftScenario()
     {
         auto station = device(TrackDeviceKind::Station, 1, 0, 30);
@@ -285,9 +435,11 @@ namespace
         }
     }
 }
-int main()
+int main(int argc, char** argv)
 {
-    try { sensorsAndInterlocks(); liftScenario(); launchScenario(); cableAndTransfer(); persistenceAndPerformance();
+    try {
+        if (argc == 2 && std::string_view(argv[1]) == "--target-speed") targetSpeedComparisons();
+        else { sensorsAndInterlocks(); liftScenario(); launchScenario(); cableAndTransfer(); persistenceAndPerformance(); }
         std::cout << "RideOperationsTests passed " << checks << " checks\n"; return 0; }
     catch (const std::exception& e) { std::cerr << "RideOperationsTests failed: " << e.what() << '\n'; return 1; }
 }

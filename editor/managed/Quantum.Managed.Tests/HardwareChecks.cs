@@ -7,6 +7,7 @@ internal static class HardwareChecks
     public static async Task Run()
     {
         await VelocityControlPath();
+        await LaunchTargetComparisons();
         using var controller = new SessionController(); await controller.Submit(_ => { });
         var vm = new EditorViewModel(controller); vm.Publish(controller.Latest!); vm.TimelineSource = 1;
         async Task Execute(EditorCommand command)
@@ -58,6 +59,78 @@ internal static class HardwareChecks
         }
         finally { File.Delete(temp); }
         Console.WriteLine($"Managed hardware forms/commands/telemetry/persistence: {checks} checks passed.");
+    }
+
+    private static async Task LaunchTargetComparisons()
+    {
+        using var controller = new SessionController();
+        await controller.Submit(s =>
+        {
+            s.Command(SessionCommand.SetRegionLength, s.Snapshot().Revision, 300, 0);
+            s.Command(SessionCommand.SetInitialSpeed, s.Snapshot().Revision, 5);
+        });
+        var vm = new EditorViewModel(controller);
+        vm.Publish(controller.Latest!); vm.TimelineSource = 1;
+        vm.SelectedHardwareChoice = vm.HardwareChoices.First(c => c.Kind == DeviceKind.Launch);
+        await vm.CreateHardwareCommand.ExecuteAsync();
+        vm.DeviceStart = "0"; vm.DeviceEnd = "70"; vm.DeviceForce = "100000";
+        await vm.ApplyDevicePropertiesCommand.ExecuteAsync();
+        vm.DeviceMode = 0; vm.DeviceAcceleration = "4"; await vm.ApplyDeviceCommand.ExecuteAsync();
+        vm.DeviceMode = 1; await vm.ApplyDeviceCommand.ExecuteAsync();
+        var exitSpeeds = new List<double>();
+        foreach (double? target in new double?[] { null, 10, 25 })
+        {
+            vm.HardwareTarget = target?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "";
+            await vm.ApplyHardwareCommand.ExecuteAsync();
+            Require(vm.Error.Length == 0 && vm.SelectedHardwareRuntime!.Settings(new LaunchSettings()).TargetSpeedMetersPerSecond == target,
+                "Blank/numeric Target Speed travels through view model, controller, ABI and authored configuration");
+            Require(vm.VisibleProfiles.All(p => p.ValueBegin == 4 && p.ValueEnd == 4), "Target comparison preserves Custom profile");
+            Require(vm.Snapshot!.Speed == 5 && vm.Snapshot.InitialSpeed == 5, "Applying a target never assigns initial train velocity");
+            bool exited = false, limited = false;
+            await controller.Submit(s =>
+            {
+                s.Command(SessionCommand.Play);
+                for (int i = 0; i < 80; ++i)
+                {
+                    s.Update(.25);
+                    var h = s.Snapshot().Hardware.Hardware.Single();
+                    limited |= h.TargetSpeedLimited;
+                    if (h.OccupiedBogieCount == 0) { exited = true; break; }
+                }
+                s.Command(SessionCommand.Pause);
+            });
+            vm.Publish(controller.Latest!);
+            Require(exited, "Managed short-launch comparison exits interval");
+            exitSpeeds.Add(vm.Snapshot!.Speed);
+            Require(limited == (target == 10), "Copied native telemetry distinguishes active/unreached/unset target limiting");
+            Require(vm.HardwareTelemetry.Contains(target is null ? "Target unset" : $"Target {target:F2}"),
+                "Telemetry shows accepted authored target including unset");
+            if (target == 10) Require(vm.Snapshot.Speed <= 10.02 && vm.Snapshot.Speed > 9.5, "10 m/s target constrains native Custom-profile playback");
+            if (target == 25) Require(vm.Snapshot.Speed < 25, "High target cannot make a short launch reach it instantly");
+            Console.WriteLine($"Managed launch comparison: target={target?.ToString() ?? "unset"}, exit={vm.Snapshot.Speed:F6} m/s, limited={limited}");
+        }
+        Require(exitSpeeds[0] > exitSpeeds[1] + 2 && exitSpeeds[0] == exitSpeeds[2],
+            "Changing only launch target changes physical speed only when reachable");
+        vm.HardwareTarget = "10"; await vm.ApplyHardwareCommand.ExecuteAsync();
+        foreach (double initial in new[] { 5.0, 20.0 })
+        {
+            await controller.Submit(s =>
+            {
+                s.Command(SessionCommand.SetInitialSpeed, s.Snapshot().Revision, initial);
+                s.Command(SessionCommand.Play); s.Update(1.0 / 240); s.Command(SessionCommand.Reset);
+            });
+            vm.Publish(controller.Latest!);
+            Require(vm.Snapshot!.Tick == 0 && vm.Snapshot.Speed == initial && vm.Snapshot.InitialSpeed == initial,
+                "Managed Initial Speed edit and Reset retain authored start speed");
+            Require(vm.SelectedHardwareRuntime!.Settings(new LaunchSettings()).TargetSpeedMetersPerSecond == 10,
+                "Initial Speed edit leaves hardware target unchanged");
+        }
+        await controller.Submit(s => { s.Command(SessionCommand.Play); s.Update(1.0 / 240); s.Command(SessionCommand.Pause); });
+        vm.Publish(controller.Latest!);
+        var above = vm.SelectedHardwareRuntime!;
+        Require(above.State == "Complete" && above.TargetSpeedLimited && above.ProfileAcceleration == 4
+            && above.CommandedAcceleration == 0 && above.AppliedForce == 0 && vm.Snapshot!.Speed > 10,
+            "Above-target launch telemetry distinguishes profile, released propulsion and actual overspeed");
     }
 
     private static async Task VelocityControlPath()

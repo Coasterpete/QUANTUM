@@ -86,6 +86,18 @@ sum-of-force-magnitudes cap. Legacy Launch/Brake custom profiles continue to be
 evaluated at each occupied bogie's local distance, including circuit wrapping.
 Zero profile commands produce finite zero forces.
 
+Launch Target Speed is an optional positive speed magnitude in the authored
+direction. It limits propulsion, not the train's final velocity. For direction
+`d` (+1 forward, -1 reverse), each occupied bogie's Constant/Custom acceleration
+`a` is constrained to `min(a, max(0, target - d * signedSpeed) / (1/240))`.
+The directed command then becomes `0.5 * loadedCarMass * acceleration` at each
+occupied bogie; the whole-device force cap applies afterward. Operations releases
+propulsion and reports Complete at or above the directed target, without braking.
+It can resume Launching if resistance or an incline slows the train below target.
+A blank target removes the propulsion limit; a zero target is rejected. A short
+launch may exit below target. Gravity or other devices can carry a train above
+target; this is not a global speed ceiling or a guaranteed exit speed.
+
 Speed controllers compute a bounded acceleration request from signed speed error.
 Station approach also limits the requested speed by braking distance to the stop
 reference. These are ride-level controllers, not final-velocity assignments.
@@ -202,6 +214,18 @@ revision-checked commands; they do not decide whether dispatch is permitted.
 The ImGui fallback retains its established Launch/Brake authoring and can load and
 preserve the added hardware configurations. The complete new family forms live in
 Avalonia.
+
+Launch telemetry displays the accepted target (including unset), signed actual
+speed, state/occupancy, the mean sampled profile acceleration before limiting,
+the mean propulsion acceleration after limiting, signed force after the device
+cap, and whether target limiting is active. The acceleration values are request
+magnitudes, not measured net train acceleration. Profile sampling remains spatial
+in authored station order, so reverse travel encounters a varying profile in the
+opposite order. Limiting is active when at least one occupied bogie's positive
+request is reduced or released by the target. These are transient copied JSON
+fields; no saved document or fixed-layout ABI structure changes. Force telemetry
+is sampled on playback ticks; immediately after Reset, profile/force values are
+zero until the next tick.
 
 ## Reset, persistence and history
 

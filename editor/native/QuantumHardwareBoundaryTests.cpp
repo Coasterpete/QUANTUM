@@ -35,6 +35,11 @@ int main()
             auto s = summary(session); uint64_t id = 0; ok(qn_device_create(session, s.revision, kind, &id, &error));
             auto after = summary(session); auto data = hardware(session, after.revision);
             require(data["hardware"].back()["id"] == id && data["hardware"].back()["configuration"].is_object(), "Hardware-specific native configuration snapshot");
+            if (kind == 0)
+                require(data["hardware"].back()["profileAcceleration"].is_number()
+                    && data["hardware"].back()["targetSpeedLimited"].is_boolean()
+                    && data["hardware"].back()["configuration"]["targetSpeedMetersPerSecond"].is_null(),
+                    "Launch snapshot distinguishes unset authored target and native limiter telemetry");
             require(qn_hardware_command(session, s.revision, id, 0, 1, 0, &error) == QN_CONFLICT, "Stale runtime command rejected");
         }
         auto baseline = summary(session); const auto revision = baseline.revision;

@@ -14,7 +14,7 @@
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding IsLaunchHardware}">
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Target speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28" /></Grid>
-      <TextBlock Classes="muted" Text="Leave target blank for continuous launch." TextWrapping="Wrap" />
+      <TextBlock Classes="muted" Text="Limits propulsion in the selected direction; does not set velocity or brake. Blank removes the limit. Apply hardware configuration to commit." TextWrapping="Wrap" />
     </StackPanel>
     <StackPanel Spacing="5" IsVisible="{Binding IsBrakeHardware}">
       <Grid ColumnDefinitions="130,*" ColumnSpacing="5"><TextBlock Text="Trim speed · m/s" VerticalAlignment="Center" FontSize="11" /><TextBox Grid.Column="1" Text="{Binding HardwareTarget}" MinHeight="28" /></Grid>

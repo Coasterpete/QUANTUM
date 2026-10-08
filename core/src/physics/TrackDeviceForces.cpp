@@ -78,6 +78,7 @@ namespace quantum::physics
             // applied force. For a constant command the mean is exactly the
             // authored value.
             double commandedAccelerationTotal = 0.0;
+            double profileAccelerationTotal = 0.0;
             for (std::size_t carIndex = 0; carIndex < pose.carCount(); ++carIndex)
             {
                 const TrainCarPose& car = pose.cars()[carIndex];
@@ -92,10 +93,11 @@ namespace quantum::physics
                         continue;
 
                     ++telemetry.occupiedBogieCount;
-                    if (!control.armed || (!control.signedAccelerationCommand
-                        && device.kind > coaster::TrackDeviceKind::Brake)
-                        || (!control.signedAccelerationCommand && device.kind == coaster::TrackDeviceKind::Brake
-                            && std::abs(signedVelocityMetersPerSecond) <= followerRestSpeedToleranceMetersPerSecond)) continue;
+                    const bool acceptsForceCommand = control.armed
+                        && (control.signedAccelerationCommand || device.kind <= coaster::TrackDeviceKind::Brake)
+                        && (control.signedAccelerationCommand || device.kind != coaster::TrackDeviceKind::Brake
+                            || std::abs(signedVelocityMetersPerSecond) > followerRestSpeedToleranceMetersPerSecond);
+                    if (!acceptsForceCommand && device.kind != coaster::TrackDeviceKind::Launch) continue;
                     double commandedAccel = device.targetAccelerationMetersPerSecondSquared;
                     if (!control.signedAccelerationCommand && device.accelerationProfile.has_value())
                     {
@@ -112,6 +114,10 @@ namespace quantum::physics
                             device.accelerationProfile.value(), clampedDist);
                     }
 
+                    if (device.kind == coaster::TrackDeviceKind::Launch)
+                        profileAccelerationTotal += commandedAccel;
+                    if (!acceptsForceCommand) continue;
+
                     if (!control.signedAccelerationCommand && device.kind == coaster::TrackDeviceKind::Brake)
                     {
                         if (const auto* brake = std::get_if<coaster::BrakeConfiguration>(&device.configuration))
@@ -122,8 +128,12 @@ namespace quantum::physics
                     {
                         if (const auto* launch = std::get_if<coaster::LaunchConfiguration>(&device.configuration);
                             launch && launch->targetSpeedMetersPerSecond)
-                            commandedAccel = std::min(commandedAccel, std::max(0.0,
+                        {
+                            const double limitedAccel = std::min(commandedAccel, std::max(0.0,
                                 *launch->targetSpeedMetersPerSecond - signedVelocityMetersPerSecond * static_cast<int>(launch->direction)) / defaultFixedTimeStepSeconds);
+                            telemetry.targetSpeedLimited |= limitedAccel < commandedAccel;
+                            commandedAccel = limitedAccel;
+                        }
                     }
                     if (control.signedAccelerationCommand) commandedAccel = *control.signedAccelerationCommand;
                     else if (device.kind == coaster::TrackDeviceKind::Brake)
@@ -143,6 +153,9 @@ namespace quantum::physics
                     commandedAccelerationTotal += commandedAccel;
                 }
             }
+            if (telemetry.occupiedBogieCount > 0)
+                telemetry.profileAccelerationMetersPerSecondSquared =
+                    profileAccelerationTotal / static_cast<double>(telemetry.occupiedBogieCount);
             if (occupied.empty())
             {
                 result.devices.push_back(telemetry);

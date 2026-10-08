@@ -43,10 +43,19 @@ public sealed partial class EditorViewModel
     public bool ShowHardwareState => IsDeviceTimeline && !HasAccelerationProfileHardware;
     public bool HasLiftHardware => IsChainHardware || IsCableHardware;
     public HardwareEntry? SelectedHardwareRuntime => Snapshot?.Hardware.Hardware.FirstOrDefault(h => h.Id == SelectedDevice?.Id);
-    public string HardwareTelemetry => SelectedHardwareRuntime is { } h ? h.Telemetry
+    public string HardwareTelemetry => SelectedHardwareRuntime is { } h ? (IsLaunchHardware ? LaunchTelemetry(h) : h.Telemetry)
         + (IsStationHardware ? $"\nAligned {h.Aligned} · stopped {h.Stopped} · dispatch requested {h.DispatchRequested} / permitted {h.DispatchPermitted}" : "")
         + (IsTransferHardware ? $"\nAlignment #{h.Alignment} → #{h.TargetAlignment} · offset {h.Position:F2} m · locked {h.Locked} · movement permitted {h.MovementPermitted}" : "")
         + (IsAccessHardware ? $"\nOpen {h.Position:P0} · locked {h.Locked} · interlocked {h.Interlocked}" : "") : "Select ride hardware";
+    private static string LaunchTelemetry(HardwareEntry h)
+    {
+        var launch = h.Settings(new LaunchSettings());
+        var target = launch.TargetSpeedMetersPerSecond is { } speed ? $"{speed:F2} m/s ({(launch.Direction > 0 ? "forward" : "reverse")})" : "unset";
+        return $"{h.State} · {h.OccupiedBogieCount} bogies / {h.OccupiedCarCount} cars · actual {h.ActualSpeed:F2} m/s\n"
+            + $"Target {target} · limiting {(h.TargetSpeedLimited ? "active" : "inactive")}\n"
+            + $"Profile {h.ProfileAcceleration:F2} / propulsion {h.CommandedAcceleration:F2} m/s² · applied force {h.AppliedForce:F0} N"
+            + (h.InterlockReason.Length == 0 ? "" : $"\n{h.InterlockReason}");
+    }
     public string HardwareContentDescription => IsStationHardware ? "Station positioning, stopping and dispatch interlocks"
         : IsTransferHardware ? "Transfer mechanism / storage alignments · alternate-track train routing pending"
         : IsAccessHardware ? "Operable access hardware · swing/slide mechanism"

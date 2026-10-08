@@ -66,7 +66,8 @@ public sealed record HardwareEntry(ulong Id, JsonElement Configuration, string S
 
     bool DispatchRequested = false, bool DispatchPermitted = false, ulong Alignment = 0, ulong TargetAlignment = 0,
 
-    double Position = 0, bool Locked = false, bool Interlocked = false, int Direction = 0)
+    double Position = 0, bool Locked = false, bool Interlocked = false, int Direction = 0,
+    double ProfileAcceleration = 0, bool TargetSpeedLimited = false)
 
 {
 

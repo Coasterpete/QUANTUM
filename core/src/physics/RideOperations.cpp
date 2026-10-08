@@ -177,6 +177,7 @@ namespace quantum::physics
             h.forceControl = {h.id, false}; h.interlockReason.clear();
             h.commandedAccelerationMetersPerSecondSquared = h.commandedSpeedMetersPerSecond = 0;
             h.actualSpeedMetersPerSecond = 0; h.appliedForceNewtons = 0;
+            h.profileAccelerationMetersPerSecondSquared = 0; h.targetSpeedLimited = false;
             h.aligned = h.stopped = h.movementPermitted = false;
             if (auto* gate = std::get_if<AccessRuntime>(&h.mechanism)) gate->protectedByOperation = false;
         }
@@ -372,7 +373,8 @@ namespace quantum::physics
                 const auto* c = std::get_if<LaunchConfiguration>(&d.configuration);
                 if (c && c->targetSpeedMetersPerSecond) h.commandedSpeedMetersPerSecond = *c->targetSpeedMetersPerSecond * static_cast<int>(c->direction);
                 const double directedSpeed = speed * (c ? static_cast<int>(c->direction) : 1);
-                if (c && c->targetSpeedMetersPerSecond && directedSpeed >= *c->targetSpeedMetersPerSecond) h.state = "Complete";
+                if (c && c->targetSpeedMetersPerSecond && directedSpeed >= *c->targetSpeedMetersPerSecond)
+                { h.state = "Complete"; h.targetSpeedLimited = true; }
                 else { h.forceControl.armed = true; h.state = "Launching"; h.commandedAccelerationMetersPerSecondSquared = profileCommand(d, train->referenceStationMeters, length, circuit); }
             }
             else if (d.kind == TrackDeviceKind::Brake)
@@ -404,6 +406,9 @@ namespace quantum::physics
             const auto& force = forces.devices[i]; auto& h = hardware_[i];
             if (h.id != force.id) throw std::invalid_argument("Hardware force telemetry IDs are stale.");
             h.appliedForceNewtons = force.appliedForceNewtons;
+            h.profileAccelerationMetersPerSecondSquared = force.profileAccelerationMetersPerSecondSquared;
+            h.targetSpeedLimited = force.targetSpeedLimited
+                || (h.targetSpeedLimited && force.profileAccelerationMetersPerSecondSquared > 0);
             if (!h.forceControl.signedAccelerationCommand)
                 h.commandedAccelerationMetersPerSecondSquared = force.commandedAccelerationMetersPerSecondSquared;
         }

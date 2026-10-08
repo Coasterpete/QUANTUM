@@ -28,6 +28,10 @@ namespace quantum::physics
         std::size_t occupiedBogieCount = 0;
         double commandedAccelerationMetersPerSecondSquared = 0.0;
         double appliedForceNewtons = 0.0;
+        // Launch profile request before target-speed limiting, averaged over
+        // occupied bogies even when reaching the target releases propulsion.
+        double profileAccelerationMetersPerSecondSquared = 0.0;
+        bool targetSpeedLimited = false;
     };
 
     struct TrackDeviceForceResult

@@ -588,6 +588,8 @@ QnResult QN_CALL qn_hardware_snapshot(QnSession handle, uint64_t revision,
             item["entered"] = h->occupancy.entered; item["exited"] = h->occupancy.exited;
             item["commandedSpeed"] = h->commandedSpeedMetersPerSecond;
             item["commandedAcceleration"] = h->commandedAccelerationMetersPerSecondSquared;
+            item["profileAcceleration"] = h->profileAccelerationMetersPerSecondSquared;
+            item["targetSpeedLimited"] = h->targetSpeedLimited;
             item["direction"] = h->actualSpeedMetersPerSecond > 0 ? 1 : h->actualSpeedMetersPerSecond < 0 ? -1 : 0;
             item["actualSpeed"] = h->actualSpeedMetersPerSecond; item["appliedForce"] = h->appliedForceNewtons;
             item["aligned"] = h->aligned; item["stopped"] = h->stopped; item["movementPermitted"] = h->movementPermitted;

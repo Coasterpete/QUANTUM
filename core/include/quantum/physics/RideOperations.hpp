@@ -66,6 +66,8 @@ namespace quantum::physics
         double commandedAccelerationMetersPerSecondSquared = 0;
         double actualSpeedMetersPerSecond = 0;
         double appliedForceNewtons = 0;
+        double profileAccelerationMetersPerSecondSquared = 0;
+        bool targetSpeedLimited = false;
         bool aligned = false, stopped = false, movementPermitted = false;
         TrackDeviceRuntimeState forceControl;
     };
