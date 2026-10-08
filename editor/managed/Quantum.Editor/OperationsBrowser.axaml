@@ -1,0 +1,21 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" xmlns:managed="using:Quantum.Managed" x:Class="Quantum.Editor.OperationsBrowser" x:DataType="local:EditorViewModel">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <StackPanel Margin="12" Spacing="8">
+      <TextBlock Classes="heading" Text="RIDE HARDWARE"/>
+      <ComboBox ItemsSource="{Binding HardwareChoices}" SelectedItem="{Binding SelectedHardwareChoice}"/>
+      <Button Content="Add Hardware" Classes="primary" Command="{Binding CreateHardwareCommand}"/>
+      <TextBox Text="{Binding HardwareFilter}" PlaceholderText="Filter hardware" ToolTip.Tip="Filter by name, family or interval. Selection is retained when filtered out."/>
+    </StackPanel>
+    <ListBox x:Name="HardwareItems" Grid.Row="1" ItemsSource="{Binding FilteredHardware}" SelectedItem="{Binding SelectedBrowserHardware}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="managed:TrackDevice">
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding Summary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+    <Button Grid.Row="2" Margin="12" Content="Remove hardware" Command="{Binding DeleteDeviceCommand}"/>
+  </Grid>
+</UserControl>

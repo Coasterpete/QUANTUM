@@ -18,14 +18,21 @@ public sealed partial class MainWindow : Window
     internal Rect TimelineBounds => Timeline.Bounds;
     internal ProfilePlot TimelinePlot => Timeline.AuthoringPlot;
     private bool closeApproved, closePending;
-    public MainWindow()
+    private readonly string layoutSettingsPath;
+    public MainWindow() : this(WorkbenchLayout.SettingsPath) { }
+    internal MainWindow(string settingsPath)
     {
+        layoutSettingsPath = settingsPath;
         InitializeComponent();
         using (var icon = AssetLoader.Open(new Uri("avares://Quantum.Editor/Assets/quantum.ico")))
             Icon = new WindowIcon(icon);
         controller = new SessionController();
-        model = new EditorViewModel(controller);
+        var layout = WorkbenchLayout.Load(layoutSettingsPath, out var layoutError);
+        model = new EditorViewModel(controller, layout);
         DataContext = model;
+        InitializeLayout();
+        model.WorkspaceMode = layout.Workspace;
+        if (layoutError is not null) model.Error = layoutError;
         AddHandler(KeyDownEvent, (_, e) =>
         {
             if (e.Key != Key.Escape || !model.InteractionActive) return;
@@ -52,6 +59,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 if (!await model.ConfirmClose()) return;
+                SaveLayout();
                 viewport.Shutdown();
                 controller.Dispose();
                 snapshots.Stop();
@@ -126,12 +134,14 @@ public sealed partial class MainWindow : Window
         foreach (var (bit, command) in new (uint, EditorCommand)[]
         {
             (1, model.UndoCommand), (2, model.RedoCommand), (4, model.SaveCommand),
-            (8, model.OpenCommand), (16, model.NewCommand), (32, model.SaveAsCommand)
+            (8, model.OpenCommand), (16, model.NewCommand), (32, model.SaveAsCommand), (1024, model.OpenTimelineCommand)
         }) if ((intents & bit) != 0) command.Execute(null);
         if (model.IsSupportsWorkspace && (intents & (64 | 128)) != 0) SupportsTree.FocusStructures();
+        else if (model.IsTrainWorkspace && (intents & (64 | 128)) != 0) TrainTree.FindControl<ListBox>("ConsistItems")?.Focus();
+        else if (model.IsOperationsWorkspace && (intents & (64 | 128)) != 0) HardwareTree.FindControl<ListBox>("HardwareItems")?.Focus();
         else
         {
-            if ((intents & 64) != 0) LengthField.Focus();
+            if ((intents & 64) != 0) { if (LengthField.IsEffectivelyVisible) LengthField.Focus(); else RouteList.Focus(); }
             if ((intents & 128) != 0) RouteList.Focus();
         }
     }

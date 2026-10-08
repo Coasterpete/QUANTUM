@@ -1,19 +1,44 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" xmlns:managed="using:Quantum.Managed" x:Class="Quantum.Editor.TrainBrowser" x:DataType="local:EditorViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
     <StackPanel Margin="14" Spacing="8">
-      <TextBlock Classes="heading" Text="TRAIN / CONFIGURATION" />
-      <TextBlock Classes="muted" Text="One simulated train · native document" TextWrapping="Wrap" />
-      <TextBlock Text="Cars per train · 1–32" />
-      <Grid ColumnDefinitions="*,Auto"><TextBox Text="{Binding TrainCarCount}" /><Button Grid.Column="1" Content="Resize" Command="{Binding ResizeTrainCommand}" /></Grid>
-      <TextBlock Text="Initial speed · m/s" />
-      <Grid ColumnDefinitions="*,Auto"><TextBox Text="{Binding InitialSpeed}" /><Button Grid.Column="1" Content="Apply" Command="{Binding ApplySpeedCommand}" /></Grid>
-      <TextBlock Classes="heading" Text="ORDERED CONSIST · FRONT → REAR" />
-      <ComboBox ItemsSource="{Binding TrainRoles}" SelectedItem="{Binding TrainPrototypeRole}" />
-      <WrapPanel><Button Content="Add" Command="{Binding AddCarCommand}" /><Button Content="Insert before" Command="{Binding InsertCarCommand}" /></WrapPanel>
+      <TextBlock Classes="heading" Text="CONSIST"/>
+      <TextBlock Classes="muted" Text="Front → rear · one simulated train" TextWrapping="Wrap"/>
+      <local:InspectorSection Header="Train setup" SectionKey="train.setup">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Cars per train · 1–32"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding TrainCarCount}"/>
+            <Button Grid.Column="1" Content="Resize" Command="{Binding ResizeTrainCommand}"/>
+          </Grid>
+          <TextBlock Text="Initial speed · m/s"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding InitialSpeed}"/>
+            <Button Grid.Column="1" Content="Apply" Command="{Binding ApplySpeedCommand}"/>
+          </Grid>
+        </StackPanel>
+      </local:InspectorSection>
+      <TextBlock Classes="heading" Text="ORDERED CONSIST · FRONT → REAR"/>
+      <ComboBox ItemsSource="{Binding TrainPrototypeChoices}" SelectedItem="{Binding SelectedTrainPrototype}"/>
+      <WrapPanel>
+        <Button Classes="primary" Content="Add Car" Command="{Binding AddCarCommand}"/>
+        <Button Content="Insert before" Command="{Binding InsertCarCommand}"/>
+      </WrapPanel>
     </StackPanel>
-    <ListBox Grid.Row="1" ItemsSource="{Binding TrainCars}" SelectedItem="{Binding SelectedCar}">
-      <ListBox.ItemTemplate><DataTemplate x:DataType="managed:TrainCarSettings"><StackPanel Spacing="4"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /><TextBlock Classes="muted technical" Text="{Binding MassLabel}" /></StackPanel></DataTemplate></ListBox.ItemTemplate>
+    <ListBox x:Name="ConsistItems" Grid.Row="1" ItemsSource="{Binding TrainCars}" SelectedItem="{Binding SelectedCar}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="managed:TrainCarSettings">
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/>
+            <TextBlock Classes="muted technical" Text="{Binding MassLabel}"/>
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
     </ListBox>
-    <WrapPanel Grid.Row="2" Margin="10"><Button Content="Duplicate" Command="{Binding DuplicateCarCommand}" /><Button Content="Remove" Command="{Binding RemoveCarCommand}" /><Button Content="↑" Command="{Binding MoveCarUpCommand}" /><Button Content="↓" Command="{Binding MoveCarDownCommand}" /></WrapPanel>
+    <WrapPanel Grid.Row="2" Margin="10">
+      <Button Content="Duplicate" Command="{Binding DuplicateCarCommand}"/>
+      <Button Content="Remove" Command="{Binding RemoveCarCommand}"/>
+      <Button Content="↑" Command="{Binding MoveCarUpCommand}"/>
+      <Button Content="↓" Command="{Binding MoveCarDownCommand}"/>
+    </WrapPanel>
   </Grid>
 </UserControl>

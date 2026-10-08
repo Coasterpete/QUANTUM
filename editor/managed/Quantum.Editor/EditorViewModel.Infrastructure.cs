@@ -17,7 +17,7 @@ public sealed partial class EditorViewModel
     {
         get => selectedInfrastructure;
         set { selectedInfrastructure = value; Changed(); Changed(nameof(HasInfrastructure));
-            if (!updatingInfrastructure) { SeedInfrastructure(); _ = SynchronizeInfrastructure(value?.Id ?? 0); } RefreshCommands(); }
+            if (!updatingInfrastructure) { InspectInfrastructure = value is not null; SeedInfrastructure(); _ = SynchronizeInfrastructure(value?.Id ?? 0); } RefreshCommands(); }
     }
     public bool HasInfrastructure => selectedInfrastructure is not null;
     public int InfrastructureKind { get => infrastructureKind; set { infrastructureKind = value; Changed(); } }
@@ -60,7 +60,7 @@ public sealed partial class EditorViewModel
             {
                 var device = snapshot.Devices.FirstOrDefault(d => d.Id == Id(id,"Gate ID"));
                 if (device is null || device.Kind != (uint)DeviceKind.Access) throw new ArgumentException("Choose an existing Access gate ID.");
-                WorkspaceMode = 0; TimelineSource = 1; SelectedDevice = device;
+                WorkspaceMode = 3; SelectedDevice = device;
             }
             return Task.CompletedTask;
         }), () => InfrastructureGates.Trim().Length > 0);
@@ -110,17 +110,18 @@ public sealed partial class EditorViewModel
         var id = next.Hardware.SelectedInfrastructure;
         if (changed || selectedInfrastructure?.Id != (id == 0 ? null : id))
         {
+            var previousId = selectedInfrastructure?.Id;
             updatingInfrastructure = true;
             InfrastructureItems = next.Hardware.Infrastructure; Changed(nameof(InfrastructureItems));
             selectedInfrastructure = InfrastructureItems.FirstOrDefault(i => i.Id == id);
             Changed(nameof(SelectedInfrastructure)); Changed(nameof(HasInfrastructure));
             updatingInfrastructure = false;
-            if (selectedInfrastructure is not null) SeedInfrastructure();
+            if (selectedInfrastructure is not null) { SeedInfrastructure(); if (previousId != id) InspectInfrastructure = true; }
         }
         if (IsSupportsWorkspace && next.Hardware.SelectedAccess != lastNativeAccess
             && next.Devices.FirstOrDefault(d => d.Id == next.Hardware.SelectedAccess && d.Kind == (uint)DeviceKind.Access) is { } gate)
         {
-            WorkspaceMode = 0; TimelineSource = 1; SelectedDevice = gate;
+            WorkspaceMode = 3; SelectedDevice = gate;
         }
         lastNativeAccess = next.Hardware.SelectedAccess;
     }

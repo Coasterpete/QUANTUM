@@ -61,9 +61,10 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     public EditorCommand ApplyLengthCommand { get; }
     public EditorCommand ApplySpeedCommand { get; }
     public EditorCommand FrameCommand { get; }
-    public EditorViewModel(SessionController controller)
+    public EditorViewModel(SessionController controller, WorkbenchLayout? layout = null)
     {
         Controller = controller;
+        Layout = layout ?? new();
         NewCommand = Add(() => Run(async () => { if (await AllowReplacement()) { await Controller.Submit(s => s.New()); path = ""; } }));
         OpenCommand = Add(() => Run(async () =>
         {
@@ -120,12 +121,13 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             var force = ParsePositive(DeviceForce, "Force limit");
             var enabled = DeviceEnabled;
             await Controller.Submit(s => s.SetDeviceProperties(snapshot.Revision, device.Id, enabled, start, end, force));
-        }), () => HasDevice);
+        }, placement: true), () => HasDevice);
         InitializeHardwareCommands();
         InitializeInfrastructureCommands();
         InitializeSupportCommands();
         InitializePlacementCommands();
         InitializeTrainCommands();
+        InitializeWorkbenchCommands();
     }
     private EditorCommand Add(Func<Task> action, Func<bool>? enabled = null)
     {
@@ -147,7 +149,9 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     public Region? Selected
     {
         get => selected;
-        set { if (selected?.Index != value?.Index) CancelForSelection(); selected = value; Changed(); Changed(nameof(HasSelection)); Length = value?.Length.ToString("G12", CultureInfo.CurrentCulture) ?? ""; RefreshProfiles(); RefreshCommands(); }
+        set { if (selected?.Index != value?.Index) CancelForSelection(); selected = value; Changed(); Changed(nameof(HasSelection)); Changed(nameof(ShowRegionInspector));
+            if (value is not null && !publishingSnapshot && IsTrackStartSelected) ClearTrackStartSelection();
+            Length = value?.Length.ToString("G12", CultureInfo.CurrentCulture) ?? ""; RefreshProfiles(); RefreshCommands(); }
     }
     public bool HasSelection => Selected is not null;
     public int TimelineSource { get => timelineSource; set { if (timelineSource != value) CancelForSelection(); timelineSource = value; Changed(); Changed(nameof(IsDeviceTimeline)); Changed(nameof(ShowProfileEditor)); Changed(nameof(ShowHardwareState)); RefreshProfiles(); SynchronizeDeviceSelection(); } }
@@ -180,6 +184,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         {
             if (selectedDevice?.Id != value?.Id) CancelForSelection();
             selectedDevice = value; Changed(); Changed(nameof(HasDevice));
+            Changed(nameof(SelectedBrowserHardware));
             DeviceMode = value?.Custom == true ? 1 : 0;
             DeviceAcceleration = value?.Acceleration.ToString("G12", CultureInfo.CurrentCulture) ?? "";
             DeviceStart = value?.Start.ToString("G12", CultureInfo.CurrentCulture) ?? "";
@@ -187,6 +192,7 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
             DeviceForce = value?.MaximumForce.ToString("G12", CultureInfo.CurrentCulture) ?? "";
             DeviceEnabled = value?.Enabled == true;
             SeedHardware();
+            SeedHardwareBaselines();
             RefreshProfiles(); RefreshCommands();
             SynchronizeDeviceSelection();
         }
@@ -248,8 +254,10 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
         PublishSupports(next.Supports, changedRoute);
         PublishTrain(next.Train);
         Changed(nameof(Snapshot)); Changed(nameof(Title)); Changed(nameof(RouteSummary)); Changed(nameof(TrainSummary)); Changed(nameof(Telemetry)); Changed(nameof(HardwareTelemetry));
+        Changed(nameof(PlaybackSummary)); Changed(nameof(IsTrackStartSelected)); Changed(nameof(ShowRegionInspector));
         if (changedRoute)
         {
+            Changed(nameof(FilteredHardware));
             Selected = next.Route.FirstOrDefault(r => r.Index == selectedIndex) ?? next.Route.FirstOrDefault();
             InitialSpeed = next.InitialSpeed.ToString("G12", CultureInfo.CurrentCulture);
             SelectedDevice = next.Devices.FirstOrDefault(d => d.Id == deviceId) ?? next.Devices.FirstOrDefault();
@@ -319,11 +327,19 @@ public sealed partial class EditorViewModel : INotifyPropertyChanged
     private async void SynchronizeDeviceSelection()
     {
         if (Snapshot is not { } snapshot) return;
-        var id = IsDeviceTimeline && !IsSupportsWorkspace ? SelectedDevice?.Id ?? 0 : 0;
+        var id = IsDeviceTimeline && (IsOperationsWorkspace || IsRouteWorkspace) ? SelectedDevice?.Id ?? 0 : 0;
         try { await Controller.Submit(s => s.SelectDevice(snapshot.Revision, id)); }
         catch (QuantumException failure) { if (failure.Code != 8) Error = failure.Message; }
         catch (ObjectDisposedException) { }
         catch (TaskCanceledException) { }
     }
-    private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    private void Changed([CallerMemberName] string? name = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        if (name is nameof(TrainCarName) or nameof(TrainCarRole) or nameof(TrainCarAsset) or nameof(AuthoredTrainName) or nameof(DefaultConnectorLength)
+            or nameof(DeviceStart) or nameof(DeviceEnd) or nameof(DeviceForce) or nameof(DeviceEnabled) or nameof(DeviceMode) or nameof(DeviceAcceleration)
+            || (name?.StartsWith("Hardware", StringComparison.Ordinal) == true && name is not nameof(HardwareTelemetry) and not nameof(HardwareContentDescription))
+            || name?.StartsWith("Gate", StringComparison.Ordinal) == true
+            || name is nameof(SelectedHomeAlignment) or nameof(AlignmentName) or nameof(AlignmentOffset) or nameof(AlignmentKind)) NotifyPending();
+    }
 }

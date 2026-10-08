@@ -13,9 +13,15 @@ public sealed partial class EditorApplication : Application
         {
             try
             {
-                var window = new MainWindow();
+                var window = desktop.Args is ["--verify-workbench-smoke", _, var layoutReport]
+                    ? new MainWindow(Path.GetFullPath(layoutReport) + ".layout.json") : new MainWindow();
                 desktop.MainWindow = window;
-                if (desktop.Args is ["--verify-train-2-smoke", var trainFixture, var trainReport])
+                if (desktop.Args is ["--verify-workbench-smoke", var uxFixture, var uxReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunWorkbenchSmoke(window, uxFixture, uxReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-train-2-smoke", var trainFixture, var trainReport])
                 {
                     desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                     window.Opened += async (_, _) => await RuntimeChecks.RunTrain2Smoke(window, trainFixture, trainReport, desktop);

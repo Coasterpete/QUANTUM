@@ -1,38 +1,93 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.TrainInspector" x:DataType="local:EditorViewModel">
   <UserControl.Resources>
     <DataTemplate x:Key="TrainFieldTemplate" x:DataType="local:TrainField">
-      <Grid ColumnDefinitions="*,110" ColumnSpacing="6" Margin="0,3"><TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextWrapping="Wrap" /><TextBox Grid.Column="1" Text="{Binding Value}" /></Grid>
+      <Grid ColumnDefinitions="*,110" ColumnSpacing="6" Margin="0,3">
+        <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+        <TextBox Grid.Column="1" Text="{Binding Value}"/>
+      </Grid>
     </DataTemplate>
   </UserControl.Resources>
   <Grid RowDefinitions="Auto,*,Auto">
-    <StackPanel Margin="14" Spacing="6"><TextBlock Classes="heading" Text="CAR CONFIGURATION" /><TextBlock Text="{Binding CarEngineeringSummary}" TextWrapping="Wrap" Classes="muted" /></StackPanel>
-    <TabControl Grid.Row="1">
-      <TabItem Header="Physical"><ScrollViewer><StackPanel Margin="12" Spacing="8">
-        <TextBlock Text="Name / identity" /><TextBox Text="{Binding TrainCarName}" />
-        <TextBlock Text="Role label · keeps explicit physics" /><ComboBox ItemsSource="{Binding TrainRoles}" SelectedItem="{Binding TrainCarRole}" />
-        <TextBlock Classes="muted" Text="Preset replaces this car's values with the chosen generic defaults. Every value remains editable." TextWrapping="Wrap" />
-        <ComboBox ItemsSource="{Binding TrainRoles}" SelectedItem="{Binding TrainPrototypeRole}" /><Button Content="Apply prototype to selected car" Command="{Binding ApplyCarPrototypeCommand}" />
-        <Separator /><TextBlock Classes="muted" Text="Exactly two bogies. Local positions bind to this car ID; contacts are preserved. Body bounds are reference envelopes, not collision meshes." TextWrapping="Wrap" />
-        <ItemsControl ItemsSource="{Binding CarFields}" ItemTemplate="{StaticResource TrainFieldTemplate}" />
-        <Button Content="Apply with uniform-box dry inertia" Command="{Binding BoxInertiaCommand}" ToolTip.Tip="Explicit native approximation from staged dry mass and body dimensions. Commits all staged car values as one action." />
-      </StackPanel></ScrollViewer></TabItem>
-      <TabItem Header="Visual"><ScrollViewer><StackPanel Margin="12" Spacing="10">
-        <TextBlock Text="GLB shell · assets:// identifier" />
-        <ComboBox ItemsSource="{Binding TrainVisualAssets}" SelectedItem="{Binding SelectedTrainVisualAsset}" />
-        <TextBox Text="{Binding TrainCarAsset}" PlaceholderText="assets://train/my-car.glb" />
-        <TextBlock Classes="muted" Text="Custom GLBs follow the existing assets pipeline. Origin = physical car reference; meters, +X forward / +Y lateral / +Z up. Placeholder art is not a production shell." TextWrapping="Wrap" />
-        <TextBlock Classes="heading" Text="VISUAL ALIGNMENT ONLY" />
-        <TextBlock Classes="muted" Text="Moves/rotates the GLB only. Physics, COG, bogies and hitches stay at their authored positions. XYZ degrees compose Rz × Ry × Rx; no shell scaling." TextWrapping="Wrap" />
-        <ItemsControl ItemsSource="{Binding CarAlignmentFields}" ItemTemplate="{StaticResource TrainFieldTemplate}" />
-      </StackPanel></ScrollViewer></TabItem>
-      <TabItem Header="Defaults"><ScrollViewer><StackPanel Margin="12" Spacing="8">
-        <TextBlock Text="Train name" /><TextBox Text="{Binding AuthoredTrainName}" />
-        <TextBlock Text="Default rear connector · m" /><TextBox Text="{Binding DefaultConnectorLength}" />
-        <TextBlock Classes="muted" Text="Resize uses these physical/load defaults for added cars. Existing cars retain explicit values. Add/Insert use the chosen prototype." TextWrapping="Wrap" />
-        <ItemsControl ItemsSource="{Binding TrainDefaultFields}" ItemTemplate="{StaticResource TrainFieldTemplate}" />
-        <Button Content="Apply train name / defaults" Command="{Binding ApplyTrainDefaultsCommand}" />
-      </StackPanel></ScrollViewer></TabItem>
-    </TabControl>
-    <StackPanel Grid.Row="2" Margin="10" Spacing="6"><TextBlock Classes="muted" Text="Fields are staged. Apply validates and commits one action, then stops and resets the native preview." TextWrapping="Wrap" /><WrapPanel><Button Content="Validate proposal" Command="{Binding ValidateCarCommand}" /><Button Content="Apply car" Classes="primary" Command="{Binding ApplyCarCommand}" /></WrapPanel></StackPanel>
+    <StackPanel Margin="14" Spacing="6">
+      <TextBlock Classes="heading" Text="SELECTED CAR"/>
+      <TextBlock Text="{Binding SelectedCar.Name}" FontSize="18"/>
+      <TextBlock IsVisible="{Binding !HasCar}" Text="Select a car in the consist." Classes="muted"/>
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="12" Spacing="10" IsVisible="{Binding HasCar}" IsEnabled="{Binding CanInteract}">
+        <local:InspectorSection Header="Basics" SectionKey="train.basics" DefaultExpanded="True">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Name"/>
+            <TextBox Text="{Binding TrainCarName}"/>
+            <TextBlock Text="Role"/>
+            <ComboBox ItemsSource="{Binding TrainRoles}" SelectedItem="{Binding TrainCarRole}" ToolTip.Tip="Role is a label; it does not replace explicit physical values."/>
+            <TextBlock Text="Shell asset"/>
+            <ComboBox ItemsSource="{Binding TrainVisualAssets}" SelectedItem="{Binding SelectedTrainVisualAsset}"/>
+            <local:InspectorSection Header="Starting point" SectionKey="train.prototype">
+              <StackPanel Spacing="6">
+                <ComboBox ItemsSource="{Binding TrainPrototypeChoices}" SelectedItem="{Binding SelectedTrainPrototype}"/>
+                <Button Content="Apply prototype" Command="{Binding ApplyCarPrototypeCommand}" ToolTip.Tip="Immediately replaces this car with editable generic native defaults. Undo restores the car."/>
+              </StackPanel>
+            </local:InspectorSection>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Mass &amp; COG" SectionKey="train.mass">
+          <StackPanel Spacing="6">
+            <ItemsControl ItemsSource="{Binding CarMassFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Body" SectionKey="train.body" ToolTip.Tip="Reference envelope, not a collision mesh. Dimensions do not recalculate dry inertia.">
+          <StackPanel Spacing="6">
+            <ItemsControl ItemsSource="{Binding CarBodyFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Bogies" SectionKey="train.bogies" ToolTip.Tip="Exactly two bogies, in this car’s local frame. Existing contacts are preserved.">
+          <StackPanel Spacing="6">
+            <ItemsControl ItemsSource="{Binding CarBogieFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Hitches" SectionKey="train.hitches">
+          <StackPanel Spacing="6">
+            <ItemsControl ItemsSource="{Binding CarHitchFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Visual asset / alignment" SectionKey="train.visual" ToolTip.Tip="GLB only; physics stays unchanged. Meters, +X forward / +Y lateral / +Z up. XYZ degrees compose Rz × Ry × Rx; no scaling. Bundled shells are placeholders.">
+          <StackPanel Spacing="6">
+            <TextBox Text="{Binding TrainCarAsset}" PlaceholderText="assets://train/my-car.glb"/>
+            <ItemsControl ItemsSource="{Binding CarAlignmentFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Advanced" SectionKey="train.advanced">
+          <StackPanel Spacing="6">
+            <TextBlock Text="{Binding CarEngineeringSummary}" TextWrapping="Wrap" Classes="muted" FontSize="11"/>
+            <ItemsControl ItemsSource="{Binding CarAdvancedFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+            <Button Content="Apply with box inertia" Command="{Binding BoxInertiaCommand}" ToolTip.Tip="Explicit native uniform-box approximation from staged mass and body dimensions. Commits all car fields."/>
+            <Button Content="Validate proposal" Command="{Binding ValidateCarCommand}" ToolTip.Tip="Check the proposal without committing. Results appear in Diagnostics."/>
+          </StackPanel>
+        </local:InspectorSection>
+        <local:InspectorSection Header="Train defaults" SectionKey="train.defaults" ToolTip.Tip="Resize uses these defaults for added cars. Existing cars retain explicit values; Add uses the chosen prototype.">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Train name"/>
+            <TextBox Text="{Binding AuthoredTrainName}"/>
+            <TextBlock Text="Default connector · m"/>
+            <TextBox Text="{Binding DefaultConnectorLength}"/>
+            <ItemsControl ItemsSource="{Binding TrainDefaultFields}" ItemTemplate="{StaticResource TrainFieldTemplate}"/>
+            <TextBlock IsVisible="{Binding TrainDefaultsPending}" Text="● Modified defaults · not applied" Classes="pending"/>
+            <WrapPanel>
+              <Button Content="Apply defaults" Command="{Binding ApplyTrainDefaultsCommand}"/>
+              <Button Content="Revert defaults" Command="{Binding RevertTrainDefaultsCommand}"/>
+            </WrapPanel>
+          </StackPanel>
+        </local:InspectorSection>
+      </StackPanel>
+    </ScrollViewer>
+    <StackPanel Grid.Row="2" Margin="10" Spacing="5" IsVisible="{Binding HasCar}">
+      <TextBlock Text="Apply car stops and resets the preview." Classes="muted" FontSize="11"/>
+      <TextBlock IsVisible="{Binding CarPending}" Text="● Modified car · not applied" Classes="pending"/>
+      <WrapPanel>
+        <Button Content="Apply car" Classes="primary" Command="{Binding ApplyCarCommand}"/>
+        <Button Content="Revert car" Command="{Binding RevertCarCommand}"/>
+      </WrapPanel>
+    </StackPanel>
   </Grid>
 </UserControl>

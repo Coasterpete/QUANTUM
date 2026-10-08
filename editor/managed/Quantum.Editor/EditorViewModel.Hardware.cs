@@ -135,24 +135,22 @@ public sealed partial class EditorViewModel
     private static ulong Id(string text, string name) => ulong.TryParse(text, out var id) ? id : throw new ArgumentException($"{name} must be a whole nonnegative ID.");
     private ulong[] GateIds() => HardwareGates.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries).Select(text => Id(text, "Gate ID")).ToArray();
     private int Direction => HardwareDirection == 0 ? 1 : -1;
-    private async Task ApplyDeviceSettings(Func<Task> operation)
+    private async Task ApplyDeviceSettings(Func<Task> operation, bool placement = false)
     {
         var id = SelectedDevice?.Id;
-        var pendingSpeed = HardwareSpeed;
-        var pendingTarget = HardwareTarget;
+        var restoreConfiguration = PreserveHardwareConfiguration();
+        var restoreOtherGroup = placement ? PreserveHardwareAcceleration() : PreserveHardwarePlacement();
         await Run(operation);
-        // These Apply buttons commit placement/force or acceleration, not the
-        // typed configuration. Publication must not discard its velocity draft.
+        // Rejected edits retain the existing accepted-form restoration policy.
         if (Error.Length == 0 && SelectedDevice?.Id == id)
         {
-            HardwareSpeed = pendingSpeed;
-            HardwareTarget = pendingTarget;
+            restoreConfiguration(); restoreOtherGroup();
         }
     }
     private void InitializeHardwareCommands()
     {
         CreateHardwareCommand = Add(() => CreateDevice(SelectedHardwareChoice.Kind), () => Snapshot?.TotalLength > 0);
-        ApplyHardwareCommand = Add(() => Run(ApplyHardware), () => HasDevice && !IsBlockHardware);
+        ApplyHardwareCommand = Add(ApplyHardwareConfiguration, () => HasDevice && !IsBlockHardware);
         DispatchCommand = Add(() => RuntimeHardware(HardwareCommand.RequestDispatch), () => IsStationHardware);
         TransferMoveCommand = Add(() => RuntimeHardware(HardwareCommand.MoveTransfer, target: SelectedAlignment?.Id ?? 0), () => IsTransferHardware && SelectedAlignment is not null);
         OpenGateCommand = Add(() => RuntimeHardware(HardwareCommand.OpenAccess), () => IsAccessHardware);
@@ -246,5 +244,6 @@ public sealed partial class EditorViewModel
             nameof(IsStationHardware), nameof(IsBlockHardware), nameof(IsTransferHardware), nameof(IsAccessHardware), nameof(HasHardwareSpeed), nameof(HasSpeedControllerHardware), nameof(HasHardwareDirection),
             nameof(HasGateReferences), nameof(HasForceHardware), nameof(HasAccelerationProfileHardware), nameof(HasLiftHardware), nameof(ShowProfileEditor), nameof(ShowHardwareState), nameof(HardwareContentDescription) }) Changed(name);
         Changed(nameof(HardwareTelemetry));
+        Changed(nameof(HasAccelerationOrResponse));
     }
 }

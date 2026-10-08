@@ -170,6 +170,7 @@ bool NativeViewport::frame(uint32_t width, uint32_t height,
                 else if (event.key.key == SDLK_S) shortcuts_ |= (event.key.mod & SDL_KMOD_SHIFT) ? 32u : 4u;
                 else if (event.key.key == SDLK_O) shortcuts_ |= 8u;
                 else if (event.key.key == SDLK_N) shortcuts_ |= 16u;
+                else if (event.key.key == SDLK_T) shortcuts_ |= 1024u;
             }
             else if (!pointerTransform_ && event.key.key == SDLK_F)
             { if (trainActive_) frameTrain(14); else camera_.frame(static_cast<double>(width_) / height_); }

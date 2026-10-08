@@ -25,6 +25,10 @@ public sealed partial class EditorViewModel
             CancelForSelection(); workspaceMode = value;
             Changed(); Changed(nameof(IsSupportsWorkspace)); Changed(nameof(IsRouteWorkspace));
             Changed(nameof(IsTrainWorkspace));
+            Changed(nameof(IsOperationsWorkspace)); Changed(nameof(ViewportHeading));
+            Layout.SelectWorkspace(value);
+            if (IsRouteWorkspace) TimelineSource = 0;
+            else if (IsOperationsWorkspace) TimelineSource = 1;
             Changed(nameof(ViewportInstructions)); RefreshCommands();
             SynchronizeSupportWorkspace(); SynchronizeDeviceSelection();
             SynchronizeTrainView();
@@ -83,8 +87,10 @@ public sealed partial class EditorViewModel
     public bool HasConnection => ActiveConnection?.Treatment > 0;
     public bool HasConnectionPlacement => ActiveConnection?.HasPlacement == true;
     public bool CanEditConnectorAsset => HasConnection && ActiveConnection?.AssetTruncated == false;
-    public string SupportHeading => selectedNode?.Label ?? selectedMember?.Label ?? selectedStructure?.Label ?? "Support authoring";
-    public string SupportContext => selectedStructure?.Summary ?? "Create or select a support structure";
+    public string SupportHeading => InspectInfrastructure ? SelectedInfrastructure?.Name ?? "New infrastructure"
+        : selectedNode?.Label ?? selectedMember?.Label ?? selectedStructure?.Label ?? "Support authoring";
+    public string SupportContext => InspectInfrastructure ? "Track-relative or world placement"
+        : selectedStructure?.Summary ?? "Create or select a support structure";
     public string SupportSummary => Snapshot is { } s
         ? $"{s.Supports.Structures.Count} structures · {s.Supports.Nodes.Count} nodes · {s.Supports.Members.Count} members" : "Loading…";
     public string ConnectionContext
@@ -179,6 +185,7 @@ public sealed partial class EditorViewModel
     }
     public async Task SelectSupportAsync(SupportSelection selection)
     {
+        InspectInfrastructure = false;
         if (Snapshot is not { } snapshot || selection == supportSelection) return;
         CancelForSelection(); ApplySupportSelection(selection, true);
         var request = ++supportSelectionRequest; supportSelectionPending = true;
@@ -218,6 +225,7 @@ public sealed partial class EditorViewModel
     private void ApplySupportSelection(SupportSelection choice, bool refresh)
     {
         if (!refresh) return;
+        var selectionChanged = supportSelection != choice;
         var previousUpdating = updatingSupports; updatingSupports = true;
         try
         {
@@ -232,6 +240,7 @@ public sealed partial class EditorViewModel
             if ((choice.Kind == SupportSelectionKind.Node && selectedNode is null) || (choice.Kind == SupportSelectionKind.Member && selectedMember is null))
                 choice = new(SupportSelectionKind.Structure, choice.Structure);
             supportSelection = choice;
+            if (selectionChanged && selectedStructure is not null) InspectInfrastructure = false;
             Changed(nameof(SupportNodes)); Changed(nameof(SupportMembers)); Changed(nameof(SelectedStructure));
             Changed(nameof(SelectedSupportNode)); Changed(nameof(SelectedSupportMember));
             MemberStartNode = SupportNodes.FirstOrDefault(n => previousStructure == choice.Structure && n.Id == start) ?? selectedNode ?? SupportNodes.FirstOrDefault();
@@ -244,6 +253,7 @@ public sealed partial class EditorViewModel
             foreach (var name in new[] { nameof(HasSupportStructure), nameof(HasSupportNode), nameof(HasSupportMember), nameof(IsFreeSupportNode),
                 nameof(IsAttachedSupportNode), nameof(IsFoundationSupportNode), nameof(CanMoveSupportNode), nameof(SupportHeading), nameof(SupportContext), nameof(MemberMetadata) }) Changed(name);
             SeedSupportAppearance(); RefreshConnection(); RefreshCommands();
+            Changed(nameof(ShowSupportStructure)); Changed(nameof(ShowSupportNode)); Changed(nameof(ShowSupportMember));
         }
         finally { updatingSupports = previousUpdating; }
     }

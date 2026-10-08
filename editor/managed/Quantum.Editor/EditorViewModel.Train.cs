@@ -6,6 +6,11 @@ using Quantum.Managed;
 
 namespace Quantum.Editor;
 
+public sealed record TrainPrototypeChoice(string Role, string Label)
+{
+    public override string ToString() => Label;
+}
+
 // A form cell holds text for a native proposal. It has no physical behavior.
 public sealed class TrainField(string path, string label, double value) : INotifyPropertyChanged
 {
@@ -25,10 +30,23 @@ public sealed partial class EditorViewModel
     private long trainViewRequest;
     public bool IsTrainWorkspace => WorkspaceMode == 2;
     public IReadOnlyList<string> TrainRoles { get; } = ["Lead", "Middle", "Rear", "Zero", "Trailer", "Custom"];
+    public IReadOnlyList<TrainPrototypeChoice> TrainPrototypeChoices { get; } = [
+        new("Middle", "Standard passenger car"), new("Lead", "Lead passenger car"), new("Rear", "Rear passenger car"),
+        new("Trailer", "Trailer"), new("Zero", "Zero car"), new("Custom", "Custom")];
+    public TrainPrototypeChoice? SelectedTrainPrototype
+    {
+        get => TrainPrototypeChoices.FirstOrDefault(c => c.Role == TrainPrototypeRole);
+        set { if (value is not null) TrainPrototypeRole = value.Role; }
+    }
     public IReadOnlyList<string> TrainVisualAssets { get; } = [
         "assets://train/placeholder-lead-car-shell.glb", "assets://train/placeholder-car-shell.glb", "assets://train/placeholder-rear-car-shell.glb"];
     public IReadOnlyList<TrainCarSettings> TrainCars { get; private set; } = [];
     public IReadOnlyList<TrainField> CarFields { get; private set; } = [];
+    public IReadOnlyList<TrainField> CarMassFields { get; private set; } = [];
+    public IReadOnlyList<TrainField> CarBodyFields { get; private set; } = [];
+    public IReadOnlyList<TrainField> CarBogieFields { get; private set; } = [];
+    public IReadOnlyList<TrainField> CarHitchFields { get; private set; } = [];
+    public IReadOnlyList<TrainField> CarAdvancedFields { get; private set; } = [];
     public IReadOnlyList<TrainField> CarAlignmentFields { get; private set; } = [];
     public IReadOnlyList<TrainField> TrainDefaultFields { get; private set; } = [];
     public TrainCarSettings? SelectedCar
@@ -42,19 +60,20 @@ public sealed partial class EditorViewModel
         }
     }
     public bool HasCar => SelectedCar is not null;
-    public string TrainCarName { get; set; } = "";
-    public string TrainCarRole { get; set; } = "Middle";
+    private string trainCarName = "", trainCarRole = "Middle", authoredTrainName = "", defaultConnectorLength = ".5";
+    public string TrainCarName { get => trainCarName; set { trainCarName = value; Changed(); } }
+    public string TrainCarRole { get => trainCarRole; set { trainCarRole = value; Changed(); } }
     private string trainPrototypeRole = "Middle", trainCarAsset = "";
-    public string TrainPrototypeRole { get => trainPrototypeRole; set { trainPrototypeRole = value ?? "Middle"; Changed(); } }
+    public string TrainPrototypeRole { get => trainPrototypeRole; set { trainPrototypeRole = value ?? "Middle"; Changed(); Changed(nameof(SelectedTrainPrototype)); } }
     public string TrainCarAsset { get => trainCarAsset; set { trainCarAsset = value ?? ""; Changed(); Changed(nameof(SelectedTrainVisualAsset)); } }
     public string? SelectedTrainVisualAsset
     {
         get => TrainVisualAssets.Contains(TrainCarAsset) ? TrainCarAsset : null;
         set { if (value is not null) TrainCarAsset = value; }
     }
-    public string AuthoredTrainName { get; set; } = "";
+    public string AuthoredTrainName { get => authoredTrainName; set { authoredTrainName = value; Changed(); } }
     public string TrainCarCount { get; set; } = "4";
-    public string DefaultConnectorLength { get; set; } = ".5";
+    public string DefaultConnectorLength { get => defaultConnectorLength; set { defaultConnectorLength = value; Changed(); } }
     public IReadOnlyList<TrainDiagnostic> TrainDiagnostics { get; private set; } = [];
     public IReadOnlyList<TrainCarSummary> TrainCarSummaries => Snapshot?.Train.Summary.Cars ?? [];
     public string TrainSummaryDetails => Snapshot?.Train.Summary is { } s
@@ -70,7 +89,7 @@ public sealed partial class EditorViewModel
         ? $"Car #{c.Id} · {c.Physical.Bogies.Length} bogies · +X forward / +Y lateral / +Z up\n"
           + "Explicit dry inertia about dry COG. Body dimensions do not recalculate it."
         : "Select a car";
-    private bool showTrainBounds = true, showTrainBogies = true, showTrainHitches = true, showTrainCog = true, showTrainFrame = true;
+    private bool showTrainBounds, showTrainBogies, showTrainHitches, showTrainCog, showTrainFrame;
     public bool ShowTrainBounds { get => showTrainBounds; set { showTrainBounds = value; Changed(); SynchronizeTrainView(); } }
     public bool ShowTrainBogies { get => showTrainBogies; set { showTrainBogies = value; Changed(); SynchronizeTrainView(); } }
     public bool ShowTrainHitches { get => showTrainHitches; set { showTrainHitches = value; Changed(); SynchronizeTrainView(); } }
@@ -193,11 +212,20 @@ public sealed partial class EditorViewModel
     }
     private void SeedCar(TrainCarSettings? car)
     {
+        foreach (var field in CarFields.Concat(CarAlignmentFields)) field.PropertyChanged -= TrainCellChanged;
         selectedCar = car;
         TrainCarName = car?.Name ?? ""; TrainCarRole = car?.Role ?? "Middle"; TrainCarAsset = car?.VisualAsset ?? "";
         CarFields = car is null ? [] : [.. PhysicalFields(car.Physical, "physical."), new("connectorLengthMeters", "Rear connector · m", car.ConnectorLengthMeters)];
         CarAlignmentFields = car is null ? [] : Enumerable.Range(0, 3).Select(i => new TrainField($"visualTranslationMeters.{i}", $"Shell translation {"XYZ"[i]} · m", car.VisualTranslationMeters[i]))
             .Concat(Enumerable.Range(0, 3).Select(i => new TrainField($"visualRotationDegrees.{i}", $"Shell rotation {"XYZ"[i]} · deg", car.VisualRotationDegrees[i]))).ToArray();
+        CarMassFields = CarFields.Where(f => f.Path.Contains("MassKilograms") || f.Path.Contains("CogMeters")).ToArray();
+        CarBodyFields = CarFields.Where(f => f.Path.Contains("bodyDimensionsMeters")).ToArray();
+        CarBogieFields = CarFields.Where(f => f.Path.Contains("bogies.")).ToArray();
+        CarHitchFields = CarFields.Where(f => f.Path.Contains("HitchMeters") || f.Path == "connectorLengthMeters").ToArray();
+        CarAdvancedFields = CarFields.Except(CarMassFields.Concat(CarBodyFields).Concat(CarBogieFields).Concat(CarHitchFields)).ToArray();
+        foreach (var field in CarFields.Concat(CarAlignmentFields)) field.PropertyChanged += TrainCellChanged;
+        carBaseline = CarStamp(); NotifyPending();
+        foreach (var property in new[] { nameof(CarMassFields), nameof(CarBodyFields), nameof(CarBogieFields), nameof(CarHitchFields), nameof(CarAdvancedFields) }) Changed(property);
         foreach (var property in new[] { nameof(SelectedCar), nameof(HasCar), nameof(TrainCarName), nameof(TrainCarRole), nameof(TrainCarAsset), nameof(CarFields), nameof(CarAlignmentFields), nameof(CarEngineeringSummary) }) Changed(property);
     }
     private void PublishTrain(TrainWorkspaceSnapshot next)
@@ -209,8 +237,7 @@ public sealed partial class EditorViewModel
             var selected = next.Configuration.Cars.FirstOrDefault(c => c.Id == next.SelectedCar) ?? next.Configuration.Cars.FirstOrDefault();
             TrainCars = next.Configuration.Cars; Changed(nameof(TrainCars)); SeedCar(selected);
             AuthoredTrainName = next.Configuration.Name; TrainCarCount = next.Configuration.Cars.Length.ToString();
-            DefaultConnectorLength = next.Configuration.DefaultConnectorLengthMeters.ToString("G", CultureInfo.CurrentCulture);
-            TrainDefaultFields = PhysicalFields(next.Configuration.DefaultPhysical);
+            SeedTrainDefaults();
             TrainDiagnostics = next.Summary.Diagnostics;
             foreach (var property in new[] { nameof(AuthoredTrainName), nameof(TrainCarCount), nameof(DefaultConnectorLength), nameof(TrainDefaultFields), nameof(TrainDiagnostics), nameof(TrainCarSummaries), nameof(TrainSummaryDetails) }) Changed(property);
             seededTrainRevision = next.Revision;

@@ -7,6 +7,11 @@ static void Expect<T>(Action action) where T : Exception
     try { action(); } catch (T) { return; }
     throw new Exception($"Expected {typeof(T).Name}");
 }
+if (args is ["--verify-workbench-binding"])
+{
+    WorkbenchChecks.VerifyDockBinding();
+    return;
+}
 var fixture = args.Single();
 for (var cycle = 0; cycle < 5; ++cycle)
 {
@@ -101,6 +106,7 @@ await SupportChecks.Run();
 await Supports2Checks.Run();
 await PlacementChecks.Run(fixture);
 await TrainChecks.Run();
+await WorkbenchChecks.Run(fixture);
 var disposedController = new SessionController();
 disposedController.Dispose(); disposedController.Dispose();
 Expect<ObjectDisposedException>(() => disposedController.Submit(_ => { }));

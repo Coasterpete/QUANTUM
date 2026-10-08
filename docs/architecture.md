@@ -10,6 +10,11 @@ application library/C ABI and Avalonia frontend. See
 [Hybrid editor foundation](hybrid-editor-foundation.md) for build commands,
 frontend ownership and migration limits.
 
+The Avalonia workbench has Track, Supports, Train and Operations compositions,
+with contextual Inspectors and a collapsible bottom dock. User layout settings
+are separate from coaster documents. See [Workbench UX consolidation](workbench-ux-consolidation.md)
+for grouping, Apply boundaries, persistence and the pending human acceptance.
+
 ### `QuantumCore`
 
 `QuantumCore` is a static library containing the current curve mathematics,
