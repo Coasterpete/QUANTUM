@@ -137,12 +137,17 @@ the next operations work in `EditorUiOperations.cpp` and `RideOperations`.
 
 ### Runtime observations
 
-Release CTest passed 126 enabled tests (127 registered; the pre-existing
-`QuantumEngine.GpuTrainPoseResidency` remains disabled). The 13-action native
+MSVC Debug and Release builds passed. CTest passed all 126 enabled tests in
+each configuration (127 registered; the pre-existing
+`QuantumEngine.GpuTrainPoseResidency` remains disabled). Debug completed in
+1348.45 seconds, Release in 241.09 seconds. Existing test-source C4834 warnings
+remain; no assertions, validation or coverage were disabled in this pass.
+The 13-action native
 workflow passed in both Release and Debug, including four swapchain recreations;
 Debug also enabled actual GPU sampling validation. No Vulkan validation error
 was reported in these runs. The audit's Arc-first fixture passed a Debug eight-action
-mode/resize smoke. UI screenshots were inspected after dock layout settlement.
+mode/resize smoke; Force-first and Profile-first Release startup smokes also passed.
+UI screenshots were inspected after dock layout settlement.
 The user's layout was restored with matching SHA-256 after each smoke.
 
 The final Release capture/resize run had a 5.25-second frame interval around
@@ -162,3 +167,5 @@ Branch: `codex/native-authoring-simulation-pass1`, based on
 campaign document and audio-test changes are retained. Agent-owned changes are
 committed separately, including only the new Application.cpp hunks. The baseline
 Application.cpp and layout snapshots remain under the ignored `build/pass1-baseline`.
+
+Implementation checkpoint: `66c2a92` (native authoring, train and operations workflows).
