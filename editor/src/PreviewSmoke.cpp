@@ -510,6 +510,11 @@ namespace quantum::editor
                 options.forceDrivenAuthoring = true;
                 continue;
             }
+            if (argument == "--native-authoring-workflow")
+            {
+                options.nativeAuthoringWorkflow = true;
+                continue;
+            }
             if (argument == "--support-performance")
             {
                 options.supportPerformance = true;

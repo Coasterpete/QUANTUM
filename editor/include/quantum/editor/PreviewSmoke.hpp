@@ -45,6 +45,7 @@ namespace quantum::editor
         // Editor emits; the real transaction, regeneration, history, and error
         // surfaces do the work.
         bool forceDrivenAuthoring = false;
+        bool nativeAuthoringWorkflow = false;
         bool resizeWindow = false;
         bool disableGpuPreviewSampling = false;
         bool enableGpuValidation = false;

@@ -11,10 +11,12 @@
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/TrainPreviewInspection.hpp>
+#include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/editor/WorkspaceComposition.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
+#include <quantum/physics/RideOperations.hpp>
 #include <quantum/renderer/EnvironmentAssets.hpp>
 
 #include <SDL3/SDL_events.h>
@@ -158,6 +160,7 @@ namespace quantum::editor
 
     enum class TrackDeviceCommandType
     {
+        Add,
         AddLaunch,
         AddBrake,
         Update,
@@ -168,6 +171,14 @@ namespace quantum::editor
     {
         TrackDeviceCommandType type = TrackDeviceCommandType::Update;
         coaster::TrackDevice device;
+        bool continuous = false;
+    };
+
+    struct RideOperationCommand
+    {
+        coaster::TrackDeviceId id = 0;
+        physics::HardwareCommand command = physics::HardwareCommand::SetEnabled;
+        double value = 0;
     };
 
     struct SectionLengthEdit
@@ -382,6 +393,8 @@ namespace quantum::editor
         InsertAfterForceDriven,
         ConvertToRateProfiles,
         ConvertToPlanarArc,
+        ConvertToForceDriven,
+        ReplaceWithRateProfiles,
         SetPlanarArcRadius,
         SetPlanarArcSweptAngle,
         SetPlanarArcPlaneTilt,
@@ -529,6 +542,13 @@ namespace quantum::editor
         void returnToEditorForPreviewSmoke() noexcept;
         void requestSimulationControlForPreviewSmoke(
             SimulationControlType control) noexcept;
+        // Developer smoke emits the same requests as the native widgets.
+        void requestNativeAuthoringActionForPreviewSmoke(unsigned action);
+        [[nodiscard]] WorkspaceMode workspaceMode() const noexcept { return workspaceMode_; }
+        [[nodiscard]] bool trainWorkspaceActive() const noexcept
+        { return workspaceMode_ == WorkspaceMode::Editor && editorWorkspace_ == EditorWorkspace::Train; }
+        [[nodiscard]] coaster::TrainCarId selectedTrainCarId() const noexcept { return trainSelectedCar_; }
+        void setTrainPreviewCars(std::span<const TrainPreviewCar> cars);
         [[nodiscard]] std::optional<ScalarProfileEndpointValueEdit>
         takeProfileEndpointValueEdit() noexcept;
         [[nodiscard]] std::optional<ProfileTransitionTypeEdit>
@@ -753,6 +773,10 @@ namespace quantum::editor
         takeTrackDeviceCommand() noexcept;
         void selectTrackDevice(coaster::TrackDeviceId id) noexcept;
         void setTrackDeviceEditError(std::string error);
+        [[nodiscard]] std::optional<coaster::TrainConfiguration> takeTrainConfigurationEdit();
+        void setTrainConfigurationEditError(std::string error);
+        [[nodiscard]] std::optional<RideOperationCommand> takeRideOperationCommand();
+        void setRideOperationStatus(const physics::RideOperations& operations);
         void setSimulationDeviceTelemetry(
             const physics::TrackDeviceForceResult& forces,
             double realizedAccelerationMetersPerSecondSquared);
@@ -853,6 +877,12 @@ void drawSimulationTelemetry();
         [[nodiscard]] float drawWorkspaceCommandArea(ImGuiViewport* mainViewport);
         void drawSupportAppearancePanel();
         void drawTrackDevices();
+        void drawHardwareConfiguration(coaster::TrackDevice& device, bool& commit);
+        void drawRideOperationStatus();
+        void drawRideOperationControls();
+        void drawTrainConfigurationEditor();
+        void frameTrainPreview(bool selectedOnly = false);
+        void beginVulkanFrame();
         void drawDeviceAccelerationProfileEditor(
             coaster::TrackDevice& device, bool& commit);
         void seedDeviceProfileBuffer(const coaster::TrackDevice& device,
@@ -1057,6 +1087,8 @@ void drawSimulationTelemetry();
         coaster::TrackDevice deviceEditBuffer_;
         std::array<char, 128> deviceNameBuffer_{};
         std::string deviceEditError_;
+        std::vector<physics::HardwareRuntime> rideHardwareStatus_;
+        std::optional<RideOperationCommand> rideOperationCommand_;
 
         // Acceleration profile editor state for the selected track device.
         // Mirrors the Transition Editor's per-channel state but for a single
@@ -1093,6 +1125,15 @@ void drawSimulationTelemetry();
         bool uiScaleRefreshPending_ = true;
         bool trainConfigurationInitialFocusPending_ = false;
         int trainSummaryCarIndex_ = 0;
+        std::vector<TrainPreviewCar> trainPreviewCars_;
+        bool trainPreviewFramePending_ = true;
+        coaster::TrainConfiguration trainDraft_;
+        std::string trainDraftSource_;
+        bool trainDraftDirty_ = false;
+        coaster::TrainCarId trainSelectedCar_ = 0;
+        int trainPrototypeRole_ = 1;
+        std::string trainEditError_;
+        std::optional<coaster::TrainConfiguration> trainConfigurationEdit_;
         std::optional<FileOperationType> pendingFileOperation_;
         std::optional<HistoryOperationType> pendingHistoryOperation_;
 bool canUndo_ = false;

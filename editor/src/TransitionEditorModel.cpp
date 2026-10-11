@@ -230,6 +230,37 @@ namespace quantum::editor
         }};
     }
 
+    RegionEditorValues regionEditorValues(
+        const coaster::AuthoredTrackSection& section,
+        const double metersPerCoordinateUnit)
+    {
+        RegionEditorValues values;
+        values.length = coaster::sectionLength(section);
+        if (section.kind == coaster::RegionKind::RateProfiles
+            || coaster::isForceDrivenSection(section))
+        {
+            const auto styles = coaster::isForceDrivenSection(section)
+                ? forceDrivenRowStyles(metersPerCoordinateUnit)
+                : rateProfileRowStyles(metersPerCoordinateUnit);
+            for (std::size_t i = 0; i < profileChannelCount; ++i)
+            {
+                const auto& profile = sectionProfileChannel(section,
+                    static_cast<ProfileChannel>(i));
+                if (!profile.segments.empty())
+                    values.channelEnds[i] = profile.segments.back()
+                        .transition.valueEnd * styles[i].authoredToDisplay;
+            }
+        }
+        else
+        {
+            const auto& arc = std::get<coaster::PlanarArcRegion>(
+                std::get<coaster::GeometryRegion>(section.region).construction);
+            values.arcParameters = {arc.radius, arc.sweptAngle * degreesPerRadian,
+                arc.planeTilt * degreesPerRadian, arc.bankChange * degreesPerRadian};
+        }
+        return values;
+    }
+
     double angularRateDegreesToRadians(
         const double rateDegreesPerMeter)
     {

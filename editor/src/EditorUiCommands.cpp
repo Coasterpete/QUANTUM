@@ -106,7 +106,7 @@ namespace quantum::editor
                 if (button("Reset")) pendingSimulationControl_ = SimulationControlType::Reset;
                 ImGui::EndDisabled();
                 next();
-                if (button("Frame All")) frameWholeTrack();
+                if (button("Frame All")) frameTrainPreview();
                 ImGui::EndGroup();
                 heading("Analyze");
                 if (button("Summary")) ImGui::SetWindowFocus("Train Physical Definition");
@@ -138,6 +138,8 @@ namespace quantum::editor
                 ImGui::EndGroup();
                 heading("Devices / Supports");
                 if (button("Devices")) ImGui::SetWindowFocus("Track Devices");
+                next();
+                if (button("Operations")) ImGui::SetWindowFocus("Ride Operations");
                 next();
                 if (button("Supports")) ImGui::SetWindowFocus("Supports###Support Workspace");
                 ImGui::EndGroup();

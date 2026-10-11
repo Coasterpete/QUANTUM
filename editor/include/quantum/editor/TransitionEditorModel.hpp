@@ -93,6 +93,18 @@ namespace quantum::editor
     inline constexpr double degreesPerRadian =
         57.295779513082320876798154814105;
 
+    // The same type-aware values seed startup, selection and history restore.
+    // Circular arcs have scalar parameters and never request channel profiles.
+    struct RegionEditorValues
+    {
+        double length = 0;
+        std::array<double, profileChannelCount> channelEnds{};
+        std::array<double, 4> arcParameters{};
+    };
+    [[nodiscard]] RegionEditorValues regionEditorValues(
+        const coaster::AuthoredTrackSection& section,
+        double metersPerCoordinateUnit);
+
     // Unit conversions shared by all three angular-rate channels. These do
     // not imply that Roll Rate is centerline curvature.
     [[nodiscard]] double angularRateDegreesToRadians(

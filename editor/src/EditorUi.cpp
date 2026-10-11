@@ -20,7 +20,6 @@
 #include <SDL3/SDL_stdinc.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_vulkan.h>
 #include <imgui_internal.h>
 
 #include <glm/common.hpp>
@@ -434,6 +433,8 @@ namespace
         bool lengthEdited = false;
         bool convertToGeometryRequested = false;
         bool convertToRateProfilesRequested = false;
+        bool convertToForceDrivenRequested = false;
+        bool replaceWithRateProfilesRequested = false;
         bool completeCircuitRequested = false;
         std::optional<quantum::coaster::LayoutMode> layoutModeChanged;
         // Present when the user picked an authoring type in the create
@@ -1861,18 +1862,7 @@ namespace
         ImGui::GetIO().IniFilename = pathStorage.c_str();
     }
 
-    void checkVulkanResult(const VkResult result)
-    {
-        if (result != VK_SUCCESS)
-        {
-            quantum::logging::logMessagef(
-                quantum::logging::LogLevel::Error,
-                "VK:ImGui",
-                "Dear ImGui Vulkan backend reported VkResult %d.",
-                static_cast<int>(result)
-            );
-        }
-    }
+
 
     void logViewportSettings(
         const quantum::editor::ViewportSettings& settings)
@@ -2925,22 +2915,15 @@ namespace
                 const char* kindName = isGeometry
                     ? (isForceDriven ? "Force-Based" : "Circular Arc")
                     : "Profile";
-                // Keep the existing selectable ID, including its region/length
-                // components; draw the visible summary separately below.
-                const char* stableKindName = isGeometry
-                    ? (isForceDriven
-                        ? "Geometry / Force Driven" : "Geometry / Planar Arc")
-                    : "Rate/Profile";
+                // Index identity remains stable while editing length or kind.
                 const double length = quantum::coaster::sectionLength(track.section(index));
                 const double endStation = startStation + length;
                 char label[128]{};
                 std::snprintf(
                     label,
                     sizeof(label),
-                    "###Region %llu - %s (%.3g)",
-                    static_cast<unsigned long long>(index + 1),
-                    stableKindName,
-                    length
+                    "###Region %llu",
+                    static_cast<unsigned long long>(index + 1)
                 );
                 char title[64]{};
                 std::snprintf(title, sizeof(title), "%02zu  %s", index + 1, kindName);
@@ -3060,20 +3043,26 @@ namespace
                 {
                     ImGui::Separator();
                     const auto& selected = track.section(selectedIndex);
-                    const bool isGeometry = selected.kind
-                        == quantum::coaster::RegionKind::Geometry
-                        && !quantum::coaster::isForceDrivenSection(selected);
-                    if (ImGui::MenuItem(isGeometry ? "Convert to Profile"
-                        : "Convert to Circular Arc"))
+                    if (ImGui::BeginMenu("Convert selected region"))
                     {
-                        if (isGeometry)
-                        {
+                        const bool force = quantum::coaster::isForceDrivenSection(selected);
+                        const bool unbankedArc = selected.kind == quantum::coaster::RegionKind::Geometry
+                            && !force && std::get<quantum::coaster::PlanarArcRegion>(
+                                std::get<quantum::coaster::GeometryRegion>(selected.region).construction).bankChange == 0;
+                        if (ImGui::MenuItem("Profile (preserve arc geometry)", nullptr, false, unbankedArc))
                             edit.convertToRateProfilesRequested = true;
-                        }
-                        else
-                        {
+                        if (ImGui::MenuItem("Profile (reset construction)", nullptr, false,
+                            selected.kind != quantum::coaster::RegionKind::RateProfiles))
+                            edit.replaceWithRateProfilesRequested = true;
+                        if (ImGui::MenuItem("Circular Arc (reset construction)", nullptr, false,
+                            selected.kind == quantum::coaster::RegionKind::RateProfiles
+                            || quantum::coaster::isForceDrivenSection(selected)))
                             edit.convertToGeometryRequested = true;
-                        }
+                        if (ImGui::MenuItem("Force-Based (reset targets)", nullptr, false,
+                            !quantum::coaster::isForceDrivenSection(selected)))
+                            edit.convertToForceDrivenRequested = true;
+                        ImGui::TextDisabled("Resets retain length and style. Undo restores construction.");
+                        ImGui::EndMenu();
                     }
                 }
                 ImGui::EndPopup();
@@ -4552,6 +4541,7 @@ namespace
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
         ImGui::DockBuilderDockWindow("Track Devices", rightId);
+        ImGui::DockBuilderDockWindow("Ride Operations", rightId);
         ImGui::DockBuilderDockWindow("Viewport Settings", rightId);
         ImGui::DockBuilderDockWindow("Region Inspector", rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
@@ -4579,8 +4569,8 @@ namespace
         ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Down, 0.27F,
             &bottomId, &centerId);
         const float configurationFraction = std::clamp(
-            320.0F * quantum::editor::editorPresentationScale() / dockspaceSize.x,
-            0.20F, 0.30F);
+            420.0F * quantum::editor::editorPresentationScale() / dockspaceSize.x,
+            0.22F, 0.34F);
         ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, configurationFraction,
             &leftId, &centerId);
         ImGui::DockBuilderDockWindow("Train Configuration", leftId);
@@ -5940,13 +5930,34 @@ namespace quantum::editor
             ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(340.0F, 520.0F),
             ImGuiCond_FirstUseEver);
-        ImGui::Begin("Track Devices");
-        ImGui::TextUnformatted("Launch and brake forces");
-        if (ImGui::Button("Add Launch"))
-            trackDeviceCommand_ = {TrackDeviceCommandType::AddLaunch, {}};
-        ImGui::SameLine();
-        if (ImGui::Button("Add Brake"))
-            trackDeviceCommand_ = {TrackDeviceCommandType::AddBrake, {}};
+        if (!ImGui::Begin("Track Devices")) { ImGui::End(); return; }
+        editorPaneHeading("TRACK DEVICES", "Authored operations / saved with this document", fonts_);
+        if (ImGui::Button("Add device...")) ImGui::OpenPopup("Add track device");
+        if (ImGui::BeginPopup("Add track device"))
+        {
+            for (const auto kind : {coaster::TrackDeviceKind::Launch, coaster::TrackDeviceKind::Brake,
+                coaster::TrackDeviceKind::Transport, coaster::TrackDeviceKind::ChainLift,
+                coaster::TrackDeviceKind::CableLift, coaster::TrackDeviceKind::Station,
+                coaster::TrackDeviceKind::Block})
+            {
+                if (ImGui::MenuItem(coaster::trackDeviceKindName(kind)))
+                {
+                    auto device = coaster::makeTrackDevice(kind);
+                    double start = 0;
+                    for (std::size_t i = 0; i < selectedSection_; ++i)
+                        start += coaster::sectionLength(authoredTrack_->section(i));
+                    const double scale = authoredTrack_->physicalSettings().metersPerCoordinateUnit;
+                    const double length = coaster::sectionLength(authoredTrack_->section(selectedSection_)) * scale;
+                    device.startStationMeters = start * scale;
+                    device.endStationMeters = start * scale + length * .75;
+                    if (auto* station = std::get_if<coaster::StationConfiguration>(&device.configuration))
+                        station->stopStationMeters = start * scale + length * .5;
+                    trackDeviceCommand_ = {TrackDeviceCommandType::Add, std::move(device)};
+                }
+            }
+            ImGui::EndPopup();
+        }
+        editorSecondaryTextWrapped("New devices start in the selected Region. Stations below use SI metres along the entire track.");
         ImGui::Text("Track length %.2f m", authoredTrack_->trackLengthMeters());
         ImGui::Separator();
 
@@ -6017,13 +6028,14 @@ namespace quantum::editor
             commit |= ImGui::IsItemDeactivatedAfterEdit();
 
             ImGui::Separator();
-            if (coaster::supportsAccelerationProfile(selected->kind))
+            if (selected->kind <= coaster::TrackDeviceKind::Station)
             {
             ImGui::TextUnformatted("Acceleration");
 
             const char* modeNames[] = {"Constant", "Custom Profile"};
             int modeIndex = deviceProfileMode_ ? 1 : 0;
-            if (ImGui::Combo("Mode", &modeIndex, modeNames, 2))
+            if (coaster::supportsAccelerationProfile(selected->kind)
+                && ImGui::Combo("Mode", &modeIndex, modeNames, 2))
             {
                 deviceProfileMode_ = (modeIndex == 1);
                 if (deviceProfileMode_)
@@ -6057,6 +6069,7 @@ namespace quantum::editor
                 &deviceEditBuffer_.maximumForceNewtons,
                 0.0, 0.0, "%.0f");
             commit |= ImGui::IsItemDeactivatedAfterEdit();
+            drawHardwareConfiguration(deviceEditBuffer_, commit);
             if (commit)
             {
                 // The constant field stays exactly as the user left it. A
@@ -6064,14 +6077,25 @@ namespace quantum::editor
                 // so mirroring the profile peak here would only rewrite
                 // authored data the moment the profile is switched off again.
                 if (deviceProfileMode_)
+                {
+                    if (!deviceProfileEditBuffer_.segments.empty())
+                        deviceProfileEditBuffer_.segments.back().transition.domainEnd =
+                            coaster::trackDeviceLengthMeters(deviceEditBuffer_, authoredTrack_->trackLengthMeters(),
+                                authoredTrack_->layoutMode() == coaster::LayoutMode::Circuit);
                     deviceEditBuffer_.accelerationProfile = deviceProfileEditBuffer_;
+                }
                 else
                     deviceEditBuffer_.accelerationProfile.reset();
                 trackDeviceCommand_ = {TrackDeviceCommandType::Update,
-                    deviceEditBuffer_};
+                    deviceEditBuffer_, deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None};
             }
             if (ImGui::Button("Delete Device"))
                 trackDeviceCommand_ = {TrackDeviceCommandType::Delete, *selected};
+            if (!deviceEditError_.empty() && ImGui::Button("Revert rejected device edits"))
+            {
+                deviceBufferId_ = 0;
+                deviceEditError_.clear();
+            }
         }
         if (!deviceEditError_.empty())
             ImGui::TextWrapped("%s", deviceEditError_.c_str());
@@ -6121,38 +6145,7 @@ namespace quantum::editor
         captureSetupPending_ = captureScenario != nullptr;
         authoredTrack_ = &authoredTrack;
         viewportSettings_.groundSurface = authoredTrack.ground();
-        selectedSection_ = 0;
-        selectedTrackAnchor_ = 0;
-        for (std::size_t channelIndex = 0;
-            channelIndex < profileChannelCount;
-            ++channelIndex)
-        {
-            const auto channel = static_cast<ProfileChannel>(channelIndex);
-            const auto& profile =
-                sectionProfileChannel(authoredTrack.section(0), channel);
-            valueEndEditBuffers_[channelIndex] =
-                profile.segments.empty()
-                    ? 0.0
-                    : profile.segments.back().transition.valueEnd
-                        * degreesPerRadian;
-            endpointSelections_[channelIndex] =
-                ScalarProfileEndpoint::None;
-            endpointDrags_[channelIndex] = ScalarProfileEndpoint::None;
-            selectedSegmentIds_[channelIndex] =
-                coaster::invalidSegmentId;
-            dragSegmentIds_[channelIndex] = coaster::invalidSegmentId;
-            dragAxisLocks_[channelIndex] =
-                DragAxisLock::None;
-            dragAxisTravelX_[channelIndex] = 0.0;
-            dragAxisTravelY_[channelIndex] = 0.0;
-            dragLastValues_[channelIndex].reset();
-            scalarDragAnchors_[channelIndex].reset();
-            graphValueRanges_[channelIndex] = {};
-        }
-        activeProfileChannel_ = ProfileChannel::Pitch;
-        hoveredProfileChannel_.reset();
-        sectionLengthEditBuffer_ =
-            coaster::sectionLength(authoredTrack.section(0));
+        selectSection(0, true);
         profileEndpointValueEdit_.reset();
         profileTransitionTypeEdit_.reset();
         trackCommand_.reset();
@@ -6236,105 +6229,9 @@ namespace quantum::editor
         );
     }
 
-    void EditorUi::initializeVulkanBackend(
-        const renderer::VulkanContext& vulkan)
-    {
-        const std::uint32_t imageCount = vulkan.swapchainImageCount();
-        const int minimumImageCount =
-            ImGui_ImplVulkanH_GetMinImageCountFromPresentMode(
-                VK_PRESENT_MODE_FIFO_KHR
-            );
 
-        if (minimumImageCount < 2
-            || imageCount < static_cast<std::uint32_t>(minimumImageCount))
-        {
-            throw std::runtime_error(
-                "The Vulkan swapchain does not provide enough images for "
-                "Dear ImGui."
-            );
-        }
 
-        const VkFormat colorFormat = vulkan.swapchainFormat();
 
-        if (colorFormat == VK_FORMAT_UNDEFINED)
-        {
-            throw std::runtime_error(
-                "Dear ImGui cannot initialize without a swapchain format."
-            );
-        }
-
-        ImGui_ImplVulkan_InitInfo initInfo{};
-        initInfo.ApiVersion = VK_API_VERSION_1_4;
-        initInfo.Instance = vulkan.instance();
-        initInfo.PhysicalDevice = vulkan.physicalDevice();
-        initInfo.Device = vulkan.device();
-        initInfo.QueueFamily = vulkan.graphicsQueueFamily();
-        initInfo.Queue = vulkan.graphicsQueue();
-        initInfo.DescriptorPoolSize =
-            IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
-        initInfo.MinImageCount = static_cast<std::uint32_t>(
-            minimumImageCount
-        );
-        initInfo.ImageCount = imageCount;
-        initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo
-            .colorAttachmentCount = 1;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo
-            .pColorAttachmentFormats = &colorFormat;
-        initInfo.UseDynamicRendering = true;
-        initInfo.CheckVkResultFn = checkVulkanResult;
-
-        if (!ImGui_ImplVulkan_Init(&initInfo))
-        {
-            throw std::runtime_error("ImGui_ImplVulkan_Init failed.");
-        }
-
-        // ImGui_ImplVulkan_Shutdown() clears every viewport's PlatformHandle,
-        // including the main viewport's SDL_WindowID association that
-        // ImGui_ImplSDL3 requires to route window/input events into Dear
-        // ImGui. That association is established only by the SDL backend's
-        // Init, so restore it after each Vulkan backend reinitialization.
-        if (sdlBackendInitialized_)
-        {
-            const auto windowId =
-                static_cast<std::uintptr_t>(SDL_GetWindowID(window_));
-            ImGui::GetMainViewport()->PlatformHandle = (void*)(windowId);
-        }
-
-        device_ = vulkan.device();
-        vulkanBackendInitialized_ = true;
-        swapchainGeneration_ = vulkan.swapchainGeneration();
-    }
-
-    void EditorUi::shutdownVulkanBackend() noexcept
-    {
-        if (!vulkanBackendInitialized_)
-        {
-            return;
-        }
-
-        // The backend owns device resources referenced by submitted frames.
-        // They must not be destroyed until those frames have completed.
-        const VkResult result = vkDeviceWaitIdle(device_);
-
-        if (result != VK_SUCCESS)
-        {
-            quantum::logging::logMessagef(
-                quantum::logging::LogLevel::Error,
-                "VK:ImGui",
-                "vkDeviceWaitIdle failed before Dear ImGui shutdown with "
-                "VkResult %d.",
-                static_cast<int>(result)
-            );
-        }
-
-        removeViewportTexture();
-        ImGui_ImplVulkan_Shutdown();
-        vulkanBackendInitialized_ = false;
-        device_ = VK_NULL_HANDLE;
-    }
 
     void EditorUi::processEvent(const SDL_Event& event)
     {
@@ -6425,57 +6322,9 @@ namespace quantum::editor
         }
     }
 
-    void EditorUi::updateViewportTexture(
-        renderer::VulkanContext& vulkan,
-        const std::uint32_t width,
-        const std::uint32_t height)
-    {
-        const VkExtent2D currentExtent = vulkan.viewportExtent();
 
-        if (currentExtent.width != width || currentExtent.height != height
-            || vulkan.viewportMsaaEnabled()
-                != (viewportSettings_.msaaEnabled
-                    && vulkan.capabilities().viewportMsaa4))
-        {
-            frameBlockingEvents_.viewportResized = true;
-            renderer::Renderer& renderer = vulkan;
-            renderer.resizeViewportTarget(
-                width,
-                height,
-                &EditorUi::retireViewportTexture,
-                this,
-                viewportSettings_.msaaEnabled
-            );
-        }
 
-        if (viewportTexture_ == VK_NULL_HANDLE
-            && vulkan.viewportImageView() != VK_NULL_HANDLE)
-        {
-            viewportTexture_ = ImGui_ImplVulkan_AddTexture(
-                vulkan.viewportImageView(),
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            );
 
-            if (viewportTexture_ == VK_NULL_HANDLE)
-            {
-                throw std::runtime_error(
-                    "Dear ImGui could not register the Editor viewport image."
-                );
-            }
-        }
-    }
-
-    void EditorUi::installFrameRenderCallback(
-        renderer::VulkanContext& vulkan) noexcept
-    {
-        frameRenderer_ = &vulkan;
-        vulkan.setFrameRenderCallback(
-            [](VkCommandBuffer commandBuffer, void* userData)
-            {
-                static_cast<EditorUi*>(userData)->render(commandBuffer);
-            },
-            this);
-    }
 
     void EditorUi::setViewportMsaaEnabled(const bool enabled) noexcept
     {
@@ -6523,19 +6372,9 @@ namespace quantum::editor
         pendingSimulationControl_ = control;
     }
 
-    void EditorUi::retireViewportTexture(void* const userData) noexcept
-    {
-        static_cast<EditorUi*>(userData)->removeViewportTexture();
-    }
 
-    void EditorUi::removeViewportTexture() noexcept
-    {
-        if (viewportTexture_ != VK_NULL_HANDLE)
-        {
-            ImGui_ImplVulkan_RemoveTexture(viewportTexture_);
-            viewportTexture_ = VK_NULL_HANDLE;
-        }
-    }
+
+
 
     bool EditorUi::updateSupportNodeManipulation(
         const bool viewportHovered,
@@ -7110,6 +6949,9 @@ namespace quantum::editor
 
         refreshViewportDisplayBounds();
 
+        if (trainWorkspaceActive() && trainPreviewFramePending_)
+            frameTrainPreview();
+
         if (captureScenario_ != nullptr && (initialViewportFramePending_ || aspectChanged))
         {
             // Fit using the actual docked viewport aspect, including startup layout changes.
@@ -7188,6 +7030,21 @@ namespace quantum::editor
 
         hoveredTrackAnchor_.reset();
         hoveredSupport_.reset();
+        if (trainWorkspaceActive() && viewportHovered && !io.AppFocusLost
+            && cameraGesture_ == CameraGesture::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            const auto imageMin = ImGui::GetItemRectMin();
+            const auto imageMax = ImGui::GetItemRectMax();
+            const auto ray = viewportCamera_.viewportRay(
+                (io.MousePos.x - imageMin.x) / (imageMax.x - imageMin.x),
+                (io.MousePos.y - imageMin.y) / (imageMax.y - imageMin.y), viewportAspectRatio_);
+            if (const auto hit = pickTrainPreviewCar(trainPreviewCars_, ray.origin, ray.direction))
+            {
+                trainSelectedCar_ = *hit;
+                for (const auto& car : trainPreviewCars_)
+                    if (car.id == *hit) trainSummaryCarIndex_ = static_cast<int>(car.index);
+            }
+        }
         std::optional<std::size_t> hoveredSection;
         // ImGui owns the raw SDL event stream. Treat a left click as a
         // viewport action only when the submitted viewport Image itself is
@@ -8623,6 +8480,14 @@ namespace quantum::editor
             ImGui::Separator();
 
             const char* state = "Stopped";
+            if (ImGui::Button("Ride operations...")) ImGui::OpenPopup("Simulator operations");
+            if (ImGui::BeginPopup("Simulator operations"))
+            {
+                editorPaneHeading("RIDE OPERATIONS", "Live preview / runtime commands", fonts_);
+                drawRideOperationControls();
+                if (!deviceEditError_.empty()) ImGui::TextWrapped("%s", deviceEditError_.c_str());
+                ImGui::EndPopup();
+            }
             if (simulationPlaybackState_ == SimulationPlaybackState::Playing)
                 state = "Playing";
             else if (simulationPlaybackState_ == SimulationPlaybackState::Paused)
@@ -8740,7 +8605,7 @@ namespace quantum::editor
             initializeVulkanBackend(vulkan);
         }
 
-        ImGui_ImplVulkan_NewFrame();
+        beginVulkanFrame();
         ImGui_ImplSDL3_NewFrame();
         if (uiScaleRefreshPending_)
         {
@@ -8780,6 +8645,7 @@ namespace quantum::editor
         // transition. As before, that request takes effect on the next frame.
         const auto editorComposition = editorWorkspaceComposition(
             workspaceMode_, editorWorkspace_);
+        if (editorComposition != EditorWorkspace::Train) trainPreviewFramePending_ = true;
         const ImGuiID trackDockspaceId = ImGui::GetID(editorDockspaceName);
         const ImGuiID trainDockspaceId = ImGui::GetID(trainDockspaceName);
         // ImGui otherwise detaches windows when their dockspace is not
@@ -9456,6 +9322,7 @@ namespace quantum::editor
             || authoredTrack_->section(selectedSection_).kind == coaster::RegionKind::RateProfiles)
             drawSupportWorkspace();
         drawTrackDevices();
+        drawRideOperationStatus();
 
         // Clamp the selection against the live document before any panel
         // reads it; structural commits can shrink or reorder sections.
@@ -9641,6 +9508,16 @@ namespace quantum::editor
             regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
                               selectedSection_, 0.0};
         }
+        else if (workspaceEdit.convertToForceDrivenRequested)
+        {
+            regionCommand_ = {RegionCommandType::ConvertToForceDriven,
+                              selectedSection_, 0.0};
+        }
+        else if (workspaceEdit.replaceWithRateProfilesRequested)
+        {
+            regionCommand_ = {RegionCommandType::ReplaceWithRateProfiles,
+                              selectedSection_, 0.0};
+        }
         // Each region kind owns exactly one primary editor surface. A
         // rate-profile region is edited in the Transition Editor and a
         // planar-arc region in the Geometry Editor. A force-driven region is
@@ -9692,7 +9569,8 @@ namespace quantum::editor
             ImGui::SetNextItemWidth(std::min(320.0F,
                 ImGui::GetContentRegionAvail().x));
             ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
-            const bool changed = ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+            ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+            const bool changed = ImGui::IsItemDeactivatedAfterEdit();
             ImGui::PopFont();
             return changed;
         };
@@ -10715,14 +10593,6 @@ namespace quantum::editor
         // shape and give geometry sections their own line.
         const bool selectedIsForceDriven =
             coaster::isForceDrivenSection(selected);
-        const std::array<ProfileRowStyle, profileChannelCount> rowStyles =
-            selectedIsForceDriven
-                ? forceDrivenRowStyles(
-                    authoredTrack_->physicalSettings()
-                        .metersPerCoordinateUnit)
-                : rateProfileRowStyles(
-                    authoredTrack_->physicalSettings()
-                        .metersPerCoordinateUnit);
         if (selected.kind == coaster::RegionKind::RateProfiles)
         {
             const auto& rollProfile =
@@ -10781,40 +10651,11 @@ namespace quantum::editor
             );
         }
 
-        // Both authoring models seed the same three numeric buffers through
-        // their own display styles, so switching region kind never leaves a
-        // stale unit in a field.
-        if (selected.kind == coaster::RegionKind::RateProfiles
-            || selectedIsForceDriven)
-        {
-            for (std::size_t channelIndex = 0;
-                channelIndex < profileChannelCount;
-                ++channelIndex)
-            {
-                valueEndEditBuffers_[channelIndex] =
-                    sectionProfileChannel(
-                        selected,
-                        static_cast<ProfileChannel>(channelIndex)
-                    ).segments.back().transition.valueEnd
-                        * rowStyles[channelIndex].authoredToDisplay;
-            }
-        }
-
-        if (selected.kind == coaster::RegionKind::Geometry
-            && !selectedIsForceDriven)
-        {
-            const auto& arc = std::get<coaster::PlanarArcRegion>(
-                std::get<coaster::GeometryRegion>(
-                    selected.region).construction);
-            planarArcEditBuffers_ = {
-                arc.radius,
-                arc.sweptAngle * degreesPerRadian,
-                arc.planeTilt * degreesPerRadian,
-                arc.bankChange * degreesPerRadian};
-        }
-
-        sectionLengthEditBuffer_ =
-            coaster::sectionLength(selected);
+        const auto values = regionEditorValues(selected,
+            authoredTrack_->physicalSettings().metersPerCoordinateUnit);
+        valueEndEditBuffers_ = values.channelEnds;
+        planarArcEditBuffers_ = values.arcParameters;
+        sectionLengthEditBuffer_ = values.length;
     }
 
     void EditorUi::selectTrackAnchor(const std::size_t anchorIndex)
@@ -11022,18 +10863,7 @@ namespace quantum::editor
         return selectedSection_;
     }
 
-    void EditorUi::render(const VkCommandBuffer commandBuffer)
-    {
-        if (!vulkanBackendInitialized_)
-        {
-            throw std::logic_error("EditorUi is not initialized.");
-        }
 
-        ImGui_ImplVulkan_RenderDrawData(
-            ImGui::GetDrawData(),
-            commandBuffer
-        );
-    }
 
     void EditorUi::shutdown() noexcept
     {
@@ -11560,6 +11390,7 @@ namespace quantum::editor
             || hardwareDragActive_
             || regionStyleNumericEditActive_
             || supportAnchorDragActive_
+            || deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None
             || firstActiveEndpoint(endpointDrags_)
                 != ScalarProfileEndpoint::None;
     }
@@ -11612,6 +11443,15 @@ std::optional<coaster::LayoutMode>
 
     void EditorUi::resetTransientState()
     {
+        trainConfigurationEdit_.reset();
+        trainDraftSource_.clear();
+        trainDraftDirty_ = false;
+        trainSelectedCar_ = 0;
+        trainEditError_.clear();
+        trainPreviewCars_.clear();
+        trainPreviewFramePending_ = true;
+        rideHardwareStatus_.clear();
+        rideOperationCommand_.reset();
         pendingGroundEdit_.reset();
         selectedTrackDeviceId_ = 0;
         deviceBufferId_ = 0;

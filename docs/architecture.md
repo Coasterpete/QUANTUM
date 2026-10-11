@@ -163,6 +163,23 @@ renderer uploads, and editor-visible state. `EditorUi` owns interaction state
 such as the selected region, selected profile segments, drag state, and numeric
 edit buffers; it does not own the authored document.
 
+The application holds `EditorUi` through a local `std::unique_ptr`, destroyed
+before its borrowed Vulkan context. Its fixed-capacity telemetry history is large;
+placing the entire UI in `Application::runImpl`'s stack frame exhausted the Windows
+Release stack during nested Vulkan/driver initialization. Vulkan-specific ImGui
+backend lifetime, descriptor registration/retirement and recording are isolated
+in `EditorUiVulkan.cpp`; the existing renderer still owns frame resources.
+
+Native Train Configuration edits a complete ordered-car draft. Apply uses
+`ApplicationService::setTrainConfiguration` to validate/accept one history action,
+reuse static geometry, and stop/reset the real preview. Physical car/load/contact,
+inertia/resistance and shell alignment remain separate authored properties.
+Native Track Devices now exposes supported speed, lift, braking and station
+parameters. Ride Operations consumes preview-owned mechanism/occupancy telemetry
+and sends runtime commands without modifying the document. Startup and Region
+selection both seed type-specific numeric buffers through `regionEditorValues`.
+See [native pass 1](native-authoring-pass1.md) for verification and workflow limits.
+
 ```text
 QuantumCore                         QuantumEngine
   |-- GLM                              |-- Vulkan

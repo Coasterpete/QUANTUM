@@ -26,6 +26,11 @@ target_link_libraries(QuantumApplication PUBLIC Quantum::Engine)
 target_compile_features(QuantumApplication PUBLIC cxx_std_23)
 set_target_properties(QuantumApplication QuantumCore QuantumEngine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(BUILD_TESTING)
+    add_executable(QuantumNativeAuthoringWorkflowTests ${PROJECT_SOURCE_DIR}/tests/NativeAuthoringWorkflowTests.cpp)
+    target_link_libraries(QuantumNativeAuthoringWorkflowTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.NativeAuthoringWorkflow COMMAND QuantumNativeAuthoringWorkflowTests)
+    set_tests_properties(QuantumApplication.NativeAuthoringWorkflow PROPERTIES
+        LABELS "authoring;train;operations;history;persistence" TIMEOUT 120)
     add_executable(QuantumTrain2Tests ${PROJECT_SOURCE_DIR}/tests/Train2Tests.cpp)
     target_link_libraries(QuantumTrain2Tests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.Train2 COMMAND QuantumTrain2Tests)
@@ -64,8 +69,11 @@ add_executable(
     src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
+    src/EditorUiVulkan.cpp
     src/EditorUiCommands.cpp
     src/EditorUiTrain.cpp
+    src/EditorUiTrainConfiguration.cpp
+    src/EditorUiOperations.cpp
     src/EditorUiPerformanceTelemetry.cpp
     src/EditorUiSimulationTelemetry.cpp
     src/EditorUiSupportAppearance.cpp

@@ -14,6 +14,23 @@ namespace quantum::editor
         std::optional<TrainPreviewInspection> inspection)
     {
         trainPreviewInspection_ = std::move(inspection);
+        trainPreviewFramePending_ = true;
+    }
+
+    void EditorUi::setTrainPreviewCars(const std::span<const TrainPreviewCar> cars)
+    {
+        trainPreviewCars_.assign(cars.begin(), cars.end());
+    }
+
+    void EditorUi::frameTrainPreview(const bool selectedOnly)
+    {
+        const auto bounds = trainPreviewBounds(trainPreviewCars_, selectedOnly
+            ? std::optional<std::uint64_t>{trainSelectedCar_} : std::nullopt);
+        if (bounds && viewportCamera_.frameBounds(bounds->first, bounds->second, viewportAspectRatio_))
+        {
+            trainPreviewFramePending_ = false;
+            initialViewportFramePending_ = false;
+        }
     }
 
     namespace
@@ -64,21 +81,7 @@ namespace quantum::editor
         if (ImGui::Begin("Train Configuration"))
         {
             editorPaneHeading("TRAIN CONFIGURATION", "Authored consist / saved in this document", fonts_);
-            editorSectionHeading("Consist", fonts_);
-            if (authoredTrack_ != nullptr)
-            {
-                // Borrow the committed setup or this frame's shared candidate.
-                // Application still accepts it through document transactions.
-                auto draft = pendingCoasterSetupEdit_.value_or(
-                    authoredTrack_->coasterSetup());
-                ImGui::SetNextItemWidth(std::max(80.0F * editorPresentationScale(),
-                    ImGui::GetContentRegionAvail().x
-                    - ImGui::CalcTextSize("Cars per train").x
-                    - ImGui::GetStyle().ItemInnerSpacing.x));
-                if (drawCarsPerTrainInput(draft))
-                    pendingCoasterSetupEdit_ = std::move(draft);
-                editorSecondaryTextWrapped("Saved in Coaster Setup. Document Undo/Redo.");
-            }
+            drawTrainConfigurationEditor();
             ImGui::Spacing();
             if (ImGui::Button("Open Coaster Setup"))
             {
@@ -107,7 +110,6 @@ namespace quantum::editor
                     ImGui::TextWrapped("%s", simulationError_.c_str());
             }
             ImGui::Spacing();
-            editorSecondaryTextWrapped("Each saved car owns its physical definition and visual shell. Full car authoring is in the Avalonia Train workspace.");
         }
         ImGui::End();
 
@@ -215,6 +217,11 @@ namespace quantum::editor
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Diagnostic car boxes, bogies and connectors. Right-drag: look; Alt+right-drag: orbit; middle-drag: pan; wheel: zoom.");
+        ImGui::SameLine();
+        if (ImGui::Button("Frame train")) frameTrainPreview();
+        ImGui::SameLine();
+        if (ImGui::Button("Frame car")) frameTrainPreview(true);
+        editorSecondaryTextWrapped("Click a car to select its physical envelope. Preview uses the accepted train; Apply publishes the draft.");
         ImGui::Spacing();
     }
 }

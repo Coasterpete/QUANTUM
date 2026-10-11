@@ -511,7 +511,12 @@ namespace quantum::engine
                     quantum::logging::logMessage(quantum::logging::LogLevel::Info, "SIM", "GPU batched sampling not available â€“ CPU fallback");
                 }
 
-                quantum::editor::EditorUi editorUi;
+                // The UI's fixed-capacity telemetry history is large. Keeping
+                // it in this function's frame exhausted Release's 1 MiB stack
+                // during vkCreateInstance/driver initialization (0xc00000fd).
+                // The owner still dies before the borrowed Vulkan context.
+                auto editorUiOwner = std::make_unique<quantum::editor::EditorUi>();
+                auto& editorUi = *editorUiOwner;
                 editorUi.initialize(
                     window,
                     vulkan,
@@ -599,10 +604,12 @@ namespace quantum::engine
                     }
                 };
 
+                std::vector<quantum::editor::TrainPreviewCar> previewCarBounds;
                 const auto publishSimulationStatus = [&]
                 {
                     if (!simulationPreview.isAvailable())
                     {
+                        editorUi.setTrainPreviewCars({});
                         editorUi.setSimulationUnavailable(
                             simulationPreview.error());
                         return;
@@ -633,6 +640,24 @@ namespace quantum::engine
                         simulationPreview.lastDeviceForces(),
                         simulationPreview.dynamicsState()
                             ->generalizedAccelerationMetersPerSecondSquared);
+                    editorUi.setRideOperationStatus(simulationPreview.operations());
+                    previewCarBounds.clear();
+                    if (const auto* pose = simulationPreview.renderPose())
+                    {
+                        const double scale = 1.0 / authoredTrack.physicalSettings().metersPerCoordinateUnit;
+                        const auto& cars = simulationPreview.trainDefinition().cars;
+                        previewCarBounds.reserve(cars.size());
+                        for (std::size_t i = 0; i < cars.size(); ++i)
+                        {
+                            const auto& car = pose->cars()[i];
+                            previewCarBounds.push_back({cars[i].authoredCarId, i,
+                                car.carPose().bodyWorldPositionMeters() * scale,
+                                cars[i].car.bodyDimensionsMeters * scale,
+                                car.loadedWorldCenterOfGravityMeters() * scale,
+                                car.carPose().bodyOrientation()});
+                        }
+                    }
+                    editorUi.setTrainPreviewCars(previewCarBounds);
                 };
 
                 rebuildSimulationPreview();
@@ -667,7 +692,8 @@ namespace quantum::engine
                     {
                         previewSmokeStart = PerformanceClock::now();
                         if (!previewSmokeOptions->stoppedPreview
-                            && !previewSmokeOptions->modeCycle)
+                            && !previewSmokeOptions->modeCycle
+                            && !previewSmokeOptions->nativeAuthoringWorkflow)
                             applicationService.play();
                     }
                 }
@@ -969,6 +995,10 @@ editorUi.selectSection(restoredSelection, true);
                     previousRenderedFrameStart;
                 std::uint64_t renderedFrameId = 0;
                 std::size_t previewModeCycleActionCount = 0;
+                unsigned previewNativeAuthoringActionCount = 0;
+                std::string previewNativeDocumentBeforeSimulation;
+                const double previewOriginalCarMass = authoredTrack.trainConfiguration().cars.empty()
+                    ? 0 : authoredTrack.trainConfiguration().cars.front().physical.car.dryMassKilograms;
                 bool previewRegionStyleEditApplied = false;
                 // One frame per scripted force-driven authoring step, so each
                 // intent is queued and then processed by the same pipeline a
@@ -1098,6 +1128,16 @@ editorUi.selectSection(restoredSelection, true);
                         quantum::editor::FrameBlockingEvents
                             applicationBlockingEvents;
 
+                        if (previewSmokeOptions != nullptr && previewSmokeOptions->nativeAuthoringWorkflow
+                            && previewNativeAuthoringActionCount < 13
+                            && renderedFrameId >= 30 + 60 * previewNativeAuthoringActionCount)
+                        {
+                            if (previewNativeAuthoringActionCount == 11)
+                                previewNativeDocumentBeforeSimulation = quantum::coaster::serializeCoasterDocument(authoredTrack);
+                            editorUi.requestNativeAuthoringActionForPreviewSmoke(previewNativeAuthoringActionCount++);
+                            quantum::logging::logMessagef(quantum::logging::LogLevel::Info, "SMOKE",
+                                "Native authoring action %u/13 queued", previewNativeAuthoringActionCount);
+                        }
                         auto pendingHistoryOperation =
                             editorUi.takePendingHistoryOperation();
 
@@ -1469,6 +1509,36 @@ editorUi.selectSection(restoredSelection, true);
                             }
                         }
 
+                        if (const auto configuration = editorUi.takeTrainConfigurationEdit())
+                        {
+                            try
+                            {
+                                applicationService.setTrainConfiguration(*configuration);
+                                editorUi.setTrainPreviewInspection(simulationPreview.trainInspection());
+                                editorUi.setTrainConfigurationEditError({});
+                                synchronizeDirtyState();
+                            }
+                            catch (const std::exception& error)
+                            {
+                                editorUi.setTrainConfigurationEditError(error.what());
+                                quantum::logging::logMessagef(quantum::logging::LogLevel::Warning,
+                                    "EDIT", "Train edit rejected: %s", error.what());
+                            }
+                        }
+                        if (const auto command = editorUi.takeRideOperationCommand())
+                        {
+                            try
+                            {
+                                simulationPreview.hardwareCommand(command->id, command->command, command->value);
+                                editorUi.setTrackDeviceEditError({});
+                            }
+                            catch (const std::exception& error)
+                            {
+                                editorUi.setTrackDeviceEditError(error.what());
+                                quantum::logging::logMessagef(quantum::logging::LogLevel::Warning,
+                                    "SIM", "Ride operation rejected: %s", error.what());
+                            }
+                        }
                         if (const auto deviceCommand =
                                 editorUi.takeTrackDeviceCommand())
                         {
@@ -1481,6 +1551,9 @@ editorUi.selectSection(restoredSelection, true);
                                 using quantum::editor::TrackDeviceCommandType;
                                 switch (deviceCommand->type)
                                 {
+                                case TrackDeviceCommandType::Add:
+                                    selectedId = candidate.addTrackDevice(deviceCommand->device);
+                                    break;
                                 case TrackDeviceCommandType::AddLaunch:
                                 case TrackDeviceCommandType::AddBrake:
                                 {
@@ -1519,9 +1592,12 @@ editorUi.selectSection(restoredSelection, true);
                                 transaction.commit(authoredTrack);
                                 if (!simulationPreview.isAvailable())
                                     rebuildSimulationPreview();
-                                applicationService.recordAcceptedEdit();
+                                applicationService.recordAcceptedEdit(deviceCommand->continuous);
                                 synchronizeDirtyState();
-                                editorUi.selectTrackDevice(selectedId);
+                                // Update keeps the current graph gesture and draft.
+                                // Reseeding here would terminate every drag frame.
+                                if (deviceCommand->type != TrackDeviceCommandType::Update)
+                                    editorUi.selectTrackDevice(selectedId);
                                 editorUi.setTrackDeviceEditError({});
                             }
                             catch (const std::exception& error)
@@ -3032,6 +3108,17 @@ editorUi.selectSection(restoredSelection, true);
                                     quantum::coaster::
                                         convertSectionToPlanarArc(section);
                                     break;
+                                case RegionCommandType::ConvertToForceDriven:
+                                    quantum::coaster::convertSectionToForceDriven(section);
+                                    break;
+                                case RegionCommandType::ReplaceWithRateProfiles:
+                                {
+                                    const auto overrides = section.trackStyleOverrides;
+                                    section = quantum::coaster::createRateProfileSection(
+                                        quantum::coaster::sectionLength(section));
+                                    section.trackStyleOverrides = overrides;
+                                    break;
+                                }
                                 case RegionCommandType::SetPlanarArcRadius:
                                     quantum::coaster::setPlanarArcRadius(
                                         section,
@@ -4469,6 +4556,7 @@ editorUi.selectSection(restoredSelection, true);
                         }
 
                         double previewVertexPublishMilliseconds = 0.0;
+                        simulationPreview.setTrainInspection(editorUi.trainWorkspaceActive(), editorUi.selectedTrainCarId());
                         if (uploadedSimulationVertexGeneration
                             != simulationPreview.vertexGeneration()
                             || rigidBodyProofPresentationChanged
@@ -4541,7 +4629,15 @@ editorUi.selectSection(restoredSelection, true);
                         // layout, camera, and (in the Simulator) playback have
                         // settled, so the file shows the steady state.
                         ++framesSinceStart;
-                        if (captureImages && capturedImageCount == 0
+                        const bool nativeTrainCapture = previewSmokeOptions != nullptr
+                            && previewSmokeOptions->nativeAuthoringWorkflow
+                            && previewNativeAuthoringActionCount == 5 && capturedImageCount == 1
+                            && renderedFrameId >= 275;
+                        const bool nativeDeviceCapture = previewSmokeOptions != nullptr
+                            && previewSmokeOptions->nativeAuthoringWorkflow
+                            && previewNativeAuthoringActionCount == 7 && capturedImageCount == 2
+                            && renderedFrameId >= 395;
+                        if (captureImages && (capturedImageCount == 0 || nativeTrainCapture || nativeDeviceCapture)
                             && !captureFramePending
                             && framesSinceStart >= 90)
                         {
@@ -4754,6 +4850,7 @@ editorUi.selectSection(restoredSelection, true);
                             }
                             else if (!previewSmokeOptions->stoppedPreview
                                 && !previewSmokeOptions->modeCycle
+                                && !previewSmokeOptions->nativeAuthoringWorkflow
                                 && simulationPreview.playbackState()
                                 != quantum::editor::SimulationPreview::
                                     PlaybackState::Playing
@@ -4792,6 +4889,35 @@ editorUi.selectSection(restoredSelection, true);
 
                 if (previewSmokeCollector.has_value())
                 {
+                    if (previewSmokeOptions->nativeAuthoringWorkflow)
+                    {
+                        const auto& train = authoredTrack.trainConfiguration();
+                        bool launchUpdated = false;
+                        for (const auto& d : authoredTrack.trackDevices().devices)
+                            if (d.kind == quantum::coaster::TrackDeviceKind::Launch
+                                && d.targetAccelerationMetersPerSecondSquared == 4
+                                && std::get_if<quantum::coaster::LaunchConfiguration>(&d.configuration)
+                                && std::get<quantum::coaster::LaunchConfiguration>(d.configuration).targetSpeedMetersPerSecond == 30)
+                                launchUpdated = true;
+                        const auto& arc = std::get<quantum::coaster::PlanarArcRegion>(
+                            std::get<quantum::coaster::GeometryRegion>(authoredTrack.section(0).region).construction);
+                        const auto& normal = quantum::editor::sectionProfileChannel(authoredTrack.section(1),
+                            quantum::editor::ProfileChannel::Pitch).segments.back().transition;
+                        const auto& pitch = quantum::editor::sectionProfileChannel(authoredTrack.section(2),
+                            quantum::editor::ProfileChannel::Pitch).segments.back().transition;
+                        if (previewNativeAuthoringActionCount != 13 || authoredTrack.sectionCount() != 5
+                            || !launchUpdated || train.cars.empty()
+                            || train.cars.front().physical.car.dryMassKilograms != previewOriginalCarMass + 25
+                            || arc.radius != 1200 || normal.valueEnd != 1.01
+                            || pitch.transitionType != quantum::math::TransitionType::Smootherstep
+                            || quantum::coaster::serializeCoasterDocument(authoredTrack) != previewNativeDocumentBeforeSimulation
+                            || !simulationPreview.isAvailable() || simulationPreview.dynamicsState()->tick == 0
+                            || editorUi.workspaceMode() != quantum::editor::WorkspaceMode::Editor)
+                        {
+                            previewSmokeFailure = true;
+                            previewSmokeFailureMessage = "Native authoring workflow did not complete its document/history/simulation assertions.";
+                        }
+                    }
                     if (previewSmokeOptions->modeCycle
                         && previewModeCycleActionCount != 8)
                     {

@@ -496,6 +496,7 @@ namespace quantum::coaster
             compiled.yawRate.transitionType
         );
 
+        converted.trackStyleOverrides = section.trackStyleOverrides;
         section = std::move(converted);
     }
 
@@ -518,6 +519,7 @@ namespace quantum::coaster
         arc.sweptAngle = length / arc.radius;
         converted.region = GeometryRegion{std::move(arc)};
 
+        converted.trackStyleOverrides = section.trackStyleOverrides;
         section = std::move(converted);
     }
 
