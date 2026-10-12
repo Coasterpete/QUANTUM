@@ -75,6 +75,12 @@ namespace quantum::coaster
     [[nodiscard]] TrackDeviceKind trackDeviceKindFromName(const std::string& name);
     [[nodiscard]] TrackDevice makeTrackDevice(TrackDeviceKind kind);
     [[nodiscard]] bool supportsAccelerationProfile(TrackDeviceKind kind) noexcept;
+
+    // An explicit interval resize preserves normalized profile shape, values,
+    // transition types and segment IDs. No change occurs while loading data.
+    // Throws without modifying the profile for invalid domains.
+    void fitTrackDeviceAccelerationProfile(TrackDevice& device,
+        double trackLengthMeters, bool circuit);
     void validateRideHardware(const TrackDeviceCollection& collection,
         double trackLengthMeters, bool circuit);
 

@@ -7,6 +7,46 @@
 
 namespace quantum::editor
 {
+    TransitionRotationTargetResult solveTransitionRotationTarget(
+        const math::ScalarTransition& transition, double targetRadians)
+    {
+        if (!std::isfinite(targetRadians))
+            throw std::invalid_argument("A rotation target must be finite.");
+        auto zeroEnd = transition;
+        zeroEnd.valueEnd = 0;
+        const double base = math::integrateScalarTransition(zeroEnd,
+            transition.domainBegin, transition.domainEnd);
+        auto basis = transition;
+        basis.valueBegin = 0;
+        basis.valueEnd = 1;
+        const double sensitivity = math::integrateScalarTransition(basis,
+            transition.domainBegin, transition.domainEnd);
+        TransitionRotationTargetResult result;
+        result.endValue = transition.valueEnd;
+        result.residualRadians = math::integrateScalarTransition(transition,
+            transition.domainBegin, transition.domainEnd) - targetRadians;
+        if (std::abs(sensitivity) <= 1e-12) return result;
+        result.endValue = (targetRadians - base) / sensitivity;
+        if (!std::isfinite(result.endValue)) return result;
+        auto solved = transition;
+        solved.valueEnd = result.endValue;
+        result.residualRadians = math::integrateScalarTransition(solved,
+            transition.domainBegin, transition.domainEnd) - targetRadians;
+        result.converged = std::abs(result.residualRadians)
+            <= 1e-10 * std::max(1.0, std::abs(targetRadians));
+        return result;
+    }
+
+    double accumulateMarkerValueDrag(double& unsnappedValue, double pixelDeltaY,
+        double unitsPerPixel, double gain, std::optional<double> snapIncrement)
+    {
+        const double rawValue = proposeMarkerValueDrag(unsnappedValue,
+            pixelDeltaY, unitsPerPixel, gain);
+        const double proposal = proposeMarkerValueDrag(rawValue, 0, unitsPerPixel, gain, snapIncrement);
+        unsnappedValue = rawValue;
+        return proposal;
+    }
+
     namespace
     {
         constexpr double straightCurvatureThreshold = 1e-12;

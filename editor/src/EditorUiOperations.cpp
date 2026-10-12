@@ -6,6 +6,48 @@
 
 namespace quantum::editor
 {
+    void EditorUi::drawSelectedDeviceStatus(const coaster::TrackDevice& device)
+    {
+        editorSectionHeading("Live simulation", fonts_);
+        const char* playback = simulationPlaybackState_ == SimulationPlaybackState::Playing ? "Playing"
+            : simulationPlaybackState_ == SimulationPlaybackState::Paused ? "Paused" : "Stopped";
+        ImGui::Text("Preview %s | train %+.3f m/s", playback, simulationSpeedMps_);
+        ImGui::Text("Saved range %.3f -> %.3f m", device.startStationMeters, device.endStationMeters);
+        const physics::HardwareRuntime* status = nullptr;
+        for (const auto& runtime : rideHardwareStatus_)
+            if (runtime.id == device.id) { status = &runtime; break; }
+        if (!simulationAvailable_ || !status)
+            editorSecondaryTextWrapped("No accepted runtime state is available for this device.");
+        else
+        {
+            ImGui::TextColored(status->interlockReason.empty() ? palette::success : palette::warning,
+                "%s | %zu occupied bogies", status->state.c_str(), status->occupancy.bogies.size());
+            if (!status->interlockReason.empty()) ImGui::TextWrapped("%s", status->interlockReason.c_str());
+            ImGui::Text("Command %+.3f m/s | %+.3f m/s^2",
+                status->commandedSpeedMetersPerSecond, status->commandedAccelerationMetersPerSecondSquared);
+            ImGui::Text("Last fixed step force %+.1f N | limit %.1f N",
+                status->appliedForceNewtons, device.maximumForceNewtons);
+            if (status->targetSpeedLimited) ImGui::TextDisabled("Target speed reached / propulsion limited");
+            if (status->occupancy.clear()) ImGui::TextDisabled("Train outside device range");
+            else if (!status->forceControl.armed) ImGui::TextDisabled("No force command armed in the current mechanism state");
+            if (status->enabled != device.enabled) ImGui::TextDisabled("Runtime enabled state differs from saved default");
+            if (device.kind == coaster::TrackDeviceKind::CableLift)
+                editorSecondaryTextWrapped("Forward entry engages the catch car, then Pulling drives toward Cable speed. The profile limits acceleration; gravity compensation and the force cap also apply. Release starts the return cycle.");
+            if (device.kind == coaster::TrackDeviceKind::ChainLift)
+                editorSecondaryTextWrapped("An engaged anti-rollback can hold the train even when the chain motor is unavailable.");
+        }
+        if (simulationPlaybackState_ != SimulationPlaybackState::Playing)
+            editorSecondaryTextWrapped("Playback is stopped or paused. Mechanisms advance and new forces are applied only during fixed physics steps. Editing saved properties refreshes device state.");
+        ImGui::BeginDisabled(!simulationAvailable_);
+        if (ImGui::SmallButton(simulationPlaybackState_ == SimulationPlaybackState::Playing ? "Pause preview" : "Play preview"))
+            pendingSimulationControl_ = simulationPlaybackState_ == SimulationPlaybackState::Playing
+                ? SimulationControlType::Pause : SimulationControlType::Play;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset preview")) pendingSimulationControl_ = SimulationControlType::Reset;
+        ImGui::EndDisabled();
+        ImGui::Separator();
+    }
+
     std::optional<RideOperationCommand> EditorUi::takeRideOperationCommand()
     {
         auto command = std::move(rideOperationCommand_);

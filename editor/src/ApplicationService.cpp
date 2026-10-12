@@ -368,15 +368,8 @@ namespace quantum::editor
         device.startStationMeters = start;
         device.endStationMeters = end;
         device.maximumForceNewtons = force;
-        if (device.accelerationProfile)
-        {
-            // Match the fallback editor: an interval resize stretches the final
-            // segment, retaining interior stations, values, types and IDs. Core
-            // rejects a new extent that would invert that segment.
-            device.accelerationProfile->segments.back().transition.domainEnd =
-                coaster::trackDeviceLengthMeters(device, track_.trackLengthMeters(),
-                    track_.layoutMode() == coaster::LayoutMode::Circuit);
-        }
+        coaster::fitTrackDeviceAccelerationProfile(device, track_.trackLengthMeters(),
+            track_.layoutMode() == coaster::LayoutMode::Circuit);
         if (device == deviceById(track_, id)) return;
         AuthoredTrackEditTransaction transaction{track_};
         transaction.candidate().updateTrackDevice(device);

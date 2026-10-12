@@ -362,6 +362,82 @@ namespace
             "Reverse launch direction reaches native train forces");
         std::cout << "Scenario B: hold/release/custom launch/brake/arrival, rollback and force caps passed\n";
     }
+    void controlledCableComparison()
+    {
+        auto cable = device(TrackDeviceKind::CableLift, 1, 27, 150);
+        std::get<CableLiftConfiguration>(cable.configuration) = {10, .5, true};
+        cable.maximumForceNewtons = 1000000;
+        ChannelProfile profile; profile.nextSegmentId = 2;
+        profile.segments.push_back({1, {0, 123, 2, 3, math::TransitionType::Linear}});
+        cable.accelerationProfile = profile;
+        auto off = cable; off.enabled = false;
+        Scenario enabled({cable}, 20, 6), disabled({off}, 20, 6);
+        // Build the same straight track from three actual connected authored
+        // Regions. The device interval crosses the 100 m Region boundary.
+        auto document = createNewDocument(); document.setLayoutMode(LayoutMode::Shuttle);
+        while (document.sectionCount() > 1) document.removeSection(document.sectionCount() - 1);
+        document.section(0) = createRateProfileSection(100);
+        document.appendSection(); document.section(1) = createRateProfileSection(100);
+        document.appendSection(); document.section(2) = createRateProfileSection(100);
+        const auto samples = integrateAuthoredTrackKinematics(document, .5);
+        enabled.track = CompiledPhysicsTrack(samples, 1, TopologyKind::OpenLinear);
+        disabled.track = enabled.track;
+        bool entered = false, exited = false, boundaryDriven = false;
+        double maximumApplied = 0, maximumEnabledSpeed = 6, maximumDisabledSpeed = 6;
+        double exitSpeed = 0, baselineSpeedAtExit = 0;
+        for (int tick = 0; tick < 8400; ++tick)
+        {
+            enabled.tick(); disabled.tick();
+            const auto& h = state(enabled.operations, 1);
+            entered |= !h.occupancy.entered.empty(); exited |= !h.occupancy.exited.empty();
+            maximumApplied = std::max(maximumApplied, h.appliedForceNewtons);
+            maximumEnabledSpeed = std::max(maximumEnabledSpeed, enabled.dynamics.signedVelocityMetersPerSecond);
+            maximumDisabledSpeed = std::max(maximumDisabledSpeed, disabled.dynamics.signedVelocityMetersPerSecond);
+            if (!h.occupancy.exited.empty())
+            {
+                exitSpeed = enabled.dynamics.signedVelocityMetersPerSecond;
+                baselineSpeedAtExit = disabled.dynamics.signedVelocityMetersPerSecond;
+            }
+            if (enabled.dynamics.generalizedReferenceLocation.stationMeters > 98
+                && enabled.dynamics.generalizedReferenceLocation.stationMeters < 102)
+                boundaryDriven |= h.appliedForceNewtons != 0 || h.forceControl.armed;
+            require(state(disabled.operations, 1).appliedForceNewtons == 0,
+                "Disabled CableLift must never apply drive force");
+        }
+        std::cout << "Cable reproduction evidence: entered=" << entered << " exited=" << exited
+            << " boundaryDriven=" << boundaryDriven << " maxForce=" << maximumApplied
+            << " station=" << enabled.dynamics.generalizedReferenceLocation.stationMeters
+            << " speed=" << enabled.dynamics.signedVelocityMetersPerSecond << " state="
+            << state(enabled.operations, 1).state << "\n";
+        require(entered && exited && boundaryDriven && maximumApplied > 100,
+            "Cable custom profile enters, drives across Region boundary, then exits actual train occupancy");
+        require(maximumEnabledSpeed > maximumDisabledSpeed + 2.5 && exitSpeed > baselineSpeedAtExit + 5,
+            "Enabled CableLift changes actual native train speed during drive and at exit compared with identical disabled run");
+        require(enabled.dynamics.generalizedReferenceLocation.stationMeters
+            > disabled.dynamics.generalizedReferenceLocation.stationMeters + 50,
+            "Enabled CableLift changes actual native travel, not only telemetry");
+        Scenario toggled({cable}, 50, 2);
+        for (int i = 0; i < 100; ++i) toggled.tick();
+        require(state(toggled.operations, 1).appliedForceNewtons > 0, "Occupied cable initially drives");
+        toggled.operations.command(1, HardwareCommand::SetEnabled, 0); toggled.tick();
+        require(state(toggled.operations, 1).appliedForceNewtons == 0, "Runtime disabled cable releases drive next fixed tick");
+        toggled.operations.command(1, HardwareCommand::SetEnabled, 1); toggled.tick();
+        require(state(toggled.operations, 1).appliedForceNewtons > 0, "Runtime re-enabled cable resumes engaged drive");
+        Scenario reverse({cable}, 50, -2); reverse.tick(); reverse.tick();
+        require(state(reverse.operations, 1).state == "Available"
+            && state(reverse.operations, 1).appliedForceNewtons == 0,
+            "Reverse entry cannot acquire a forward-only cable catch car");
+        const auto id = document.addTrackDevice(cable);
+        const auto serialized = serializeCoasterDocument(document);
+        const auto reopened = deserializeCoasterDocument(serialized);
+        require(reopened && serializeCoasterDocument(*reopened) == serialized
+            && reopened->trackDevices().devices.front().id == id,
+            "Controlled CableLift configuration/profile/enabled state survives save and reopen");
+        std::cout << "Controlled CableLift: peak enabled speed=" << maximumEnabledSpeed
+            << " peak disabled speed=" << maximumDisabledSpeed << " exit speed=" << exitSpeed
+            << " baseline speed at same tick=" << baselineSpeedAtExit
+            << " max force=" << maximumApplied << " N; entry/exit/Region/profile/toggle/reverse/persistence passed\n";
+    }
     void cableAndTransfer()
     {
         auto cable = device(TrackDeviceKind::CableLift, 1, 10, 35);
@@ -439,7 +515,7 @@ int main(int argc, char** argv)
 {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--target-speed") targetSpeedComparisons();
-        else { sensorsAndInterlocks(); liftScenario(); launchScenario(); cableAndTransfer(); persistenceAndPerformance(); }
+        else { sensorsAndInterlocks(); liftScenario(); launchScenario(); cableAndTransfer(); controlledCableComparison(); persistenceAndPerformance(); }
         std::cout << "RideOperationsTests passed " << checks << " checks\n"; return 0; }
     catch (const std::exception& e) { std::cerr << "RideOperationsTests failed: " << e.what() << '\n'; return 1; }
 }

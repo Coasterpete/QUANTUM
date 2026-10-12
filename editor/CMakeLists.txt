@@ -15,6 +15,7 @@ add_library(QuantumApplication STATIC
     src/TrackDevicePresentation.cpp
     src/InfrastructurePresentation.cpp
     src/TransitionEditorModel.cpp
+    src/InteractionPreferences.cpp
     src/ViewportCamera.cpp
     src/ViewportTrackAnchors.cpp
     src/ViewportTransformHandles.cpp)
@@ -26,6 +27,11 @@ target_link_libraries(QuantumApplication PUBLIC Quantum::Engine)
 target_compile_features(QuantumApplication PUBLIC cxx_std_23)
 set_target_properties(QuantumApplication QuantumCore QuantumEngine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(BUILD_TESTING)
+    add_executable(QuantumTrackAuthoringInteractionTests ${PROJECT_SOURCE_DIR}/tests/TrackAuthoringInteractionTests.cpp)
+    target_link_libraries(QuantumTrackAuthoringInteractionTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TrackAuthoringInteraction COMMAND QuantumTrackAuthoringInteractionTests)
+    set_tests_properties(QuantumApplication.TrackAuthoringInteraction PROPERTIES
+        LABELS "camera;input;authoring;operations;history;persistence" TIMEOUT 120)
     add_executable(QuantumNativeAuthoringWorkflowTests ${PROJECT_SOURCE_DIR}/tests/NativeAuthoringWorkflowTests.cpp)
     target_link_libraries(QuantumNativeAuthoringWorkflowTests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.NativeAuthoringWorkflow COMMAND QuantumNativeAuthoringWorkflowTests)

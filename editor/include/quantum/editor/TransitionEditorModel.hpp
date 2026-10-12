@@ -93,6 +93,39 @@ namespace quantum::editor
     inline constexpr double degreesPerRadian =
         57.295779513082320876798154814105;
 
+    struct TransitionRotationTargetResult
+    {
+        bool converged = false;
+        double endValue = 0.0;
+        double residualRadians = 0.0;
+    };
+
+    // Solves the analytic integral of this transition by changing its end
+    // value. This is a rider-local channel integral, not a world Euler angle
+    // or a promise to preserve the 3D endpoint. No authored state is mutated.
+    [[nodiscard]] TransitionRotationTargetResult solveTransitionRotationTarget(
+        const math::ScalarTransition& transition, double targetRadians);
+
+    // Keep the unsnapped engineering value throughout a gesture, then snap
+    // only the proposal. Small deltas must accumulate across frame boundaries.
+    [[nodiscard]] double accumulateMarkerValueDrag(double& unsnappedValue,
+        double pixelDeltaY, double unitsPerPixel, double gain,
+        std::optional<double> snapIncrement = std::nullopt);
+
+    struct TransitionPrecisionState
+    {
+        std::size_t regionIndex = static_cast<std::size_t>(-1);
+        ProfileChannel channel = ProfileChannel::Pitch;
+        coaster::SegmentId segmentId = coaster::invalidSegmentId;
+        double length = 0;
+        double amplitude = 0;
+        double targetDegrees = 0;
+        double lastBegin = 0;
+        double lastEnd = 0;
+        double lastLength = 0;
+        bool targetRequested = false;
+    };
+
     // The same type-aware values seed startup, selection and history restore.
     // Circular arcs have scalar parameters and never request channel profiles.
     struct RegionEditorValues

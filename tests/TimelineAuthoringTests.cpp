@@ -128,11 +128,19 @@ namespace
         require(document(app) == edited, "Negative custom candidate preserves document");
         app.setDeviceProperties(id, true, 3, 28, 8000);
         const auto& resized = *app.track().trackDevices().devices[0].accelerationProfile;
-        require(resized.segments[0].transition.domainEnd == 10 && resized.segments[1].transition.domainEnd == 25,
-            "Interval resize stretches final segment and preserves interior stations");
+        require(resized.segments[0].transition.domainEnd == 12.5 && resized.segments[1].transition.domainEnd == 25,
+            "Interval resize preserves normalized profile timing");
         const auto resizedState = document(app);
-        rejects([&] { app.setDeviceProperties(id, true, 3, 8, 8000); });
-        require(document(app) == resizedState, "Inverting custom extent is rejected");
+        app.setDeviceProperties(id, true, 3, 8, 8000);
+        const auto& shrunk = *app.track().trackDevices().devices[0].accelerationProfile;
+        require(shrunk.segments[0].transition.domainEnd == 2.5 && shrunk.segments[1].transition.domainEnd == 5,
+            "Shrinking before an old split retimes both segments without inversion");
+        const auto shrunkState = document(app);
+        roundtripHistory(app, resizedState, shrunkState);
+        rejects([&] { app.setDeviceProperties(id, true, 3, 3, 8000); });
+        require(document(app) == shrunkState, "Empty custom extent remains rejected atomically");
+        app.restoreHistory(true);
+        require(document(app) == resizedState, "Undo shrink restores the exact larger profile");
         const auto boundary = app.beginProfileDrag({ProfileOwner::Device, id}, {1, ProfileEditOperation::MoveEnd});
         static_cast<void>(app.previewProfileDrag(boundary, 7)); app.commitProfileDrag(boundary);
         roundtripHistory(app, resizedState, document(app));

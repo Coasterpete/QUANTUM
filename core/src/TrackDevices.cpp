@@ -4,9 +4,33 @@
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
 
 namespace quantum::coaster
 {
+    void fitTrackDeviceAccelerationProfile(TrackDevice& device,
+        double trackLengthMeters, bool circuit)
+    {
+        if (!device.accelerationProfile) return;
+        const double newLength = trackDeviceLengthMeters(device, trackLengthMeters, circuit);
+        if (!std::isfinite(newLength) || newLength <= 0
+            || device.accelerationProfile->segments.empty())
+            throw std::invalid_argument("Custom acceleration requires a non-empty, positive device interval.");
+        const double oldLength = device.accelerationProfile->segments.back().transition.domainEnd;
+        validateChannelProfile(*device.accelerationProfile, oldLength);
+        if (newLength == oldLength) return;
+        auto candidate = *device.accelerationProfile;
+        for (auto& segment : candidate.segments)
+        {
+            segment.transition.domainBegin = (segment.transition.domainBegin / oldLength) * newLength;
+            segment.transition.domainEnd = (segment.transition.domainEnd / oldLength) * newLength;
+        }
+        candidate.segments.front().transition.domainBegin = 0;
+        candidate.segments.back().transition.domainEnd = newLength;
+        validateChannelProfile(candidate, newLength);
+        device.accelerationProfile = std::move(candidate);
+    }
+
     void validateTrackDevices(const TrackDeviceCollection& collection,
         const double trackLengthMeters, const bool circuit)
     {

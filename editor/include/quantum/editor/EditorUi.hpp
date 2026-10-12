@@ -13,6 +13,7 @@
 #include <quantum/editor/TrainPreviewInspection.hpp>
 #include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
+#include <quantum/editor/InteractionPreferences.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/editor/WorkspaceComposition.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
@@ -48,30 +49,6 @@ namespace quantum::editor
         float y = 0.0f;
     };
 
-    // Authoring interaction configuration for the Transition Editor,
-    // shared by every section and every rate channel. Defaults preserve
-    // the original drag feel; snapping starts disabled. A future
-    // Preferences/Authoring panel can expose these fields directly.
-    struct TransitionEditorInputSettings
-    {
-        // Drag gain multipliers on each row's natural value-per-pixel
-        // slope. Normal 1.0 reproduces the original absolute-cursor
-        // mapping; Fine slows the value change for precision work.
-        float normalDragGain = 1.0F;
-        float fineDragGain = 0.25F;
-
-        // Authored-value snapping applied while the user edits (drag or
-        // numeric input). Never quantizes data on load or selection.
-        bool snapEnabled = false;
-        double snapIncrement = 0.005;
-
-        // Authored-distance snapping applied while interior segment
-        // boundaries are dragged horizontally. Independent of value
-        // snapping so vertical precision work keeps its own grid.
-        bool distanceSnapEnabled = false;
-        double distanceSnapIncrement = 5.0;
-    };
-
     // Which cursor axis an active handle drag follows. The lock engages
     // once cumulative motion makes the intended axis unambiguous, so a
     // mostly-vertical value drag cannot drift boundaries horizontally
@@ -83,10 +60,9 @@ namespace quantum::editor
         Vertical
     };
 
-    // Rolling reference for an active handle drag: the cursor position,
-    // authored value, and authored distance of the previous frame.
-    // Integrating per-frame deltas lets the gain change live when Shift is
-    // pressed mid-drag without a value jump.
+    // Unsnapped engineering accumulator for an active handle drag. SDL
+    // relative deltas preserve fractional motion; the gain can change live
+    // with Shift without rebasing or jumping the authored proposal.
     struct ScalarDragAnchor
     {
         double pixelX = 0.0;
@@ -140,6 +116,7 @@ namespace quantum::editor
         std::uint32_t segmentId = 0;
         ScalarProfileEndpoint endpoint = ScalarProfileEndpoint::End;
         double distance = 0.0;
+        bool continuous = true;
     };
 
     enum class TrackCommandType
@@ -450,18 +427,11 @@ namespace quantum::editor
 
     // Authoritative viewport display configuration. The editor owns these
     // values and pushes them into the camera and renderer every frame.
-    struct ViewportSettings
+    struct ViewportSettings : CameraNavigationSettings
     {
         bool orthographic = false;
         float fieldOfViewDegrees = 45.0F;
 
-        // Multipliers on the camera's natural drag response.
-        float orbitSensitivity = 1.0F;
-        float zoomSensitivity = 1.0F;
-        float movementUnitsPerSecond =
-            static_cast<float>(defaultViewportMovementUnitsPerSecond);
-        float fastMovementMultiplier =
-            static_cast<float>(defaultViewportFastMovementMultiplier);
         float sunAzimuthDegrees = -142.0F;
         float sunElevationDegrees = 55.0F;
         float sunIntensity = 3.0F;
@@ -987,6 +957,9 @@ void drawSimulationTelemetry();
         // Split-at-cursor candidate captured when a row context menu opens.
         std::array<double, profileChannelCount> contextMenuSplitDistances_{};
         TransitionEditorInputSettings transitionEditorInputSettings_;
+        TransitionPrecisionState transitionPrecisionState_;
+        MousePos pendingMouseMotion_;
+        MousePos frameMouseMotion_;
         bool inputSettingsWindowOpen_ = false;
         ViewportSettings viewportSettings_;
         std::optional<std::pair<coaster::GroundAppearance, bool>> pendingGroundEdit_;
@@ -1118,6 +1091,10 @@ void drawSimulationTelemetry();
         std::optional<RegionTrackStyleEdit> regionTrackStyleEdit_;
         std::optional<StartPoseEdit> startPoseEdit_;
         std::optional<TrackHardwareEdit> trackHardwareEdit_;
+        void configureInteractionPersistence();
+        void updateInteractionPersistence();
+        void drawSelectedDeviceStatus(const coaster::TrackDevice& device);
+        std::optional<InteractionPreferences> lastInteractionPreferences_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
         float uiScaleOverride_ = 0.0F; // zero selects automatic display scaling

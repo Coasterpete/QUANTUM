@@ -670,6 +670,7 @@ namespace quantum::engine
                     previewSmokeStart;
                 bool previewSmokeDurationCompleted = false;
                 bool previewSmokeFailure = false;
+                std::size_t acceptedTransitionSmokeEdits = 0;
                 std::string previewSmokeFailureMessage;
 
                 // Screenshot capture state. A capture is requested once the
@@ -1674,19 +1675,31 @@ editorUi.selectSection(restoredSelection, true);
                             && renderedFrameId >= 60
                             && renderedFrameId < 90)
                         {
-                            const double progress = static_cast<double>(
-                                renderedFrameId - 60);
-                            requestedValueEdit = quantum::editor::
-                                ScalarProfileEndpointValueEdit{
-                                    .endpoint = quantum::editor::
-                                        ScalarProfileEndpoint::End,
+                            std::optional<std::size_t> profileRegion;
+                            for (std::size_t i = 0; i < authoredTrack.sectionCount(); ++i)
+                                if (authoredTrack.section(i).kind == quantum::coaster::RegionKind::RateProfiles)
+                                { profileRegion = i; break; }
+                            if (!profileRegion)
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage = "Transition drag smoke requires a Rate/Profile Region.";
+                                running = false;
+                            }
+                            else
+                            {
+                                if (renderedFrameId == 60) editorUi.selectSection(*profileRegion);
+                                const auto& profile = quantum::editor::sectionProfileChannel(
+                                    authoredTrack.section(*profileRegion), quantum::editor::ProfileChannel::Pitch);
+                                const double progress = static_cast<double>(renderedFrameId - 60);
+                                requestedValueEdit = quantum::editor::ScalarProfileEndpointValueEdit{
+                                    .endpoint = quantum::editor::ScalarProfileEndpoint::End,
                                     .value = -0.04 + 0.0005 * progress,
                                     .continuous = renderedFrameId < 89,
-                                    .sectionIndex = 4,
-                                    .channel = quantum::editor::
-                                        ProfileChannel::Pitch,
-                                    .segmentId = 1
-                            };
+                                    .sectionIndex = *profileRegion,
+                                    .channel = quantum::editor::ProfileChannel::Pitch,
+                                    .segmentId = profile.segments.back().id
+                                };
+                            }
                         }
                         auto requestedTransitionType =
                             editorUi.takeProfileTransitionTypeEdit();
@@ -2074,7 +2087,8 @@ editorUi.selectSection(restoredSelection, true);
                             (groundEdit.has_value() && groundEdit->second)
                             || (requestedValueEdit.has_value()
                                 && requestedValueEdit->continuous)
-                            || requestedDistanceEdit.has_value()
+                            || (requestedDistanceEdit.has_value()
+                                && requestedDistanceEdit->continuous)
                             || (requestedStartPoseEdit.has_value()
                                 && requestedStartPoseEdit->continuous)
                             || (requestedHardwareEdit.has_value()
@@ -3887,6 +3901,18 @@ editorUi.selectSection(restoredSelection, true);
                                 true);
                         }
 
+                        if (previewSmokeOptions != nullptr && previewSmokeOptions->transitionDrag
+                            && renderedFrameId >= 60 && renderedFrameId < 90 && requestedValueEdit)
+                        {
+                            if (editTransaction.committed()) ++acceptedTransitionSmokeEdits;
+                            else
+                            {
+                                previewSmokeFailure = true;
+                                previewSmokeFailureMessage = "A scripted transition drag edit was rejected.";
+                                running = false;
+                            }
+                        }
+
                         // Numeric fields are editor-side buffers. Refresh
                         // every buffer for which the user submitted an intent
                         // from the final committed document, regardless of
@@ -4924,6 +4950,12 @@ editorUi.selectSection(restoredSelection, true);
                         previewSmokeFailure = true;
                         previewSmokeFailureMessage =
                             "Mode cycle did not complete eight actions.";
+                    }
+                    if (previewSmokeOptions->transitionDrag && acceptedTransitionSmokeEdits != 30)
+                    {
+                        previewSmokeFailure = true;
+                        if (previewSmokeFailureMessage.empty())
+                            previewSmokeFailureMessage = "Transition drag smoke did not commit all 30 scripted edits.";
                     }
                     const double elapsedSeconds = previewSmokeStart
                         ? std::chrono::duration<double>(

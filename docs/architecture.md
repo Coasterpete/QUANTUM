@@ -897,6 +897,24 @@ document mutations.
 
 ### Transition Editor
 
+The integrated interaction pass adds persistent navigation/graph preferences,
+SDL relative mouse accumulation, focus-plane cursor zoom, and discrete numeric
+commits. `TransitionEditorModel` proposes analytic channel-integral targets
+without mutating Core data; EditorUi applies accepted end-rate proposals through
+the existing authored transaction and regeneration path. Explicit interior
+length/amplitude controls and matching a compatible previous Region value use
+the same path. Exact semantic boundary frames supply evaluated endpoint angles.
+These are not general endpoint constraints. See
+[`track-authoring-input-device-pass2.md`](track-authoring-input-device-pass2.md)
+for mathematical scope, tests, interaction semantics and manual acceptance.
+
+Explicit custom-device interval resizes now use
+`fitTrackDeviceAccelerationProfile` to preserve normalized segment timing and
+authored values/IDs across growth or shrinkage. The native service and Workbench
+share this Core operation. Track Devices reads actual RideOperations state and
+identifies stopped/paused playback and last-step force rather than implying that
+a saved enabled checkbox indicates applied propulsion.
+
 The Transition Editor is a distance-domain authoring surface for the selected
 Rate/Profile region. It is not a generic stack of unrelated example graphs.
 Roll, Pitch, and Yaw are the three actual authored channels, aligned on one
