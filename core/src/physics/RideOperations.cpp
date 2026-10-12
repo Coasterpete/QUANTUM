@@ -181,6 +181,7 @@ namespace quantum::physics
             h.commandedAccelerationMetersPerSecondSquared = h.commandedSpeedMetersPerSecond = 0;
             h.actualSpeedMetersPerSecond = 0; h.appliedForceNewtons = 0;
             h.profileAccelerationMetersPerSecondSquared = 0; h.targetSpeedLimited = false;
+            h.requestedForceNewtons = 0; h.forceLimitReached = false; h.generalizedForceNewtons.reset();
             h.aligned = h.stopped = h.movementPermitted = false;
             if (auto* gate = std::get_if<AccessRuntime>(&h.mechanism)) gate->protectedByOperation = false;
         }
@@ -409,6 +410,9 @@ namespace quantum::physics
             const auto& force = forces.devices[i]; auto& h = hardware_[i];
             if (h.id != force.id) throw std::invalid_argument("Hardware force telemetry IDs are stale.");
             h.appliedForceNewtons = force.appliedForceNewtons;
+            h.requestedForceNewtons = force.requestedForceNewtons;
+            h.forceLimitReached = force.forceLimitReached;
+            h.generalizedForceNewtons = force.generalizedForceNewtons;
             h.profileAccelerationMetersPerSecondSquared = force.profileAccelerationMetersPerSecondSquared;
             h.targetSpeedLimited = force.targetSpeedLimited
                 || (h.targetSpeedLimited && force.profileAccelerationMetersPerSecondSquared > 0);

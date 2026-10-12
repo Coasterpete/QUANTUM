@@ -11,6 +11,7 @@
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/TrainPreviewInspection.hpp>
+#include <quantum/editor/SimulationDynamicsDiagnostics.hpp>
 #include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
 #include <quantum/editor/InteractionPreferences.hpp>
@@ -750,6 +751,8 @@ namespace quantum::editor
         void setSimulationDeviceTelemetry(
             const physics::TrackDeviceForceResult& forces,
             double realizedAccelerationMetersPerSecondSquared);
+        void setSimulationDynamicsDiagnostics(const SimulationDynamicsDiagnostics& diagnostics) { simulationDynamicsDiagnostics_ = diagnostics; }
+        void openEngineeringDynamics() noexcept { pendingEngineeringDynamics_ = true; }
 
         // Updates the compact viewport playback telemetry. Physics state and
         // render geometry remain owned by the application-side preview.
@@ -1086,6 +1089,9 @@ void drawSimulationTelemetry();
             ScalarProfileEndpoint::None;
         physics::TrackDeviceForceResult simulationDeviceForces_;
         double simulationRealizedAcceleration_ = 0.0;
+        SimulationDynamicsDiagnostics simulationDynamicsDiagnostics_;
+        bool pendingEngineeringDynamics_ = false;
+        void drawSimulationDynamicsDiagnostics();
         std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
         std::optional<RegionTrackStyleEdit> regionTrackStyleEdit_;

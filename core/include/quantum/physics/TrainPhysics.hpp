@@ -890,6 +890,10 @@ namespace quantum::physics
         TrackBoundary boundary = TrackBoundary::None;
         bool wrapped = false;
         bool boundaryIntervention = false;
+        // Same ordered applications and virtual-work projections used by the
+        // step. Allows callers to identify device contributions without a
+        // second, potentially different kinematic solve.
+        std::vector<ExternalForceApplicationEvaluation> externalForces;
     };
 
     struct TrainStepResult

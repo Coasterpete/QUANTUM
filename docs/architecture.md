@@ -1135,9 +1135,12 @@ The preview owns its `TrainDefinition`, initial, previous, and current
 fixed-step accumulator. Play starts or resumes, Pause preserves the current
 state and pose, and Reset restores the deterministic increasing-station initial
 placement and the document's authored initial speed before returning to
-Stopped. Open tracks try a deterministic 14.75 m lead-reference station and
-then later 0.5 m candidates until `solveTrainPose` accepts the complete
-consist; an open-track consist boundary intervention pauses playback. Circuit
+Stopped. Open tracks retain the deterministic 14.75 m lead-reference placement
+when it fits, using the solved straight reference assembly to seed larger trains
+or shorter layouts, then searching the full open domain in 0.5 m candidates.
+The actual track solver validates every candidate. Failed placement reports the
+available track length and straight-reference bogie/body spans; it never clamps
+multiple bogies onto an endpoint. An open-track boundary intervention pauses playback. Circuit
 wrapping and reverse-travel orientation remain Core behavior.
 
 The first frame carrying minimize/restore events discards its incoming preview
@@ -1190,6 +1193,28 @@ navigation. The accumulator advances Core only in
 retained per rendered frame; excess wall-clock backlog from a stall is dropped,
 but the physics step size is never stretched or replaced with variable-delta
 motion.
+
+Simulator's optional **Engineering dynamics...** popup reads a committed-state
+`SimulationDynamicsDiagnostics` snapshot. It shows loaded and effective mass,
+straight-reference dimensions, actual bogie stations, signed speed, resolved
+acceleration, gravity, device virtual work, aggregate resistance, mass-gradient
+and constraint/stop corrections, geometric connector closure and interlocks.
+It does not evaluate individual wheel-contact loads or infer connector axial
+forces from aggregate resistance. Reset and device edits invalidate the old force
+sample. Train Apply accepts valid authored configuration into one history action
+even when the layout cannot accommodate it, then rebuilds/stops playback; Undo
+can recover the previous working train. Invalid authored physics is still rejected.
+
+Device telemetry distinguishes the controller request after occupancy/interlocks,
+the capped signed tangent-force sum, and `Q = sum(F dot dp/dq)` supplied to the
+production integrator. The force cap is one total absolute-force budget per
+mechanism, distributed across occupied bogies according to their car mass and
+command. `TrainTelemetry::externalForces` retains the ordered virtual-work
+projections already computed by `stepTrain`; the preview aggregates them by the
+device's application range after a successful tick. This introduces no extra pose
+solve. Device Q is separate from the resolved net `M_eff * delta(qdot)/dt` and
+from endpoint reactions. Developer smoke JSON includes the final committed
+dynamics; `--engineering-dynamics` opens this same native popup for capture.
 
 ## Native physics foundation
 
@@ -1313,6 +1338,16 @@ coordinate and solves each following car sequentially so its hitch-to-hitch
 distance satisfies the authored rigid connector length. Circuit seam crossing
 and reverse travel preserve consist order, while an open track admits motion
 only while the complete consist envelope remains on the track.
+
+Open-path connector searches now bound the complete nominal bogie footprint,
+and exclude the root where the following front hitch crosses forward of the
+leading rear hitch. The default unsigned-distance equation otherwise admits
+both 3.5 m overlapping and 4.5 m separated car placements for a 0.5 m connector.
+Switching between these roots during finite differences produces false inertia
+and mass-gradient forces. Perpendicular roots retain the ordinary distance
+residual/minimum refinement and their ill-conditioned load classification.
+Circuit root selection is unchanged. A clamped lead reference also stops outgoing
+velocity when asymmetric bogies remain inset within the endpoint.
 
 Individual cars do not have independently integrated longitudinal degrees of
 freedom. Phase 3 introduced the inter-car connectors as kinematic constraints;

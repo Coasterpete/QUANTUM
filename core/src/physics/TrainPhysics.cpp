@@ -815,10 +815,23 @@ namespace quantum::physics
                 solveFrontHitchPositionForValidatedDefinition(
                     track, followingDefinition.car, followingLocation,
                     counters, bogieHint);
-            const double distance = glm::length(
-                frontHitch
-                - leadingPose.rearHitchWorldPositionMeters());
-            const double residual = distance - connectorLengthMeters;
+            const glm::dvec3 hitchDelta = frontHitch
+                - leadingPose.rearHitchWorldPositionMeters();
+            const double distance = glm::length(hitchDelta);
+            // On an open path the following front hitch must stay behind the
+            // leading rear hitch. Unsigned distance also has an overlapping
+            // root (3.5 m instead of 4.5 m for the default cars). Selecting it
+            // when the trailing endpoint truncates the search changes branches
+            // between q-h and q+h and destroys the kinematic derivatives.
+            const bool invertedOpenConnector =
+                track.topology() == coaster::TopologyKind::OpenLinear
+                && glm::dot(hitchDelta, leadingPose.bodyFrame().tangent)
+                    > connectorLengthToleranceMeters;
+            // Keep a perpendicular/tangent root on the ordinary nonnegative
+            // distance residual. Negating distance would create a false sign
+            // bracket at zero axial projection and prematurely stop refinement.
+            const double residual = distance
+                + (invertedOpenConnector ? connectorLengthMeters : -connectorLengthMeters);
             if (!std::isfinite(distance) || !std::isfinite(residual))
             {
                 throw std::domain_error(
@@ -902,7 +915,21 @@ namespace quantum::physics
                     ? leadingPose.referenceLocation().stationMeters
                     : track.lengthMeters()
                         - leadingPose.referenceLocation().stationMeters;
-                searchEnd = std::min(searchEnd, availableBehind);
+                double rearBogieOffset = std::numeric_limits<double>::infinity();
+                double frontBogieOffset = -rearBogieOffset;
+                for (const auto& bogie : followingDefinition.car.bogies)
+                {
+                    rearBogieOffset = std::min(rearBogieOffset, bogie.referencePositionMeters.x);
+                    frontBogieOffset = std::max(frontBogieOffset, bogie.referencePositionMeters.x);
+                }
+                // Bound every candidate by the complete following-car bogie
+                // footprint. Bounding only its reference let bracket/golden
+                // refinements query illegal endpoints even when a legal root
+                // existed within millimetres of the trailing limit.
+                searchEnd = std::min(searchEnd, std::nextafter(
+                    availableBehind + rearBogieOffset, 0.0));
+                const double availableAhead = track.lengthMeters() - availableBehind;
+                searchBegin = std::max(searchBegin, frontBogieOffset - availableAhead);
             }
 
             if (!std::isfinite(searchBegin)
@@ -4938,6 +4965,14 @@ if (std::abs(solved.residualMeters)
             }
             committedPose = trySolveTrainPose(
                 track, definition, advancement.location, counters);
+            if (committedPose && advancement.boundary != TrackBoundary::None)
+            {
+                // Asymmetric cars can keep both bogies legal when the lead
+                // reference reaches its coordinate boundary. A clamped
+                // reference must not retain a nonzero outgoing velocity.
+                boundaryIntervention = true;
+                nextVelocity = 0.0;
+            }
             if (!committedPose)
             {
                 if (counters)
@@ -5078,6 +5113,7 @@ if (std::abs(solved.residualMeters)
             advancement.wrapped,
             boundaryIntervention
         };
+        telemetry.externalForces = std::move(current.externalForces);
         return {nextState, std::move(telemetry)};
     }
 }

@@ -115,6 +115,39 @@ namespace
         bad = c; bad.cars[0].rearConnection.rigidLengthMeters = -1; rejects([&] { validateTrainConfiguration(bad); });
         bad = c; bad.repeatedCar.loadout.massKilograms = -1; rejects([&] { validateTrainConfiguration(bad); });
     }
+    void changedConsistLifecycle()
+    {
+        auto track = createNewDocument();
+        auto settings = track.physicalSettings(); settings.initialSpeed = 0; track.setPhysicalSettings(settings);
+        auto launch = makeTrackDevice(TrackDeviceKind::Launch); launch.startStationMeters = 0; launch.endStationMeters = 45;
+        launch.maximumForceNewtons = 90000; launch.targetAccelerationMetersPerSecondSquared = 11.794;
+        (void)track.addTrackDevice(launch);
+        ApplicationService app{track}; require(app.rebuildPreview(), "Lifecycle four-car preview initializes");
+        app.play(); app.update(.1);
+        auto train = app.track().trainConfiguration(); resizeTrainConsist(train, 8);
+        const auto before = serializeCoasterDocument(app.track());
+        app.setTrainConfiguration(train);
+        require(app.preview().dynamicsState()->tick == 0 && app.preview().playbackState() == SimulationPreview::PlaybackState::Stopped,
+            "Four-to-eight Apply stops and resets active simulation");
+        require(app.preview().dynamicsDiagnostics().cars.size() == 8 && app.preview().meshInstances().size() == 8, "Physics and visuals both rebuild eight cars");
+        require(!app.preview().dynamicsDiagnostics().hasStep && app.preview().lastDeviceForces().devices.empty(), "Apply clears old forces");
+        app.play(); app.update(defaultFixedTimeStepSeconds);
+        require(app.preview().lastDeviceForces().devices.front().occupiedBogieCount == 16 && app.preview().dynamicsDiagnostics().loadedMassKilograms == 8000,
+            "Accepted eight-car state owns mass and device occupancy");
+        const auto eight = serializeCoasterDocument(app.track());
+        app.restoreHistory(true); require(serializeCoasterDocument(app.track()) == before, "Undo restores four cars");
+        app.restoreHistory(false); require(serializeCoasterDocument(app.track()) == eight, "Redo restores eight cars");
+        auto reopened = deserializeCoasterDocument(eight); require(bool(reopened), "Eight-car save reopens");
+        ApplicationService loaded{*reopened}; require(loaded.rebuildPreview() && loaded.preview().dynamicsDiagnostics().cars.size() == 8, "Reopen reconstructs eight-car physics");
+        train = app.track().trainConfiguration(); resizeTrainConsist(train, 16);
+        app.setTrainConfiguration(train);
+        require(app.track().trainConfiguration().cars.size() == 16 && !app.preview().isAvailable(), "Valid oversize authored consist is retained with unavailable simulation");
+        require(app.preview().error().find("69.800") != std::string::npos, "Oversize Apply explains required bogie distance");
+        const auto oversize = serializeCoasterDocument(app.track()); require(bool(deserializeCoasterDocument(oversize)), "Oversize train remains saveable");
+        app.restoreHistory(true); require(app.preview().isAvailable() && app.preview().dynamicsDiagnostics().cars.size() == 8, "Undo invalid placement recovers working preview");
+        app.restoreHistory(false); require(!app.preview().isAvailable() && serializeCoasterDocument(app.track()) == oversize, "Redo restores diagnosis and authored data");
+    }
+
     void persistenceHistoryAndPreview()
     {
         for (bool zero : {false, true})
@@ -365,7 +398,7 @@ int main(int argc, char** argv)
     {
         if (argc == 3 && std::string_view(argv[1]) == "--write-fixture")
         { std::ofstream file(argv[2]); file << serializeCoasterDocument(acceptance()); if (!file) throw std::runtime_error("Fixture write failed"); return 0; }
-        orderedModelAndSummary(); persistenceHistoryAndPreview(); hardwareMassAndIdentity(); previewPickingAndFraming(); integratedOperations();
+        orderedModelAndSummary(); changedConsistLifecycle(); persistenceHistoryAndPreview(); hardwareMassAndIdentity(); previewPickingAndFraming(); integratedOperations();
         std::cout << "Train2Tests passed " << checks << " checks\n"; return 0;
     }
     catch (const std::exception& error) { std::cerr << "Train2Tests failed: " << error.what() << '\n'; return 1; }

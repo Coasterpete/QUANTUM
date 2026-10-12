@@ -1,6 +1,8 @@
 #pragma once
 
 #include <quantum/editor/FramePerformanceTelemetry.hpp>
+#include <quantum/editor/SimulationDynamicsDiagnostics.hpp>
+#include <quantum/physics/TrackDeviceForces.hpp>
 
 #include <array>
 #include <cstddef>
@@ -32,6 +34,7 @@ namespace quantum::editor
         bool repeat = false;
         bool stoppedPreview = false;
         bool simulator = false;
+        bool engineeringDynamics = false;
         bool modeCycle = false;
         bool cameraOrbit = false;
         bool msaaOff = false;
@@ -101,6 +104,8 @@ namespace quantum::editor
 
     struct PreviewSmokeReport
     {
+        SimulationDynamicsDiagnostics trainDynamics;
+        physics::TrackDeviceForceResult deviceForces;
         std::filesystem::path documentPath;
         std::string buildConfiguration;
         double requestedDurationSeconds = 0.0;

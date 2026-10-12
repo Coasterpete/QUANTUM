@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/TrainPreviewInspection.hpp>
+#include <quantum/editor/SimulationDynamicsDiagnostics.hpp>
 #include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
@@ -104,6 +105,7 @@ namespace quantum::editor
         void hardwareCommand(coaster::TrackDeviceId id, physics::HardwareCommand command, double value = 0, std::uint64_t target = 0);
         [[nodiscard]] const physics::TrackDeviceForceResult&
             lastDeviceForces() const noexcept;
+        [[nodiscard]] const SimulationDynamicsDiagnostics& dynamicsDiagnostics() const noexcept { return dynamicsDiagnostics_; }
 
         void play() noexcept;
         void pause() noexcept;
@@ -171,6 +173,7 @@ namespace quantum::editor
     private:
         void setUnavailable(std::string error) noexcept;
         void rebuildVertices();
+        void refreshDynamicsDiagnostics();
 
         std::optional<physics::CompiledPhysicsTrack> compiledTrack_;
         physics::PhysicsEnvironment environment_;
@@ -179,6 +182,7 @@ namespace quantum::editor
         std::vector<physics::TrackDeviceRuntimeState> deviceRuntimeStates_;
         physics::RideOperations operations_;
         physics::TrackDeviceForceResult lastDeviceForces_;
+        SimulationDynamicsDiagnostics dynamicsDiagnostics_;
         std::optional<physics::TrainDynamicsState> initialState_;
         std::optional<physics::TrainDynamicsState> dynamicsState_;
         std::optional<physics::TrainDynamicsState> previousState_;

@@ -62,6 +62,8 @@ namespace quantum::physics
                     "Device runtime control does not match authored IDs.");
             TrackDeviceForceTelemetry telemetry;
             telemetry.id = device.id;
+            telemetry.armed = control.armed;
+            telemetry.applicationBegin = result.applications.size();
             struct OccupiedBogie
             {
                 std::size_t carIndex;
@@ -150,6 +152,7 @@ namespace quantum::physics
                             .referencePositionMeters,
                         requested});
                     requestedTotal += std::abs(requested);
+                    telemetry.requestedForceNewtons += requested;
                     commandedAccelerationTotal += commandedAccel;
                 }
             }
@@ -163,6 +166,10 @@ namespace quantum::physics
             }
             const double applied = std::min(requestedTotal,
                 device.maximumForceNewtons);
+            telemetry.requestedAbsoluteForceNewtons = requestedTotal;
+            telemetry.suppliedAbsoluteForceNewtons = applied;
+            telemetry.forceLimitReached = requestedTotal > device.maximumForceNewtons;
+            telemetry.applicationCount = occupied.size();
             const double scale = requestedTotal > 0 ? applied / requestedTotal : 0;
             double signedApplied = 0;
             for (const OccupiedBogie& bogie : occupied)

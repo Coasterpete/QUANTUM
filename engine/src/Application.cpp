@@ -607,6 +607,7 @@ namespace quantum::engine
                 std::vector<quantum::editor::TrainPreviewCar> previewCarBounds;
                 const auto publishSimulationStatus = [&]
                 {
+                    editorUi.setSimulationDynamicsDiagnostics(simulationPreview.dynamicsDiagnostics());
                     if (!simulationPreview.isAvailable())
                     {
                         editorUi.setTrainPreviewCars({});
@@ -635,7 +636,7 @@ namespace quantum::engine
                     }
                     editorUi.setSimulationStatus(
                         uiState,
-                        simulationPreview.speedMetersPerSecond());
+                        simulationPreview.dynamicsState()->signedVelocityMetersPerSecond);
                     editorUi.setSimulationDeviceTelemetry(
                         simulationPreview.lastDeviceForces(),
                         simulationPreview.dynamicsState()
@@ -4563,6 +4564,9 @@ editorUi.selectSection(restoredSelection, true);
                                 || frameBlockingEvents.windowRestored);
                         publishSimulationStatus();
 
+                        if (previewSmokeOptions && previewSmokeOptions->engineeringDynamics && renderedFrameId == 2)
+                            editorUi.openEngineeringDynamics();
+
                         if (rigidBodyProof)
                         {
                             std::string assetError;
@@ -4962,11 +4966,13 @@ editorUi.selectSection(restoredSelection, true);
                             PerformanceClock::now()
                             - *previewSmokeStart).count()
                         : 0.0;
-                    const auto report = previewSmokeCollector->finish(
+                    auto report = previewSmokeCollector->finish(
                         elapsedSeconds,
                         previewSmokeDurationCompleted && !previewSmokeFailure,
                         previewSmokeFailure,
                         previewSmokeFailureMessage);
+                    report.trainDynamics = simulationPreview.dynamicsDiagnostics();
+                    report.deviceForces = simulationPreview.lastDeviceForces();
                     const auto paths =
                         quantum::editor::writePreviewSmokeReports(
                             report, *previewSmokeOptions);

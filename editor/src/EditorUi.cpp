@@ -8726,11 +8726,12 @@ namespace quantum::editor
                 {
                     if (device.occupiedBogieCount == 0)
                         continue;
-                    ImGui::Text("Device #%llu: %zu bogies | command %.2f m/s^2 | applied %+.0f N",
+                    ImGui::Text("Device #%llu: %zu bogies | command %.2f m/s^2 | supplied %+.0f N",
                         static_cast<unsigned long long>(device.id),
                         device.occupiedBogieCount,
                         device.commandedAccelerationMetersPerSecondSquared,
                         device.appliedForceNewtons);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Device force after controller, interlocks and the total force cap. Gravity, resistance and endpoint reactions determine the net acceleration.");
                 }
             }
             else
@@ -8757,6 +8758,22 @@ namespace quantum::editor
                 pendingSimulationControl_ = SimulationControlType::Reset;
             ImGui::EndDisabled();
 
+            if (ImGui::Button("Engineering dynamics...")) ImGui::OpenPopup("Engineering dynamics");
+            if (pendingEngineeringDynamics_)
+            {
+                ImGui::OpenPopup("Engineering dynamics");
+                pendingEngineeringDynamics_ = false;
+            }
+            const float dynamicsScale = editorPresentationScale();
+            ImGui::SetNextWindowSize({std::max(1.0F, std::min(720 * dynamicsScale, mainViewport->WorkSize.x - 24 * dynamicsScale)),
+                std::max(1.0F, std::min(540 * dynamicsScale, mainViewport->WorkSize.y - 24 * dynamicsScale))}, ImGuiCond_Appearing);
+            ImGui::SetNextWindowPos({mainViewport->WorkPos.x + mainViewport->WorkSize.x * .5F,
+                mainViewport->WorkPos.y + mainViewport->WorkSize.y * .5F}, ImGuiCond_Appearing, {.5F, .5F});
+            if (ImGui::BeginPopup("Engineering dynamics"))
+            {
+                drawSimulationDynamicsDiagnostics();
+                ImGui::EndPopup();
+            }
             ImGui::Checkbox("Show train physics diagnostics", &trainPhysicsDiagnosticsVisible_);
             drawRigidBodyProofControls();
 

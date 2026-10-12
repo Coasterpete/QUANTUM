@@ -480,6 +480,12 @@ namespace quantum::editor
                 options.simulator = true;
                 continue;
             }
+            if (argument == "--engineering-dynamics")
+            {
+                options.engineeringDynamics = true;
+                options.simulator = true;
+                continue;
+            }
             if (argument == "--mode-cycle")
             {
                 options.modeCycle = true;
@@ -955,7 +961,27 @@ namespace quantum::editor
         nlohmann::json frameTrace = nlohmann::json::array();
         for (const auto& sample : report.frameTrace)
             frameTrace.push_back(frameTraceJson(sample));
+        const auto& dynamics = report.trainDynamics;
+        nlohmann::json cars = nlohmann::json::array(), devices = nlohmann::json::array();
+        for (const auto& car : dynamics.cars)
+            cars.push_back({{"car_id", car.id}, {"loaded_mass_kg", car.loadedMassKilograms},
+                {"reference_m", car.referenceStationMeters}, {"front_bogie_m", car.frontBogieStationMeters}, {"rear_bogie_m", car.rearBogieStationMeters}});
+        for (const auto& device : report.deviceForces.devices)
+            devices.push_back({{"id", device.id}, {"occupied_bogies", device.occupiedBogieCount},
+                {"armed", device.armed}, {"requested_N", device.requestedForceNewtons},
+                {"capped_tangent_supply_N", device.appliedForceNewtons}, {"force_limit_reached", device.forceLimitReached},
+                {"generalized_supply_N", device.generalizedForceNewtons ? nlohmann::json(*device.generalizedForceNewtons) : nlohmann::json(nullptr)}});
         const nlohmann::json json = {
+            {"final_train_dynamics", {{"placement_valid", dynamics.placementValid}, {"has_step", dynamics.hasStep},
+                {"tick", dynamics.tick}, {"track_length_m", dynamics.trackLengthMeters},
+                {"straight_bogie_span_m", dynamics.straightBogieSpanMeters}, {"body_envelope_m", dynamics.bodyEnvelopeLengthMeters},
+                {"loaded_mass_kg", dynamics.loadedMassKilograms}, {"effective_mass_kg", dynamics.effectiveMassKilograms},
+                {"signed_speed_mps", dynamics.signedSpeedMetersPerSecond}, {"acceleration_mps2", dynamics.accelerationMetersPerSecondSquared},
+                {"device_Q_N", dynamics.externalForceNewtons}, {"gravity_Q_N", dynamics.gravityForceNewtons},
+                {"resistance_Q_N", dynamics.resistanceForceNewtons}, {"mass_gradient_Q_N", dynamics.massGradientForceNewtons},
+                {"constraint_Q_N", dynamics.constraintForceNewtons}, {"resolved_net_Q_N", dynamics.netForceNewtons},
+                {"endpoint_restriction", dynamics.boundary != physics::TrackBoundary::None},
+                {"maximum_connector_residual_m", dynamics.maximumConnectorResidualMeters}, {"cars", cars}, {"devices", devices}}},
             {"run", {
                 {"document_path", report.documentPath.string()},
                 {"build_configuration", report.buildConfiguration},

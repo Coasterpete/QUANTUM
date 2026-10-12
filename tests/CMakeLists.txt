@@ -297,6 +297,17 @@ if(QUANTUM_ENABLE_EDITOR)
     set_tests_properties(QuantumEditor.RigidBodyPresentation PROPERTIES
         LABELS "editor;physics;rigid-body;renderer;presentation")
 
+    add_executable(QuantumEditorMultiCarPropulsionTests
+        MultiCarPropulsionTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp)
+    target_include_directories(QuantumEditorMultiCarPropulsionTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorMultiCarPropulsionTests PRIVATE Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorMultiCarPropulsionTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorMultiCarPropulsionTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.MultiCarPropulsion COMMAND QuantumEditorMultiCarPropulsionTests)
+    set_tests_properties(QuantumEditor.MultiCarPropulsion PROPERTIES LABELS "editor;physics;operations;train")
+
     add_executable(
         QuantumEditorSimulationPreviewTests
         SimulationPreviewTests.cpp

@@ -109,6 +109,7 @@ add_executable(
     include/quantum/editor/RiderLoadDiagnostics.hpp
     include/quantum/editor/RigidBodyMechanismProof.hpp
     include/quantum/editor/SimulationPreview.hpp
+    include/quantum/editor/SimulationDynamicsDiagnostics.hpp
     include/quantum/editor/TrainMeshPresentation.hpp
     include/quantum/editor/TransitionEditorModel.hpp
     include/quantum/editor/TrainPreviewInspection.hpp

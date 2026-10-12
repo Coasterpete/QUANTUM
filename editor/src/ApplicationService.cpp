@@ -264,9 +264,9 @@ namespace quantum::editor
             == coaster::serializeTrainConfiguration(track_.trainConfiguration())) return;
         AuthoredTrackEditTransaction transaction{track_};
         transaction.candidate().setTrainConfiguration(configuration);
-        SimulationPreview proposal;
-        if (!proposal.rebuild(transaction.candidate()) && preview_.isAvailable())
-            throw std::invalid_argument(proposal.error());
+        // A valid authored train can exceed this layout's supported footprint.
+        // Accept it into history; rebuild marks playback unavailable with the
+        // placement diagnosis instead of keeping a competing older consist.
         auto history = history_;
         history.record(transaction.candidate());
         cancelTransform();

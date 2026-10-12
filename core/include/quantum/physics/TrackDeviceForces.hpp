@@ -32,6 +32,17 @@ namespace quantum::physics
         // occupied bogies even when reaching the target releases propulsion.
         double profileAccelerationMetersPerSecondSquared = 0.0;
         bool targetSpeedLimited = false;
+        // Requests after occupancy/controller/interlocks, before the force cap.
+        double requestedForceNewtons = 0.0;
+        double requestedAbsoluteForceNewtons = 0.0;
+        double suppliedAbsoluteForceNewtons = 0.0;
+        bool forceLimitReached = false;
+        bool armed = false;
+        std::size_t applicationBegin = 0, applicationCount = 0;
+        // Published by the preview only after a successful production step.
+        // Q = sum(F dot dp/dq), not the net force after gravity/resistance or
+        // an allocation of endpoint reaction to this mechanism.
+        std::optional<double> generalizedForceNewtons;
     };
 
     struct TrackDeviceForceResult

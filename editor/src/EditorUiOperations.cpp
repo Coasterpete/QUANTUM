@@ -25,8 +25,12 @@ namespace quantum::editor
             if (!status->interlockReason.empty()) ImGui::TextWrapped("%s", status->interlockReason.c_str());
             ImGui::Text("Command %+.3f m/s | %+.3f m/s^2",
                 status->commandedSpeedMetersPerSecond, status->commandedAccelerationMetersPerSecondSquared);
-            ImGui::Text("Last fixed step force %+.1f N | limit %.1f N",
+            ImGui::Text("Last step device supply %+.1f N | limit %.1f N",
                 status->appliedForceNewtons, device.maximumForceNewtons);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Sum of signed device tangent forces after limits. This is not the train's net longitudinal force.");
+            ImGui::Text("Request after interlocks %+.1f N", status->requestedForceNewtons);
+            if (status->generalizedForceNewtons) ImGui::Text("Supplied to train coordinate %+.1f N", *status->generalizedForceNewtons);
+            if (status->forceLimitReached) ImGui::TextColored(palette::warning, "Force limit reached");
             if (status->targetSpeedLimited) ImGui::TextDisabled("Target speed reached / propulsion limited");
             if (status->occupancy.clear()) ImGui::TextDisabled("Train outside device range");
             else if (!status->forceControl.armed) ImGui::TextDisabled("No force command armed in the current mechanism state");

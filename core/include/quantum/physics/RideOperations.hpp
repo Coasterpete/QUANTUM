@@ -69,6 +69,9 @@ namespace quantum::physics
         double appliedForceNewtons = 0;
         double profileAccelerationMetersPerSecondSquared = 0;
         bool targetSpeedLimited = false;
+        double requestedForceNewtons = 0;
+        bool forceLimitReached = false;
+        std::optional<double> generalizedForceNewtons;
         bool aligned = false, stopped = false, movementPermitted = false;
         TrackDeviceRuntimeState forceControl;
     };

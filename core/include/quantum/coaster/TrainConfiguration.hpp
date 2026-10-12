@@ -65,6 +65,9 @@ namespace quantum::coaster
         std::size_t carCount = 0, bogieCount = 0, connectorCount = 0;
         double dryMassKilograms = 0, loadedMassKilograms = 0;
         double bodyEnvelopeLengthMeters = 0, frontExtentMeters = 0, rearExtentMeters = 0;
+        // Solved straight reference-rail bogie stations relative to the lead
+        // reference. Unlike body length, this is the supported track footprint.
+        double straightBogieSpanMeters = 0, frontBogieExtentMeters = 0, rearBogieExtentMeters = 0;
         glm::dvec3 straightLoadedCenterOfGravityMeters{0.0};
         bool straightAssemblyAvailable = false;
         std::vector<TrainCarSummary> cars;

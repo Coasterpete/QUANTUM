@@ -270,10 +270,18 @@ namespace quantum::coaster
             const auto pose = physics::solveTrainPose(rail, definition,
                 {physics::primaryTrackPathId, extent, physics::TravelDirection::IncreasingStation});
             const auto origin = pose.cars().front().carPose().bodyWorldPositionMeters();
+            result.frontBogieExtentMeters = -std::numeric_limits<double>::infinity();
+            result.rearBogieExtentMeters = std::numeric_limits<double>::infinity();
             std::vector<std::pair<double, double>> bounds;
             for (std::size_t i = 0; i < pose.carCount(); ++i)
             {
                 const auto& carPose = pose.cars()[i].carPose();
+                for (const auto* bogie : {&carPose.frontBogie(), &carPose.rearBogie()})
+                {
+                    const double station = bogie->location().stationMeters - extent;
+                    result.frontBogieExtentMeters = std::max(result.frontBogieExtentMeters, station);
+                    result.rearBogieExtentMeters = std::min(result.rearBogieExtentMeters, station);
+                }
                 const auto dimensions = definition.cars[i].car.bodyDimensionsMeters;
                 double low = std::numeric_limits<double>::infinity(), high = -low;
                 for (int x : {-1, 1}) for (int y : {-1, 1}) for (int z : {-1, 1})
@@ -296,6 +304,7 @@ namespace quantum::coaster
             }
             result.straightLoadedCenterOfGravityMeters = pose.aggregateWorldCenterOfGravityMeters() - origin;
             result.straightAssemblyAvailable = true;
+            result.straightBogieSpanMeters = result.frontBogieExtentMeters - result.rearBogieExtentMeters;
         }
         catch (const std::invalid_argument& error) { issue(true, 0, error.what()); }
         catch (const std::exception& error) { issue(false, 0, "Straight reference assembly unavailable: " + std::string(error.what())); }
