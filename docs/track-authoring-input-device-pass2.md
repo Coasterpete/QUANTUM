@@ -182,8 +182,65 @@ under `%TEMP%/quantum-authoring-pass2-baseline`; the original branch remains int
 
 ## Verification
 
-Build/test/runtime outcomes are recorded here after completion. No test or Vulkan
-validation was disabled by this pass. The prior GPU residency test remains disabled.
+Windows/MSVC verification completed on the active checkout, including its
+pre-existing audio work. Intel Core i7-14700KF, NVIDIA GeForce RTX 4070 (driver
+32.0.16.1088); Windows SDK 10.0.26100.0, Vulkan headers 1.4.357. No assertions,
+tests or validation were disabled by this pass.
+
+Commands:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build build --config Release --parallel 2
+cmake --build build --config Debug --parallel 2
+ctest --test-dir build -C Release --output-on-failure
+ctest --test-dir build -C Debug --output-on-failure --parallel 2
+```
+
+- Full Debug and Release builds passed. Final editor delivery builds also passed
+  after the smoke-harness correction and smaller numeric step buttons.
+- Release: all 127 enabled tests passed, 238.91 seconds.
+- Debug: all 127 enabled tests passed, 797.64 seconds (parallel 2).
+- 128 tests are registered. The pre-existing
+  `QuantumEngine.GpuTrainPoseResidency` remains disabled in both configurations.
+- The new `QuantumApplication.TrackAuthoringInteraction` covers DPI/partitioned
+  orbit, projection-independent cursor zoom, preference defaults/round trips/
+  rejection, fine snapping, all 19 rotation-target functions, real authoring
+  regeneration, shared values, history and persistence, and custom-profile resizing.
+- Existing geometry, train, devices, native boundaries, resistance, operations,
+  supports, persistence and GPU suites ran. This is not real audio listening or
+  human mouse/keyboard acceptance.
+- Release programmatic runtime: the mixed 320 m/three-Region fixture completed
+  all 13 native authoring actions, mode cycling and four swapchain recreations.
+  1485 frames/360 fixed steps, 98.943 average FPS and 60.092 ms maximum frame
+  interval in this 15.011-second diagnostic run. This is not a performance gain
+  claim or representative large-scene benchmark.
+- Corrected Debug programmatic runtime: the 60 m/one-Profile fixture committed
+  all 30 scripted end-rate edits and handled four swapchain recreations with
+  Vulkan validation and GPU sampling validation requested. The stopped-preview
+  12.002-second run recorded 1196 frames and no physics steps; geometry was
+  regenerated through the real authored/Vulkan path. Measured edit pre-simulation
+  times were approximately 6.5–7 ms near the end of the scripted gesture.
+- An earlier Debug mode-cycle run completed 226 physics steps but exposed the
+  old hardcoded transition smoke bug. Its original PASS report is **not** evidence
+  that those transition edits succeeded. The corrected harness now fails on a
+  rejected edit or fewer than 30 committed edits.
+- A no-Profile fixture was intentionally rejected by the corrected Debug smoke:
+  result FAILED, exit code 2, `Transition drag smoke requires a Rate/Profile Region.`
+  This verifies failure propagation instead of silently reporting success.
+- An actual Release ImGui ini test loaded and rewrote nondefault orbit/pan/zoom,
+  cursor-zoom, fine-gain and force-snap preferences with matching values.
+- Each runtime check restored the original user layout with matching SHA-256.
+  Captures were inspected for application layout/rendering; they are not evidence
+  of human precision dragging or a clicked target-tools popup.
+- No Vulkan validation error was reported. Debug retained the Vulkan loader
+  warning that `VK_LAYER_OBS_HOOK` declares API 1.3 while QUANTUM requests 1.4.
+  That external layer warning was not suppressed or treated as a fence diagnosis.
+
+Reports, captures, generated negative fixture, ini backups and copied build/CTest
+logs are under `build/pass2-verification` (ignored by Git). They retain the initial
+failure evidence as well as final results. Implementation commit: `453f170`.
+The verification/handoff commit follows it; `git log -2` identifies both.
 
 The TimelineAuthoring regression originally required the old tail-only interval
 resize and rejected shrinking before a split. Its contract was deliberately
