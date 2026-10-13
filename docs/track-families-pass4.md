@@ -214,7 +214,7 @@ centerline presentation, documents/history, assets, supports and the new family 
 The latest Release family run passed approximately **2.84 million per-vertex/triangle
 and contract assertions**. This is one CTest case with extensive checks, not millions
 of separate user workflows. Transient implementation failures (including the sweep
-winding, missing reference labels and an overly strict tessellation comparison) were
+winding, legacy display-name compatibility and an overly strict tessellation comparison) were
 corrected; no final enabled test failure is outstanding.
 
 Build evidence: `build/pass4-release-verified-build.log` and
@@ -339,3 +339,36 @@ explicitly separate; this pass does not resolve them.
 Also added: the owned `tests/fixtures/track-families/` documents/hierarchy fixture and
 `docs/images/track-families-pass4/` native captures. Only pass-owned changes are staged.
 The audio hooks in `Application.cpp` are intentionally left in the working tree.
+
+## Committed evidence checkpoint
+
+Implementation/content/verification checkpoint: `85d6520` — Implement numbered
+track families and replaceable structural components. The original pass-3 branch
+and starting HEAD remain available. The saved Workbench layout was restored from
+its pre-smoke backup and its SHA-256 hash matches exactly. The only remaining
+unstaged changes are the pre-existing policy/audio/tests/assets/campaign work.
+
+There are **28 native captures**: 25 Editor views, two isolated Release monorail
+Simulator views, and one Debug Monorail-200 Simulator view. The other Simulator
+smokes exercised Hybrid-100/custom components but did not yield a settled screenshot
+within their short runs under concurrent GPU load; no screenshot proof is claimed
+for those two Simulator cases.
+
+Selected native evidence:
+
+- [Truss-100](images/track-families-pass4/truss-100/editor-overview.png)
+- [Banshee / Box-110](images/track-families-pass4/box-110/editor-overview.png)
+- [Pipeline / Box-230](images/track-families-pass4/box-230/editor-overview.png)
+- [Mixed Hybrid construction](images/track-families-pass4/mixed-hybrid/editor-overview.png)
+- [Topper](images/track-families-pass4/hybrid-topper/editor-overview.png)
+- [Prefabricated wood and generated supports](images/track-families-pass4/wood-supports/editor-overview.png)
+- [Monorail-100 Editor](images/track-families-pass4/monorail-100/editor-overview.png)
+- [Monorail-100 Simulator](images/track-families-pass4/monorail-100/simulator/simulator-0.png)
+- [Monorail-200 Simulator](images/track-families-pass4/monorail-200/simulator/simulator-0.png)
+- [Inverted custom GLB components](images/track-families-pass4/inverted-custom/editor-overview.png)
+
+Full Inspector parameter editing, Undo/Redo and saving through native menu input
+remain human acceptance steps. Automated document/history/geometry tests cover
+those underlying contracts. Final production assets, track texture/normal-map
+sampling, precise junctions, project asset browsing and complete support edit
+provenance remain open. This report does not claim pass 4 is wholly finished.
