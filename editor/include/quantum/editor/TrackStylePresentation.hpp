@@ -52,7 +52,7 @@ namespace quantum::editor
     [[nodiscard]] TrackStylePresentationImpact
     classifyResolvedTrackStylePresentationChange(
         const coaster::TrackStylePreset& before,
-        const coaster::TrackStylePreset& after) noexcept;
+        const coaster::TrackStylePreset& after);
 
     // Classifies the effective appearance of every region after a document
     // configuration edit, including changes hidden by sparse overrides.

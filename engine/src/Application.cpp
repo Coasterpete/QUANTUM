@@ -1,3 +1,5 @@
+#include <set>
+#include <quantum/renderer/StaticMeshAssets.hpp>
 #include <quantum/engine/Application.hpp>
 #include <quantum/editor/ApplicationService.hpp>
 #include <quantum/coaster/AuthoredTrack.hpp>
@@ -396,6 +398,9 @@ namespace quantum::engine
         int applicationExitCode = 0;
         try
         {
+            const char* assetBase = SDL_GetBasePath();
+            if (!assetBase) throw std::runtime_error(std::string{"Cannot locate track assets: "}+SDL_GetError());
+            quantum::renderer::configureTrackComponentAssets(std::filesystem::path{assetBase});
             {
                 // Audio is a non-fatal startup subsystem. The engine is scoped
                 // to this block so its destructor releases the SDL audio
@@ -4167,10 +4172,12 @@ editorUi.selectSection(restoredSelection, true);
 
                         const auto requestedTrackConfiguration =
                             editorUi.takePendingTrackConfigurationSelection();
+                        const auto componentEdit = editorUi.takePendingTrackComponentEdit();
+                        const bool reloadComponents = editorUi.takePendingTrackComponentReload();
                         const bool resetTrackConfiguration =
                             editorUi.takePendingTrackConfigurationReset();
                         if (requestedTrackConfiguration.has_value()
-                            || resetTrackConfiguration)
+                            || resetTrackConfiguration || componentEdit.has_value() || reloadComponents)
                         {
                             try
                             {
@@ -4181,18 +4188,40 @@ editorUi.selectSection(restoredSelection, true);
                                     candidateTrack.applyTrackConfiguration(
                                         *requestedTrackConfiguration);
                                 }
+                                if (componentEdit) candidateTrack.setTrackStyle(*componentEdit);
                                 if (resetTrackConfiguration)
                                 {
                                     candidateTrack.resetToConfigurationDefaults();
                                 }
+                                if (reloadComponents)
+                                {
+                                    std::set<std::string> assets;
+                                    const auto collect = [&](const auto& components) {
+                                        for (const auto& component : components)
+                                            if (!component.asset.path.empty()) assets.insert(component.asset.path);
+                                    };
+                                    collect(candidateTrack.trackStyle().components);
+                                    for (const auto& variant : candidateTrack.trackStyle().variants) collect(variant.components);
+                                    for (const auto& interval : candidateTrack.trackStyle().constructionIntervals) collect(interval.components);
+                                    for (const auto& asset : assets)
+                                    {
+                                        quantum::renderer::reloadTrackComponentAsset(asset);
+                                        renderer.reloadTrackHardwareAsset(asset, centerline.renderableTrack);
+                                    }
+                                }
                                 if (quantum::coaster::serializeCoasterDocument(
                                         candidateTrack)
                                     != quantum::coaster::serializeCoasterDocument(
-                                        authoredTrack))
+                                        authoredTrack) || reloadComponents)
                                 {
-                                    const auto impact = quantum::editor::
+                                    auto impact = quantum::editor::
                                         classifyDocumentTrackStyleEdit(
                                             authoredTrack, candidateTrack);
+                                    if (reloadComponents)
+                                        impact = quantum::editor::combineTrackStyleImpacts(impact,
+                                            {static_cast<quantum::editor::TrackStylePresentationProduct>(
+                                                static_cast<unsigned>(quantum::editor::TrackStylePresentationProduct::RenderableMesh)
+                                                | static_cast<unsigned>(quantum::editor::TrackStylePresentationProduct::HardwareInstances))});
                                     if (impact.requiresFullRegeneration())
                                     {
                                         throw std::invalid_argument(

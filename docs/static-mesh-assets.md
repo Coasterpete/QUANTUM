@@ -1,5 +1,10 @@
 # Static mesh assets
 
+Current numbered-track capabilities and the expanded static node/transform contract
+are documented in [pass 4](track-families-pass4.md) and the
+[Blender workflow](track-component-blender-workflow.md). The milestone notes below
+record the earlier restricted importer contract.
+
 This milestone supports small Blender-authored repeating track-hardware meshes.
 It is intentionally not a scene importer, asset browser, or material system.
 

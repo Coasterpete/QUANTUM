@@ -357,9 +357,9 @@ namespace quantum::coaster
                 repeatingHardware.push_back(std::move(serialized));
             }
 
-            return {
+            json serialized{
                 {"name", style.name},
-                {"geometryFamily", "DualRailTubular"},
+                {"geometryFamily", style.geometryFamily == TrackGeometryFamily::Components ? "Components" : "DualRailTubular"},
                 {"visible", style.visible},
                 {"railsVisible", style.railsVisible},
                 {"railCount", style.railCount},
@@ -380,6 +380,9 @@ namespace quantum::coaster
                     {"material", serializeTrackMaterial(
                         style.spine.material)}}},
                 {"repeatingHardware", std::move(repeatingHardware)}};
+            if (style.geometryFamily == TrackGeometryFamily::Components)
+                serialized["construction"] = json::parse(serializeTrackComponents(style));
+            return serialized;
         }
 
         json serializeRegionTrackStyleOverrides(
@@ -2056,7 +2059,7 @@ TrackStylePreset deserializeTrackStyle(
             requireNoUnknownFields(object, {
                 "name", "geometryFamily", "railCount", "railOffsets",
                 "railRadius", "railRadialSegments", "railMaterial", "spine",
-                "repeatingHardware", "visible", "railsVisible"}, path);
+                "repeatingHardware", "visible", "railsVisible", "construction"}, path);
             requireString(object, "name", path);
             requireString(object, "geometryFamily", path);
             requireInteger(object, "railCount", path);
@@ -2067,7 +2070,7 @@ TrackStylePreset deserializeTrackStyle(
             requireObject(object, "spine", path);
             requireArray(object, "repeatingHardware", path);
 
-            if (object["geometryFamily"] != "DualRailTubular")
+            if (object["geometryFamily"] != "DualRailTubular" && object["geometryFamily"] != "Components")
             {
                 throw std::runtime_error(
                     path + ".geometryFamily: unsupported track geometry family");
@@ -2083,7 +2086,8 @@ TrackStylePreset deserializeTrackStyle(
 
             TrackStylePreset style;
             style.name = object["name"].get<std::string>();
-            style.geometryFamily = TrackGeometryFamily::DualRailTubular;
+            style.geometryFamily = object["geometryFamily"] == "Components"
+                ? TrackGeometryFamily::Components : TrackGeometryFamily::DualRailTubular;
             if (object.contains("visible"))
             {
                 requireBoolean(object, "visible", path);
@@ -2224,6 +2228,14 @@ TrackStylePreset deserializeTrackStyle(
                 style.repeatingHardware.push_back(std::move(hardware));
             }
 
+            if (style.geometryFamily == TrackGeometryFamily::Components)
+            {
+                requireObject(object, "construction", path);
+                deserializeTrackComponents(style, object["construction"].dump());
+            }
+            if (style.geometryFamily == TrackGeometryFamily::DualRailTubular
+                && object.contains("construction") && !object["construction"].is_null())
+                throw std::runtime_error(path + ": legacy style cannot contain component geometry");
             validateTrackStyle(style);
             return style;
         }

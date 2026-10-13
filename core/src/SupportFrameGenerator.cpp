@@ -25,9 +25,11 @@ namespace quantum::coaster
             structure.name = std::string(supportStyleName(style)) + " frame " + std::to_string(structure.id);
         }
         structure.style = style;
+        const auto interface = trackSupportAttachmentAt(track.trackStyle(),
+            recipe.station * track.physicalSettings().metersPerCoordinateUnit) / track.physicalSettings().metersPerCoordinateUnit;
         const std::array<TrackAttachment, 2> attachments{{
-            {recipe.station, -recipe.width*.5, recipe.verticalOffset},
-            {recipe.station, recipe.width*.5, recipe.verticalOffset}}};
+            {recipe.station+interface.x, interface.y-recipe.width*.5, interface.z+recipe.verticalOffset},
+            {recipe.station+interface.x, interface.y+recipe.width*.5, interface.z+recipe.verticalOffset}}};
         std::array<glm::dvec3, 4> positions;
         for (std::size_t lane = 0; lane < 2; ++lane)
         {

@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/CoasterSetup.hpp>
 #include <quantum/coaster/TrackPhysicalSettings.hpp>
+#include <quantum/coaster/TrackStyle.hpp>
 #include <quantum/editor/EditorStyle.hpp>
 
 #include <optional>
@@ -29,6 +30,8 @@ namespace quantum::editor
         std::optional<coaster::TrackPhysicalSettings> physicalSettings;
         std::optional<std::string> trackConfigurationId;
         bool resetTrackConfiguration = false;
+        bool reloadTrackComponents = false;
+        std::optional<coaster::TrackStylePreset> trackStyle;
     };
 
     // Draws the self-contained Coaster Setup panel and returns one complete

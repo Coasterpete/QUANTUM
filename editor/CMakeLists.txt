@@ -27,6 +27,10 @@ target_link_libraries(QuantumApplication PUBLIC Quantum::Engine)
 target_compile_features(QuantumApplication PUBLIC cxx_std_23)
 set_target_properties(QuantumApplication QuantumCore QuantumEngine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(BUILD_TESTING)
+    add_executable(QuantumTrackFamilyTests ${PROJECT_SOURCE_DIR}/tests/TrackFamilyTests.cpp)
+    target_link_libraries(QuantumTrackFamilyTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TrackFamilies COMMAND QuantumTrackFamilyTests "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumApplication.TrackFamilies PROPERTIES LABELS "track;catalog;components;assets;history;persistence" TIMEOUT 120)
     add_executable(QuantumTrackAuthoringInteractionTests ${PROJECT_SOURCE_DIR}/tests/TrackAuthoringInteractionTests.cpp)
     target_link_libraries(QuantumTrackAuthoringInteractionTests PRIVATE QuantumApplication)
     add_test(NAME QuantumApplication.TrackAuthoringInteraction COMMAND QuantumTrackAuthoringInteractionTests)
@@ -251,6 +255,15 @@ add_custom_command(
 add_custom_target(QUANTUMTrackAssets ALL
     DEPENDS "${quantum_track_asset_destination}")
 add_dependencies(QUANTUM QUANTUMTrackAssets)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/assets/track/components/" DESTINATION assets/track/components)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/assets/track/catalog/" DESTINATION assets/track/catalog)
+
+add_custom_target(QUANTUMNumberedTrackAssets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/assets/track"
+        "$<TARGET_FILE_DIR:QUANTUM>/assets/track"
+    VERBATIM)
+add_dependencies(QUANTUMNumberedTrackAssets QUANTUMTrackAssets)
+add_dependencies(QUANTUM QUANTUMNumberedTrackAssets)
 
 set(quantum_mechanical_asset_files
     rotating-arm-placeholder.glb

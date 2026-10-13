@@ -1,5 +1,11 @@
 add_library(QuantumCore STATIC)
 
+file(READ "${PROJECT_SOURCE_DIR}/assets/track/catalog/numbered-families.json" QUANTUM_TRACK_CATALOG_JSON)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/assets/track/catalog/numbered-families.json")
+configure_file(src/TrackCatalogData.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/TrackCatalogData.hpp" @ONLY)
+target_include_directories(QuantumCore PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
 add_library(Quantum::Core ALIAS QuantumCore)
 
 target_sources(
@@ -16,6 +22,7 @@ target_sources(
         src/GroundAppearance.cpp
         src/TrackPhysicalSettings.cpp
         src/TrackConfiguration.cpp
+        src/TrackComponentsJson.cpp
         src/TrackStyle.cpp
         src/RideHardware.cpp
         src/RideHardwareJson.cpp
@@ -53,6 +60,7 @@ target_sources(
         include/quantum/coaster/GroundAppearance.hpp
         include/quantum/coaster/TrackGeneration.hpp
         include/quantum/coaster/TrackPhysicalSettings.hpp
+        include/quantum/coaster/TrackComponentDiagnostics.hpp
         include/quantum/coaster/TrackConfiguration.hpp
         include/quantum/coaster/TrackStyle.hpp
         include/quantum/coaster/RideHardware.hpp

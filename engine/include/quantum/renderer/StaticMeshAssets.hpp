@@ -2,6 +2,7 @@
 
 #include <quantum/coaster/TrackStyle.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec2.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,7 @@ namespace quantum::renderer
     {
         glm::vec3 position{0.0F};
         glm::vec3 normal{0.0F, 0.0F, 1.0F};
+        glm::vec2 uv{0.0F};
     };
 
     struct StaticMeshSubmesh
@@ -43,6 +45,8 @@ namespace quantum::renderer
         std::vector<std::uint32_t> triangleIndices;
         std::vector<std::uint32_t> edgeIndices;
         std::vector<StaticMeshSubmesh> submeshes;
+        glm::vec3 minimumPosition{0.0F};
+        glm::vec3 maximumPosition{0.0F};
     };
 
     enum class HardwareAssetLoadState
@@ -79,6 +83,12 @@ namespace quantum::renderer
     [[nodiscard]] StaticMeshAsset loadStaticMeshGlb(
         std::string identifier,
         const std::filesystem::path& path);
+
+    // Configures the calling thread's CPU component cache and Core resolver.
+    // Missing/unsupported assets retain their IDs and resolve to procedural geometry.
+    void configureTrackComponentAssets(const std::filesystem::path& runtimeRoot);
+    [[nodiscard]] std::optional<HardwareAssetLoadStatus> trackComponentAssetStatus(std::string_view identifier);
+    void reloadTrackComponentAsset(std::string_view identifier);
 
     class StaticMeshAssetCache
     {

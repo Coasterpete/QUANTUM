@@ -9077,6 +9077,8 @@ namespace quantum::editor
             pendingTrackConfigurationSelection_ =
                 std::move(*setupEdits.trackConfigurationId);
         }
+        pendingTrackComponentReload_ |= setupEdits.reloadTrackComponents;
+        if (setupEdits.trackStyle) pendingTrackComponentEdit_ = std::move(setupEdits.trackStyle);
         pendingTrackConfigurationReset_ |=
             setupEdits.resetTrackConfiguration;
 
@@ -11691,6 +11693,18 @@ std::optional<coaster::LayoutMode>
         auto selection = std::move(pendingTrackConfigurationSelection_);
         pendingTrackConfigurationSelection_.reset();
         return selection;
+    }
+
+    std::optional<coaster::TrackStylePreset> EditorUi::takePendingTrackComponentEdit() noexcept
+    {
+        auto result=std::move(pendingTrackComponentEdit_);
+        pendingTrackComponentEdit_.reset();
+        return result;
+    }
+
+    bool EditorUi::takePendingTrackComponentReload() noexcept
+    {
+        return std::exchange(pendingTrackComponentReload_, false);
     }
 
     bool EditorUi::takePendingTrackConfigurationReset() noexcept

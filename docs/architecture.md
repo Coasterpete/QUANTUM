@@ -227,6 +227,28 @@ AuthoredTrack
 The diagram is a description of current dependency flow, not a commitment to
 additional architectural layers.
 
+## Numbered track construction catalog
+
+Pass 4 extends `TrackStylePreset` with family-defined component slots, variants,
+independent construction intervals and support attachment coordinates.
+`TrackFamilyRegistry` loads versioned content with explicit IDs and base relationships;
+resolved component snapshots are authored document data, while `RenderableTrack`
+and CPU/GPU asset caches remain generated presentation data. Tube/box sweeps and
+round/rectangular member providers support variable topology, including monorails.
+The existing legacy dual-rail path remains compatible.
+
+Component dimensions and interval stations are metres, converted through document
+physical scale before presentation. The Engine supplies static GLB meshes to Core's
+thread-local resolver; repeated custom parts use existing Vulkan instances, and
+continuous tiles deform/clip along cached track frames. Style/material/asset edits
+use presentation invalidation rather than canonical geometry/physics solves.
+New support generation consumes family/variant attachment metadata. Manual support
+graph data is preserved by appearance edits.
+
+See [pass-4 evidence and limitations](track-families-pass4.md) and the
+[Blender component contract](track-component-blender-workflow.md). Track texture
+sampling and complete generated-support edit provenance remain unfinished.
+
 ## Core curve foundation
 
 ### Curves and derivatives

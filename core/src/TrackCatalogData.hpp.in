@@ -1,0 +1,4 @@
+#pragma once
+namespace quantum::coaster::detail {
+inline constexpr const char* trackCatalogJson = R"QUANTUMCAT(@QUANTUM_TRACK_CATALOG_JSON@)QUANTUMCAT";
+}

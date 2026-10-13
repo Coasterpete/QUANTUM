@@ -169,7 +169,8 @@ namespace quantum::editor
                     const std::size_t lastState = firstState
                         + slice.vertexCount / 2;
                     const coaster::RailOffset offset =
-                        resolvedStyles.at(region).railOffsets.at(rail);
+                        resolvedStyles.at(region).railOffsets.empty() ? coaster::RailOffset{}
+                        : resolvedStyles.at(region).railOffsets.at(std::min(rail, resolvedStyles.at(region).railOffsets.size()-1));
                     appendReferenceCurveSegmentRange(
                         vertices, visualization.samples, firstState, lastState,
                         color,
@@ -181,6 +182,14 @@ namespace quantum::editor
                         });
                 }
             }
+        }
+
+        bool uniformComponentVisibility(const std::vector<coaster::TrackStylePreset>& styles)
+        {
+            if (styles.empty() || styles.front().geometryFamily != coaster::TrackGeometryFamily::Components) return false;
+            return std::ranges::all_of(styles, [&](const auto& style) {
+                return style.visible == styles.front().visible && style.railsVisible == styles.front().railsVisible;
+            });
         }
 
         [[nodiscard]] std::vector<coaster::TrackStylePreset>
@@ -341,6 +350,10 @@ namespace quantum::editor
 
         visualization.sectionSlices.resize(authoredSectionCount);
         visualization.resolvedRegionStyles.reserve(authoredSectionCount);
+        std::vector<coaster::TrackStylePreset> componentRegionStyles;
+        for (std::size_t region=0; region<track.sectionCount(); ++region)
+            componentRegionStyles.push_back(coaster::resolveTrackStyle(style,track.section(region).trackStyleOverrides));
+        const bool uniformComponents=uniformComponentVisibility(componentRegionStyles);
         std::uint32_t nextHardwareObjectId = 1;
         for (std::size_t index = 0; index < authoredSectionCount; ++index)
         {
@@ -403,18 +416,27 @@ namespace quantum::editor
                 coaster::resolveTrackStyle(
                     style,
                     track.section(index).trackStyleOverrides);
-            appendRenderableTrack(
-                visualization.renderableTrack,
-                coaster::generateRenderableTrack(
-                    std::span<const coaster::RiderLocalGeometryState>{
-                        states.data() + firstState,
-                        lastState - firstState + 1},
-                    resolvedStyle,
-                    index + 1 == authoredSectionCount),
-                nextHardwareObjectId);
+            if (!uniformComponents)
+            {
+                appendRenderableTrack(
+                    visualization.renderableTrack,
+                    coaster::generateRenderableTrack(
+                        std::span<const coaster::RiderLocalGeometryState>{
+                            states.data() + firstState,
+                            lastState - firstState + 1},
+                        coaster::componentStyleInCoordinateUnits(resolvedStyle, track.physicalSettings().metersPerCoordinateUnit),
+                        index + 1 == authoredSectionCount),
+                    nextHardwareObjectId);
+            }
             visualization.resolvedRegionStyles.push_back(
                 std::move(resolvedStyle));
         }
+
+        if (uniformComponents)
+            appendRenderableTrack(visualization.renderableTrack,
+                coaster::generateRenderableTrack(states,
+                    coaster::componentStyleInCoordinateUnits(componentRegionStyles.front(),track.physicalSettings().metersPerCoordinateUnit)),
+                nextHardwareObjectId);
 
         visualization.vertices.reserve(
             renderer::viewportCurveCount * 2 * segmentCount
@@ -422,8 +444,10 @@ namespace quantum::editor
 
         // Each region contributes only its own rail segments, so an offset
         // override cannot leak across a boundary.
-        appendEngineeringRailCurves(visualization.vertices, visualization,
-            visualization.resolvedRegionStyles);
+        auto referenceStyles = visualization.resolvedRegionStyles;
+        for (auto& referenceStyle : referenceStyles)
+            referenceStyle = coaster::componentStyleInCoordinateUnits(referenceStyle, track.physicalSettings().metersPerCoordinateUnit);
+        appendEngineeringRailCurves(visualization.vertices, visualization, referenceStyles);
 
         appendReferenceCurveSegments(
             visualization.vertices,
@@ -511,6 +535,13 @@ namespace quantum::editor
 
         coaster::RenderableTrack combinedMesh;
         std::uint32_t nextHardwareObjectId = 1;
+        const bool uniformComponents=uniformComponentVisibility(candidate.resolvedRegionStyles);
+        if (uniformComponents && (rebuildMesh || rebuildHardware))
+            appendRenderableTrack(combinedMesh,
+                coaster::generateRenderableTrack(cachedVisualization.samples,
+                    coaster::componentStyleInCoordinateUnits(candidate.resolvedRegionStyles.front(),track.physicalSettings().metersPerCoordinateUnit)),
+                nextHardwareObjectId);
+        if (!uniformComponents)
         for (std::size_t region = 0;
             region < cachedVisualization.sectionSlices.size(); ++region)
         {
@@ -520,6 +551,15 @@ namespace quantum::editor
             const auto& style = candidate.resolvedRegionStyles[region];
             const bool includeHardwareAtEnd = region + 1
                 == cachedVisualization.sectionSlices.size();
+
+            if (style.geometryFamily == coaster::TrackGeometryFamily::Components)
+            {
+                if (rebuildMesh || rebuildHardware)
+                    appendRenderableTrack(combinedMesh,
+                        coaster::generateRenderableTrack(samples,
+                            coaster::componentStyleInCoordinateUnits(style, track.physicalSettings().metersPerCoordinateUnit), includeHardwareAtEnd), nextHardwareObjectId);
+                continue;
+            }
 
             if (rebuildMesh)
             {
@@ -579,8 +619,10 @@ namespace quantum::editor
             std::vector<renderer::LineVertex> engineeringRails;
             engineeringRails.reserve(
                 2 * cachedVisualization.verticesPerCurve);
-            appendEngineeringRailCurves(engineeringRails, cachedVisualization,
-                candidate.resolvedRegionStyles);
+            auto referenceStyles = candidate.resolvedRegionStyles;
+            for (auto& referenceStyle : referenceStyles)
+                referenceStyle = coaster::componentStyleInCoordinateUnits(referenceStyle, track.physicalSettings().metersPerCoordinateUnit);
+            appendEngineeringRailCurves(engineeringRails, cachedVisualization, referenceStyles);
             if (engineeringRails.size()
                 != 2 * static_cast<std::size_t>(
                     cachedVisualization.verticesPerCurve))

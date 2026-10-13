@@ -1,0 +1,3848 @@
+{
+  "schemaVersion": 1,
+  "dimensionPolicy": "Temporary editable blockout approximations in metres; not manufacturer dimensions.",
+  "types": [
+    {
+      "id": "truss-100",
+      "displayName": "Truss-100",
+      "familyId": "truss",
+      "category": "Steel Truss",
+      "reference": "Intamin Intimidator 305 / Project 305",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "chord-0",
+            "displayName": "Upper left chord",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.35,
+              -0.22
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "chord-1",
+            "displayName": "Upper right chord",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.35,
+              -0.22
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "chord-2",
+            "displayName": "Lower left chord",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.35,
+              -0.95
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "chord-3",
+            "displayName": "Lower right chord",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.35,
+              -0.95
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-connection--1",
+            "displayName": "Left rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              -0.35,
+              -0.22
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace--1",
+            "displayName": "Left bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              1.25,
+              -0.35,
+              -0.95
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-connection-1",
+            "displayName": "Right rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              0.35,
+              -0.22
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace-1",
+            "displayName": "Right bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              1.25,
+              0.35,
+              -0.95
+            ],
+            "required": false
+          },
+          {
+            "id": "lower-cross-member",
+            "displayName": "Lower Cross Member",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.35,
+              -0.95
+            ],
+            "dimensions": [
+              0.1,
+              0.07,
+              0.07
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              0.35,
+              -0.95
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.07
+            ],
+            "dimensions": [
+              0.13,
+              1.25,
+              0.1
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "required": false
+          },
+          {
+            "id": "web-post--1",
+            "displayName": "Left chord connector",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.35,
+              -0.22
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              -0.35,
+              -0.95
+            ],
+            "required": false
+          },
+          {
+            "id": "web-post-1",
+            "displayName": "Right chord connector",
+            "provider": "member",
+            "offset": [
+              0,
+              0.35,
+              -0.22
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              0.35,
+              -0.95
+            ],
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -1.04
+        ]
+      }
+    },
+    {
+      "id": "truss-120",
+      "displayName": "Truss-120",
+      "familyId": "truss",
+      "category": "Steel Truss",
+      "reference": "Intamin Expedition GeForce",
+      "baseId": "truss-100",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "chord-0",
+            "displayName": "Lower central spine",
+            "provider": "tube",
+            "offset": [
+              0,
+              0,
+              -0.72
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-connection--1",
+            "displayName": "Left rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.15,
+            "endOffset": [
+              0,
+              0,
+              -0.72
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace--1",
+            "displayName": "Left bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.15,
+            "endOffset": [
+              1.15,
+              0,
+              -0.72
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-connection-1",
+            "displayName": "Right rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.15,
+            "endOffset": [
+              0,
+              0,
+              -0.72
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace-1",
+            "displayName": "Right bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.15,
+            "endOffset": [
+              1.15,
+              0,
+              -0.72
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.07
+            ],
+            "dimensions": [
+              0.13,
+              1.25,
+              0.1
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.15,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.81
+        ]
+      }
+    },
+    {
+      "id": "truss-200",
+      "displayName": "Truss-200",
+      "familyId": "truss",
+      "category": "Steel Truss",
+      "reference": "Mack Rides Hyper Coaster / DC Rivals",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.625,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.625,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "chord-0",
+            "displayName": "Upper left chord",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.42,
+              -0.24
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "chord-1",
+            "displayName": "Upper right chord",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.42,
+              -0.24
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "chord-2",
+            "displayName": "Lower central spine",
+            "provider": "tube",
+            "offset": [
+              0,
+              0,
+              -0.82
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-connection--1",
+            "displayName": "Left rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.625,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              -0.42,
+              -0.24
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace--1",
+            "displayName": "Left bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.625,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              1.25,
+              0,
+              -0.82
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-connection-1",
+            "displayName": "Right rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              0.625,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              0.42,
+              -0.24
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace-1",
+            "displayName": "Right bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              0.625,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              1.25,
+              0,
+              -0.82
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.07
+            ],
+            "dimensions": [
+              0.13,
+              1.4,
+              0.1
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "required": false
+          },
+          {
+            "id": "web-post--1",
+            "displayName": "Left chord connector",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.42,
+              -0.24
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              0,
+              -0.82
+            ],
+            "required": false
+          },
+          {
+            "id": "web-post-1",
+            "displayName": "Right chord connector",
+            "provider": "member",
+            "offset": [
+              0,
+              0.42,
+              -0.24
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.25,
+            "endOffset": [
+              0,
+              0,
+              -0.82
+            ],
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.91
+        ]
+      }
+    },
+    {
+      "id": "truss-210",
+      "displayName": "Truss-210",
+      "familyId": "truss",
+      "category": "Steel Truss",
+      "reference": "Mack Rides Voltron Nevera",
+      "baseId": "truss-200"
+    },
+    {
+      "id": "truss-300",
+      "displayName": "Truss-300",
+      "familyId": "truss",
+      "category": "Steel Truss",
+      "reference": "Intamin Maverick",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "chord-0",
+            "displayName": "Lower central spine",
+            "provider": "tube",
+            "offset": [
+              0,
+              0,
+              -0.4
+            ],
+            "dimensions": [
+              1,
+              0.18,
+              0.18
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-connection--1",
+            "displayName": "Left rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              0,
+              -0.4
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace--1",
+            "displayName": "Left bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0.9,
+              0,
+              -0.4
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-connection-1",
+            "displayName": "Right rail connection",
+            "provider": "member",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.075,
+              0.075
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              0,
+              -0.4
+            ],
+            "required": false
+          },
+          {
+            "id": "bay-brace-1",
+            "displayName": "Right bay brace",
+            "provider": "member",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.12,
+              0.06,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0.9,
+              0,
+              -0.4
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.07
+            ],
+            "dimensions": [
+              0.13,
+              1.25,
+              0.1
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.49
+        ]
+      }
+    },
+    {
+      "id": "truss-320",
+      "displayName": "Truss-320",
+      "familyId": "truss",
+      "category": "Steel Truss",
+      "reference": "Intamin Batman Gotham City Escape",
+      "baseId": "truss-300",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "chord-0",
+            "displayName": "Lower central spine",
+            "provider": "tube",
+            "offset": [
+              0,
+              0,
+              -0.45
+            ],
+            "dimensions": [
+              1,
+              0.4,
+              0.3
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-connection--1",
+            "displayName": "Left rail connection",
+            "provider": "beam",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              0.2,
+              0.18,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              0,
+              -0.45
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-connection-1",
+            "displayName": "Right rail connection",
+            "provider": "beam",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              0.2,
+              0.18,
+              0.06
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              0,
+              -0.45
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.07
+            ],
+            "dimensions": [
+              0.13,
+              1.25,
+              0.1
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.6
+        ]
+      }
+    },
+    {
+      "id": "box-100",
+      "displayName": "Box-100",
+      "familyId": "box",
+      "category": "Box Spine",
+      "reference": "Classic B&M inverted: Raptor / Montu",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.6,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.6,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "box-spine",
+            "displayName": "Box Spine",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              0.5
+            ],
+            "dimensions": [
+              1,
+              0.55,
+              0.6
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-bracket--1",
+            "displayName": "Left rail bracket",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.6,
+              0
+            ],
+            "dimensions": [
+              0.15,
+              0.13,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              -0.275,
+              0.5
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-bracket-1",
+            "displayName": "Right rail bracket",
+            "provider": "member",
+            "offset": [
+              0,
+              0.6,
+              0
+            ],
+            "dimensions": [
+              0.15,
+              0.13,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              0.275,
+              0.5
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              0.14
+            ],
+            "dimensions": [
+              0.18,
+              1.2,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          0.8
+        ]
+      }
+    },
+    {
+      "id": "box-110",
+      "displayName": "Box-110",
+      "familyId": "box",
+      "category": "Box Spine",
+      "reference": "Newer B&M inverted: Banshee",
+      "baseId": "box-100"
+    },
+    {
+      "id": "box-200",
+      "displayName": "Box-200",
+      "familyId": "box",
+      "category": "Box Spine",
+      "reference": "B&M floorless: Kraken / Medusa",
+      "construction": {
+        "components": [
+          {
+            "id": "running-left",
+            "displayName": "Running Left",
+            "provider": "tube",
+            "offset": [
+              0,
+              -0.6,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "running-right",
+            "displayName": "Running Right",
+            "provider": "tube",
+            "offset": [
+              0,
+              0.6,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.15,
+              0.15
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "box-spine",
+            "displayName": "Box Spine",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.5
+            ],
+            "dimensions": [
+              1,
+              0.55,
+              0.6
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "rail-bracket--1",
+            "displayName": "Left rail bracket",
+            "provider": "member",
+            "offset": [
+              0,
+              -0.6,
+              0
+            ],
+            "dimensions": [
+              0.15,
+              0.13,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              -0.275,
+              -0.5
+            ],
+            "required": false
+          },
+          {
+            "id": "rail-bracket-1",
+            "displayName": "Right rail bracket",
+            "provider": "member",
+            "offset": [
+              0,
+              0.6,
+              0
+            ],
+            "dimensions": [
+              0.15,
+              0.13,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "endOffset": [
+              0,
+              0.275,
+              -0.5
+            ],
+            "required": false
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.14
+            ],
+            "dimensions": [
+              0.18,
+              1.2,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.9,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.8
+        ]
+      }
+    },
+    {
+      "id": "box-210",
+      "displayName": "Box-210",
+      "familyId": "box",
+      "category": "Box Spine",
+      "reference": "Classic B&M sit-down: Kumba",
+      "baseId": "box-200"
+    },
+    {
+      "id": "box-220",
+      "displayName": "Box-220",
+      "familyId": "box",
+      "category": "Box Spine",
+      "reference": "First-generation B&M stand-up: Mantis",
+      "baseId": "box-200"
+    },
+    {
+      "id": "box-230",
+      "displayName": "Box-230",
+      "familyId": "box",
+      "category": "Box Spine",
+      "reference": "B&M Surf Coaster: Pipeline: The Surf Coaster",
+      "baseId": "box-200"
+    },
+    {
+      "id": "hybrid-100",
+      "displayName": "Hybrid-100",
+      "familyId": "hybrid",
+      "category": "Hybrid",
+      "reference": "I-Box and Topper construction",
+      "construction": {
+        "components": [
+          {
+            "id": "running--1",
+            "displayName": "Left running surface",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.22,
+              0.055
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "web--1",
+            "displayName": "Left steel web",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.2025
+            ],
+            "dimensions": [
+              1,
+              0.08,
+              0.35
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "lower-flange--1",
+            "displayName": "Left lower flange",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.405
+            ],
+            "dimensions": [
+              1,
+              0.3,
+              0.055
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "running-1",
+            "displayName": "Right running surface",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.22,
+              0.055
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "web-1",
+            "displayName": "Right steel web",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.2025
+            ],
+            "dimensions": [
+              1,
+              0.08,
+              0.35
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "lower-flange-1",
+            "displayName": "Right lower flange",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.405
+            ],
+            "dimensions": [
+              1,
+              0.3,
+              0.055
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "cross-tie",
+            "displayName": "Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.4975
+            ],
+            "dimensions": [
+              0.18,
+              1.5,
+              0.13
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 0.85,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.5625
+        ],
+        "variantId": "i-box",
+        "variants": [
+          {
+            "id": "i-box",
+            "displayName": "I-Box",
+            "components": [
+              {
+                "id": "running--1",
+                "displayName": "Left running surface",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  0
+                ],
+                "dimensions": [
+                  1,
+                  0.22,
+                  0.055
+                ],
+                "materialSlot": "running",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.62,
+                    0.68,
+                    0.7,
+                    1
+                  ],
+                  "metallic": 0.8,
+                  "roughness": 0.24
+                },
+                "runningSurface": true,
+                "required": true
+              },
+              {
+                "id": "web--1",
+                "displayName": "Left steel web",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.2025
+                ],
+                "dimensions": [
+                  1,
+                  0.08,
+                  0.35
+                ],
+                "materialSlot": "structure",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "required": true
+              },
+              {
+                "id": "lower-flange--1",
+                "displayName": "Left lower flange",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.405
+                ],
+                "dimensions": [
+                  1,
+                  0.3,
+                  0.055
+                ],
+                "materialSlot": "structure",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "required": true
+              },
+              {
+                "id": "running-1",
+                "displayName": "Right running surface",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  0
+                ],
+                "dimensions": [
+                  1,
+                  0.22,
+                  0.055
+                ],
+                "materialSlot": "running",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.62,
+                    0.68,
+                    0.7,
+                    1
+                  ],
+                  "metallic": 0.8,
+                  "roughness": 0.24
+                },
+                "runningSurface": true,
+                "required": true
+              },
+              {
+                "id": "web-1",
+                "displayName": "Right steel web",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.2025
+                ],
+                "dimensions": [
+                  1,
+                  0.08,
+                  0.35
+                ],
+                "materialSlot": "structure",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "required": true
+              },
+              {
+                "id": "lower-flange-1",
+                "displayName": "Right lower flange",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.405
+                ],
+                "dimensions": [
+                  1,
+                  0.3,
+                  0.055
+                ],
+                "materialSlot": "structure",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "required": true
+              },
+              {
+                "id": "cross-tie",
+                "displayName": "Cross Tie",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0,
+                  -0.4975
+                ],
+                "dimensions": [
+                  0.18,
+                  1.5,
+                  0.13
+                ],
+                "materialSlot": "structure",
+                "placement": "repeated",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "spacing": 0.85,
+                "required": false
+              }
+            ],
+            "supportAttachment": [
+              0,
+              0,
+              -0.5625
+            ]
+          },
+          {
+            "id": "topper",
+            "displayName": "Topper",
+            "components": [
+              {
+                "id": "running--1",
+                "displayName": "Left running surface",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  0
+                ],
+                "dimensions": [
+                  1,
+                  0.22,
+                  0.055
+                ],
+                "materialSlot": "running",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.62,
+                    0.68,
+                    0.7,
+                    1
+                  ],
+                  "metallic": 0.8,
+                  "roughness": 0.24
+                },
+                "runningSurface": true,
+                "required": true
+              },
+              {
+                "id": "steel-cap--1",
+                "displayName": "Left steel cap",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.0925
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.13
+                ],
+                "materialSlot": "structure",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer--1-0",
+                "displayName": "Left timber layer 1",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.185
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer--1-1",
+                "displayName": "Left timber layer 2",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.24
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer--1-2",
+                "displayName": "Left timber layer 3",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.295
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer--1-3",
+                "displayName": "Left timber layer 4",
+                "provider": "box",
+                "offset": [
+                  0,
+                  -0.55,
+                  -0.35
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "running-1",
+                "displayName": "Right running surface",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  0
+                ],
+                "dimensions": [
+                  1,
+                  0.22,
+                  0.055
+                ],
+                "materialSlot": "running",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.62,
+                    0.68,
+                    0.7,
+                    1
+                  ],
+                  "metallic": 0.8,
+                  "roughness": 0.24
+                },
+                "runningSurface": true,
+                "required": true
+              },
+              {
+                "id": "steel-cap-1",
+                "displayName": "Right steel cap",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.0925
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.13
+                ],
+                "materialSlot": "structure",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.08,
+                    0.52,
+                    0.57,
+                    1
+                  ],
+                  "metallic": 0.25,
+                  "roughness": 0.4
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer-1-0",
+                "displayName": "Timber Layer 1 0",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.185
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer-1-1",
+                "displayName": "Right timber layer 2",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.24
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer-1-2",
+                "displayName": "Timber Layer 1 2",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.295
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "timber-layer-1-3",
+                "displayName": "Timber Layer 1 3",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0.55,
+                  -0.35
+                ],
+                "dimensions": [
+                  1,
+                  0.25,
+                  0.055
+                ],
+                "materialSlot": "timber",
+                "placement": "continuous",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "required": true
+              },
+              {
+                "id": "cross-tie",
+                "displayName": "Cross Tie",
+                "provider": "box",
+                "offset": [
+                  0,
+                  0,
+                  -0.4425
+                ],
+                "dimensions": [
+                  0.18,
+                  1.5,
+                  0.13
+                ],
+                "materialSlot": "timber",
+                "placement": "repeated",
+                "material": {
+                  "color": [
+                    0.43,
+                    0.28,
+                    0.14,
+                    1
+                  ],
+                  "metallic": 0,
+                  "roughness": 0.82
+                },
+                "spacing": 0.85,
+                "required": false
+              }
+            ],
+            "supportAttachment": [
+              0,
+              0,
+              -0.5075
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "wood-100",
+      "displayName": "Wood-100",
+      "familyId": "wood",
+      "category": "Wooden",
+      "reference": "Traditional American / PTC-era layered wooden construction",
+      "construction": {
+        "components": [
+          {
+            "id": "running--1",
+            "displayName": "Left running surface",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.12,
+              0.025
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "timber-layer--1-0",
+            "displayName": "Left timber layer 1",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.035
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer--1-1",
+            "displayName": "Left timber layer 2",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.08
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer--1-2",
+            "displayName": "Left timber layer 3",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.125
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer--1-3",
+            "displayName": "Left timber layer 4",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.17
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer--1-4",
+            "displayName": "Left timber layer 5",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.215
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer--1-5",
+            "displayName": "Left timber layer 6",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.26
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "side-ledger--1",
+            "displayName": "Left side ledger",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.81,
+              -0.26
+            ],
+            "dimensions": [
+              1,
+              0.17,
+              0.17
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "running-1",
+            "displayName": "Right running surface",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.12,
+              0.025
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "timber-layer-1-0",
+            "displayName": "Timber Layer 1 0",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.035
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer-1-1",
+            "displayName": "Right timber layer 2",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.08
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer-1-2",
+            "displayName": "Timber Layer 1 2",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.125
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer-1-3",
+            "displayName": "Timber Layer 1 3",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.17
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer-1-4",
+            "displayName": "Timber Layer 1 4",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.215
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-layer-1-5",
+            "displayName": "Timber Layer 1 5",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.26
+            ],
+            "dimensions": [
+              1,
+              0.25,
+              0.045
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "side-ledger-1",
+            "displayName": "Right side ledger",
+            "provider": "box",
+            "offset": [
+              0,
+              0.81,
+              -0.26
+            ],
+            "dimensions": [
+              1,
+              0.17,
+              0.17
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "timber-cross-tie",
+            "displayName": "Timber Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.35
+            ],
+            "dimensions": [
+              0.14,
+              1.75,
+              0.18
+            ],
+            "materialSlot": "timber",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "spacing": 0.55,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.44
+        ]
+      }
+    },
+    {
+      "id": "wood-200",
+      "displayName": "Wood-200",
+      "familyId": "wood",
+      "category": "Wooden",
+      "reference": "Intamin prefabricated wooden: El Toro / Balder",
+      "baseId": "wood-100",
+      "construction": {
+        "components": [
+          {
+            "id": "running--1",
+            "displayName": "Left running surface",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.12,
+              0.025
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "laminated-bearing--1",
+            "displayName": "Left laminated bearing",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.55,
+              -0.2
+            ],
+            "dimensions": [
+              1,
+              0.34,
+              0.375
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "side-guide--1",
+            "displayName": "Left side guide",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.7200000000000001,
+              -0.1
+            ],
+            "dimensions": [
+              1,
+              0.025,
+              0.16
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "required": true
+          },
+          {
+            "id": "running-1",
+            "displayName": "Right running surface",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.12,
+              0.025
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "laminated-bearing-1",
+            "displayName": "Right laminated bearing",
+            "provider": "box",
+            "offset": [
+              0,
+              0.55,
+              -0.2
+            ],
+            "dimensions": [
+              1,
+              0.34,
+              0.375
+            ],
+            "materialSlot": "timber",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "required": true
+          },
+          {
+            "id": "side-guide-1",
+            "displayName": "Right side guide",
+            "provider": "box",
+            "offset": [
+              0,
+              0.7200000000000001,
+              -0.1
+            ],
+            "dimensions": [
+              1,
+              0.025,
+              0.16
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "required": true
+          },
+          {
+            "id": "timber-cross-tie",
+            "displayName": "Timber Cross Tie",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.42
+            ],
+            "dimensions": [
+              0.22,
+              1.75,
+              0.18
+            ],
+            "materialSlot": "timber",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.43,
+                0.28,
+                0.14,
+                1
+              ],
+              "metallic": 0,
+              "roughness": 0.82
+            },
+            "spacing": 1.0,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.51
+        ]
+      }
+    },
+    {
+      "id": "wood-300",
+      "displayName": "Wood-300",
+      "familyId": "wood",
+      "category": "Wooden",
+      "reference": "Reserved: no construction reference assigned",
+      "reserved": true
+    },
+    {
+      "id": "monorail-100",
+      "displayName": "Monorail-100",
+      "familyId": "monorail",
+      "category": "Monorail",
+      "reference": "RMC Raptor",
+      "referenceOffsets": [
+        [
+          0,
+          0
+        ]
+      ],
+      "construction": {
+        "components": [
+          {
+            "id": "central-box-rail",
+            "displayName": "Central Box Rail",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.2225
+            ],
+            "dimensions": [
+              1,
+              0.3,
+              0.42
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "top-running-surface",
+            "displayName": "Top Running Surface",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.3,
+              0.025
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "bottom-guide-surface",
+            "displayName": "Bottom Guide Surface",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.445
+            ],
+            "dimensions": [
+              1,
+              0.32,
+              0.025
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "required": true
+          },
+          {
+            "id": "attachment-plate",
+            "displayName": "Attachment Plate",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.4775
+            ],
+            "dimensions": [
+              0.24,
+              0.44,
+              0.04
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.5,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.4975
+        ]
+      }
+    },
+    {
+      "id": "monorail-200",
+      "displayName": "Monorail-200",
+      "familyId": "monorail",
+      "category": "Monorail",
+      "reference": "Intamin Hot Racer",
+      "referenceOffsets": [
+        [
+          0,
+          0
+        ]
+      ],
+      "construction": {
+        "components": [
+          {
+            "id": "central-box-beam",
+            "displayName": "Central Box Beam",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.2975
+            ],
+            "dimensions": [
+              1,
+              0.24,
+              0.55
+            ],
+            "materialSlot": "structure",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "required": true
+          },
+          {
+            "id": "running-deck",
+            "displayName": "Running Deck",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "dimensions": [
+              1,
+              0.44,
+              0.045
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "runningSurface": true,
+            "required": true
+          },
+          {
+            "id": "guide-left",
+            "displayName": "Guide Left",
+            "provider": "box",
+            "offset": [
+              0,
+              -0.1375,
+              -0.17
+            ],
+            "dimensions": [
+              1,
+              0.035,
+              0.16
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "required": true
+          },
+          {
+            "id": "guide-right",
+            "displayName": "Guide Right",
+            "provider": "box",
+            "offset": [
+              0,
+              0.1375,
+              -0.17
+            ],
+            "dimensions": [
+              1,
+              0.035,
+              0.16
+            ],
+            "materialSlot": "running",
+            "placement": "continuous",
+            "material": {
+              "color": [
+                0.62,
+                0.68,
+                0.7,
+                1
+              ],
+              "metallic": 0.8,
+              "roughness": 0.24
+            },
+            "required": true
+          },
+          {
+            "id": "attachment-saddle",
+            "displayName": "Attachment Saddle",
+            "provider": "box",
+            "offset": [
+              0,
+              0,
+              -0.6
+            ],
+            "dimensions": [
+              0.3,
+              0.38,
+              0.055
+            ],
+            "materialSlot": "structure",
+            "placement": "repeated",
+            "material": {
+              "color": [
+                0.08,
+                0.52,
+                0.57,
+                1
+              ],
+              "metallic": 0.25,
+              "roughness": 0.4
+            },
+            "spacing": 1.4,
+            "required": false
+          }
+        ],
+        "supportAttachment": [
+          0,
+          0,
+          -0.6275
+        ]
+      }
+    }
+  ]
+}
