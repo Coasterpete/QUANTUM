@@ -13,6 +13,11 @@ namespace quantum::editor
     inline constexpr double defaultViewportFastMovementMultiplier = 4.0;
     inline constexpr double maximumViewportNavigationDeltaSeconds = 0.1;
 
+    // Mouse displacement is already accumulated for the frame: never multiply
+    // it by delta time. SDL/ImGui pixels are normalized by the UI display scale.
+    [[nodiscard]] double viewportMouseRotationRadians(double pixels,
+        double sensitivity, double displayScale = 1.0, bool precision = false);
+
     struct ViewportCameraClipPlanes
     {
         double nearPlane = 0.0;
@@ -130,6 +135,11 @@ namespace quantum::editor
             double exponentPerWheelUnit =
                 defaultViewportZoomExponentPerWheelUnit
         );
+
+        // Keeps the point on the focus plane under the cursor fixed on screen.
+        // Works in both projections without querying depth or changing geometry.
+        void zoomAt(double wheelDelta, double normalizedX, double normalizedY,
+            double aspectRatio, double exponentPerWheelUnit = defaultViewportZoomExponentPerWheelUnit);
 
         // Rotates the viewing direction in place, preserving the eye
         // position and focus distance. This is distinct from orbit(), which

@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" xmlns:managed="using:Quantum.Managed" x:Class="Quantum.Editor.TrainDiagnosticsPane" x:DataType="local:EditorViewModel">
+  <Grid>
+    <ScrollViewer IsVisible="{Binding Layout.ShowSummary}" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="16" Spacing="10">
+        <TextBlock Classes="heading" Text="TRAIN SUMMARY"/>
+        <TextBlock Classes="technical" Text="{Binding TrainSummary}" FontSize="{DynamicResource QuantumSectionSize}"/>
+        <TextBlock Text="{Binding TrainPreviewStatus}" Classes="runtime" TextWrapping="Wrap"/>
+        <local:InspectorSection Header="Engineering details" SectionKey="train.summary-details">
+          <StackPanel Spacing="6">
+            <TextBlock Text="{Binding TrainSummaryDetails}" Classes="technical" TextWrapping="Wrap" Margin="0,10"/>
+            <TextBlock Classes="muted" Text="Straight assembly, body-envelope to body-envelope, relative to car 0 body origin. Curved-track poses and world COG come from the solver." TextWrapping="Wrap"/>
+            <ItemsControl ItemsSource="{Binding TrainCarSummaries}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="managed:TrainCarSummary">
+                  <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,4"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </local:InspectorSection>
+      </StackPanel>
+    </ScrollViewer>
+    <ScrollViewer IsVisible="{Binding Layout.ShowTrainDiagnostics}" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="16" Spacing="10">
+        <TextBlock Classes="heading" Text="WARNINGS / ERRORS"/>
+        <ItemsControl ItemsSource="{Binding TrainDiagnostics}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="managed:TrainDiagnostic">
+              <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,5"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

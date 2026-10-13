@@ -2,6 +2,7 @@
 #include <quantum/coaster/TrackConfiguration.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -495,6 +496,7 @@ namespace quantum::coaster
             compiled.yawRate.transitionType
         );
 
+        converted.trackStyleOverrides = section.trackStyleOverrides;
         section = std::move(converted);
     }
 
@@ -517,6 +519,7 @@ namespace quantum::coaster
         arc.sweptAngle = length / arc.radius;
         converted.region = GeometryRegion{std::move(arc)};
 
+        converted.trackStyleOverrides = section.trackStyleOverrides;
         section = std::move(converted);
     }
 
@@ -682,7 +685,7 @@ namespace quantum::coaster
         AuthoredTrack candidate = *this;
         candidate.layoutMode_ = mode;
         validateSupportAnchors(candidate);
-        if (!candidate.trackDevices_.devices.empty())
+        if (!candidate.trackDevices_.devices.empty() || !candidate.trackDevices_.infrastructure.empty())
             validateTrackDevices(candidate.trackDevices_,
                 candidate.trackLengthMeters(),
                 mode == LayoutMode::Circuit);
@@ -882,7 +885,7 @@ namespace quantum::coaster
     void AuthoredTrack::setPhysicalSettings(const TrackPhysicalSettings& settings)
     {
         validateTrackPhysicalSettings(settings);
-        if (!trackDevices_.devices.empty())
+        if (!trackDevices_.devices.empty() || !trackDevices_.infrastructure.empty())
             validateTrackDevices(trackDevices_,
                 authoredTrackLength(*this)
                     * settings.metersPerCoordinateUnit,
@@ -960,7 +963,25 @@ namespace quantum::coaster
     {
         CoasterSetup replacement = setup;
         validateCoasterSetup(replacement);
+        auto train = trainConfiguration_;
+        if (train.cars.size() != replacement.carsPerTrain)
+            resizeTrainConsist(train, replacement.carsPerTrain);
         coasterSetup_ = std::move(replacement);
+        trainConfiguration_ = std::move(train);
+    }
+
+    const TrainConfiguration& AuthoredTrack::trainConfiguration() const noexcept
+    {
+        return trainConfiguration_;
+    }
+
+    void AuthoredTrack::setTrainConfiguration(const TrainConfiguration& configuration)
+    {
+        validateTrainConfiguration(configuration);
+        auto replacement = configuration;
+        replacement.carCount = replacement.cars.size();
+        trainConfiguration_ = std::move(replacement);
+        coasterSetup_.carsPerTrain = static_cast<std::uint32_t>(trainConfiguration_.cars.size());
     }
 
     const SupportCollection& AuthoredTrack::supports() const noexcept
@@ -995,6 +1016,8 @@ namespace quantum::coaster
     TrackDeviceId AuthoredTrack::addTrackDevice(TrackDevice device)
     {
         TrackDeviceCollection candidate = trackDevices_;
+        if (candidate.nextId == std::numeric_limits<TrackDeviceId>::max())
+            throw std::invalid_argument("Track device ID space is exhausted.");
         device.id = candidate.nextId++;
         candidate.devices.push_back(std::move(device));
         setTrackDevices(candidate);

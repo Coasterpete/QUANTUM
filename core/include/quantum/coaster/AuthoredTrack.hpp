@@ -9,6 +9,7 @@
 #include <quantum/coaster/RiderLocalGeometry.hpp>
 #include <quantum/coaster/Supports.hpp>
 #include <quantum/coaster/TrackStyle.hpp>
+#include <quantum/coaster/TrainConfiguration.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -252,6 +253,8 @@ namespace quantum::coaster
         // Validates the complete coaster configuration before replacing the
         // document's authored style/options/train/heartline state.
         void setCoasterSetup(const CoasterSetup& setup);
+        [[nodiscard]] const TrainConfiguration& trainConfiguration() const noexcept;
+        void setTrainConfiguration(const TrainConfiguration& configuration);
 
         [[nodiscard]] const SupportCollection& supports() const noexcept;
         // Validates the complete collection before replacing persistent
@@ -381,6 +384,7 @@ namespace quantum::coaster
         TrackStylePreset trackStyle_;
         CoasterSetup coasterSetup_ =
             createCoasterSetupForStyle(defaultCoasterStyleId);
+        TrainConfiguration trainConfiguration_ = createDefaultOrderedTrainConfiguration();
         SupportCollection supports_;
         TrackDeviceCollection trackDevices_;
         std::vector<AuthoredTrackSection> sections_;

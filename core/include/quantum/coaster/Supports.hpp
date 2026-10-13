@@ -1,6 +1,7 @@
 #pragma once
 
 #include <quantum/coaster/StaticMeshAsset.hpp>
+#include <quantum/coaster/SupportSurface.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
@@ -26,7 +27,9 @@ namespace quantum::coaster
     enum class SupportMemberProfileShape : std::uint8_t
     {
         Circular,
-        Rectangular
+        Rectangular,
+        Hss,
+        ISection
     };
 
     // The two directed ends of a member. Connections are authored per end and
@@ -168,8 +171,12 @@ namespace quantum::coaster
     // Marks a node as an explicitly authored foundation/ground anchor. Its
     // SupportNode::position remains authoritative; terrain projection and
     // terrain-follow metadata are future additive concerns.
+    enum class SupportFoundationKind : std::uint8_t { Footing, Pedestal, Pier, Block };
     struct Foundation
     {
+        SupportFoundationKind kind = SupportFoundationKind::Footing;
+        // Zero dimensions retain the historical structure-derived pad size.
+        glm::dvec3 dimensions{0.0};
         [[nodiscard]] friend bool operator==(
             const Foundation&,
             const Foundation&) = default;
@@ -271,6 +278,13 @@ namespace quantum::coaster
         SupportMemberOrientationReference orientationReference;
         std::optional<SupportMemberEndConnection> startConnection;
         std::optional<SupportMemberEndConnection> endConnection;
+        std::optional<SupportSurface> surface;
+        // Existing explicit sections remain explicit. Only an authored opt-in
+        // resolves a family profile, so changing a family preserves overrides.
+        bool useStyleProfile = false;
+        // Generated frame dimensions follow recipe edits until the member's
+        // profile is explicitly authored, even when its values are identical.
+        bool useFrameProfile = false;
 
         [[nodiscard]] friend bool operator==(
             const SupportMember&, const SupportMember&) = default;
@@ -443,6 +457,26 @@ namespace quantum::coaster
             const WoodenSupportRunRecipe&) = default;
     };
 
+    enum class SupportStyleFamily : std::uint8_t
+    {
+        TraditionalTimber, TubularSteel, BoxSteel, ISectionSteel, ConcretePier, Custom
+    };
+
+    // A bounded two-post frame recipe; output is ordinary editable graph data.
+    // All dimensions here use the existing support Core-unit convention.
+    struct SupportFrameRecipe
+    {
+        double station = 10.0;
+        double width = 4.0;
+        double foundationElevation = -5.0;
+        double verticalOffset = -0.5;
+        SupportMemberProfile post{SupportMemberProfileShape::Rectangular, {0.3, 0.3}, 0.0};
+        SupportMemberProfile beam{SupportMemberProfileShape::Rectangular, {0.3, 0.45}, 0.0};
+        SupportMemberProfile brace{SupportMemberProfileShape::Rectangular, {0.15, 0.2}, 0.0};
+        glm::dvec3 foundationSize{0.9, 0.9, 0.45};
+        bool operator==(const SupportFrameRecipe&) const = default;
+    };
+
     struct SupportStructure
     {
         SupportStructureId id = invalidSupportStructureId;
@@ -450,6 +484,9 @@ namespace quantum::coaster
         std::vector<SupportNode> nodes;
         std::vector<SupportMember> members;
         SupportElementId nextElementId = 1;
+        SupportStyleFamily style = SupportStyleFamily::TraditionalTimber;
+        std::optional<SupportSurface> surface;
+        std::optional<SupportFrameRecipe> generatedFrame;
         std::optional<WoodenSupportRunRecipe> generatedWoodenRun;
         // Absent in documents written before Supports M2A, which resolve to
         // the conservative default timber appearance.
@@ -459,6 +496,16 @@ namespace quantum::coaster
         [[nodiscard]] friend bool operator==(
             const SupportStructure&, const SupportStructure&) = default;
     };
+
+    [[nodiscard]] const char* supportStyleName(SupportStyleFamily style);
+    [[nodiscard]] SupportStyleFamily supportStyleFromName(std::string_view name);
+    [[nodiscard]] SupportMemberProfile supportStyleProfile(SupportStyleFamily style,
+        SupportMemberRole role = SupportMemberRole::Unspecified);
+    [[nodiscard]] SupportMemberProfile resolveSupportProfile(const SupportStructure& structure,
+        const SupportMember& member);
+    [[nodiscard]] SupportSurface resolveSupportSurface(const SupportStructure& structure,
+        const SupportMember& member, double metersPerCoordinateUnit = 1.0);
+    void validateSupportFrameRecipe(const SupportFrameRecipe& recipe);
 
     struct SupportCollection
     {

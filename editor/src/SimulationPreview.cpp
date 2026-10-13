@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <format>
 #include <stdexcept>
 #include <utility>
 
@@ -18,9 +19,9 @@ namespace quantum::editor
 {
     namespace
     {
-        // This fixed train first fits a straight open path at about 14.65 m.
-        // The small margin keeps its initial bogies away from the endpoint;
-        // Core still validates the complete consist at every candidate.
+        // Retain the four-car reference placement when it fits. Larger or
+        // shorter layouts use the resolved straight assembly as a search seed;
+        // the real curved-track solver still validates every candidate.
         inline constexpr double preferredInitialStationMeters = 14.75;
         inline constexpr double initialPlacementSearchStepMeters = 0.5;
 
@@ -63,7 +64,8 @@ namespace quantum::editor
 
         [[nodiscard]] InitialPlacement findInitialPlacement(
             const physics::CompiledPhysicsTrack& track,
-            const physics::TrainDefinition& train)
+            const physics::TrainDefinition& train,
+            const coaster::TrainSummary& summary)
         {
             if (track.topology() == coaster::TopologyKind::ClosedCircuit)
             {
@@ -75,7 +77,20 @@ namespace quantum::editor
             else
             {
                 const double length = track.lengthMeters();
-                for (double station = preferredInitialStationMeters;
+                if (summary.straightAssemblyAvailable)
+                {
+                    const double minimum = -summary.rearBogieExtentMeters;
+                    const double maximum = length - summary.frontBogieExtentMeters;
+                    if (minimum <= maximum)
+                    {
+                        const double margin = std::min(0.1, (maximum - minimum) * 0.25);
+                        const double seed = std::clamp(preferredInitialStationMeters,
+                            minimum + margin, maximum - margin);
+                        if (auto placement = tryPlacement(track, train, seed))
+                            return std::move(*placement);
+                    }
+                }
+                for (double station = 0.0;
                     station < length;
                     station += initialPlacementSearchStepMeters)
                 {
@@ -87,8 +102,11 @@ namespace quantum::editor
             }
 
             throw std::invalid_argument(
-                "The authored track has no legal increasing-station placement "
-                "for the configured preview train.");
+                std::format("No legal complete-train placement for {} cars on {:.3f} m of track. "
+                    "Straight reference assembly: {:.3f} m bogie span, {:.3f} m body envelope. "
+                    "Curved-track bogie/connector constraints must also close. Extend the track or edit the train; authored data is preserved.",
+                    train.cars.size(), track.lengthMeters(), summary.straightBogieSpanMeters,
+                    summary.bodyEnvelopeLengthMeters));
         }
 
         [[nodiscard]] renderer::LineVertex vertex(
@@ -298,16 +316,26 @@ namespace quantum::editor
     bool SimulationPreview::rebuild(
         const coaster::AuthoredTrack& authoredTrack) noexcept
     {
+        dynamicsDiagnostics_ = {};
         setUnavailable({});
         try
         {
-            coaster::TrainConfiguration trainConfiguration =
-                coaster::createDefaultTrainConfiguration();
-            trainConfiguration.carCount =
-                authoredTrack.coasterSetup().carsPerTrain;
+            const auto& trainConfiguration = authoredTrack.trainConfiguration();
             trainDefinition_ = coaster::resolveTrainConfiguration(
                 trainConfiguration);
-            visualConsist_ = makeDefaultTrainVisualConsist(trainDefinition_.cars.size());
+            const auto summary = coaster::summarizeTrainConfiguration(trainConfiguration);
+            dynamicsDiagnostics_.straightBogieSpanMeters = summary.straightBogieSpanMeters;
+            dynamicsDiagnostics_.bodyEnvelopeLengthMeters = summary.bodyEnvelopeLengthMeters;
+            visualConsist_.cars.clear();
+            for (const auto& car : trainConfiguration.cars)
+            {
+                auto transform = glm::translate(glm::dmat4{1}, car.visualAlignment.translationMeters);
+                const auto radians = glm::radians(car.visualAlignment.rotationDegrees);
+                transform = glm::rotate(transform, radians.z, glm::dvec3{0, 0, 1});
+                transform = glm::rotate(transform, radians.y, glm::dvec3{0, 1, 0});
+                transform = glm::rotate(transform, radians.x, glm::dvec3{1, 0, 0});
+                visualConsist_.cars.push_back({car.visualAsset, transform});
+            }
             const std::vector<coaster::TrackKinematicState> kinematics =
                 coaster::integrateAuthoredTrackKinematics(
                     authoredTrack,
@@ -319,6 +347,8 @@ namespace quantum::editor
                 authoredTrack.physicalSettings(),
                 authoredTrack.layoutMode(),
                 derivedTopology);
+            dynamicsDiagnostics_.trackLengthMeters = compiledTrack_->lengthMeters();
+            dynamicsDiagnostics_.circuit = compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit;
             coaster::validateTrackDevices(authoredTrack.trackDevices(),
                 compiledTrack_->lengthMeters(),
                 compiledTrack_->topology()
@@ -332,7 +362,7 @@ namespace quantum::editor
                 physics::initialTrackDeviceRuntimeStates(trackDevices_);
 
             InitialPlacement placement = findInitialPlacement(
-                *compiledTrack_, trainDefinition_);
+                *compiledTrack_, trainDefinition_, summary);
             initialPose_.emplace(std::move(placement.pose));
 
             physics::TrainDynamicsState initialState;
@@ -397,6 +427,25 @@ namespace quantum::editor
         deviceRuntimeStates_ =
             physics::initialTrackDeviceRuntimeStates(trackDevices_);
         lastDeviceForces_ = {};
+        dynamicsDiagnostics_.hasStep = false;
+        operations_.reset(trackDevices_);
+        refreshDynamicsDiagnostics();
+        if (compiledTrack_ && pose_ && dynamicsState_)
+        {
+            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
+            operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+                compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
+            deviceRuntimeStates_ = operations_.forceControls();
+        }
+    }
+
+    void SimulationPreview::hardwareCommand(coaster::TrackDeviceId id, physics::HardwareCommand command, double value, std::uint64_t target)
+    {
+        if (!isAvailable()) throw std::invalid_argument("Simulation preview is unavailable.");
+        operations_.command(id, command, value, target);
+        const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
+        operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+            compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
     }
 
     const physics::TrackDeviceForceResult&
@@ -435,6 +484,7 @@ namespace quantum::editor
         lastGpuBogieSamples_.clear();
         lastGpuBogieQueries_.clear();
         lastDeviceForces_ = {};
+        dynamicsDiagnostics_.hasStep = false;
         if (!initialState_ || !initialPose_)
         {
             return;
@@ -444,6 +494,16 @@ namespace quantum::editor
         pose_ = initialPose_;
         previousPose_ = initialPose_;
         renderPose_ = initialPose_;
+        refreshDynamicsDiagnostics();
+        try
+        {
+            operations_.reset(trackDevices_);
+            const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
+            operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+                compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit, 0);
+            deviceRuntimeStates_ = operations_.forceControls();
+        }
+        catch (const std::exception& error) { setUnavailable(error.what()); return; }
         rebuildVertices();
     }
 
@@ -539,10 +599,14 @@ namespace quantum::editor
                 const double previousVelocity =
                     dynamicsState_->signedVelocityMetersPerSecond;
                 const auto stepBegin = std::chrono::steady_clock::now();
+                const auto observation = physics::observeTrain(*pose_, dynamicsState_->signedVelocityMetersPerSecond, trainDefinition_.trainId, &trainDefinition_);
+                operations_.step(trackDevices_, std::span(&observation, 1), compiledTrack_->lengthMeters(),
+                    compiledTrack_->topology() == coaster::TopologyKind::ClosedCircuit);
+                deviceRuntimeStates_ = operations_.forceControls();
                 lastDeviceForces_ = physics::evaluateTrackDeviceForces(
                     trackDevices_, deviceRuntimeStates_, *compiledTrack_,
                     trainDefinition_, *pose_,
-                    dynamicsState_->signedVelocityMetersPerSecond);
+                    dynamicsState_->signedVelocityMetersPerSecond, environment_.gravityAccelerationMetersPerSecondSquared);
                 physics::TrainStepResult result = physics::stepTrain(
                     *compiledTrack_,
                     trainDefinition_,
@@ -551,6 +615,29 @@ namespace quantum::editor
                     {},
                     lastDeviceForces_.applications,
                     &frameTelemetry_.solveCounters);
+                // These are the projections actually used by stepTrain. Do
+                // not infer successful acceleration from the capped request.
+                for (auto& device : lastDeviceForces_.devices)
+                {
+                    double generalizedForce = 0;
+                    for (std::size_t i = device.applicationBegin;
+                        i < device.applicationBegin + device.applicationCount; ++i)
+                        generalizedForce += result.telemetry.externalForces.at(i).generalizedForceNewtons;
+                    device.generalizedForceNewtons = generalizedForce;
+                }
+                operations_.recordForces(lastDeviceForces_);
+                auto& diagnostics = dynamicsDiagnostics_;
+                const auto& telemetry = result.telemetry;
+                diagnostics.hasStep = true;
+                diagnostics.effectiveMassKilograms = telemetry.effectiveGeneralizedMassKilograms;
+                diagnostics.gravityForceNewtons = telemetry.generalizedGravityForceNewtons;
+                diagnostics.externalForceNewtons = telemetry.generalizedExternalForceNewtons;
+                diagnostics.resistanceForceNewtons = telemetry.resistanceForceNewtons;
+                diagnostics.resistance = telemetry.basicResistance;
+                diagnostics.massGradientForceNewtons = telemetry.kinematicMassGradientForceNewtons;
+                diagnostics.constraintForceNewtons = telemetry.constraintForceNewtons;
+                diagnostics.netForceNewtons = telemetry.totalGeneralizedForceNewtons;
+                diagnostics.boundary = telemetry.boundary;
                 const double stepMilliseconds =
                     std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - stepBegin).count();
@@ -567,6 +654,7 @@ namespace quantum::editor
                 previousPose_ = std::move(pose_);
                 dynamicsState_ = result.state;
                 pose_ = std::move(result.telemetry.pose);
+                refreshDynamicsDiagnostics();
                 const double nextVelocity =
                     dynamicsState_->signedVelocityMetersPerSecond;
                 frameTelemetry_.minimumAbsoluteVelocityMetersPerSecond =
@@ -841,6 +929,38 @@ namespace quantum::editor
         return trainDefinition_;
     }
 
+    void SimulationPreview::refreshDynamicsDiagnostics()
+    {
+        if (!pose_ || !dynamicsState_) return;
+        auto& d = dynamicsDiagnostics_;
+        d.placementValid = true;
+        d.tick = dynamicsState_->tick;
+        d.loadedMassKilograms = pose_->totalLoadedMassKilograms();
+        d.signedSpeedMetersPerSecond = dynamicsState_->signedVelocityMetersPerSecond;
+        d.accelerationMetersPerSecondSquared = dynamicsState_->generalizedAccelerationMetersPerSecondSquared;
+        d.maximumConnectorResidualMeters = pose_->maximumAbsoluteConnectorResidualMeters();
+        d.minimumBogieStationMeters = compiledTrack_->lengthMeters();
+        d.maximumBogieStationMeters = 0;
+        d.cars.clear();
+        for (const auto& car : pose_->cars())
+        {
+            const auto front = car.carPose().frontBogie().location().stationMeters;
+            const auto rear = car.carPose().rearBogie().location().stationMeters;
+            d.minimumBogieStationMeters = std::min({d.minimumBogieStationMeters, front, rear});
+            d.maximumBogieStationMeters = std::max({d.maximumBogieStationMeters, front, rear});
+            d.cars.push_back({trainDefinition_.cars[car.carIndex()].authoredCarId,
+                car.loadedMassKilograms(), car.referenceLocation().stationMeters, front, rear});
+        }
+        if (!d.hasStep)
+        {
+            d.effectiveMassKilograms = 0;
+            d.gravityForceNewtons = d.externalForceNewtons = d.resistanceForceNewtons = 0;
+            d.massGradientForceNewtons = d.constraintForceNewtons = d.netForceNewtons = 0;
+            d.resistance = {};
+            d.boundary = physics::TrackBoundary::None;
+        }
+    }
+
     std::optional<TrainPreviewInspection>
     SimulationPreview::trainInspection() const
     {
@@ -857,6 +977,7 @@ namespace quantum::editor
             inspection.connectorLengthMeters =
                 trainDefinition_.connections.front().rigidLengthMeters;
         inspection.resistance = trainDefinition_.resistance;
+        inspection.cars = trainDefinition_.cars;
         return inspection;
     }
 
@@ -883,6 +1004,9 @@ namespace quantum::editor
 
     void SimulationPreview::setUnavailable(std::string error) noexcept
     {
+        dynamicsDiagnostics_.placementValid = false;
+        dynamicsDiagnostics_.hasStep = false;
+        dynamicsDiagnostics_.cars.clear();
         compiledTrack_.reset();
         initialState_.reset();
         dynamicsState_.reset();
@@ -903,6 +1027,7 @@ namespace quantum::editor
         lastGpuBogieQueries_.clear();
         trackDevices_.clear();
         deviceRuntimeStates_.clear();
+        operations_ = {};
         lastDeviceForces_ = {};
         gpuTrackReady_ = false;
         error_ = std::move(error);
@@ -936,7 +1061,7 @@ namespace quantum::editor
 
         updateTrainMeshInstances(meshInstances_, *renderPose_, visualConsist_.cars,
             coordinateUnitsPerMeter_);
-        if (!physicsDiagnosticsVisible_)
+        if (!physicsDiagnosticsVisible_ && !trainInspectionActive_)
             return;
 
         vertices_.reserve(
@@ -949,13 +1074,15 @@ namespace quantum::editor
         {
             const physics::CarPose& carPose =
                 renderPose_->cars()[index].carPose();
-            appendCarBox(
+            const bool selected = trainInspectionActive_ && trainDefinition_.cars[index].authoredCarId == selectedCarId_;
+            if (physicsDiagnosticsVisible_ || (trainOverlays_ & 1) || selected) appendCarBox(
                 vertices_,
                 carPose,
                 trainDefinition_.cars[index].car.bodyDimensionsMeters,
                 coordinateUnitsPerMeter_,
-                carColors[index % carColors.size()]);
-            if (useGpuBogieMarkers)
+                selected ? Color{1, .85F, .1F, 1} : carColors[index % carColors.size()]);
+            if (trainInspectionActive_ && !physicsDiagnosticsVisible_ && !(trainOverlays_ & 2)) {}
+            else if (useGpuBogieMarkers)
             {
                 appendBogieMarkerFromGpuSample(vertices_, lastGpuBogieSamples_[index * 2], coordinateUnitsPerMeter_);
                 appendBogieMarkerFromGpuSample(vertices_, lastGpuBogieSamples_[index * 2 + 1], coordinateUnitsPerMeter_);
@@ -967,9 +1094,34 @@ namespace quantum::editor
                 appendBogieMarker(
                     vertices_, carPose.rearBogie(), coordinateUnitsPerMeter_);
             }
+            const auto cross = [&](const glm::dvec3& point, const Color& color) {
+                for (const auto axis : {glm::dvec3{.12, 0, 0}, glm::dvec3{0, .12, 0}, glm::dvec3{0, 0, .12}})
+                    appendLine(vertices_, point - axis, point + axis, coordinateUnitsPerMeter_, color);
+            };
+            if (trainInspectionActive_ && (trainOverlays_ & 4))
+            {
+                cross(carPose.frontHitchWorldPositionMeters(), connectorColor);
+                cross(carPose.rearHitchWorldPositionMeters(), connectorColor);
+            }
+            if (selected && (trainOverlays_ & 8))
+            {
+                const auto& cog = renderPose_->cars()[index].loadedWorldCenterOfGravityMeters();
+                cross(cog, {1, .2F, 1, 1});
+                appendLine(vertices_, carPose.bodyWorldPositionMeters(), cog, coordinateUnitsPerMeter_, {1, .2F, 1, 1});
+            }
+            if (selected && (trainOverlays_ & 16))
+            {
+                const auto origin = carPose.bodyWorldPositionMeters();
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    glm::dvec3 local{0}; local[axis] = .75;
+                    Color color{0, 0, 0, 1}; color[axis] = 1;
+                    appendLine(vertices_, origin, origin + carPose.bodyOrientation() * local, coordinateUnitsPerMeter_, color);
+                }
+            }
         }
 
-        for (const physics::InterCarConnectionPose& connection
+        if (physicsDiagnosticsVisible_ || (trainOverlays_ & 4)) for (const physics::InterCarConnectionPose& connection
             : renderPose_->connections())
         {
             appendLine(
@@ -983,6 +1135,15 @@ namespace quantum::editor
         frameTelemetry_.vertexPreparationMilliseconds +=
             std::chrono::duration<double, std::milli>(
                 preparationEnd - preparationBegin).count();
+    }
+
+    void SimulationPreview::setTrainInspection(bool active, std::uint64_t selectedCarId, std::uint32_t overlays)
+    {
+        if (active == trainInspectionActive_ && selectedCarId == selectedCarId_ && overlays == trainOverlays_) return;
+        trainInspectionActive_ = active;
+        selectedCarId_ = selectedCarId;
+        trainOverlays_ = overlays;
+        rebuildVertices();
     }
 
     void SimulationPreview::setGpuContext(physics::gpu::GpuPhysicsContext* gpu) noexcept

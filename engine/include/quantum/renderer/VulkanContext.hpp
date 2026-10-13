@@ -137,6 +137,8 @@ namespace quantum::renderer
         // Replaces the solid timber presentation. Rebuilds the shared
         // instance stream and its per-appearance draw batches; the unit meshes
         // and timber textures are uploaded once and retained.
+        void updateInfrastructurePresentation(std::span<const coaster::SupportSolidPresentation> infrastructure,
+            std::span<const coaster::SupportSolidPresentation> access);
         void updateSupportSolidPresentation(
             std::span<const coaster::SupportSolidPresentation> presentations
         ) override;
@@ -239,7 +241,9 @@ namespace quantum::renderer
             SolidSupportTextureImageResource& image) noexcept;
         void uploadSupportSolidMeshes();
         void uploadSupportSolidInstances(
-            std::span<const coaster::SupportSolidPresentation> presentations);
+            std::span<const coaster::SupportSolidPresentation> presentations,
+            std::span<const coaster::SupportSolidPresentation> infrastructure = {},
+            std::span<const coaster::SupportSolidPresentation> access = {});
         void createEnvironmentResources();
         void destroyEnvironmentResources() noexcept;
         // One uploaded IBL set for one bundled sky. Vulkan owns the images;
@@ -395,7 +399,7 @@ namespace quantum::renderer
             bool uploaded = false;
         };
 
-        std::array<SupportSolidMeshResource, 2> supportSolidMeshes_{};
+        std::array<SupportSolidMeshResource, 3> supportSolidMeshes_{};
         VkBuffer supportSolidInstanceBuffer_ = VK_NULL_HANDLE;
         VmaAllocation supportSolidInstanceAllocation_ = VK_NULL_HANDLE;
         void* supportSolidInstanceMappedData_ = nullptr;
@@ -407,7 +411,8 @@ namespace quantum::renderer
             std::uint32_t meshIndex = 0;
             std::uint32_t firstInstance = 0;
             std::uint32_t instanceCount = 0;
-            coaster::SupportAppearance appearance;
+            coaster::SupportSurface appearance;
+            double metersPerCoordinateUnit = 1.0;
         };
 
         std::vector<SupportSolidDrawBatch> supportSolidDrawBatches_;
@@ -417,9 +422,12 @@ namespace quantum::renderer
             std::uint32_t firstInstance = 0;
             std::uint32_t instanceCount = 0;
             coaster::SupportFoundationAppearance appearance;
+            std::uint32_t meshIndex = 0;
+            double metersPerCoordinateUnit = 1.0;
         };
 
         std::vector<SupportFoundationDrawBatch> supportFoundationDrawBatches_;
+        std::vector<coaster::SupportSolidPresentation> publishedSupports_, publishedInfrastructure_, publishedAccess_;
         bool supportSolidVisible_ = true;
         bool supportDebugLinesVisible_ = true;
         VkDescriptorSetLayout groundTextureDescriptorLayout_ = VK_NULL_HANDLE;

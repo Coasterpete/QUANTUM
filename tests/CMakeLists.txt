@@ -297,6 +297,17 @@ if(QUANTUM_ENABLE_EDITOR)
     set_tests_properties(QuantumEditor.RigidBodyPresentation PROPERTIES
         LABELS "editor;physics;rigid-body;renderer;presentation")
 
+    add_executable(QuantumEditorMultiCarPropulsionTests
+        MultiCarPropulsionTests.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/SimulationPreview.cpp
+        ${PROJECT_SOURCE_DIR}/editor/src/TrainMeshPresentation.cpp)
+    target_include_directories(QuantumEditorMultiCarPropulsionTests PRIVATE ${PROJECT_SOURCE_DIR}/editor/include)
+    target_link_libraries(QuantumEditorMultiCarPropulsionTests PRIVATE Quantum::Engine Quantum::Core)
+    target_compile_features(QuantumEditorMultiCarPropulsionTests PRIVATE cxx_std_23)
+    set_target_properties(QuantumEditorMultiCarPropulsionTests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME QuantumEditor.MultiCarPropulsion COMMAND QuantumEditorMultiCarPropulsionTests)
+    set_tests_properties(QuantumEditor.MultiCarPropulsion PROPERTIES LABELS "editor;physics;operations;train")
+
     add_executable(
         QuantumEditorSimulationPreviewTests
         SimulationPreviewTests.cpp
@@ -396,6 +407,8 @@ if(QUANTUM_ENABLE_ENGINE)
     target_link_libraries(QuantumEngineSupportSolidRendererTests PRIVATE
         Quantum::Engine Quantum::Core)
     target_compile_features(QuantumEngineSupportSolidRendererTests PRIVATE cxx_std_23)
+    target_compile_definitions(QuantumEngineSupportSolidRendererTests PRIVATE
+        QUANTUM_SUPPORT_FRAGMENT_BINARY="${CMAKE_BINARY_DIR}/shaders/support.frag.spv")
     set_target_properties(QuantumEngineSupportSolidRendererTests PROPERTIES
         CXX_EXTENSIONS OFF)
     add_dependencies(QuantumEngineSupportSolidRendererTests QuantumShaders)
@@ -2924,3 +2937,10 @@ add_test(NAME QuantumCore.SupportSolidGeometry
     COMMAND QuantumCoreSupportSolidGeometryTests)
 set_tests_properties(QuantumCore.SupportSolidGeometry PROPERTIES
     LABELS "core;coaster;supports;appearance;rendering")
+
+add_executable(QuantumCoreRideOperationsTests RideOperationsTests.cpp)
+target_link_libraries(QuantumCoreRideOperationsTests PRIVATE Quantum::Core)
+add_test(NAME QuantumCore.RideOperations COMMAND QuantumCoreRideOperationsTests)
+set_tests_properties(QuantumCore.RideOperations PROPERTIES LABELS "core;physics;operations")
+add_test(NAME QuantumCore.TargetSpeed COMMAND QuantumCoreRideOperationsTests --target-speed)
+set_tests_properties(QuantumCore.TargetSpeed PROPERTIES LABELS "core;physics;operations")

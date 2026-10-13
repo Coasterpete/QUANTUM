@@ -5,7 +5,9 @@
 
 #include <string>
 #include <string_view>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace quantum::editor
@@ -30,6 +32,20 @@ namespace quantum::editor
     {
         std::vector<TrainVisualPrototype> cars;
     };
+
+    // Display-space copies for engineering picking/framing. Stable identity
+    // follows the physical car; GLB mesh bounds never redefine these envelopes.
+    struct TrainPreviewCar
+    {
+        std::uint64_t id;
+        std::size_t index;
+        glm::dvec3 center, dimensions, cog;
+        glm::dquat orientation;
+    };
+    [[nodiscard]] std::optional<std::uint64_t> pickTrainPreviewCar(std::span<const TrainPreviewCar> cars,
+        const glm::dvec3& rayOrigin, const glm::dvec3& rayDirection);
+    [[nodiscard]] std::optional<std::pair<glm::dvec3, glm::dvec3>> trainPreviewBounds(
+        std::span<const TrainPreviewCar> cars, std::optional<std::uint64_t> selected = std::nullopt);
 
     // Temporary presentation policy, to be replaced by authored visual inputs:
     // 0: empty; 1: lead; 2: lead/rear; 3+: lead/middle(s)/rear.

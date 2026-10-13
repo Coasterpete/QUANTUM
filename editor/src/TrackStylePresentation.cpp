@@ -123,9 +123,23 @@ namespace quantum::editor
 
     TrackStylePresentationImpact classifyResolvedTrackStylePresentationChange(
         const coaster::TrackStylePreset& before,
-        const coaster::TrackStylePreset& after) noexcept
+        const coaster::TrackStylePreset& after)
     {
         TrackStylePresentationImpact impact;
+
+        if (before.geometryFamily == coaster::TrackGeometryFamily::Components
+            || after.geometryFamily == coaster::TrackGeometryFamily::Components)
+        {
+            if (before.geometryFamily != after.geometryFamily
+                || coaster::serializeTrackComponents(before) != coaster::serializeTrackComponents(after)
+                || before.visible != after.visible || before.railsVisible != after.railsVisible)
+            {
+                add(impact, TrackStylePresentationProduct::RenderableMesh);
+                add(impact, TrackStylePresentationProduct::HardwareInstances);
+                add(impact, TrackStylePresentationProduct::EngineeringRails);
+            }
+            return impact;
+        }
 
         // A different generator family has no presentation-only path yet.
         // Preset names are metadata; all other concrete inputs are classified

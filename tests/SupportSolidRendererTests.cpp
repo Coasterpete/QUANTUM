@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -20,6 +21,29 @@
 
 namespace
 {
+    void supportFragmentUsesEnabledDeviceCapabilities()
+    {
+        std::ifstream file(QUANTUM_SUPPORT_FRAGMENT_BINARY, std::ios::binary | std::ios::ate);
+        if (!file || file.tellg() < 20 || file.tellg() % 4 != 0)
+            throw std::runtime_error("Support fragment SPIR-V is missing or truncated.");
+        std::vector<std::uint32_t> words(static_cast<std::size_t>(file.tellg())/4);
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(words.data()),static_cast<std::streamsize>(words.size()*4));
+        // SPIR-V's fixed header and instruction encoding. Demote requires an
+        // optional Vulkan feature which QUANTUM does not enable.
+        constexpr std::uint32_t spirvMagic = 0x07230203, spirv15 = 0x00010500;
+        constexpr std::uint32_t opCapability = 17, demoteCapability = 5379;
+        if (!file || words[0] != spirvMagic || words[1] > spirv15)
+            throw std::runtime_error("Support fragment must retain its portable SPIR-V 1.5 contract.");
+        for (std::size_t i=5;i<words.size();)
+        {
+            const auto count=words[i]>>16, opcode=words[i]&0xffff;
+            if (!count || i+count>words.size()) throw std::runtime_error("Malformed SPIR-V instruction.");
+            if (opcode==opCapability && count==2 && words[i+1]==demoteCapability)
+                throw std::runtime_error("Support shader requests unenabled demote capability.");
+            i+=count;
+        }
+    }
     using namespace quantum::renderer;
     using SupportMemberMeshKind = quantum::coaster::SupportMemberMeshKind;
 
@@ -374,6 +398,7 @@ int main(const int argc, char* argv[])
     {
         require(argc == 2, "pass the QUANTUM source root");
         const std::filesystem::path sourceRoot{argv[1]};
+        supportFragmentUsesEnabledDeviceCapabilities();
         boxMeshIsAClosedUnitCube();
         boxFaceWindingIsOutward();
         boxIsClosedWithMatchingSharedCorners();

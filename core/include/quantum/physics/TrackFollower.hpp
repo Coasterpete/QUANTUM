@@ -1,4 +1,5 @@
 #pragma once
+#include <quantum/physics/TrainDefinition.hpp>
 
 #include <quantum/coaster/TrackKinematics.hpp>
 #include <quantum/coaster/TrackPhysicalSettings.hpp>
@@ -167,24 +168,6 @@ namespace quantum::physics
         };
     }
 
-    struct BasicResistance
-    {
-        // Coulomb-like mechanical/bearing force capacity, in N.
-        double constantMechanicalForceNewtons = 0.0;
-
-        // Linear force coefficient in N/(m/s), equivalently N*s/m.
-        double linearResistanceCoefficientNewtonSecondsPerMeter = 0.0;
-
-        // Zero-wind Phase 1 aerodynamic inputs. CdA is represented directly
-        // by dragAreaSquareMeters, with force -0.5 * rho * CdA * v * |v|.
-        double airDensityKilogramsPerCubicMeter = 1.225;
-        double dragAreaSquareMeters = 0.0;
-
-        // Dimensionless Crr. Until bogie/contact loads exist, supported load
-        // is approximated as mass * gravity rather than a resolved normal load.
-        double rollingResistanceCoefficient = 0.0;
-    };
-
     struct BasicResistanceForceBreakdown
     {
         double constantMechanicalForceMagnitudeNewtons = 0.0;
@@ -199,7 +182,6 @@ namespace quantum::physics
         double totalResistanceForceNewtons = 0.0;
     };
 
-    void validateBasicResistance(const BasicResistance& resistance);
 
     // Shared Phase 1/3 aggregate resistance law. impendingForceNewtons is the
     // non-resistance generalized force that dry resistance opposes at rest.

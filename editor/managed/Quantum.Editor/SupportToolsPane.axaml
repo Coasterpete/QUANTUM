@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.SupportToolsPane" x:DataType="local:EditorViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="16" Spacing="10">
+      <local:InspectorSection SectionKey="supports.generate" Header="Generate bent / steel frame" DefaultExpanded="True" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Family"/>
+          <ComboBox SelectedIndex="{Binding SupportFamily}" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Traditional Timber"/>
+            <ComboBoxItem Content="Tubular Steel"/>
+            <ComboBoxItem Content="Box / HSS Steel"/>
+            <ComboBoxItem Content="I / H Structural Steel"/>
+            <ComboBoxItem Content="Concrete Pier"/>
+            <ComboBoxItem Content="Custom"/>
+          </ComboBox>
+          <TextBlock Text="Station · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameStation}"/>
+          <TextBlock Text="Bent width / post spacing · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameWidth}"/>
+          <TextBlock Text="Foundation world Z · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameElevation}"/>
+          <TextBlock Text="Attachment vertical offset · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameVertical}"/>
+          <TextBlock Text="Post size · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FramePost}"/>
+          <TextBlock Text="Beam depth · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameBeam}"/>
+          <TextBlock Text="Brace size · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameBrace}"/>
+          <TextBlock Text="Foundation footprint · metres"/>
+          <TextBox Classes="numeric" Text="{Binding FrameFooting}"/>
+          <Button Classes="primary" Content="Generate Frame" Command="{Binding GenerateFrameCommand}"/>
+          <Button Content="Apply selected frame parameters" Command="{Binding RegenerateFrameCommand}" IsVisible="{Binding HasGeneratedFrame}"/>
+          <TextBlock Text="Creates editable native nodes and members. Parameter edits retain frame IDs and explicit member/material overrides. Existing Wooden Run generation remains available in the native editor." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </local:InspectorSection>
+      <Button Content="Add infrastructure" Command="{Binding NewInfrastructureDraftCommand}" Classes="primary"/>
+      <TextBlock Text="Select a catwalk, platform, rail or stairs in the Infrastructure browser to edit it in the Inspector." Classes="muted" TextWrapping="Wrap"/>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

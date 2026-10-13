@@ -1,3 +1,4 @@
+#include <quantum/coaster/RideHardwareSerialization.hpp>
 #include <quantum/coaster/CoasterDocument.hpp>
 
 #include <nlohmann/json.hpp>
@@ -356,9 +357,9 @@ namespace quantum::coaster
                 repeatingHardware.push_back(std::move(serialized));
             }
 
-            return {
+            json serialized{
                 {"name", style.name},
-                {"geometryFamily", "DualRailTubular"},
+                {"geometryFamily", style.geometryFamily == TrackGeometryFamily::Components ? "Components" : "DualRailTubular"},
                 {"visible", style.visible},
                 {"railsVisible", style.railsVisible},
                 {"railCount", style.railCount},
@@ -379,6 +380,9 @@ namespace quantum::coaster
                     {"material", serializeTrackMaterial(
                         style.spine.material)}}},
                 {"repeatingHardware", std::move(repeatingHardware)}};
+            if (style.geometryFamily == TrackGeometryFamily::Components)
+                serialized["construction"] = json::parse(serializeTrackComponents(style));
+            return serialized;
         }
 
         json serializeRegionTrackStyleOverrides(
@@ -501,6 +505,8 @@ namespace quantum::coaster
             {
             case SupportMemberProfileShape::Circular: return "Circular";
             case SupportMemberProfileShape::Rectangular: return "Rectangular";
+            case SupportMemberProfileShape::Hss: return "Hss";
+            case SupportMemberProfileShape::ISection: return "ISection";
             }
             throw std::runtime_error("Unknown support member profile shape.");
         }
@@ -644,6 +650,13 @@ namespace quantum::coaster
                     if (node.foundation.has_value())
                     {
                         nodeJson["foundation"] = json::object();
+                        if (node.foundation->kind != SupportFoundationKind::Footing)
+                        {
+                            const char* kinds[]{"Footing", "Pedestal", "Pier", "Block"};
+                            nodeJson["foundation"]["kind"] = kinds[static_cast<unsigned>(node.foundation->kind)];
+                        }
+                        if (node.foundation->dimensions != glm::dvec3{0.0})
+                            nodeJson["foundation"]["dimensions"] = {node.foundation->dimensions.x, node.foundation->dimensions.y, node.foundation->dimensions.z};
                     }
                     nodesJson.push_back(std::move(nodeJson));
                 }
@@ -665,6 +678,9 @@ namespace quantum::coaster
                     // Absent means Unspecified, so M1/M2A documents without
                     // roles keep their byte layout and manual members that
                     // never picked a role stay compact.
+                    if (member.surface) memberJson["surface"] = json::parse(serializeSupportSurface(*member.surface));
+                    if (member.useStyleProfile) memberJson["useStyleProfile"] = true;
+                    if (member.useFrameProfile) memberJson["useFrameProfile"] = true;
                     if (member.role != SupportMemberRole::Unspecified)
                     {
                         memberJson["role"] =
@@ -713,6 +729,23 @@ namespace quantum::coaster
                     {"nextElementId", structure.nextElementId},
                     {"nodes", std::move(nodesJson)},
                     {"members", std::move(membersJson)}};
+                if (structure.style != SupportStyleFamily::TraditionalTimber)
+                    structureJson["style"] = supportStyleName(structure.style);
+                if (structure.surface) structureJson["surface"] = json::parse(serializeSupportSurface(*structure.surface));
+                if (structure.generatedFrame)
+                {
+                    const auto& r = *structure.generatedFrame;
+                    const auto profile = [](const SupportMemberProfile& p) -> json
+                    {
+                        return {{"shape", supportProfileShapeToString(p.shape)},
+                            {"outerDimensions", {{"x", p.outerDimensions.x}, {"y", p.outerDimensions.y}}},
+                            {"wallThickness", p.wallThickness}};
+                    };
+                    structureJson["generatedFrame"] = {{"station", r.station}, {"width", r.width},
+                        {"foundationElevation", r.foundationElevation}, {"verticalOffset", r.verticalOffset},
+                        {"post", profile(r.post)}, {"beam", profile(r.beam)}, {"brace", profile(r.brace)},
+                        {"foundationSize", {r.foundationSize.x, r.foundationSize.y, r.foundationSize.z}}};
+                }
                 if (structure.generatedWoodenRun)
                 {
                     const auto& recipe = *structure.generatedWoodenRun;
@@ -1312,6 +1345,8 @@ namespace quantum::coaster
             {
                 profile.shape = SupportMemberProfileShape::Rectangular;
             }
+            else if (shape == "Hss") profile.shape = SupportMemberProfileShape::Hss;
+            else if (shape == "ISection") profile.shape = SupportMemberProfileShape::ISection;
             else
             {
                 throw std::runtime_error(
@@ -1509,7 +1544,7 @@ namespace quantum::coaster
                 requireNoUnknownFields(structureJson,
                     {"id", "name", "nextElementId", "nodes", "members",
                      "generatedWoodenRun", "appearance",
-                     "foundationAppearance"},
+                     "foundationAppearance", "style", "surface", "generatedFrame"},
                     structurePath);
                 requireString(structureJson, "name", structurePath);
                 requireArray(structureJson, "nodes", structurePath);
@@ -1519,6 +1554,25 @@ namespace quantum::coaster
                 structure.id = deserializeSupportId<SupportStructureId>(
                     structureJson, "id", structurePath);
                 structure.name = structureJson["name"].get<std::string>();
+                if (structureJson.contains("style")) structure.style = supportStyleFromName(structureJson["style"].get<std::string>());
+                if (structureJson.contains("surface")) structure.surface = deserializeSupportSurface(structureJson["surface"].dump());
+                if (structureJson.contains("generatedFrame"))
+                {
+                    const auto& j = structureJson["generatedFrame"];
+                    requireNoUnknownFields(j, {"station", "width", "foundationElevation", "verticalOffset",
+                        "post", "beam", "brace", "foundationSize"}, structurePath + ".generatedFrame");
+                    SupportFrameRecipe r;
+                    r.station = j.at("station").get<double>(); r.width = j.at("width").get<double>();
+                    r.foundationElevation = j.at("foundationElevation").get<double>(); r.verticalOffset = j.at("verticalOffset").get<double>();
+                    r.post = deserializeSupportMemberProfile(j.at("post"), structurePath + ".generatedFrame.post");
+                    r.beam = deserializeSupportMemberProfile(j.at("beam"), structurePath + ".generatedFrame.beam");
+                    r.brace = deserializeSupportMemberProfile(j.at("brace"), structurePath + ".generatedFrame.brace");
+                    const auto& a = j.at("foundationSize");
+                    if (!a.is_array() || a.size() != 3) throw std::runtime_error("Frame foundation size needs three dimensions.");
+                    r.foundationSize = {a[0].get<double>(), a[1].get<double>(), a[2].get<double>()};
+                    validateSupportFrameRecipe(r); structure.generatedFrame = r;
+                }
+
                 structure.nextElementId =
                     deserializeSupportId<SupportElementId>(
                         structureJson, "nextElementId", structurePath);
@@ -1822,8 +1876,24 @@ namespace quantum::coaster
                     {
                         requireObject(nodeJson, "foundation", nodePath);
                         requireNoUnknownFields(
-                            nodeJson["foundation"], {}, nodePath + ".foundation");
+                            nodeJson["foundation"], {"kind", "dimensions"}, nodePath + ".foundation");
                         node.foundation.emplace();
+                        const auto& f = nodeJson["foundation"];
+                        if (f.contains("kind"))
+                        {
+                            const auto kind = f["kind"].get<std::string>();
+                            if (kind == "Footing") node.foundation->kind = SupportFoundationKind::Footing;
+                            else if (kind == "Pedestal") node.foundation->kind = SupportFoundationKind::Pedestal;
+                            else if (kind == "Pier") node.foundation->kind = SupportFoundationKind::Pier;
+                            else if (kind == "Block") node.foundation->kind = SupportFoundationKind::Block;
+                            else throw std::runtime_error("Unknown foundation kind.");
+                        }
+                        if (f.contains("dimensions"))
+                        {
+                            const auto& a = f["dimensions"];
+                            if (!a.is_array() || a.size() != 3) throw std::runtime_error("Foundation dimensions need three values.");
+                            node.foundation->dimensions = {a[0].get<double>(), a[1].get<double>(), a[2].get<double>()};
+                        }
                     }
                     structure.nodes.push_back(std::move(node));
                 }
@@ -1844,7 +1914,7 @@ namespace quantum::coaster
                     requireNoUnknownFields(memberJson,
                         {"id", "startNodeId", "endNodeId", "profile", "role",
                          "orientation", "orientationReference",
-                         "startConnection", "endConnection"},
+                         "startConnection", "endConnection", "surface", "useStyleProfile", "useFrameProfile"},
                         memberPath);
                     requireObject(memberJson, "profile", memberPath);
 
@@ -1858,6 +1928,9 @@ namespace quantum::coaster
                         deserializeSupportMemberProfile(
                             memberJson["profile"], memberPath + ".profile")};
                     // Absent role means Unspecified for M1/M2A documents.
+                    if (memberJson.contains("surface")) member.surface = deserializeSupportSurface(memberJson["surface"].dump());
+                    if (memberJson.contains("useStyleProfile")) member.useStyleProfile = memberJson["useStyleProfile"].get<bool>();
+                    if (memberJson.contains("useFrameProfile")) member.useFrameProfile = memberJson["useFrameProfile"].get<bool>();
                     if (memberJson.contains("role"))
                     {
                         requireString(memberJson, "role", memberPath);
@@ -1986,7 +2059,7 @@ TrackStylePreset deserializeTrackStyle(
             requireNoUnknownFields(object, {
                 "name", "geometryFamily", "railCount", "railOffsets",
                 "railRadius", "railRadialSegments", "railMaterial", "spine",
-                "repeatingHardware", "visible", "railsVisible"}, path);
+                "repeatingHardware", "visible", "railsVisible", "construction"}, path);
             requireString(object, "name", path);
             requireString(object, "geometryFamily", path);
             requireInteger(object, "railCount", path);
@@ -1997,7 +2070,7 @@ TrackStylePreset deserializeTrackStyle(
             requireObject(object, "spine", path);
             requireArray(object, "repeatingHardware", path);
 
-            if (object["geometryFamily"] != "DualRailTubular")
+            if (object["geometryFamily"] != "DualRailTubular" && object["geometryFamily"] != "Components")
             {
                 throw std::runtime_error(
                     path + ".geometryFamily: unsupported track geometry family");
@@ -2013,7 +2086,8 @@ TrackStylePreset deserializeTrackStyle(
 
             TrackStylePreset style;
             style.name = object["name"].get<std::string>();
-            style.geometryFamily = TrackGeometryFamily::DualRailTubular;
+            style.geometryFamily = object["geometryFamily"] == "Components"
+                ? TrackGeometryFamily::Components : TrackGeometryFamily::DualRailTubular;
             if (object.contains("visible"))
             {
                 requireBoolean(object, "visible", path);
@@ -2154,6 +2228,14 @@ TrackStylePreset deserializeTrackStyle(
                 style.repeatingHardware.push_back(std::move(hardware));
             }
 
+            if (style.geometryFamily == TrackGeometryFamily::Components)
+            {
+                requireObject(object, "construction", path);
+                deserializeTrackComponents(style, object["construction"].dump());
+            }
+            if (style.geometryFamily == TrackGeometryFamily::DualRailTubular
+                && object.contains("construction") && !object["construction"].is_null())
+                throw std::runtime_error(path + ": legacy style cannot contain component geometry");
             validateTrackStyle(style);
             return style;
         }
@@ -2331,13 +2413,14 @@ TrackStylePreset deserializeTrackStyle(
         }
         root["trackStyle"] = serializeTrackStyle(track.trackStyle());
         root["coasterSetup"] = serializeCoasterSetup(track.coasterSetup());
+        root["train"] = json::parse(serializeTrainConfiguration(track.trainConfiguration()));
         root["supports"] = serializeSupportCollection(track.supports());
         json devicesJson = json::array();
         for (const TrackDevice& device : track.trackDevices().devices)
         {
             json deviceJson = {
                 {"id", device.id},
-                {"kind", device.kind == TrackDeviceKind::Launch ? "Launch" : "Brake"},
+                {"kind", trackDeviceKindName(device.kind)},
                 {"name", device.name},
                 {"enabled", device.enabled},
                 {"startStationMeters", device.startStationMeters},
@@ -2350,9 +2433,14 @@ TrackStylePreset deserializeTrackStyle(
             {
                 deviceJson["accelerationProfile"] = serializeChannelProfile(device.accelerationProfile.value());
             }
+            if (device.configuration.index() != 0)
+                deviceJson["configuration"] = json::parse(serializeRideHardwareConfiguration(device));
             devicesJson.push_back(std::move(deviceJson));
         }
         root["trackDevices"] = {
+            {"schemaVersion", 2},
+            {"nextInfrastructureId", track.trackDevices().nextInfrastructureId},
+            {"infrastructure", json::parse(serializeTrackInfrastructure(track.trackDevices().infrastructure))},
             {"nextId", track.trackDevices().nextId},
             {"devices", std::move(devicesJson)}
         };
@@ -2391,7 +2479,7 @@ TrackStylePreset deserializeTrackStyle(
             static const std::vector<std::string> rootAllowed = {
                 "formatVersion", "sections", "layoutMode", "startPose",
                 "physicalSettings", "trackConfigurationId", "trackStyle",
-                "coasterSetup", "supports", "trackDevices", "ground"
+                "coasterSetup", "supports", "trackDevices", "ground", "train"
             };
             requireNoUnknownFields(root, rootAllowed, "root");
 
@@ -2636,6 +2724,17 @@ TrackStylePreset deserializeTrackStyle(
                     root["coasterSetup"], "coasterSetup"));
             }
 
+            // Train 2 is an additive sub-schema. Historical documents retain
+            // equivalent repeated physical definitions and ordered default shells.
+            if (root.contains("train"))
+            {
+                auto train = deserializeTrainConfiguration(root["train"].dump());
+                if (train.cars.size() != track.coasterSetup().carsPerTrain)
+                    throw std::invalid_argument("train.cars disagrees with coasterSetup.carsPerTrain.");
+                track.setTrainConfiguration(train);
+            }
+            else track.setTrainConfiguration(createDefaultOrderedTrainConfiguration(track.coasterSetup().carsPerTrain));
+
             // Documents written before persistent supports were introduced
             // retain the default empty collection.
             if (root.contains("supports"))
@@ -2650,7 +2749,13 @@ TrackStylePreset deserializeTrackStyle(
                 requireObject(root, "trackDevices", "root");
                 const json& collectionJson = root["trackDevices"];
                 requireNoUnknownFields(collectionJson,
-                    {"nextId", "devices"}, "trackDevices");
+                    {"nextId", "devices", "schemaVersion", "nextInfrastructureId", "infrastructure"}, "trackDevices");
+                if (collectionJson.contains("schemaVersion")
+                    && (!collectionJson["schemaVersion"].is_number_integer() || collectionJson["schemaVersion"] != 2))
+                    throw std::runtime_error("Unsupported ride hardware schemaVersion.");
+                if (!collectionJson.contains("schemaVersion")
+                    && (collectionJson.contains("infrastructure") || collectionJson.contains("nextInfrastructureId")))
+                    throw std::runtime_error("Ride infrastructure requires hardware schemaVersion 2.");
                 requireInteger(collectionJson, "nextId", "trackDevices");
                 requireArray(collectionJson, "devices", "trackDevices");
                 if (collectionJson["nextId"] < 0)
@@ -2669,7 +2774,7 @@ TrackStylePreset deserializeTrackStyle(
                     static const std::vector<std::string> deviceAllowed = {"id", "kind", "name",
                         "enabled", "startStationMeters", "endStationMeters",
                         "targetAccelerationMetersPerSecondSquared",
-                        "maximumForceNewtons", "accelerationProfile"};
+                        "maximumForceNewtons", "accelerationProfile", "configuration"};
                     requireNoUnknownFields(item, deviceAllowed, path);
                     requireInteger(item, "id", path);
                     if (item["id"] < 0)
@@ -2686,9 +2791,11 @@ TrackStylePreset deserializeTrackStyle(
                     TrackDevice device;
                     device.id = item["id"].get<TrackDeviceId>();
                     const std::string kind = item["kind"].get<std::string>();
-                    if (kind == "Launch") device.kind = TrackDeviceKind::Launch;
-                    else if (kind == "Brake") device.kind = TrackDeviceKind::Brake;
-                    else throw std::runtime_error(path + ".kind: unknown device kind");
+                    device.kind = trackDeviceKindFromName(kind);
+                    if (item.contains("configuration") && !collectionJson.contains("schemaVersion"))
+                        throw std::runtime_error("Typed ride hardware requires schemaVersion 2.");
+                    if (item.contains("configuration"))
+                        device.configuration = deserializeRideHardwareConfiguration(device.kind, item["configuration"].dump());
                     device.name = item["name"].get<std::string>();
                     device.enabled = item["enabled"].get<bool>();
                     device.startStationMeters = item["startStationMeters"].get<double>();
@@ -2705,6 +2812,14 @@ TrackStylePreset deserializeTrackStyle(
                     }
                     collection.devices.push_back(std::move(device));
                 }
+                if (collectionJson.contains("nextInfrastructureId"))
+                {
+                    requireInteger(collectionJson, "nextInfrastructureId", "trackDevices");
+                    if (collectionJson["nextInfrastructureId"] <= 0) throw std::runtime_error("Invalid infrastructure next ID.");
+                    collection.nextInfrastructureId = collectionJson["nextInfrastructureId"].get<std::uint64_t>();
+                }
+                if (collectionJson.contains("infrastructure"))
+                    collection.infrastructure = deserializeTrackInfrastructure(collectionJson["infrastructure"].dump());
                 track.setTrackDevices(collection);
             }
 

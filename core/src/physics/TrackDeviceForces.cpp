@@ -39,9 +39,12 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const TrainDefinition& train,
         const TrainPose& pose,
-        const double signedVelocityMetersPerSecond)
+        const double signedVelocityMetersPerSecond,
+        const double gravityAccelerationMetersPerSecondSquared)
     {
-        if (!std::isfinite(signedVelocityMetersPerSecond)
+        if (!std::isfinite(gravityAccelerationMetersPerSecondSquared)
+            || gravityAccelerationMetersPerSecondSquared < 0
+            || !std::isfinite(signedVelocityMetersPerSecond)
             || pose.carCount() != train.cars.size()
             || devices.size() != runtimeStates.size())
             throw std::invalid_argument("Device force evaluation requires a matching train pose and finite speed.");
@@ -59,15 +62,8 @@ namespace quantum::physics
                     "Device runtime control does not match authored IDs.");
             TrackDeviceForceTelemetry telemetry;
             telemetry.id = device.id;
-            if (!control.armed
-                || (device.kind == coaster::TrackDeviceKind::Brake
-                && std::abs(signedVelocityMetersPerSecond)
-                    <= followerRestSpeedToleranceMetersPerSecond))
-            {
-                result.devices.push_back(telemetry);
-                continue;
-            }
-
+            telemetry.armed = control.armed;
+            telemetry.applicationBegin = result.applications.size();
             struct OccupiedBogie
             {
                 std::size_t carIndex;
@@ -84,6 +80,7 @@ namespace quantum::physics
             // applied force. For a constant command the mean is exactly the
             // authored value.
             double commandedAccelerationTotal = 0.0;
+            double profileAccelerationTotal = 0.0;
             for (std::size_t carIndex = 0; carIndex < pose.carCount(); ++carIndex)
             {
                 const TrainCarPose& car = pose.cars()[carIndex];
@@ -97,8 +94,14 @@ namespace quantum::physics
                         track.lengthMeters(), circuit))
                         continue;
 
+                    ++telemetry.occupiedBogieCount;
+                    const bool acceptsForceCommand = control.armed
+                        && (control.signedAccelerationCommand || device.kind <= coaster::TrackDeviceKind::Brake)
+                        && (control.signedAccelerationCommand || device.kind != coaster::TrackDeviceKind::Brake
+                            || std::abs(signedVelocityMetersPerSecond) > followerRestSpeedToleranceMetersPerSecond);
+                    if (!acceptsForceCommand && device.kind != coaster::TrackDeviceKind::Launch) continue;
                     double commandedAccel = device.targetAccelerationMetersPerSecondSquared;
-                    if (device.accelerationProfile.has_value())
+                    if (!control.signedAccelerationCommand && device.accelerationProfile.has_value())
                     {
                         const double localDist = deviceLocalDistance(device,
                             bogie->location().stationMeters,
@@ -113,6 +116,34 @@ namespace quantum::physics
                             device.accelerationProfile.value(), clampedDist);
                     }
 
+                    if (device.kind == coaster::TrackDeviceKind::Launch)
+                        profileAccelerationTotal += commandedAccel;
+                    if (!acceptsForceCommand) continue;
+
+                    if (!control.signedAccelerationCommand && device.kind == coaster::TrackDeviceKind::Brake)
+                    {
+                        if (const auto* brake = std::get_if<coaster::BrakeConfiguration>(&device.configuration))
+                            commandedAccel = std::min(commandedAccel, std::max(0.0,
+                                std::abs(signedVelocityMetersPerSecond) - brake->targetSpeedMetersPerSecond) / defaultFixedTimeStepSeconds);
+                    }
+                    if (!control.signedAccelerationCommand && device.kind == coaster::TrackDeviceKind::Launch)
+                    {
+                        if (const auto* launch = std::get_if<coaster::LaunchConfiguration>(&device.configuration);
+                            launch && launch->targetSpeedMetersPerSecond)
+                        {
+                            const double limitedAccel = std::min(commandedAccel, std::max(0.0,
+                                *launch->targetSpeedMetersPerSecond - signedVelocityMetersPerSecond * static_cast<int>(launch->direction)) / defaultFixedTimeStepSeconds);
+                            telemetry.targetSpeedLimited |= limitedAccel < commandedAccel;
+                            commandedAccel = limitedAccel;
+                        }
+                    }
+                    if (control.signedAccelerationCommand) commandedAccel = *control.signedAccelerationCommand;
+                    else if (device.kind == coaster::TrackDeviceKind::Brake)
+                        commandedAccel *= signedVelocityMetersPerSecond > 0 ? -1 : 1;
+                    else if (const auto* launch = std::get_if<coaster::LaunchConfiguration>(&device.configuration))
+                        commandedAccel *= static_cast<int>(launch->direction);
+                    if (control.compensateGravity)
+                        commandedAccel += gravityAccelerationMetersPerSecondSquared * bogie->trackFrame().tangent.z;
                     const double requested = 0.5
                         * car.loadedMassKilograms()
                         * commandedAccel;
@@ -120,11 +151,14 @@ namespace quantum::physics
                         definition.bogies[bogie->definitionIndex()]
                             .referencePositionMeters,
                         requested});
-                    requestedTotal += requested;
+                    requestedTotal += std::abs(requested);
+                    telemetry.requestedForceNewtons += requested;
                     commandedAccelerationTotal += commandedAccel;
                 }
             }
-            telemetry.occupiedBogieCount = occupied.size();
+            if (telemetry.occupiedBogieCount > 0)
+                telemetry.profileAccelerationMetersPerSecondSquared =
+                    profileAccelerationTotal / static_cast<double>(telemetry.occupiedBogieCount);
             if (occupied.empty())
             {
                 result.devices.push_back(telemetry);
@@ -132,20 +166,23 @@ namespace quantum::physics
             }
             const double applied = std::min(requestedTotal,
                 device.maximumForceNewtons);
-            const double direction = device.kind == coaster::TrackDeviceKind::Launch
-                ? 1.0
-                : (signedVelocityMetersPerSecond > 0.0 ? -1.0 : 1.0);
-            const double scale = applied / requestedTotal;
+            telemetry.requestedAbsoluteForceNewtons = requestedTotal;
+            telemetry.suppliedAbsoluteForceNewtons = applied;
+            telemetry.forceLimitReached = requestedTotal > device.maximumForceNewtons;
+            telemetry.applicationCount = occupied.size();
+            const double scale = requestedTotal > 0 ? applied / requestedTotal : 0;
+            double signedApplied = 0;
             for (const OccupiedBogie& bogie : occupied)
             {
                 result.applications.push_back({bogie.carIndex,
                     bogie.localPoint,
-                    direction * scale * bogie.requestedForce
+                    scale * bogie.requestedForce
                         * bogie.pose->trackFrame().tangent});
+                signedApplied += scale * bogie.requestedForce;
             }
             telemetry.commandedAccelerationMetersPerSecondSquared =
-                commandedAccelerationTotal / static_cast<double>(occupied.size());
-            telemetry.appliedForceNewtons = direction * applied;
+                std::abs(commandedAccelerationTotal) / static_cast<double>(occupied.size());
+            telemetry.appliedForceNewtons = signedApplied;
             result.devices.push_back(telemetry);
         }
         return result;

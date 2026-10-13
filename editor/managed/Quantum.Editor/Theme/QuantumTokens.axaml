@@ -1,0 +1,62 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Views and engineering canvases share semantic roles. Only this file chooses colors. -->
+  <Color x:Key="QuantumAccentColor">#83DED4</Color>
+  <Color x:Key="QuantumSurfaceColor">#1C2734</Color>
+  <Color x:Key="QuantumSelectionColor">#285967</Color>
+  <SolidColorBrush x:Key="QuantumBackground">#0D131C</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumSurface0">#141E2A</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumSurface1" Color="{StaticResource QuantumSurfaceColor}" />
+  <SolidColorBrush x:Key="QuantumSurface2">#253446</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumSurfaceRaised">#304358</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumBorder">#465B70</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumBorderStrong">#7B92A7</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumTextPrimary">#F0F4F8</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumTextSecondary">#C2CEDB</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumTextMuted">#A6B9CD</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumTextDisabled">#8B9DAF</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumAccent" Color="{StaticResource QuantumAccentColor}" />
+  <SolidColorBrush x:Key="QuantumAccentHover">#A4EEE6</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumAccentPressed">#61BCB4</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumOnAccent">#10242A</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumSelection" Color="{StaticResource QuantumSelectionColor}" />
+  <SolidColorBrush x:Key="QuantumSelectionHover">#2A5C69</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumSelectionInactive">#31465B</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumInputBackground">#0E1925</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumInputBorder">#6D859E</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumInputFocus">#A4EEE6</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumRuntime">#9AD8EF</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumRuntimeSurface">#132D3B</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumWarning">#F2D28E</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumError">#FFD1D6</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumErrorSurface">#462630</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumSuccess">#ADE2BD</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumInfo">#ABD8FF</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumCanvas">#0C1722</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGridMinor">#32495D</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGridMajor">#526C83</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGridAxis">#7F9AAE</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGraphPrimary">#FFBC83</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGraphSecondary">#9EDCF3</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGraphTertiary">#CCB2FF</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumGraphSelection">#20394A</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumHandle">#DDE9F5</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumHandleHover">#FFFFFF</SolidColorBrush>
+  <SolidColorBrush x:Key="QuantumHandleSelected">#83DED4</SolidColorBrush>
+
+  <!-- Family and weight are separate in Avalonia; the real Semibold face supplies headings. -->
+  <FontFamily x:Key="QuantumUIFont">avares://Quantum.Editor/Assets#Overpass</FontFamily>
+  <FontFamily x:Key="QuantumUIFontMedium">avares://Quantum.Editor/Assets#Overpass</FontFamily>
+  <FontFamily x:Key="QuantumUIFontBold">avares://Quantum.Editor/Assets#Overpass</FontFamily>
+  <FontFamily x:Key="QuantumMonoFont">avares://Quantum.Editor/Assets#Overpass Mono</FontFamily>
+  <FontWeight x:Key="QuantumHeadingWeight">SemiBold</FontWeight>
+  <x:Double x:Key="QuantumTitleSize">21</x:Double>
+  <x:Double x:Key="QuantumSectionSize">18</x:Double>
+  <x:Double x:Key="QuantumBodySize">14</x:Double>
+  <x:Double x:Key="QuantumHelperSize">12</x:Double>
+  <x:Double x:Key="QuantumTechnicalSize">13</x:Double>
+  <x:Double x:Key="QuantumDiagnosticSize">12</x:Double>
+  <Thickness x:Key="QuantumSectionPadding">10,10</Thickness>
+  <Thickness x:Key="QuantumInputPadding">8,5</Thickness>
+  <Thickness x:Key="QuantumButtonPadding">12,5</Thickness>
+  <CornerRadius x:Key="QuantumControlRadius">3</CornerRadius>
+</ResourceDictionary>

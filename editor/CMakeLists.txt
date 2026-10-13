@@ -1,35 +1,98 @@
+add_library(QuantumApplication STATIC
+    src/ApplicationService.cpp
+    src/ApplicationService.Supports.cpp
+    src/ApplicationService.Placement.cpp
+    src/CenterlineVisualization.cpp
+    src/DocumentHistory.cpp
+    src/DocumentState.cpp
+    src/RegionSummary.cpp
+    src/RiderLoadDiagnostics.cpp
+    src/SimulationPreview.cpp
+    src/SupportVisualization.cpp
+    src/SupportPicking.cpp
+    src/TrainMeshPresentation.cpp
+    src/TrackStylePresentation.cpp
+    src/TrackDevicePresentation.cpp
+    src/InfrastructurePresentation.cpp
+    src/TransitionEditorModel.cpp
+    src/InteractionPreferences.cpp
+    src/ViewportCamera.cpp
+    src/ViewportTrackAnchors.cpp
+    src/ViewportTransformHandles.cpp)
+if(WIN32)
+    target_sources(QuantumApplication PRIVATE src/DocumentFileWindows.cpp)
+endif()
+target_include_directories(QuantumApplication PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(QuantumApplication PUBLIC Quantum::Engine)
+target_compile_features(QuantumApplication PUBLIC cxx_std_23)
+set_target_properties(QuantumApplication QuantumCore QuantumEngine PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(BUILD_TESTING)
+    add_executable(QuantumTrackFamilyTests ${PROJECT_SOURCE_DIR}/tests/TrackFamilyTests.cpp)
+    target_link_libraries(QuantumTrackFamilyTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TrackFamilies COMMAND QuantumTrackFamilyTests "${PROJECT_SOURCE_DIR}")
+    set_tests_properties(QuantumApplication.TrackFamilies PROPERTIES LABELS "track;catalog;components;assets;history;persistence" TIMEOUT 120)
+    add_executable(QuantumTrackAuthoringInteractionTests ${PROJECT_SOURCE_DIR}/tests/TrackAuthoringInteractionTests.cpp)
+    target_link_libraries(QuantumTrackAuthoringInteractionTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TrackAuthoringInteraction COMMAND QuantumTrackAuthoringInteractionTests)
+    set_tests_properties(QuantumApplication.TrackAuthoringInteraction PROPERTIES
+        LABELS "camera;input;authoring;operations;history;persistence" TIMEOUT 120)
+    add_executable(QuantumNativeAuthoringWorkflowTests ${PROJECT_SOURCE_DIR}/tests/NativeAuthoringWorkflowTests.cpp)
+    target_link_libraries(QuantumNativeAuthoringWorkflowTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.NativeAuthoringWorkflow COMMAND QuantumNativeAuthoringWorkflowTests)
+    set_tests_properties(QuantumApplication.NativeAuthoringWorkflow PROPERTIES
+        LABELS "authoring;train;operations;history;persistence" TIMEOUT 120)
+    add_executable(QuantumTrain2Tests ${PROJECT_SOURCE_DIR}/tests/Train2Tests.cpp)
+    target_link_libraries(QuantumTrain2Tests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.Train2 COMMAND QuantumTrain2Tests)
+    add_executable(QuantumSupports2Tests ${PROJECT_SOURCE_DIR}/tests/Supports2Tests.cpp)
+    target_link_libraries(QuantumSupports2Tests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.Supports2 COMMAND QuantumSupports2Tests)
+    set_tests_properties(QuantumApplication.Supports2 PROPERTIES LABELS "supports;infrastructure;appearance;history;uv")
+    add_executable(QuantumRideHardwareAuthoringTests ${PROJECT_SOURCE_DIR}/tests/RideHardwareAuthoringTests.cpp)
+    target_link_libraries(QuantumRideHardwareAuthoringTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.RideHardwareAuthoring COMMAND QuantumRideHardwareAuthoringTests)
+    add_executable(QuantumApplicationServiceTests ${PROJECT_SOURCE_DIR}/tests/ApplicationServiceTests.cpp)
+    target_link_libraries(QuantumApplicationServiceTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.Service COMMAND QuantumApplicationServiceTests)
+    add_executable(QuantumTimelineAuthoringTests ${PROJECT_SOURCE_DIR}/tests/TimelineAuthoringTests.cpp)
+    target_link_libraries(QuantumTimelineAuthoringTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TimelineAuthoring COMMAND QuantumTimelineAuthoringTests)
+    add_executable(QuantumSupportsWorkspaceTests ${PROJECT_SOURCE_DIR}/tests/SupportsWorkspaceTests.cpp)
+    target_link_libraries(QuantumSupportsWorkspaceTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.SupportsWorkspace COMMAND QuantumSupportsWorkspaceTests)
+    add_executable(QuantumTrackPlacementTests ${PROJECT_SOURCE_DIR}/tests/TrackPlacementTests.cpp)
+    target_link_libraries(QuantumTrackPlacementTests PRIVATE QuantumApplication)
+    add_test(NAME QuantumApplication.TrackPlacement COMMAND QuantumTrackPlacementTests
+        "${PROJECT_SOURCE_DIR}/smoke-tests/modern-steel-validation.quantum")
+endif()
+
+if(QUANTUM_ENABLE_HYBRID_EDITOR)
+    add_subdirectory(native)
+endif()
+
+if(QUANTUM_ENABLE_EDITOR)
 add_executable(
     QUANTUM
     src/main.cpp
-    src/CenterlineVisualization.cpp
-    src/SupportPicking.cpp
     src/SupportNodeManipulation.cpp
-    src/SupportVisualization.cpp
     src/CoasterSetupUi.cpp
-    src/DocumentHistory.cpp
-    src/DocumentState.cpp
     src/EditorIcons.cpp
     src/EditorStyle.cpp
     src/EditorUi.cpp
+    src/EditorUiVulkan.cpp
     src/EditorUiCommands.cpp
     src/EditorUiTrain.cpp
+    src/EditorUiTrainConfiguration.cpp
+    src/EditorUiOperations.cpp
     src/EditorUiPerformanceTelemetry.cpp
     src/EditorUiSimulationTelemetry.cpp
     src/EditorUiSupportAppearance.cpp
     src/PlatformDialogs.cpp
     src/PreviewSmoke.cpp
-    src/RegionSummary.cpp
     src/ReadmeCapture.cpp
     src/ReadmeCaptureRunner.cpp
-    src/RiderLoadDiagnostics.cpp
     src/RigidBodyMechanismProof.cpp
-    src/SimulationPreview.cpp
-    src/TrainMeshPresentation.cpp
-    src/TransitionEditorModel.cpp
-    src/TrackStylePresentation.cpp
-    src/ViewportCamera.cpp
     src/ViewportPicking.cpp
-    src/ViewportTrackAnchors.cpp
     include/quantum/editor/AuthoredTrackEditTransaction.hpp
     include/quantum/editor/CenterlineVisualization.hpp
     include/quantum/editor/SupportPicking.hpp
@@ -50,6 +113,7 @@ add_executable(
     include/quantum/editor/RiderLoadDiagnostics.hpp
     include/quantum/editor/RigidBodyMechanismProof.hpp
     include/quantum/editor/SimulationPreview.hpp
+    include/quantum/editor/SimulationDynamicsDiagnostics.hpp
     include/quantum/editor/TrainMeshPresentation.hpp
     include/quantum/editor/TransitionEditorModel.hpp
     include/quantum/editor/TrainPreviewInspection.hpp
@@ -81,6 +145,7 @@ target_link_libraries(
     QUANTUM
     PRIVATE
         Quantum::Engine
+        QuantumApplication
         Quantum::Core
         Quantum::Audio
         SDL3::SDL3
@@ -190,6 +255,15 @@ add_custom_command(
 add_custom_target(QUANTUMTrackAssets ALL
     DEPENDS "${quantum_track_asset_destination}")
 add_dependencies(QUANTUM QUANTUMTrackAssets)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/assets/track/components/" DESTINATION assets/track/components)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/assets/track/catalog/" DESTINATION assets/track/catalog)
+
+add_custom_target(QUANTUMNumberedTrackAssets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/assets/track"
+        "$<TARGET_FILE_DIR:QUANTUM>/assets/track"
+    VERBATIM)
+add_dependencies(QUANTUMNumberedTrackAssets QUANTUMTrackAssets)
+add_dependencies(QUANTUM QUANTUMNumberedTrackAssets)
 
 set(quantum_mechanical_asset_files
     rotating-arm-placeholder.glb
@@ -439,4 +513,5 @@ if(WIN32)
         DESTINATION "."
         COMPONENT Runtime
     )
+endif()
 endif()

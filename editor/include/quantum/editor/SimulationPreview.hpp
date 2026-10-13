@@ -2,9 +2,11 @@
 
 #include <quantum/coaster/AuthoredTrack.hpp>
 #include <quantum/editor/TrainPreviewInspection.hpp>
+#include <quantum/editor/SimulationDynamicsDiagnostics.hpp>
 #include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/physics/TrainPhysics.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
+#include <quantum/physics/RideOperations.hpp>
 #include <quantum/physics/gpu/GpuPhysicsContext.hpp>
 #include <quantum/renderer/Renderer.hpp>
 
@@ -99,8 +101,11 @@ namespace quantum::editor
         // Device-only document edits refresh operational inputs without
         // recompiling canonical geometry or uploading track buffers.
         void setTrackDevices(const coaster::TrackDeviceCollection& devices);
+        [[nodiscard]] const physics::RideOperations& operations() const noexcept { return operations_; }
+        void hardwareCommand(coaster::TrackDeviceId id, physics::HardwareCommand command, double value = 0, std::uint64_t target = 0);
         [[nodiscard]] const physics::TrackDeviceForceResult&
             lastDeviceForces() const noexcept;
+        [[nodiscard]] const SimulationDynamicsDiagnostics& dynamicsDiagnostics() const noexcept { return dynamicsDiagnostics_; }
 
         void play() noexcept;
         void pause() noexcept;
@@ -125,6 +130,9 @@ namespace quantum::editor
         [[nodiscard]] std::span<const renderer::StaticMeshInstance> meshInstances()
             const noexcept;
         void setPhysicsDiagnosticsVisible(bool visible);
+        // Train workspace engineering overlays; selection is a stable authored ID.
+        // Bits: bounds=1, bogies=2, hitches/connectors=4, loaded COG=8, frame=16.
+        void setTrainInspection(bool active, std::uint64_t selectedCarId, std::uint32_t overlays = 31);
         [[nodiscard]] const SimulationPreviewFrameTelemetry& frameTelemetry()
             const noexcept;
 
@@ -165,13 +173,16 @@ namespace quantum::editor
     private:
         void setUnavailable(std::string error) noexcept;
         void rebuildVertices();
+        void refreshDynamicsDiagnostics();
 
         std::optional<physics::CompiledPhysicsTrack> compiledTrack_;
         physics::PhysicsEnvironment environment_;
         physics::TrainDefinition trainDefinition_;
         std::vector<coaster::TrackDevice> trackDevices_;
         std::vector<physics::TrackDeviceRuntimeState> deviceRuntimeStates_;
+        physics::RideOperations operations_;
         physics::TrackDeviceForceResult lastDeviceForces_;
+        SimulationDynamicsDiagnostics dynamicsDiagnostics_;
         std::optional<physics::TrainDynamicsState> initialState_;
         std::optional<physics::TrainDynamicsState> dynamicsState_;
         std::optional<physics::TrainDynamicsState> previousState_;
@@ -183,6 +194,9 @@ namespace quantum::editor
         TrainVisualConsist visualConsist_;
         std::vector<renderer::StaticMeshInstance> meshInstances_;
         bool physicsDiagnosticsVisible_ = true;
+        bool trainInspectionActive_ = false;
+        std::uint64_t selectedCarId_ = 0;
+        std::uint32_t trainOverlays_ = 31;
         PlaybackState playbackState_ = PlaybackState::Stopped;
         double accumulatorSeconds_ = 0.0;
         double renderAlpha_ = 0.0;

@@ -1,0 +1,1250 @@
+{
+    "coasterSetup": {
+        "carsPerTrain": 4,
+        "heartline": {
+            "enabled": true,
+            "offsetMeters": 1.4
+        },
+        "options": [
+            {
+                "choice": "layout-1",
+                "optionId": "train-layout"
+            }
+        ],
+        "styleId": "placeholder-style-1"
+    },
+    "formatVersion": 1,
+    "ground": {
+        "albedoTexture": "",
+        "baseColor": [
+            0.4399999976158142,
+            0.4699999988079071,
+            0.46000000834465027,
+            1.0
+        ],
+        "elevation": 0.0,
+        "enabled": true,
+        "metallic": 0.0,
+        "normalTexture": "",
+        "roughness": 0.9200000166893005,
+        "roughnessTexture": "",
+        "sizeX": 1200.0,
+        "sizeY": 1200.0,
+        "uvTiling": [
+            120.0,
+            120.0
+        ]
+    },
+    "layoutMode": "Shuttle",
+    "physicalSettings": {
+        "gravityAcceleration": 9.80665,
+        "initialSpeed": 20.0,
+        "metersPerCoordinateUnit": 1.0
+    },
+    "sections": [
+        {
+            "kind": "RateProfiles",
+            "length": 70.0,
+            "rateProfiles": {
+                "pitch": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 70.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                },
+                "roll": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 70.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                },
+                "yaw": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 70.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "kind": "Geometry",
+            "length": 45.0,
+            "planarArc": {
+                "bankChange": 0.0,
+                "planeTilt": 0.0,
+                "radius": 25.0,
+                "sweptAngle": 1.8
+            }
+        },
+        {
+            "kind": "RateProfiles",
+            "length": 100.0,
+            "rateProfiles": {
+                "pitch": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 100.0,
+                                "type": "Linear",
+                                "valueBegin": 0.04,
+                                "valueEnd": 0.04
+                            }
+                        }
+                    ]
+                },
+                "roll": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 100.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                },
+                "yaw": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 100.0,
+                                "type": "Linear",
+                                "valueBegin": 0.0,
+                                "valueEnd": 0.0
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "startPose": {
+        "orientation": {
+            "w": 1.0,
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        },
+        "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 50.0
+        }
+    },
+    "supports": {
+        "nextStructureId": 1,
+        "structures": []
+    },
+    "trackConfigurationId": "truss-200",
+    "trackDevices": {
+        "devices": [],
+        "infrastructure": [],
+        "nextId": 1,
+        "nextInfrastructureId": 1,
+        "schemaVersion": 2
+    },
+    "trackStyle": {
+        "construction": {
+            "components": [
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        1.0,
+                        0.15,
+                        0.15
+                    ],
+                    "displayName": "Running Left",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "id": "running-left",
+                    "material": {
+                        "color": [
+                            0.6200000047683716,
+                            0.6800000071525574,
+                            0.699999988079071,
+                            1.0
+                        ],
+                        "metallic": 0.800000011920929,
+                        "roughness": 0.23999999463558197
+                    },
+                    "materialSlot": "running",
+                    "offset": [
+                        0.0,
+                        -0.625,
+                        0.0
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "continuous",
+                    "provider": "tube",
+                    "radialSegments": 12,
+                    "required": true,
+                    "runningSurface": true,
+                    "spacing": 1.0,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        1.0,
+                        0.15,
+                        0.15
+                    ],
+                    "displayName": "Running Right",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "id": "running-right",
+                    "material": {
+                        "color": [
+                            0.6200000047683716,
+                            0.6800000071525574,
+                            0.699999988079071,
+                            1.0
+                        ],
+                        "metallic": 0.800000011920929,
+                        "roughness": 0.23999999463558197
+                    },
+                    "materialSlot": "running",
+                    "offset": [
+                        0.0,
+                        0.625,
+                        0.0
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "continuous",
+                    "provider": "tube",
+                    "radialSegments": 12,
+                    "required": true,
+                    "runningSurface": true,
+                    "spacing": 1.0,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        1.0,
+                        0.18,
+                        0.18
+                    ],
+                    "displayName": "Upper left chord",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "id": "chord-0",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        -0.42,
+                        -0.24
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "continuous",
+                    "provider": "tube",
+                    "radialSegments": 12,
+                    "required": true,
+                    "runningSurface": false,
+                    "spacing": 1.0,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        1.0,
+                        0.18,
+                        0.18
+                    ],
+                    "displayName": "Upper right chord",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "id": "chord-1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        0.42,
+                        -0.24
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "continuous",
+                    "provider": "tube",
+                    "radialSegments": 12,
+                    "required": true,
+                    "runningSurface": false,
+                    "spacing": 1.0,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        1.0,
+                        0.18,
+                        0.18
+                    ],
+                    "displayName": "Lower central spine",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "id": "chord-2",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        0.0,
+                        -0.82
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "continuous",
+                    "provider": "tube",
+                    "radialSegments": 12,
+                    "required": true,
+                    "runningSurface": false,
+                    "spacing": 1.0,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.12,
+                        0.075,
+                        0.075
+                    ],
+                    "displayName": "Left rail connection",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        -0.42,
+                        -0.24
+                    ],
+                    "id": "rail-connection--1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        -0.625,
+                        0.0
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "member",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.12,
+                        0.06,
+                        0.06
+                    ],
+                    "displayName": "Left bay brace",
+                    "enabled": true,
+                    "endOffset": [
+                        1.25,
+                        0.0,
+                        -0.82
+                    ],
+                    "id": "bay-brace--1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        -0.625,
+                        0.0
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "member",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.12,
+                        0.075,
+                        0.075
+                    ],
+                    "displayName": "Right rail connection",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.42,
+                        -0.24
+                    ],
+                    "id": "rail-connection-1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        0.625,
+                        0.0
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "member",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.12,
+                        0.06,
+                        0.06
+                    ],
+                    "displayName": "Right bay brace",
+                    "enabled": true,
+                    "endOffset": [
+                        1.25,
+                        0.0,
+                        -0.82
+                    ],
+                    "id": "bay-brace-1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        0.625,
+                        0.0
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "member",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.13,
+                        1.4,
+                        0.1
+                    ],
+                    "displayName": "Cross Tie",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "id": "cross-tie",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        0.0,
+                        -0.07
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "box",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.12,
+                        0.075,
+                        0.075
+                    ],
+                    "displayName": "Left chord connector",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        -0.82
+                    ],
+                    "id": "web-post--1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        -0.42,
+                        -0.24
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "member",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                },
+                {
+                    "asset": "",
+                    "assetLength": 1.0,
+                    "assetScale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "dimensions": [
+                        0.12,
+                        0.075,
+                        0.075
+                    ],
+                    "displayName": "Right chord connector",
+                    "enabled": true,
+                    "endOffset": [
+                        0.0,
+                        0.0,
+                        -0.82
+                    ],
+                    "id": "web-post-1",
+                    "material": {
+                        "color": [
+                            0.07999999821186066,
+                            0.5199999809265137,
+                            0.5699999928474426,
+                            1.0
+                        ],
+                        "metallic": 0.25,
+                        "roughness": 0.4000000059604645
+                    },
+                    "materialSlot": "structure",
+                    "offset": [
+                        0.0,
+                        0.42,
+                        -0.24
+                    ],
+                    "phase": 0.0,
+                    "placeholder": false,
+                    "placement": "repeated",
+                    "provider": "member",
+                    "radialSegments": 12,
+                    "required": false,
+                    "runningSurface": false,
+                    "spacing": 1.25,
+                    "useAssetMaterials": true
+                }
+            ],
+            "familyId": "truss",
+            "intervals": [],
+            "nextIntervalId": 1,
+            "schemaVersion": 1,
+            "supportAttachment": [
+                0.0,
+                0.0,
+                -0.91
+            ],
+            "typeId": "truss-200",
+            "variantId": "",
+            "variants": []
+        },
+        "geometryFamily": "Components",
+        "name": "Truss-200",
+        "railCount": 2,
+        "railMaterial": {
+            "baseColor": {
+                "a": 1.0,
+                "b": 0.47999998927116394,
+                "g": 0.4000000059604645,
+                "r": 0.3199999928474426
+            },
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.41999998688697815
+        },
+        "railOffsets": [
+            {
+                "lateral": -0.625,
+                "vertical": 0.0
+            },
+            {
+                "lateral": 0.625,
+                "vertical": 0.0
+            }
+        ],
+        "railRadialSegments": 12,
+        "railRadius": 0.065,
+        "railsVisible": true,
+        "repeatingHardware": [],
+        "spine": {
+            "dimensions": {
+                "x": 0.0,
+                "y": 0.0
+            },
+            "enabled": false,
+            "material": {
+                "baseColor": {
+                    "a": 1.0,
+                    "b": 0.47999998927116394,
+                    "g": 0.4000000059604645,
+                    "r": 0.3199999928474426
+                },
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.41999998688697815
+            },
+            "offset": {
+                "lateral": 0.0,
+                "vertical": 0.0
+            },
+            "radialSegments": 12,
+            "type": "None"
+        },
+        "visible": true
+    },
+    "train": {
+        "cars": [
+            {
+                "connectorLengthMeters": 0.5,
+                "id": 1,
+                "name": "Lead",
+                "physical": {
+                    "aerodynamicCenterMeters": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "bodyDimensionsMeters": [
+                        4.0,
+                        1.35,
+                        1.4
+                    ],
+                    "bogies": [
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                1.15,
+                                0.0,
+                                0.0
+                            ]
+                        },
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                -1.15,
+                                0.0,
+                                0.0
+                            ]
+                        }
+                    ],
+                    "dragAreaSquareMeters": 0.0,
+                    "dryCogMeters": [
+                        0.0,
+                        0.0,
+                        0.55
+                    ],
+                    "dryMassKilograms": 800.0,
+                    "frontHitchMeters": [
+                        2.0,
+                        0.0,
+                        0.2
+                    ],
+                    "inertiaKgM2": [
+                        [
+                            252.16666666666666,
+                            0.0,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            1197.3333333333335,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            0.0,
+                            1188.1666666666667
+                        ]
+                    ],
+                    "loadCogMeters": [
+                        0.0,
+                        0.0,
+                        0.9
+                    ],
+                    "loadMassKilograms": 200.0,
+                    "rearHitchMeters": [
+                        -2.0,
+                        0.0,
+                        0.2
+                    ]
+                },
+                "role": "Lead",
+                "visualAsset": "assets://train/placeholder-lead-car-shell.glb",
+                "visualRotationDegrees": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "visualTranslationMeters": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            {
+                "connectorLengthMeters": 0.5,
+                "id": 2,
+                "name": "Middle",
+                "physical": {
+                    "aerodynamicCenterMeters": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "bodyDimensionsMeters": [
+                        4.0,
+                        1.35,
+                        1.4
+                    ],
+                    "bogies": [
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                1.15,
+                                0.0,
+                                0.0
+                            ]
+                        },
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                -1.15,
+                                0.0,
+                                0.0
+                            ]
+                        }
+                    ],
+                    "dragAreaSquareMeters": 0.0,
+                    "dryCogMeters": [
+                        0.0,
+                        0.0,
+                        0.55
+                    ],
+                    "dryMassKilograms": 800.0,
+                    "frontHitchMeters": [
+                        2.0,
+                        0.0,
+                        0.2
+                    ],
+                    "inertiaKgM2": [
+                        [
+                            252.16666666666666,
+                            0.0,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            1197.3333333333335,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            0.0,
+                            1188.1666666666667
+                        ]
+                    ],
+                    "loadCogMeters": [
+                        0.0,
+                        0.0,
+                        0.9
+                    ],
+                    "loadMassKilograms": 200.0,
+                    "rearHitchMeters": [
+                        -2.0,
+                        0.0,
+                        0.2
+                    ]
+                },
+                "role": "Middle",
+                "visualAsset": "assets://train/placeholder-car-shell.glb",
+                "visualRotationDegrees": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "visualTranslationMeters": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            {
+                "connectorLengthMeters": 0.5,
+                "id": 3,
+                "name": "Middle",
+                "physical": {
+                    "aerodynamicCenterMeters": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "bodyDimensionsMeters": [
+                        4.0,
+                        1.35,
+                        1.4
+                    ],
+                    "bogies": [
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                1.15,
+                                0.0,
+                                0.0
+                            ]
+                        },
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                -1.15,
+                                0.0,
+                                0.0
+                            ]
+                        }
+                    ],
+                    "dragAreaSquareMeters": 0.0,
+                    "dryCogMeters": [
+                        0.0,
+                        0.0,
+                        0.55
+                    ],
+                    "dryMassKilograms": 800.0,
+                    "frontHitchMeters": [
+                        2.0,
+                        0.0,
+                        0.2
+                    ],
+                    "inertiaKgM2": [
+                        [
+                            252.16666666666666,
+                            0.0,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            1197.3333333333335,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            0.0,
+                            1188.1666666666667
+                        ]
+                    ],
+                    "loadCogMeters": [
+                        0.0,
+                        0.0,
+                        0.9
+                    ],
+                    "loadMassKilograms": 200.0,
+                    "rearHitchMeters": [
+                        -2.0,
+                        0.0,
+                        0.2
+                    ]
+                },
+                "role": "Middle",
+                "visualAsset": "assets://train/placeholder-car-shell.glb",
+                "visualRotationDegrees": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "visualTranslationMeters": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            {
+                "connectorLengthMeters": 0.5,
+                "id": 4,
+                "name": "Rear",
+                "physical": {
+                    "aerodynamicCenterMeters": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "bodyDimensionsMeters": [
+                        4.0,
+                        1.35,
+                        1.4
+                    ],
+                    "bogies": [
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                1.15,
+                                0.0,
+                                0.0
+                            ]
+                        },
+                        {
+                            "contacts": [],
+                            "positionMeters": [
+                                -1.15,
+                                0.0,
+                                0.0
+                            ]
+                        }
+                    ],
+                    "dragAreaSquareMeters": 0.0,
+                    "dryCogMeters": [
+                        0.0,
+                        0.0,
+                        0.55
+                    ],
+                    "dryMassKilograms": 800.0,
+                    "frontHitchMeters": [
+                        2.0,
+                        0.0,
+                        0.2
+                    ],
+                    "inertiaKgM2": [
+                        [
+                            252.16666666666666,
+                            0.0,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            1197.3333333333335,
+                            0.0
+                        ],
+                        [
+                            0.0,
+                            0.0,
+                            1188.1666666666667
+                        ]
+                    ],
+                    "loadCogMeters": [
+                        0.0,
+                        0.0,
+                        0.9
+                    ],
+                    "loadMassKilograms": 200.0,
+                    "rearHitchMeters": [
+                        -2.0,
+                        0.0,
+                        0.2
+                    ]
+                },
+                "role": "Rear",
+                "visualAsset": "assets://train/placeholder-rear-car-shell.glb",
+                "visualRotationDegrees": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "visualTranslationMeters": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            }
+        ],
+        "defaultConnectorLengthMeters": 0.5,
+        "defaultPhysical": {
+            "aerodynamicCenterMeters": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "bodyDimensionsMeters": [
+                4.0,
+                1.35,
+                1.4
+            ],
+            "bogies": [
+                {
+                    "contacts": [],
+                    "positionMeters": [
+                        1.15,
+                        0.0,
+                        0.0
+                    ]
+                },
+                {
+                    "contacts": [],
+                    "positionMeters": [
+                        -1.15,
+                        0.0,
+                        0.0
+                    ]
+                }
+            ],
+            "dragAreaSquareMeters": 0.0,
+            "dryCogMeters": [
+                0.0,
+                0.0,
+                0.55
+            ],
+            "dryMassKilograms": 800.0,
+            "frontHitchMeters": [
+                2.0,
+                0.0,
+                0.2
+            ],
+            "inertiaKgM2": [
+                [
+                    252.16666666666666,
+                    0.0,
+                    0.0
+                ],
+                [
+                    0.0,
+                    1197.3333333333335,
+                    0.0
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1188.1666666666667
+                ]
+            ],
+            "loadCogMeters": [
+                0.0,
+                0.0,
+                0.9
+            ],
+            "loadMassKilograms": 200.0,
+            "rearHitchMeters": [
+                -2.0,
+                0.0,
+                0.2
+            ]
+        },
+        "name": "Train 1",
+        "nextCarId": 5,
+        "resistance": {
+            "airDensity": 1.225,
+            "dragAreaSquareMeters": 2.5,
+            "linearCoefficient": 50.0,
+            "mechanicalForceNewtons": 500.0,
+            "rollingCoefficient": 0.01
+        },
+        "schemaVersion": 2,
+        "trainId": 1
+    }
+}

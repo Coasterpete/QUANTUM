@@ -1,0 +1,136 @@
+#pragma once
+#include <quantum/physics/RideOperations.hpp>
+#include "QuantumNative.h"
+#include <quantum/editor/ViewportTransformHandles.hpp>
+#include <quantum/editor/CenterlineVisualization.hpp>
+#include <quantum/editor/ViewportCamera.hpp>
+#include <quantum/editor/SupportVisualization.hpp>
+#include <quantum/editor/InfrastructurePresentation.hpp>
+#include <quantum/editor/TrainMeshPresentation.hpp>
+#include <quantum/renderer/VulkanContext.hpp>
+#include <imgui.h>
+#include <thread>
+
+// One concrete hosted presenter; the existing renderer still owns every GPU
+// resource. This object owns its SDL wrapper and ImGui texture registration.
+class NativeViewport
+{
+public:
+    NativeViewport() = default;
+    ~NativeViewport();
+    NativeViewport(const NativeViewport&) = delete;
+    NativeViewport& operator=(const NativeViewport&) = delete;
+    void open(uint32_t platform, uint64_t window,
+        const quantum::editor::CenterlineVisualization& geometry);
+    bool frame(uint32_t width, uint32_t height,
+        const quantum::editor::CenterlineVisualization* geometry,
+        const quantum::editor::SupportVisualization* supports,
+        const quantum::coaster::GroundAppearance* ground, bool frameTrack);
+    void captureTrain(uint64_t revision, uint64_t generation,
+        std::span<const quantum::renderer::LineVertex> train,
+        std::span<const quantum::renderer::StaticMeshInstance> meshes);
+    void captureTrainAuthoring(uint64_t revision, bool active, uint64_t selected, uint32_t overlays,
+        const quantum::coaster::TrainConfiguration& train, const quantum::physics::TrainPose* pose, double metersPerUnit);
+    [[nodiscard]] bool trainAssetFailed() const noexcept { return trainAssetFailed_; }
+    struct TrainPickIntent { uint64_t revision, car; };
+    [[nodiscard]] std::optional<TrainPickIntent> takeTrainPick() noexcept;
+    void captureDevice(uint64_t revision, uint64_t selected,
+        const quantum::coaster::AuthoredTrack& track,
+        const quantum::editor::CenterlineVisualization& geometry,
+        const quantum::physics::RideOperations& operations, uint64_t infrastructureSelection = 0);
+    struct SupportPickIntent
+    {
+        uint64_t revision, selectionRevision;
+        std::optional<quantum::editor::SupportSelection> selection;
+    };
+    void captureSupports(uint64_t revision, uint64_t selectionRevision, bool active,
+        std::optional<quantum::editor::SupportSelection> selection,
+        const quantum::coaster::SupportCollection& supports,
+        const quantum::editor::SupportVisualization& visualization);
+    [[nodiscard]] std::optional<SupportPickIntent> takeSupportPick() noexcept;
+    struct InfrastructurePickIntent { uint64_t revision, id; bool access; };
+    [[nodiscard]] std::optional<InfrastructurePickIntent> takeInfrastructurePick() noexcept;
+    void pickInfrastructureAt(double x, double y);
+    void input(uint32_t action, double x, double y, double z, double value);
+    void requireOwnerThread() const;
+    uint32_t takeShortcuts() noexcept;
+    void setPresentation(uint32_t mode);
+    struct TrackStartPickIntent { uint64_t revision, selectionRevision; };
+    void capturePlacement(uint64_t revision, uint64_t selectionRevision, uint64_t presentationRevision,
+        bool active, bool selected, quantum::editor::StartPoseTransformMode mode,
+        const quantum::coaster::AuthoredStartPose& authored,
+        std::optional<quantum::coaster::AuthoredStartPose> candidate, double coordinateScale,
+        const quantum::editor::CenterlineVisualization& geometry);
+    [[nodiscard]] std::optional<TrackStartPickIntent> takeTrackStartPick() noexcept;
+    [[nodiscard]] QnTransformIntent takeTransformIntent() noexcept;
+    void cancelTransformInput() noexcept;
+private:
+    void close() noexcept;
+    static void retireTexture(void* self) noexcept;
+    void drawSupportOverlay();
+    void frameSupportSelection();
+    void drawTrainOverlay();
+    void frameTrain(uint32_t action);
+    void pickTrainAt(double x, double y);
+    void drawPlacementOverlay();
+    void placementPointer(uint32_t phase, const glm::dvec2& pointer, double pixelScale = 1);
+    void queueTransform(uint32_t phase, const glm::dvec2& pointer);
+    [[nodiscard]] std::optional<quantum::editor::SupportSelection> pickSupportAt(
+        double normalizedX, double normalizedY, double pixelScale = 1) const;
+    SDL_Window* window_ = nullptr;
+    ImGuiContext* imgui_ = nullptr;
+    bool video_ = false;
+    bool backend_ = false;
+    bool hosted_ = false;
+    uint32_t shortcuts_ = 0;
+    VkDescriptorSet texture_ = VK_NULL_HANDLE;
+    quantum::renderer::VulkanContext renderer_;
+    quantum::editor::ViewportCamera camera_;
+    std::thread::id owner_;
+    uint32_t width_ = 800, height_ = 500;
+    std::uint64_t swapchainGeneration_ = 0;
+    uint64_t trainRevision_ = 0, trainGeneration_ = 0;
+    bool trainDirty_ = false;
+    std::vector<quantum::renderer::LineVertex> train_;
+    std::vector<quantum::renderer::LineVertex> device_, lines_;
+    double deviceMechanismPosition_ = -1;
+    std::string deviceMechanismState_;
+    uint64_t deviceRevision_ = 0, selectedDevice_ = 0;
+    uint64_t infrastructureRevision_ = 0, selectedInfrastructure_ = 0;
+    std::optional<InfrastructurePickIntent> infrastructurePick_;
+    bool infrastructureDirty_ = false;
+    std::vector<quantum::coaster::SupportSolidPresentation> infrastructure_, access_;
+    std::vector<quantum::editor::InfrastructureSolid> infrastructurePicking_, accessPicking_;
+    std::vector<std::pair<uint64_t,double>> accessFractions_, nextAccessFractions_;
+    std::vector<quantum::renderer::StaticMeshInstance> meshes_;
+    std::vector<quantum::editor::TrainPreviewCar> previewCars_;
+    bool trainActive_ = false;
+    bool trainAssetFailed_ = false;
+    uint64_t trainAuthoringRevision_ = 0, selectedCar_ = 0;
+    uint32_t trainOverlays_ = 31;
+    std::optional<TrainPickIntent> trainPick_;
+    quantum::editor::SupportVisualization supportPicking_;
+    std::vector<uint32_t> supportAnchors_;
+    std::vector<std::pair<glm::dvec3, quantum::editor::SupportSelection>> supportConnections_;
+    std::optional<quantum::editor::SupportSelection> selectedSupport_, hoveredSupport_;
+    std::optional<SupportPickIntent> supportPick_;
+    uint64_t supportRevision_ = 0, supportSelectionRevision_ = 0;
+    bool supportActive_ = false;
+    quantum::coaster::AuthoredStartPose displayedStartPose_;
+    uint64_t placementRevision_ = 0, placementSelectionRevision_ = 0, placementPresentationRevision_ = 0;
+    bool placementActive_ = true, startSelected_ = false, startHovered_ = false, placementPreview_ = false;
+    double coordinateScale_ = 1, pixelScale_ = 1;
+    quantum::editor::StartPoseTransformMode transformMode_ = quantum::editor::StartPoseTransformMode::Select;
+    std::optional<quantum::editor::StartPoseTransformAxis> hoveredAxis_;
+    std::optional<TrackStartPickIntent> startPick_;
+    struct PointerTransform
+    {
+        QnTransformIntent intent;
+        glm::dvec2 start, origin, direction;
+        double metersPerPixel, initialAngle;
+    };
+    std::optional<PointerTransform> pointerTransform_;
+    QnTransformIntent transformIntent_{};
+    uint64_t nextTransformIntent_ = 1;
+    std::vector<quantum::renderer::LineVertex> placementGhost_;
+};

@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.HardwareRuntimePane" x:DataType="local:EditorViewModel">
+  <Border Classes="runtime" Padding="4"><ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="16" Spacing="10">
+      <TextBlock Text="RUNTIME · READ ONLY" Classes="heading"/>
+      <TextBlock Text="{Binding SelectedDevice.Name}" FontSize="{DynamicResource QuantumSectionSize}"/>
+      <TextBlock Text="{Binding HardwareTelemetry}" Classes="technical runtime" TextWrapping="Wrap"/>
+      <WrapPanel IsVisible="{Binding IsStationHardware}">
+        <Button Content="Request dispatch" Classes="primary" Command="{Binding DispatchCommand}"/>
+      </WrapPanel>
+      <StackPanel IsVisible="{Binding IsTransferHardware}" Spacing="6">
+        <TextBlock Text="Move target"/>
+        <ComboBox ItemsSource="{Binding TransferAlignments}" SelectedItem="{Binding SelectedAlignment}"/>
+        <Button Content="Move to destination" Command="{Binding TransferMoveCommand}"/>
+      </StackPanel>
+      <WrapPanel IsVisible="{Binding IsAccessHardware}">
+        <Button Content="Unlock" Command="{Binding UnlockGateCommand}"/>
+        <Button Content="Open" Command="{Binding OpenGateCommand}"/>
+        <Button Content="Close" Command="{Binding CloseGateCommand}"/>
+        <Button Content="Lock" Command="{Binding LockGateCommand}"/>
+      </WrapPanel>
+      <WrapPanel IsVisible="{Binding HasLiftHardware}">
+        <Button Content="Set available" Command="{Binding HardwareAvailableCommand}"/>
+        <Button Content="Set unavailable" Command="{Binding HardwareUnavailableCommand}"/>
+      </WrapPanel>
+      <TextBlock Text="Runtime commands affect the current preview. Reset restores authored initial state." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
+    </StackPanel>
+  </ScrollViewer></Border>
+</UserControl>

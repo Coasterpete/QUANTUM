@@ -14,6 +14,23 @@ namespace quantum::editor
         std::optional<TrainPreviewInspection> inspection)
     {
         trainPreviewInspection_ = std::move(inspection);
+        trainPreviewFramePending_ = true;
+    }
+
+    void EditorUi::setTrainPreviewCars(const std::span<const TrainPreviewCar> cars)
+    {
+        trainPreviewCars_.assign(cars.begin(), cars.end());
+    }
+
+    void EditorUi::frameTrainPreview(const bool selectedOnly)
+    {
+        const auto bounds = trainPreviewBounds(trainPreviewCars_, selectedOnly
+            ? std::optional<std::uint64_t>{trainSelectedCar_} : std::nullopt);
+        if (bounds && viewportCamera_.frameBounds(bounds->first, bounds->second, viewportAspectRatio_))
+        {
+            trainPreviewFramePending_ = false;
+            initialViewportFramePending_ = false;
+        }
     }
 
     namespace
@@ -64,21 +81,7 @@ namespace quantum::editor
         if (ImGui::Begin("Train Configuration"))
         {
             editorPaneHeading("TRAIN CONFIGURATION", "Authored consist / saved in this document", fonts_);
-            editorSectionHeading("Consist", fonts_);
-            if (authoredTrack_ != nullptr)
-            {
-                // Borrow the committed setup or this frame's shared candidate.
-                // Application still accepts it through document transactions.
-                auto draft = pendingCoasterSetupEdit_.value_or(
-                    authoredTrack_->coasterSetup());
-                ImGui::SetNextItemWidth(std::max(80.0F * editorPresentationScale(),
-                    ImGui::GetContentRegionAvail().x
-                    - ImGui::CalcTextSize("Cars per train").x
-                    - ImGui::GetStyle().ItemInnerSpacing.x));
-                if (drawCarsPerTrainInput(draft))
-                    pendingCoasterSetupEdit_ = std::move(draft);
-                editorSecondaryTextWrapped("Saved in Coaster Setup. Document Undo/Redo.");
-            }
+            drawTrainConfigurationEditor();
             ImGui::Spacing();
             if (ImGui::Button("Open Coaster Setup"))
             {
@@ -107,7 +110,6 @@ namespace quantum::editor
                     ImGui::TextWrapped("%s", simulationError_.c_str());
             }
             ImGui::Spacing();
-            editorSecondaryTextWrapped("One backend car definition is repeated across the consist.");
         }
         ImGui::End();
 
@@ -122,21 +124,29 @@ namespace quantum::editor
             else
             {
                 const auto& inspection = *trainPreviewInspection_;
-                const auto& car = inspection.repeatedCar.car;
-                const auto& loadout = inspection.repeatedCar.loadout;
+                int selectedCar = trainSummaryCarIndex_;
+                if (!inspection.cars.empty())
+                {
+                    selectedCar = std::clamp(selectedCar, 0, static_cast<int>(inspection.cars.size() - 1));
+                    ImGui::SliderInt("Inspect car (front = 0)", &selectedCar, 0, static_cast<int>(inspection.cars.size() - 1));
+                    trainSummaryCarIndex_ = selectedCar;
+                }
+                const auto& physical = inspection.cars.empty() ? inspection.repeatedCar : inspection.cars[selectedCar];
+                const auto& car = physical.car;
+                const auto& loadout = physical.loadout;
                 if (beginTrainValues("Resolved summary"))
                 {
                     trainNumber(fonts_, "Cars", static_cast<double>(inspection.carCount), "cars", 0);
-                    trainNumber(fonts_, "Loaded mass / car", inspection.loadedCarMassKilograms, "kg", 1);
+                    trainNumber(fonts_, "Loaded mass / car", physics::totalCarMassKilograms(car, loadout), "kg", 1);
                     trainNumber(fonts_, "Total train mass", inspection.totalTrainMassKilograms, "kg", 1);
                     if (inspection.connectorLengthMeters)
                         trainNumber(fonts_, "Connector length", *inspection.connectorLengthMeters, "m");
                     ImGui::EndTable();
                 }
                 ImGui::Spacing();
-                if (ImGui::TreeNode("Physical definition / backend defaults"))
+                if (ImGui::TreeNode("Selected physical car / authored values"))
                 {
-                    ImGui::TextDisabled("READ ONLY / not authored in this document");
+                    ImGui::TextDisabled("READ ONLY / authored in this document");
                     if (beginTrainValues("Physical defaults"))
                     {
                         trainNumber(fonts_, "Dry mass / car", car.dryMassKilograms, "kg", 1);
@@ -160,7 +170,7 @@ namespace quantum::editor
                         ImGui::EndTable();
                     }
                     editorSecondaryTextWrapped("Local axes: +X forward / +Y lateral / +Z up.");
-                    editorSecondaryTextWrapped("Style and restraint metadata do not yet select a physical car.");
+                    editorSecondaryTextWrapped("Role metadata does not change explicit physical values.");
                     ImGui::TreePop();
                 }
                 if (ImGui::TreeNode("Resistance / backend defaults"))
@@ -207,6 +217,11 @@ namespace quantum::editor
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Diagnostic car boxes, bogies and connectors. Right-drag: look; Alt+right-drag: orbit; middle-drag: pan; wheel: zoom.");
+        ImGui::SameLine();
+        if (ImGui::Button("Frame train")) frameTrainPreview();
+        ImGui::SameLine();
+        if (ImGui::Button("Frame car")) frameTrainPreview(true);
+        editorSecondaryTextWrapped("Click a car to select its physical envelope. Preview uses the accepted train; Apply publishes the draft.");
         ImGui::Spacing();
     }
 }

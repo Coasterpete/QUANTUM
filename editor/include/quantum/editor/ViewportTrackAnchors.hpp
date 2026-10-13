@@ -47,6 +47,13 @@ namespace quantum::editor
         double angleRadians
     );
 
+    // Display-only Z(yaw) * Y(pitch) * X(roll), in radians. Positive pitch
+    // turns +X toward -Z, matching native rider-local pitch. At the pitch
+    // singularity we display roll=0 and the equivalent yaw; storage stays q.
+    [[nodiscard]] glm::dvec3 startPoseAngles(const coaster::AuthoredStartPose& pose);
+    [[nodiscard]] coaster::AuthoredStartPose startPoseWithAngles(
+        const coaster::AuthoredStartPose& pose, const glm::dvec3& pitchYawRoll);
+
     enum class ViewportTrackAnchorKind
     {
         Start,

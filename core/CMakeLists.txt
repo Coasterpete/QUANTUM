@@ -1,5 +1,11 @@
 add_library(QuantumCore STATIC)
 
+file(READ "${PROJECT_SOURCE_DIR}/assets/track/catalog/numbered-families.json" QUANTUM_TRACK_CATALOG_JSON)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/assets/track/catalog/numbered-families.json")
+configure_file(src/TrackCatalogData.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/TrackCatalogData.hpp" @ONLY)
+target_include_directories(QuantumCore PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
 add_library(Quantum::Core ALIAS QuantumCore)
 
 target_sources(
@@ -16,15 +22,22 @@ target_sources(
         src/GroundAppearance.cpp
         src/TrackPhysicalSettings.cpp
         src/TrackConfiguration.cpp
+        src/TrackComponentsJson.cpp
         src/TrackStyle.cpp
+        src/RideHardware.cpp
+        src/RideHardwareJson.cpp
+        src/physics/RideOperations.cpp
         src/TrackDevices.cpp
         src/TrainConfiguration.cpp
+        src/TrainConfigurationJson.cpp
         src/BSplineCurve.cpp
         src/NurbsCurve.cpp
         src/PlanarArcRegion.cpp
         src/StaticMeshAsset.cpp
         src/SupportSolidGeometry.cpp
         src/Supports.cpp
+        src/SupportStyles.cpp
+        src/SupportFrameGenerator.cpp
         src/WoodenSupportGenerator.cpp
         src/physics/CarPose.cpp
         src/physics/DynamicContactPhysics.cpp
@@ -47,8 +60,12 @@ target_sources(
         include/quantum/coaster/GroundAppearance.hpp
         include/quantum/coaster/TrackGeneration.hpp
         include/quantum/coaster/TrackPhysicalSettings.hpp
+        include/quantum/coaster/TrackComponentDiagnostics.hpp
         include/quantum/coaster/TrackConfiguration.hpp
         include/quantum/coaster/TrackStyle.hpp
+        include/quantum/coaster/RideHardware.hpp
+        include/quantum/coaster/RideHardwareSerialization.hpp
+        include/quantum/physics/RideOperations.hpp
         include/quantum/coaster/TrackDevices.hpp
         include/quantum/coaster/TrainConfiguration.hpp
         include/quantum/coaster/PlanarArcRegion.hpp
@@ -73,6 +90,7 @@ target_sources(
         include/quantum/physics/CarPose.hpp
         include/quantum/physics/DynamicContactPhysics.hpp
         include/quantum/physics/TrainPhysics.hpp
+        include/quantum/physics/TrainDefinition.hpp
         include/quantum/physics/TrackDeviceForces.hpp
         include/quantum/physics/TrackFollower.hpp
 )

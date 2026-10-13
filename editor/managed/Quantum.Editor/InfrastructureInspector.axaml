@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:Quantum.Editor" x:Class="Quantum.Editor.InfrastructureInspector" x:DataType="local:EditorViewModel">
+  <StackPanel Spacing="8">
+    <TextBlock Classes="heading" Text="INFRASTRUCTURE · AUTHORED"/>
+    <StackPanel Spacing="6">
+      <TextBlock Text="Name"/>
+      <TextBox Text="{Binding InfrastructureName}"/>
+      <ComboBox SelectedIndex="{Binding InfrastructureKind}" HorizontalAlignment="Stretch">
+        <ComboBoxItem Content="Catwalk"/>
+        <ComboBoxItem Content="Platform"/>
+        <ComboBoxItem Content="Guardrail"/>
+        <ComboBoxItem Content="Stairs"/>
+        <ComboBoxItem Content="Landing"/>
+      </ComboBox>
+      <TextBlock Text="Start / end station · metres"/>
+      <TextBox Classes="numeric" Text="{Binding InfrastructureStart}"/>
+      <TextBox Classes="numeric" Text="{Binding InfrastructureEnd}"/>
+      <ComboBox SelectedIndex="{Binding InfrastructureSide}" HorizontalAlignment="Stretch">
+        <ComboBoxItem Content="Left"/>
+        <ComboBoxItem Content="Right"/>
+      </ComboBox>
+      <local:InspectorSection Header="Geometry / appearance / access" SectionKey="supports.infrastructure-details">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Lateral / vertical offset · metres"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureLateral}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureVertical}"/>
+          <TextBlock Text="Width · metres"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureWidth}"/>
+          <ComboBox SelectedIndex="{Binding InfrastructureDeck}" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Solid plate"/>
+            <ComboBoxItem Content="Grating"/>
+          </ComboBox>
+          <ComboBox SelectedIndex="{Binding InfrastructureMaterial}" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Timber"/>
+            <ComboBoxItem Content="Painted steel"/>
+            <ComboBoxItem Content="Galvanized steel"/>
+            <ComboBoxItem Content="Concrete"/>
+          </ComboBox>
+          <CheckBox Content="Inner guardrail" IsChecked="{Binding InfrastructureInner}"/>
+          <CheckBox Content="Outer guardrail" IsChecked="{Binding InfrastructureOuter}"/>
+          <TextBlock Text="Rail height / post spacing · metres"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureRailHeight}"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructurePostSpacing}"/>
+          <CheckBox Content="Use explicit world endpoints" IsChecked="{Binding InfrastructureWorld}"/>
+          <StackPanel IsVisible="{Binding InfrastructureWorld}" Spacing="5">
+            <TextBlock Text="Start X, Y, Z · metres"/>
+            <TextBox Classes="numeric" Text="{Binding InfrastructureWorldStart}"/>
+            <TextBlock Text="End X, Y, Z · metres"/>
+            <TextBox Classes="numeric" Text="{Binding InfrastructureWorldEnd}"/>
+          </StackPanel>
+          <TextBlock Text="Stair maximum rise · metres"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureRise}"/>
+          <TextBlock Text="Access gate IDs · comma separated"/>
+          <TextBox Classes="numeric" Text="{Binding InfrastructureGates}"/>
+        </StackPanel>
+      </local:InspectorSection>
+      <Button Content="Inspect referenced gate / Operations" Command="{Binding SelectInfrastructureGateCommand}"/>
+      <Button Classes="primary" IsVisible="{Binding !HasInfrastructure}" Content="Create infrastructure" Command="{Binding CreateInfrastructureCommand}"/>
+      <Button Classes="primary" IsVisible="{Binding HasInfrastructure}" Content="Apply infrastructure" Command="{Binding ApplyInfrastructureCommand}"/>
+      <Button Classes="destructive" IsVisible="{Binding HasInfrastructure}" Content="Remove infrastructure" Command="{Binding DeleteInfrastructureCommand}"/>
+      <TextBlock Text="ⓘ Details" ToolTip.Tip="Track-relative decks follow grade, bank and curves. World endpoints stay fixed. Stair routing is explicit; step geometry is procedural. Access motion and interlocks remain in Ride Operations." Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" TextWrapping="Wrap"/>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

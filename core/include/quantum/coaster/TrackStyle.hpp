@@ -9,6 +9,8 @@
 #include <glm/vec4.hpp>
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -21,7 +23,8 @@ namespace quantum::coaster
     // renderer implementation.
     enum class TrackGeometryFamily : std::uint8_t
     {
-        DualRailTubular
+        DualRailTubular,
+        Components
     };
 
     struct TrackMaterial
@@ -77,6 +80,55 @@ namespace quantum::coaster
         std::optional<TrackMaterial> materialOverride;
     };
 
+    // Slots are family-defined strings. Providers describe geometry rather than
+    // catalog identity; a new type using these providers is a content operation.
+    enum class TrackComponentProvider : std::uint8_t { Tube, Box, Member, Beam };
+    enum class TrackComponentPlacement : std::uint8_t { Continuous, Repeated, Junction };
+
+    struct TrackComponent
+    {
+        std::string id;
+        std::string displayName;
+        std::string materialSlot;
+        TrackComponentProvider provider = TrackComponentProvider::Box;
+        TrackComponentPlacement placement = TrackComponentPlacement::Continuous;
+        bool enabled = true;
+        bool runningSurface = false;
+        bool required = false; // required slot identity; visibility is independent
+        glm::dvec3 offset{0.0};
+        // Member endpoint relative to the same track frame. X can span a bay.
+        glm::dvec3 endOffset{0.0};
+        // X = rigid length, Y = lateral width, Z = vertical height, metres.
+        glm::dvec3 dimensions{0.1};
+        double spacing = 1.0;
+        double phase = 0.0;
+        std::uint32_t radialSegments = 12;
+        TrackMaterial material;
+        StaticMeshAssetReference asset; // empty = procedural; retained on failure
+        double assetLength = 1.0; // authored local-X tile length for curve deformation
+        glm::dvec3 assetScale{1.0};
+        bool useAssetMaterials = true;
+    };
+
+    struct TrackConstructionVariant
+    {
+        std::string id;
+        std::string displayName;
+        std::vector<TrackComponent> components;
+        glm::dvec3 supportAttachment{0.0};
+    };
+
+    struct TrackConstructionInterval
+    {
+        std::uint64_t id = 0;
+        double start = 0.0;
+        double end = 1.0;
+        std::string typeId;
+        std::string variantId;
+        // Optional complete component snapshot, independent of catalog availability.
+        std::vector<TrackComponent> components;
+    };
+
     struct TrackStylePreset
     {
         std::string name;
@@ -94,6 +146,14 @@ namespace quantum::coaster
 
         ContinuousSpineStyle spine;
         std::vector<RepeatingHardwareStyle> repeatingHardware;
+        std::string familyId;
+        std::string typeId;
+        std::string variantId;
+        std::vector<TrackComponent> components;
+        std::vector<TrackConstructionVariant> variants;
+        std::vector<TrackConstructionInterval> constructionIntervals;
+        std::uint64_t nextConstructionIntervalId = 1;
+        glm::dvec3 supportAttachment{0.0};
     };
 
     // Semantic authoring properties that a concrete style configuration may
@@ -174,6 +234,7 @@ namespace quantum::coaster
     {
         glm::vec3 position{0.0F};
         glm::vec3 normal{0.0F, 0.0F, 1.0F};
+        glm::vec2 uv{0.0F};
     };
 
     struct TrackSubmesh
@@ -193,6 +254,24 @@ namespace quantum::coaster
         std::vector<std::uint32_t> edgeIndices;
         std::vector<TrackSubmesh> submeshes;
     };
+
+    struct TrackComponentMesh
+    {
+        ContinuousTrackMesh mesh;
+        std::vector<TrackMaterial> materials;
+    };
+    using TrackComponentMeshResolver = std::function<
+        std::shared_ptr<const TrackComponentMesh>(std::string_view)>;
+    // Engine supplies this per calling thread. Core owns no platform/asset I/O.
+    void setTrackComponentMeshResolver(TrackComponentMeshResolver resolver);
+    [[nodiscard]] glm::dvec3 trackSupportAttachmentAt(
+        const TrackStylePreset& style, double station);
+    [[nodiscard]] TrackStylePreset componentStyleInCoordinateUnits(
+        const TrackStylePreset& style, double metersPerCoordinateUnit);
+
+    // Versioned component payload shared by catalog and document serialization.
+    [[nodiscard]] std::string serializeTrackComponents(const TrackStylePreset& style);
+    void deserializeTrackComponents(TrackStylePreset& style, std::string_view json);
 
     // Rendering-only, contiguous instance payload. It deliberately contains
     // no pointers, editor state, or draw commands and can later be copied into

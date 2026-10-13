@@ -1,0 +1,1235 @@
+{
+    "coasterSetup": {
+        "carsPerTrain": 4,
+        "heartline": {
+            "enabled": true,
+            "offsetMeters": 1.4
+        },
+        "options": [
+            {
+                "choice": "layout-1",
+                "optionId": "train-layout"
+            }
+        ],
+        "styleId": "placeholder-style-1"
+    },
+    "formatVersion": 1,
+    "ground": {
+        "albedoTexture": "",
+        "baseColor": [
+            0.4399999976158142,
+            0.4699999988079071,
+            0.46000000834465027,
+            1.0
+        ],
+        "elevation": -5.0,
+        "enabled": true,
+        "metallic": 0.0,
+        "normalTexture": "",
+        "roughness": 0.9200000166893005,
+        "roughnessTexture": "",
+        "sizeX": 1200.0,
+        "sizeY": 1200.0,
+        "uvTiling": [
+            120.0,
+            120.0
+        ]
+    },
+    "layoutMode": "Circuit",
+    "physicalSettings": {
+        "gravityAcceleration": 9.80665,
+        "initialSpeed": 20.0,
+        "metersPerCoordinateUnit": 1.0
+    },
+    "sections": [
+        {
+            "kind": "RateProfiles",
+            "length": 60.0,
+            "rateProfiles": {
+                "pitch": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 60.0,
+                                "type": "Smootherstep",
+                                "valueBegin": -0.008,
+                                "valueEnd": 0.006
+                            }
+                        }
+                    ]
+                },
+                "roll": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 60.0,
+                                "type": "Smootherstep",
+                                "valueBegin": 0.012,
+                                "valueEnd": -0.009
+                            }
+                        }
+                    ]
+                },
+                "yaw": {
+                    "nextSegmentId": 2,
+                    "segments": [
+                        {
+                            "id": 1,
+                            "transition": {
+                                "domainBegin": 0.0,
+                                "domainEnd": 60.0,
+                                "type": "Smootherstep",
+                                "valueBegin": 0.006,
+                                "valueEnd": 0.025
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "startPose": {
+        "orientation": {
+            "w": 1.0,
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        },
+        "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        }
+    },
+    "supports": {
+        "nextStructureId": 6,
+        "structures": [
+            {
+                "generatedFrame": {
+                    "beam": {
+                        "outerDimensions": {
+                            "x": 0.27,
+                            "y": 0.21
+                        },
+                        "shape": "Rectangular",
+                        "wallThickness": 0.0
+                    },
+                    "brace": {
+                        "outerDimensions": {
+                            "x": 0.18,
+                            "y": 0.15
+                        },
+                        "shape": "Rectangular",
+                        "wallThickness": 0.0
+                    },
+                    "foundationElevation": -5.0,
+                    "foundationSize": [
+                        0.9,
+                        0.9,
+                        0.45
+                    ],
+                    "post": {
+                        "outerDimensions": {
+                            "x": 0.3,
+                            "y": 0.3
+                        },
+                        "shape": "Rectangular",
+                        "wallThickness": 0.0
+                    },
+                    "station": 5.0,
+                    "verticalOffset": -0.5,
+                    "width": 4.0
+                },
+                "id": 1,
+                "members": [
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 3,
+                        "id": 5,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.3
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 4,
+                        "id": 6,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.3
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 2,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 7,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.27,
+                                "y": 0.21
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "LedgerCap",
+                        "startConnection": {
+                            "treatment": "Plate"
+                        },
+                        "startNodeId": 3,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 8,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.18,
+                                "y": 0.15
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "Brace",
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    }
+                ],
+                "name": "TraditionalTimber frame 1",
+                "nextElementId": 9,
+                "nodes": [
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 1,
+                        "position": {
+                            "x": 5.079977333037821,
+                            "y": -1.89221784863626,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 2,
+                        "position": {
+                            "x": 4.954827329329422,
+                            "y": 2.0988052073907904,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "id": 3,
+                        "position": {
+                            "x": 5.079977333037821,
+                            "y": -1.89221784863626,
+                            "z": -0.5157445800841578
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": -2.0,
+                            "station": 5.0,
+                            "verticalOffset": -0.5
+                        }
+                    },
+                    {
+                        "id": 4,
+                        "position": {
+                            "x": 4.954827329329422,
+                            "y": 2.0988052073907904,
+                            "z": -0.27894837480989026
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": 2.0,
+                            "station": 5.0,
+                            "verticalOffset": -0.5
+                        }
+                    }
+                ]
+            },
+            {
+                "generatedFrame": {
+                    "beam": {
+                        "outerDimensions": {
+                            "x": 0.5,
+                            "y": 0.5
+                        },
+                        "shape": "Circular",
+                        "wallThickness": 0.025
+                    },
+                    "brace": {
+                        "outerDimensions": {
+                            "x": 0.18,
+                            "y": 0.18
+                        },
+                        "shape": "Circular",
+                        "wallThickness": 0.012
+                    },
+                    "foundationElevation": -5.0,
+                    "foundationSize": [
+                        0.9,
+                        0.9,
+                        0.45
+                    ],
+                    "post": {
+                        "outerDimensions": {
+                            "x": 0.5,
+                            "y": 0.5
+                        },
+                        "shape": "Circular",
+                        "wallThickness": 0.025
+                    },
+                    "station": 15.0,
+                    "verticalOffset": -0.5,
+                    "width": 4.0
+                },
+                "id": 2,
+                "members": [
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 3,
+                        "id": 5,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.5,
+                                "y": 0.5
+                            },
+                            "shape": "Circular",
+                            "wallThickness": 0.025
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 4,
+                        "id": 6,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.5,
+                                "y": 0.5
+                            },
+                            "shape": "Circular",
+                            "wallThickness": 0.025
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 2,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 7,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.5,
+                                "y": 0.5
+                            },
+                            "shape": "Circular",
+                            "wallThickness": 0.025
+                        },
+                        "role": "LedgerCap",
+                        "startConnection": {
+                            "treatment": "Plate"
+                        },
+                        "startNodeId": 3,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 8,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.18,
+                                "y": 0.18
+                            },
+                            "shape": "Circular",
+                            "wallThickness": 0.012
+                        },
+                        "role": "Brace",
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    }
+                ],
+                "name": "TubularSteel frame 2",
+                "nextElementId": 9,
+                "nodes": [
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 1,
+                        "position": {
+                            "x": 15.210221626160147,
+                            "y": -1.2277299508834596,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 2,
+                        "position": {
+                            "x": 14.78237861164388,
+                            "y": 2.69513103658204,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "id": 3,
+                        "position": {
+                            "x": 15.210221626160147,
+                            "y": -1.2277299508834596,
+                            "z": 0.10346300285611987
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": -2.0,
+                            "station": 15.0,
+                            "verticalOffset": -0.5
+                        }
+                    },
+                    {
+                        "id": 4,
+                        "position": {
+                            "x": 14.78237861164388,
+                            "y": 2.69513103658204,
+                            "z": 0.7577657064657259
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": 2.0,
+                            "station": 15.0,
+                            "verticalOffset": -0.5
+                        }
+                    }
+                ],
+                "style": "TubularSteel"
+            },
+            {
+                "generatedFrame": {
+                    "beam": {
+                        "outerDimensions": {
+                            "x": 0.3,
+                            "y": 0.45
+                        },
+                        "shape": "Hss",
+                        "wallThickness": 0.015
+                    },
+                    "brace": {
+                        "outerDimensions": {
+                            "x": 0.15,
+                            "y": 0.15
+                        },
+                        "shape": "Hss",
+                        "wallThickness": 0.015
+                    },
+                    "foundationElevation": -5.0,
+                    "foundationSize": [
+                        0.9,
+                        0.9,
+                        0.45
+                    ],
+                    "post": {
+                        "outerDimensions": {
+                            "x": 0.3,
+                            "y": 0.3
+                        },
+                        "shape": "Hss",
+                        "wallThickness": 0.015
+                    },
+                    "station": 25.0,
+                    "verticalOffset": -0.5,
+                    "width": 4.0
+                },
+                "id": 3,
+                "members": [
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 3,
+                        "id": 5,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.3
+                            },
+                            "shape": "Hss",
+                            "wallThickness": 0.015
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 4,
+                        "id": 6,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.3
+                            },
+                            "shape": "Hss",
+                            "wallThickness": 0.015
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 2,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 7,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.45
+                            },
+                            "shape": "Hss",
+                            "wallThickness": 0.015
+                        },
+                        "role": "LedgerCap",
+                        "startConnection": {
+                            "treatment": "Plate"
+                        },
+                        "startNodeId": 3,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 8,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.15,
+                                "y": 0.15
+                            },
+                            "shape": "Hss",
+                            "wallThickness": 0.015
+                        },
+                        "role": "Brace",
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    }
+                ],
+                "name": "BoxSteel frame 3",
+                "nextElementId": 9,
+                "nodes": [
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 1,
+                        "position": {
+                            "x": 25.232042194530102,
+                            "y": 0.14030463518348382,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 2,
+                        "position": {
+                            "x": 24.37235785692252,
+                            "y": 3.9465292494857294,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "id": 3,
+                        "position": {
+                            "x": 25.232042194530102,
+                            "y": 0.14030463518348382,
+                            "z": 1.5807625280492248
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": -2.0,
+                            "station": 25.0,
+                            "verticalOffset": -0.5
+                        }
+                    },
+                    {
+                        "id": 4,
+                        "position": {
+                            "x": 24.37235785692252,
+                            "y": 3.9465292494857294,
+                            "z": 2.460306174011116
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": 2.0,
+                            "station": 25.0,
+                            "verticalOffset": -0.5
+                        }
+                    }
+                ],
+                "style": "BoxSteel"
+            },
+            {
+                "generatedFrame": {
+                    "beam": {
+                        "outerDimensions": {
+                            "x": 0.3,
+                            "y": 0.5
+                        },
+                        "shape": "ISection",
+                        "wallThickness": 0.02
+                    },
+                    "brace": {
+                        "outerDimensions": {
+                            "x": 0.18,
+                            "y": 0.25
+                        },
+                        "shape": "ISection",
+                        "wallThickness": 0.02
+                    },
+                    "foundationElevation": -5.0,
+                    "foundationSize": [
+                        0.9,
+                        0.9,
+                        0.45
+                    ],
+                    "post": {
+                        "outerDimensions": {
+                            "x": 0.3,
+                            "y": 0.5
+                        },
+                        "shape": "ISection",
+                        "wallThickness": 0.02
+                    },
+                    "station": 35.0,
+                    "verticalOffset": -0.5,
+                    "width": 4.0
+                },
+                "id": 4,
+                "members": [
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 3,
+                        "id": 5,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.5
+                            },
+                            "shape": "ISection",
+                            "wallThickness": 0.02
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 4,
+                        "id": 6,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.5
+                            },
+                            "shape": "ISection",
+                            "wallThickness": 0.02
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 2,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 7,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.5
+                            },
+                            "shape": "ISection",
+                            "wallThickness": 0.02
+                        },
+                        "role": "LedgerCap",
+                        "startConnection": {
+                            "treatment": "Plate"
+                        },
+                        "startNodeId": 3,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 8,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.18,
+                                "y": 0.25
+                            },
+                            "shape": "ISection",
+                            "wallThickness": 0.02
+                        },
+                        "role": "Brace",
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    }
+                ],
+                "name": "ISectionSteel frame 4",
+                "nextElementId": 9,
+                "nodes": [
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 1,
+                        "position": {
+                            "x": 34.98877152086275,
+                            "y": 2.6326819487282123,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 2,
+                        "position": {
+                            "x": 33.53492121943234,
+                            "y": 6.27160413817437,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "id": 3,
+                        "position": {
+                            "x": 34.98877152086275,
+                            "y": 2.6326819487282123,
+                            "z": 3.7684602717261484
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": -2.0,
+                            "station": 35.0,
+                            "verticalOffset": -0.5
+                        }
+                    },
+                    {
+                        "id": 4,
+                        "position": {
+                            "x": 33.53492121943234,
+                            "y": 6.27160413817437,
+                            "z": 4.571308078092404
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": 2.0,
+                            "station": 35.0,
+                            "verticalOffset": -0.5
+                        }
+                    }
+                ],
+                "style": "ISectionSteel"
+            },
+            {
+                "generatedFrame": {
+                    "beam": {
+                        "outerDimensions": {
+                            "x": 0.8,
+                            "y": 0.8
+                        },
+                        "shape": "Rectangular",
+                        "wallThickness": 0.0
+                    },
+                    "brace": {
+                        "outerDimensions": {
+                            "x": 0.3,
+                            "y": 0.3
+                        },
+                        "shape": "Rectangular",
+                        "wallThickness": 0.0
+                    },
+                    "foundationElevation": -5.0,
+                    "foundationSize": [
+                        0.9,
+                        0.9,
+                        0.45
+                    ],
+                    "post": {
+                        "outerDimensions": {
+                            "x": 0.8,
+                            "y": 0.8
+                        },
+                        "shape": "Rectangular",
+                        "wallThickness": 0.0
+                    },
+                    "station": 45.0,
+                    "verticalOffset": -0.5,
+                    "width": 4.0
+                },
+                "id": 5,
+                "members": [
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 3,
+                        "id": 5,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.8,
+                                "y": 0.8
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endConnection": {
+                            "treatment": "Saddle"
+                        },
+                        "endNodeId": 4,
+                        "id": 6,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.8,
+                                "y": 0.8
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "PrimaryPost",
+                        "startConnection": {
+                            "treatment": "Base"
+                        },
+                        "startNodeId": 2,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 7,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.8,
+                                "y": 0.8
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "LedgerCap",
+                        "startConnection": {
+                            "treatment": "Plate"
+                        },
+                        "startNodeId": 3,
+                        "useFrameProfile": true
+                    },
+                    {
+                        "endNodeId": 4,
+                        "id": 8,
+                        "profile": {
+                            "outerDimensions": {
+                                "x": 0.3,
+                                "y": 0.3
+                            },
+                            "shape": "Rectangular",
+                            "wallThickness": 0.0
+                        },
+                        "role": "Brace",
+                        "startNodeId": 1,
+                        "useFrameProfile": true
+                    }
+                ],
+                "name": "ConcretePier frame 5",
+                "nextElementId": 9,
+                "nodes": [
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 1,
+                        "position": {
+                            "x": 44.12736203371398,
+                            "y": 6.840585792308926,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "foundation": {
+                            "dimensions": [
+                                0.9,
+                                0.9,
+                                0.45
+                            ]
+                        },
+                        "id": 2,
+                        "position": {
+                            "x": 41.96588941855674,
+                            "y": 10.17866978773515,
+                            "z": -5.0
+                        }
+                    },
+                    {
+                        "id": 3,
+                        "position": {
+                            "x": 44.12736203371398,
+                            "y": 6.840585792308926,
+                            "z": 6.342792180236329
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": -2.0,
+                            "station": 45.0,
+                            "verticalOffset": -0.5
+                        }
+                    },
+                    {
+                        "id": 4,
+                        "position": {
+                            "x": 41.96588941855674,
+                            "y": 10.17866978773515,
+                            "z": 6.773177325663791
+                        },
+                        "trackAttachment": {
+                            "lateralOffset": 2.0,
+                            "station": 45.0,
+                            "verticalOffset": -0.5
+                        }
+                    }
+                ],
+                "style": "ConcretePier"
+            }
+        ]
+    },
+    "trackConfigurationId": "modern-steel",
+    "trackDevices": {
+        "devices": [
+            {
+                "configuration": {
+                    "initiallyInterlocked": false,
+                    "initiallyLocked": false,
+                    "initiallyOpen": false,
+                    "lateralOffsetMeters": 1.1,
+                    "meshAsset": "",
+                    "motion": 0,
+                    "movementSeconds": 1.0,
+                    "openAngleDegrees": 90.0,
+                    "role": 0,
+                    "travelDirection": 1,
+                    "travelDistanceMeters": 1.0,
+                    "verticalOffsetMeters": -0.25,
+                    "yawDegrees": 0.0
+                },
+                "enabled": true,
+                "endStationMeters": 16.0,
+                "id": 1,
+                "kind": "Access",
+                "maximumForceNewtons": 10000.0,
+                "name": "Access",
+                "startStationMeters": 15.0,
+                "targetAccelerationMetersPerSecondSquared": 1.0
+            }
+        ],
+        "infrastructure": [
+            {
+                "accessGates": [
+                    1
+                ],
+                "deck": 1,
+                "endStationMeters": 48.0,
+                "id": 1,
+                "kind": 0,
+                "lateralOffsetMeters": 1.5,
+                "meshAsset": "",
+                "name": "Bank-following catwalk",
+                "railings": {
+                    "heightMeters": 1.1,
+                    "inner": false,
+                    "outer": true
+                },
+                "side": 1,
+                "startStationMeters": 3.0,
+                "verticalOffsetMeters": -0.25,
+                "widthMeters": 0.8
+            },
+            {
+                "accessGates": [
+                    1
+                ],
+                "deck": 1,
+                "endStationMeters": 48.0,
+                "id": 2,
+                "kind": 1,
+                "lateralOffsetMeters": 1.5,
+                "meshAsset": "",
+                "name": "Maintenance platform",
+                "railings": {
+                    "heightMeters": 1.1,
+                    "inner": false,
+                    "outer": true
+                },
+                "side": 1,
+                "startStationMeters": 3.0,
+                "verticalOffsetMeters": -0.25,
+                "widthMeters": 2.0,
+                "worldEndMeters": [
+                    19.0,
+                    2.0,
+                    -0.25
+                ],
+                "worldPlacement": true,
+                "worldStartMeters": [
+                    15.0,
+                    2.0,
+                    -0.25
+                ]
+            },
+            {
+                "accessGates": [
+                    1
+                ],
+                "deck": 1,
+                "endStationMeters": 48.0,
+                "id": 3,
+                "kind": 3,
+                "lateralOffsetMeters": 1.5,
+                "meshAsset": "",
+                "name": "Ground stairs",
+                "railings": {
+                    "heightMeters": 1.1,
+                    "inner": false,
+                    "outer": true
+                },
+                "side": 1,
+                "startStationMeters": 3.0,
+                "verticalOffsetMeters": -0.25,
+                "widthMeters": 2.0,
+                "worldEndMeters": [
+                    24.0,
+                    2.0,
+                    -4.95
+                ],
+                "worldPlacement": true,
+                "worldStartMeters": [
+                    19.0,
+                    2.0,
+                    -0.25
+                ]
+            },
+            {
+                "accessGates": [
+                    1
+                ],
+                "deck": 1,
+                "endStationMeters": 48.0,
+                "id": 4,
+                "kind": 4,
+                "lateralOffsetMeters": 1.5,
+                "meshAsset": "",
+                "name": "Ground landing",
+                "railings": {
+                    "heightMeters": 1.1,
+                    "inner": false,
+                    "outer": true
+                },
+                "side": 1,
+                "startStationMeters": 3.0,
+                "verticalOffsetMeters": -0.25,
+                "widthMeters": 2.0,
+                "worldEndMeters": [
+                    26.0,
+                    2.0,
+                    -4.95
+                ],
+                "worldPlacement": true,
+                "worldStartMeters": [
+                    24.0,
+                    2.0,
+                    -4.95
+                ]
+            }
+        ],
+        "nextId": 2,
+        "nextInfrastructureId": 5,
+        "schemaVersion": 2
+    },
+    "trackStyle": {
+        "geometryFamily": "DualRailTubular",
+        "name": "ModernSteel",
+        "railCount": 2,
+        "railMaterial": {
+            "baseColor": {
+                "a": 1.0,
+                "b": 0.07999999821186066,
+                "g": 0.1599999964237213,
+                "r": 0.7200000286102295
+            },
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.23999999463558197
+        },
+        "railOffsets": [
+            {
+                "lateral": -0.55,
+                "vertical": 0.0
+            },
+            {
+                "lateral": 0.55,
+                "vertical": 0.0
+            }
+        ],
+        "railRadialSegments": 16,
+        "railRadius": 0.075,
+        "railsVisible": true,
+        "repeatingHardware": [
+            {
+                "asset": {
+                    "id": "assets://track/test-crosstie-placeholder.glb",
+                    "placeholder": true
+                },
+                "enabled": true,
+                "frameFollow": "TrackFrame",
+                "localPosition": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": -0.12
+                },
+                "localRotationRadians": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "localScale": {
+                    "x": 1.0,
+                    "y": 1.0,
+                    "z": 1.0
+                },
+                "materialOverride": {
+                    "baseColor": {
+                        "a": 1.0,
+                        "b": 0.4300000071525574,
+                        "g": 0.38999998569488525,
+                        "r": 0.36000001430511475
+                    },
+                    "metallicFactor": 0.0,
+                    "roughnessFactor": 0.41999998688697815
+                },
+                "spacing": 0.75,
+                "startOffset": 0.0
+            }
+        ],
+        "spine": {
+            "dimensions": {
+                "x": 0.32,
+                "y": 0.42
+            },
+            "enabled": true,
+            "material": {
+                "baseColor": {
+                    "a": 1.0,
+                    "b": 0.27000001072883606,
+                    "g": 0.23000000417232513,
+                    "r": 0.20000000298023224
+                },
+                "metallicFactor": 0.800000011920929,
+                "roughnessFactor": 0.5799999833106995
+            },
+            "offset": {
+                "lateral": 0.0,
+                "vertical": -0.46
+            },
+            "radialSegments": 12,
+            "type": "Box"
+        },
+        "visible": true
+    }
+}

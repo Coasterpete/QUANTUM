@@ -68,6 +68,10 @@ namespace
         require(modeCycle && modeCycle->has_value()
                 && (**modeCycle).modeCycle,
             "mode cycle flag parses without a value");
+        const auto nativeWorkflow = parse({
+            "--dev-preview-smoke", fixtureString, "--native-authoring-workflow"});
+        require(nativeWorkflow && nativeWorkflow->has_value() && (**nativeWorkflow).nativeAuthoringWorkflow,
+            "native authoring workflow flag parses without a value");
         const auto stoppedEdit = parse({
             "--dev-preview-smoke", fixtureString, "--stopped-preview",
             "--camera-orbit", "--transition-drag", "--msaa-off",

@@ -6,6 +6,10 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <numbers>
+#include <ranges>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -254,6 +258,16 @@ namespace quantum::coaster
     std::vector<SupportMemberPlacement> resolveSupportMemberPlacements(
         const SupportStructure& structure)
     {
+        if (std::ranges::any_of(structure.members, &SupportMember::useStyleProfile))
+        {
+            auto effective = structure;
+            for (auto& member : effective.members)
+            {
+                member.profile = resolveSupportProfile(structure, member);
+                member.useStyleProfile = false;
+            }
+            return resolveSupportMemberPlacements(effective);
+        }
         const NodeLookup nodes = buildNodeLookup(structure);
         std::vector<SupportMemberPlacement> placements;
         placements.reserve(structure.members.size());
@@ -468,9 +482,12 @@ namespace quantum::coaster
     }
 
     SupportSolidPresentation buildSupportSolidPresentation(
-        const SupportStructure& structure)
+        const SupportStructure& structure, const double metersPerCoordinateUnit)
     {
+        if (!std::isfinite(metersPerCoordinateUnit) || metersPerCoordinateUnit <= 0)
+            throw std::invalid_argument("Support presentation requires a positive coordinate scale.");
         SupportSolidPresentation presentation;
+        presentation.metersPerCoordinateUnit = metersPerCoordinateUnit;
         presentation.structureId = structure.id;
         presentation.appearance =
             structure.appearance.value_or(SupportAppearance{});
@@ -483,10 +500,18 @@ namespace quantum::coaster
 
         const auto placements = resolveSupportMemberPlacements(structure);
 
-        std::vector<SupportMemberInstance> rectangular;
-        std::vector<SupportMemberInstance> circular;
-        rectangular.reserve(structure.members.size());
-        circular.reserve(structure.members.size());
+        const auto append = [&](SupportMemberMeshKind mesh, const glm::mat4& transform,
+            const SupportSurface& surface, const glm::vec4& section = glm::vec4{1, 0, 0, 0})
+        {
+            auto batch = std::ranges::find_if(presentation.batches, [&](const auto& b)
+                { return b.mesh == mesh && b.surface == surface; });
+            if (batch == presentation.batches.end())
+            {
+                presentation.batches.push_back({mesh, {}, surface});
+                batch = presentation.batches.end() - 1;
+            }
+            batch->instances.push_back({transform, section});
+        };
 
         // The largest cross-section dimension meeting each foundation node.
         // Indexing these IDs avoids searching every node for every member.
@@ -518,13 +543,92 @@ namespace quantum::coaster
                 continue;
             }
 
-            const glm::dvec2 section = crossSection(member.profile);
-            SupportMemberInstance instance;
-            instance.transform = memberTransform(frame, section);
+            const auto profile = resolveSupportProfile(structure, member);
+            const glm::dvec2 section = crossSection(profile);
+            const auto surface = resolveSupportSurface(structure, member, metersPerCoordinateUnit);
+            validateSupportSurface(surface);
+            const auto part = [&](const glm::dvec2& dimensions, const glm::dvec2& offset)
+            {
+                auto f = frame;
+                f.origin += f.axisY * offset.x + f.axisZ * offset.y;
+                append(SupportMemberMeshKind::Rectangular, memberTransform(f, dimensions), surface);
+            };
+            const double t = profile.wallThickness;
+            if (profile.shape == SupportMemberProfileShape::Hss
+                || (profile.shape == SupportMemberProfileShape::Rectangular && t > 0))
+            {
+                part({t, section.y}, {-(section.x - t) * .5, 0});
+                part({t, section.y}, {(section.x - t) * .5, 0});
+                part({section.x - 2*t, t}, {0, -(section.y - t) * .5});
+                part({section.x - 2*t, t}, {0, (section.y - t) * .5});
+            }
+            else if (profile.shape == SupportMemberProfileShape::ISection)
+            {
+                part({section.x, t}, {0, -(section.y - t) * .5});
+                part({section.x, t}, {0, (section.y - t) * .5});
+                part({t, section.y - 2*t}, {0, 0});
+            }
+            else if (profile.shape == SupportMemberProfileShape::Circular)
+            {
+                append(t > 0 ? SupportMemberMeshKind::CircularTube : SupportMemberMeshKind::Circular,
+                    memberTransform(frame, section), surface,
+                    {static_cast<float>(1 - 2*t/section.x), 1, 0, 0});
+            }
+            else part(section, {0, 0});
 
-            const bool circularSection =
-                member.profile.shape == SupportMemberProfileShape::Circular;
-            (circularSection ? circular : rectangular).push_back(instance);
+            // Connections remain identified by member + directed end. Their
+            // display frame follows physical mounting, including authored GLB
+            // placement offsets; no new graph objects or interlock state.
+            for (int end = 0; end < 2; ++end)
+            {
+                const auto& connection = end == 0 ? member.startConnection : member.endConnection;
+                if (!connection || connection->treatment == SupportMemberEndTreatment::MiteredCut) continue;
+                auto f = frame;
+                f.origin = end == 0 ? placements[index].start : placements[index].end;
+                if (end == 0) { f.axisX = -f.axisX; f.axisZ = -f.axisZ; }
+                glm::dmat4 placement{1.0};
+                if (connection->localPlacement)
+                {
+                    const auto& p = *connection->localPlacement;
+                    placement = glm::translate(glm::dmat4{1}, p.position) * glm::mat4_cast(p.orientation)
+                        * glm::scale(glm::dmat4{1}, p.scale);
+                }
+                const auto steel = defaultSupportSurface(SupportMaterialKind::GalvanizedSteel);
+                const double size = std::max(section.x, section.y);
+                const auto box = [&](glm::dvec3 offset, glm::dvec3 dimensions, bool concrete = false)
+                {
+                    glm::dmat4 basis{1};
+                    basis[0] = glm::dvec4{f.axisX, 0}; basis[1] = glm::dvec4{f.axisY, 0};
+                    basis[2] = glm::dvec4{f.axisZ, 0}; basis[3] = glm::dvec4{f.origin, 1};
+                    auto transform = basis * placement * glm::translate(glm::dmat4{1}, offset)
+                        * glm::scale(glm::dmat4{1}, dimensions);
+                    append(SupportMemberMeshKind::Rectangular, glm::mat4{transform},
+                        concrete ? defaultSupportSurface(SupportMaterialKind::Concrete) : steel, {1, 0, 0, 1});
+                };
+                using T = SupportMemberEndTreatment;
+                switch (connection->treatment)
+                {
+                case T::MiteredCut: break;
+                case T::EndCap: box({0,0,0}, {.06*size, section.x*1.04, section.y*1.04}); break;
+                case T::Plate: box({0,0,0}, {.12*size, section.x*1.6, section.y*1.6}); break;
+                case T::Flange:
+                case T::Base:
+                    box({0,0,0}, {.15*size, section.x*2, section.y*2});
+                    box({-.2*size,0,0}, {.35*size, section.x*1.12, section.y*1.12}); break;
+                case T::Splice:
+                    for (double side : {-1.0,1.0}) box({-.4*size,side*.55*section.x,0},
+                        {size,.1*size,section.y*1.1}); break;
+                case T::Saddle:
+                case T::Clamp:
+                    box({0,0,0}, {.18*size, section.x*1.8, section.y*1.4});
+                    for (double side : {-1.0,1.0}) box({.3*size,side*.8*section.x,0},
+                        {.6*size,.15*size,section.y*1.4});
+                    if (connection->treatment == T::Clamp)
+                        box({.6*size,0,0}, {.12*size, section.x*1.8, section.y*1.4});
+                    break;
+                case T::Footing: box({0,0,0}, {.2*size,section.x*2,section.y*2}, true); break;
+                }
+            }
 
             const double largest = std::max(section.x, section.y);
             for (const SupportElementId nodeId :
@@ -538,16 +642,9 @@ namespace quantum::coaster
             }
         }
 
-        if (!rectangular.empty())
-        {
-            presentation.batches.push_back(
-                {SupportMemberMeshKind::Rectangular, std::move(rectangular)});
-        }
-        if (!circular.empty())
-        {
-            presentation.batches.push_back(
-                {SupportMemberMeshKind::Circular, std::move(circular)});
-        }
+        // Keep historical profile ordering while also grouping by resolved material.
+        std::stable_sort(presentation.batches.begin(), presentation.batches.end(),
+            [](const auto& a, const auto& b) { return a.mesh < b.mesh; });
 
         for (const SupportNode& node : structure.nodes)
         {
@@ -579,6 +676,13 @@ namespace quantum::coaster
                 ? presentation.foundationAppearance.padDepth
                 : (section > 0.0 ? section : 1.0)
                     * supportFoundationPadDepthScale;
+            pad.kind = node.foundation->kind;
+            const auto dimensions = node.foundation->dimensions;
+            if (dimensions.x > 0) pad.padDimensions.x = dimensions.x;
+            if (dimensions.y > 0) pad.padDimensions.y = dimensions.y;
+            if (dimensions.z > 0) pad.padDepth = dimensions.z;
+            if (pad.kind != SupportFoundationKind::Footing && dimensions.z == 0)
+                pad.padDepth *= pad.kind == SupportFoundationKind::Pier ? 6.0 : 2.0;
             presentation.foundations.push_back(pad);
         }
 
@@ -586,14 +690,27 @@ namespace quantum::coaster
     }
 
     std::vector<SupportSolidPresentation> buildSupportSolidPresentation(
-        const SupportCollection& collection)
+        const SupportCollection& collection, const double metersPerCoordinateUnit)
     {
         std::vector<SupportSolidPresentation> presentations;
         presentations.reserve(collection.structures.size());
         for (const SupportStructure& structure : collection.structures)
         {
-            presentations.push_back(buildSupportSolidPresentation(structure));
+            presentations.push_back(buildSupportSolidPresentation(structure, metersPerCoordinateUnit));
         }
         return presentations;
     }
+    glm::dvec2 supportSurfaceUv(const glm::dvec3& p, const glm::dvec3& n,
+        const glm::dvec3& extent, const glm::dvec2& repeat, bool circular, double seamFraction)
+    {
+        if (!isFinite(p) || !isFinite(n) || !isFinite(extent)
+            || extent.x <= 0 || extent.y <= 0 || extent.z <= 0
+            || !std::isfinite(repeat.x) || !std::isfinite(repeat.y) || repeat.x <= 0 || repeat.y <= 0
+            || !std::isfinite(seamFraction)) throw std::invalid_argument("Invalid support UV input.");
+        if (std::abs(n.x) >= .5) return {p.y / repeat.x, p.z * (n.x > 0 ? 1 : -1) / repeat.y};
+        if (circular) return {p.x / repeat.x, seamFraction * std::numbers::pi * extent.y * (n.y*p.y + n.z*p.z > 0 ? -1 : 1) / repeat.y};
+        const double across = std::abs(n.y) > .5 ? -std::copysign(1.0, n.y)*p.z : std::copysign(1.0, n.z)*p.y;
+        return {p.x / repeat.x, across / repeat.y};
+    }
+
 }

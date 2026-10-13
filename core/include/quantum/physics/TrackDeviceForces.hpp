@@ -14,6 +14,8 @@ namespace quantum::physics
     {
         coaster::TrackDeviceId id = 0;
         bool armed = false;
+        std::optional<double> signedAccelerationCommand;
+        bool compensateGravity = false;
     };
 
     [[nodiscard]] std::vector<TrackDeviceRuntimeState>
@@ -26,6 +28,21 @@ namespace quantum::physics
         std::size_t occupiedBogieCount = 0;
         double commandedAccelerationMetersPerSecondSquared = 0.0;
         double appliedForceNewtons = 0.0;
+        // Launch profile request before target-speed limiting, averaged over
+        // occupied bogies even when reaching the target releases propulsion.
+        double profileAccelerationMetersPerSecondSquared = 0.0;
+        bool targetSpeedLimited = false;
+        // Requests after occupancy/controller/interlocks, before the force cap.
+        double requestedForceNewtons = 0.0;
+        double requestedAbsoluteForceNewtons = 0.0;
+        double suppliedAbsoluteForceNewtons = 0.0;
+        bool forceLimitReached = false;
+        bool armed = false;
+        std::size_t applicationBegin = 0, applicationCount = 0;
+        // Published by the preview only after a successful production step.
+        // Q = sum(F dot dp/dq), not the net force after gravity/resistance or
+        // an allocation of endpoint reaction to this mechanism.
+        std::optional<double> generalizedForceNewtons;
     };
 
     struct TrackDeviceForceResult
@@ -42,5 +59,6 @@ namespace quantum::physics
         const CompiledPhysicsTrack& track,
         const TrainDefinition& train,
         const TrainPose& pose,
-        double signedVelocityMetersPerSecond);
+        double signedVelocityMetersPerSecond,
+        double gravityAccelerationMetersPerSecondSquared = 9.80665);
 }

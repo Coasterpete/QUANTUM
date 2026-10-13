@@ -953,6 +953,8 @@ namespace quantum::coaster
         {
         case SupportMemberProfileShape::Circular:
         case SupportMemberProfileShape::Rectangular:
+        case SupportMemberProfileShape::Hss:
+        case SupportMemberProfileShape::ISection:
             break;
         default:
             throw std::invalid_argument(
@@ -981,6 +983,10 @@ namespace quantum::coaster
                 "Support member wall thickness must be finite, nonnegative, "
                 "and less than half the smallest outer dimension.");
         }
+        if ((profile.shape == SupportMemberProfileShape::Hss
+                || profile.shape == SupportMemberProfileShape::ISection)
+            && profile.wallThickness <= 0.0)
+            throw std::invalid_argument("HSS and I/H profiles need a positive wall/web thickness.");
     }
 
     void validateSupportMemberRole(const SupportMemberRole role)
@@ -1159,6 +1165,9 @@ namespace quantum::coaster
 
         for (const SupportStructure& structure : collection.structures)
         {
+            static_cast<void>(supportStyleName(structure.style));
+            if (structure.surface) validateSupportSurface(*structure.surface);
+            if (structure.generatedFrame) validateSupportFrameRecipe(*structure.generatedFrame);
             if (structure.generatedWoodenRun)
             {
                 validateWoodenSupportRunRecipe(*structure.generatedWoodenRun);
@@ -1190,6 +1199,13 @@ namespace quantum::coaster
 
             for (const SupportNode& node : structure.nodes)
             {
+                if (node.foundation)
+                {
+                    if (node.foundation->kind > SupportFoundationKind::Block)
+                        throw std::invalid_argument("Unknown support foundation kind.");
+                    for (double d : {node.foundation->dimensions.x, node.foundation->dimensions.y, node.foundation->dimensions.z})
+                        if (!std::isfinite(d) || d < 0) throw std::invalid_argument("Foundation dimensions must be finite and nonnegative.");
+                }
                 if (node.id == invalidSupportElementId)
                 {
                     throw std::invalid_argument(
@@ -1257,6 +1273,10 @@ namespace quantum::coaster
                 }
 
                 validateSupportMemberProfile(member.profile);
+                if (member.useFrameProfile && (!structure.generatedFrame || member.useStyleProfile))
+                    throw std::invalid_argument("Frame profile inheritance requires a generated frame and excludes family inheritance.");
+                validateSupportMemberProfile(resolveSupportProfile(structure, member));
+                if (member.surface) validateSupportSurface(*member.surface);
                 validateSupportMemberRole(member.role);
                 validateSupportMemberOrientation(member.orientation);
                 validateSupportMemberOrientationReference(

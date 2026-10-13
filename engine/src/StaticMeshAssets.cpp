@@ -1,6 +1,13 @@
 #include <quantum/renderer/StaticMeshAssets.hpp>
+#include <quantum/coaster/TrackConfiguration.hpp>
+#include <quantum/coaster/TrackComponentDiagnostics.hpp>
+#include <quantum/engine/Logging.hpp>
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+#include <functional>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -50,10 +57,21 @@ namespace
         const Json& material = document["materials"][materialIndex];
         if (!material.is_object())
             assetError(identifier, "material is malformed.");
+        if (material.value("alphaMode",std::string{"OPAQUE"})!="OPAQUE")
+            assetError(identifier,"transparent/masked static component materials are unsupported.");
+        if (material.contains("extensions"))
+            assetError(identifier,"static component material extensions are unsupported.");
+        if (material.contains("emissiveFactor"))
+            for (const auto& factor:material.at("emissiveFactor"))
+                if (factor.get<double>()!=0) assetError(identifier,"emissive static component materials are unsupported.");
+        if (material.contains("normalTexture") || material.contains("occlusionTexture") || material.contains("emissiveTexture"))
+            assetError(identifier,"material textures are unsupported by the static component pipeline.");
         const Json& pbr = material.contains("pbrMetallicRoughness")
             ? material["pbrMetallicRoughness"] : Json::object();
         if (!pbr.is_object())
             assetError(identifier, "pbrMetallicRoughness is malformed.");
+        if (pbr.contains("baseColorTexture") || pbr.contains("metallicRoughnessTexture"))
+            assetError(identifier,"PBR textures are unsupported by the static component pipeline.");
         quantum::coaster::TrackMaterial result;
         result.baseColor = {1.0F, 1.0F, 1.0F, 1.0F};
         result.metallic = pbr.value("metallicFactor", 1.0F);
@@ -306,52 +324,100 @@ namespace
         {
             assetError(identifier, "no mesh is present.");
         }
-        if (meshes->size() != 1)
-        {
-            assetError(identifier, "exactly one mesh is supported in this milestone.");
-        }
+        if (document.contains("extensionsRequired") && !document["extensionsRequired"].empty())
+            assetError(identifier, "required glTF extensions are unsupported.");
+        if (document.contains("nodes") && !document["nodes"].is_array())
+            assetError(identifier, "nodes must be an array.");
+    }
 
-        const auto nodes = document.find("nodes");
-        if (nodes != document.end())
+    struct MeshOccurrence { std::size_t mesh; glm::dmat4 transform; };
+    std::vector<MeshOccurrence> meshOccurrences(const Json& document, std::string_view identifier)
+    {
+        std::vector<MeshOccurrence> result;
+        const auto& meshes=document.at("meshes");
+        if (!document.contains("nodes"))
         {
-            if (!nodes->is_array() || nodes->size() != 1)
-            {
-                assetError(identifier,
-                    "exactly one untransformed mesh node is supported.");
-            }
-            std::size_t meshNodeCount = 0;
-            for (const Json& node : *nodes)
-            {
-                if (!node.is_object())
-                {
-                    assetError(identifier, "a node is malformed.");
-                }
-                for (const char* const transform : {
-                    "matrix", "translation", "rotation", "scale", "children",
-                    "camera", "skin", "extensions"})
-                {
-                    if (node.contains(transform))
-                    {
-                        assetError(identifier,
-                            "node transforms/hierarchy are unsupported; apply object transforms before Blender export.");
-                    }
-                }
-                if (node.contains("mesh"))
-                {
-                    if (!node["mesh"].is_number_unsigned()
-                        || node["mesh"].get<std::size_t>() != 0)
-                    {
-                        assetError(identifier, "node references an unsupported mesh.");
-                    }
-                    ++meshNodeCount;
-                }
-            }
-            if (meshNodeCount != 1)
-            {
-                assetError(identifier,
-                    "the single glTF node must reference the imported mesh.");
-            }
+            for (std::size_t i=0;i<meshes.size();++i) result.push_back({i,glm::dmat4{1}});
+            return result;
         }
+        const auto& nodes=document.at("nodes");
+        std::vector<bool> child(nodes.size(),false), visiting(nodes.size(),false), visited(nodes.size(),false);
+        for (const auto& node:nodes)
+            for (const auto& index:node.value("children",Json::array()))
+            {
+                auto i=index.get<std::size_t>();
+                if (i>=nodes.size()) assetError(identifier,"child node index is invalid.");
+                if (child[i]) assetError(identifier,"node has multiple parents.");
+                child[i]=true;
+            }
+        std::function<void(std::size_t,const glm::dmat4&)> visit;
+        visit=[&](std::size_t index,const glm::dmat4& parent)
+        {
+            if (index>=nodes.size() || visiting[index]) assetError(identifier,"invalid or cyclic scene hierarchy.");
+            if (visited[index]) assetError(identifier,"node occurs more than once in the active scene.");
+            visiting[index]=true; visited[index]=true;
+            const auto& node=nodes[index];
+            if (!node.is_object()) assetError(identifier,"node is malformed.");
+            for (const char* field:{"skin","camera","extensions"})
+                if (node.contains(field)) assetError(identifier,"unsupported node feature: "+std::string(field));
+            glm::dmat4 local{1};
+            if (node.contains("matrix"))
+            {
+                if (node.contains("translation") || node.contains("rotation") || node.contains("scale"))
+                    assetError(identifier,"node cannot have both matrix and TRS.");
+                const auto& matrix=node.at("matrix");
+                if (!matrix.is_array() || matrix.size()!=16) assetError(identifier,"matrix must have 16 entries.");
+                for (int k=0;k<16;++k) local[k/4][k%4]=matrix[k].get<double>();
+            }
+            else
+            {
+                const auto vec=[&](const char* key,glm::dvec3 fallback) {
+                    if (!node.contains(key)) return fallback;
+                    const auto& v=node.at(key);
+                    if (!v.is_array() || v.size()!=3) assetError(identifier,"TRS vector must have three entries.");
+                    return glm::dvec3{v[0].get<double>(),v[1].get<double>(),v[2].get<double>()};
+                };
+                glm::dquat rotation{1,0,0,0};
+                if (node.contains("rotation"))
+                {
+                    const auto& q=node.at("rotation");
+                    if (!q.is_array() || q.size()!=4) assetError(identifier,"rotation must have four entries.");
+                    rotation={q[3].get<double>(),q[0].get<double>(),q[1].get<double>(),q[2].get<double>()};
+                    if (!std::isfinite(glm::length(rotation)) || std::abs(glm::length(rotation)-1)>1e-5)
+                        assetError(identifier,"rotation quaternion must be finite and unit length.");
+                }
+                local=glm::translate(local,vec("translation",glm::dvec3{0}))*glm::mat4_cast(rotation);
+                local=glm::scale(local,vec("scale",glm::dvec3{1}));
+            }
+            const auto world=parent*local;
+            for (int c=0;c<4;++c) for (int r=0;r<4;++r)
+                if (!std::isfinite(world[c][r])) assetError(identifier,"node transform is nonfinite.");
+            if (std::abs(glm::determinant(glm::dmat3{world}))<1e-12
+                || world[0][3]!=0 || world[1][3]!=0 || world[2][3]!=0 || world[3][3]!=1)
+                assetError(identifier,"node transform must be nonsingular and affine.");
+            if (node.contains("mesh"))
+            {
+                const auto mesh=node.at("mesh").get<std::size_t>();
+                if (mesh>=meshes.size()) assetError(identifier,"node mesh index is invalid.");
+                result.push_back({mesh,world});
+            }
+            for (const auto& next:node.value("children",Json::array())) visit(next.get<std::size_t>(),world);
+            visiting[index]=false;
+        };
+        if (document.contains("scenes"))
+        {
+            const auto& scenes=document.at("scenes");
+            const auto selected=document.value("scene",std::size_t{0});
+            if (!scenes.is_array() || selected>=scenes.size()) assetError(identifier,"default scene index is invalid.");
+            for (const auto& root:scenes[selected].at("nodes")) visit(root.get<std::size_t>(),glm::dmat4{1});
+        }
+        else
+        {
+            for (std::size_t i=0;i<nodes.size();++i) if (!child[i]) visit(i,glm::dmat4{1});
+            if (std::ranges::any_of(visited,[](bool value){return !value;}))
+                assetError(identifier,"scene hierarchy has no valid root.");
+        }
+        return result;
     }
 
     struct AccessorView
@@ -425,7 +491,7 @@ namespace
             assetError(identifier, "bufferView must reference the embedded GLB buffer.");
         }
 
-        const std::size_t components = expectedType == "VEC3" ? 3 : 1;
+        const std::size_t components = expectedType == "VEC3" ? 3 : expectedType == "VEC2" ? 2 : 1;
         const std::size_t elementSize = checkedMultiply(
             componentSize(expectedComponent, identifier), components,
             identifier, "accessor element");
@@ -703,14 +769,14 @@ namespace quantum::renderer
                 assetError(identifier, "mesh has no accessor or bufferView data.");
             }
 
-            const Json& primitives = document.at("meshes")[0].at("primitives");
-            if (!primitives.is_array() || primitives.empty())
-            {
-                assetError(identifier, "mesh has no triangle geometry.");
-            }
-
             StaticMeshAsset asset;
-            asset.identifier = std::move(identifier);
+            asset.identifier = identifier;
+            for (const auto& occurrence : meshOccurrences(document, asset.identifier))
+            {
+            const auto& primitives=document.at("meshes")[occurrence.mesh].at("primitives");
+            if (!primitives.is_array() || primitives.empty()) assetError(asset.identifier,"mesh has no triangle geometry.");
+            const auto normalTransform=glm::inverseTranspose(glm::dmat3{occurrence.transform});
+            const bool mirrored=glm::determinant(glm::dmat3{occurrence.transform})<0;
             for (const Json& primitive : primitives)
             {
                 if (!primitive.is_object())
@@ -759,6 +825,13 @@ namespace quantum::renderer
                     document, glb.binary,
                     attributes["NORMAL"].get<std::size_t>(),
                     "VEC3", componentFloat, asset.identifier);
+                std::optional<AccessorView> uvs;
+                if (attributes.contains("TEXCOORD_0"))
+                {
+                    uvs=accessorView(document,glb.binary,attributes["TEXCOORD_0"].get<std::size_t>(),"VEC2",componentFloat,asset.identifier);
+                    if (uvs->count!=positions.count) assetError(asset.identifier,"UV and position counts differ.");
+                }
+                if (attributes.contains("COLOR_0")) assetError(asset.identifier,"vertex colors are unsupported by static component presentation.");
                 const AccessorView indices = indexAccessorView(
                     document, glb.binary,
                     primitive["indices"].get<std::size_t>(), asset.identifier);
@@ -784,9 +857,9 @@ namespace quantum::renderer
                     vertexIndex < positions.count; ++vertexIndex)
                 {
                     const glm::vec3 position = gltfVectorToQuantum(
-                        readVec3(positions, vertexIndex));
+                        glm::vec3{occurrence.transform * glm::dvec4{readVec3(positions, vertexIndex),1}});
                     glm::vec3 normal = gltfVectorToQuantum(
-                        readVec3(normals, vertexIndex));
+                        glm::vec3{normalTransform * glm::dvec3{readVec3(normals, vertexIndex)}});
                     if (!finite(position) || !finite(normal)
                         || glm::length(normal) <= 1.0e-6F)
                     {
@@ -794,7 +867,14 @@ namespace quantum::renderer
                             "mesh contains a non-finite or degenerate position/normal.");
                     }
                     normal = glm::normalize(normal);
-                    asset.vertices.push_back({position, normal});
+                    glm::vec2 uv{0};
+                    if (uvs)
+                    {
+                        std::memcpy(&uv.x,uvs->data+vertexIndex*uvs->stride,sizeof(float));
+                        std::memcpy(&uv.y,uvs->data+vertexIndex*uvs->stride+sizeof(float),sizeof(float));
+                        if (!std::isfinite(uv.x) || !std::isfinite(uv.y)) assetError(asset.identifier,"UV is nonfinite.");
+                    }
+                    asset.vertices.push_back({position, normal, uv});
                 }
 
                 if (asset.triangleIndices.size()
@@ -808,7 +888,8 @@ namespace quantum::renderer
                     asset.triangleIndices.size() + indices.count);
                 for (std::size_t index = 0; index < indices.count; ++index)
                 {
-                    const std::uint32_t localIndex = readIndex(indices, index);
+                    const auto sourceIndex=mirrored ? (index/3)*3+(index%3==1 ? 2 : index%3==2 ? 1 : 0) : index;
+                    const std::uint32_t localIndex = readIndex(indices, sourceIndex);
                     if (localIndex >= positions.count)
                     {
                         assetError(asset.identifier,
@@ -820,10 +901,14 @@ namespace quantum::renderer
                     firstIndex, static_cast<std::uint32_t>(indices.count),
                     primitiveMaterial(document, primitive, asset.identifier)});
             }
+            }
             if (asset.vertices.empty() || asset.triangleIndices.empty())
             {
                 assetError(asset.identifier, "mesh contains no triangle geometry.");
             }
+            asset.minimumPosition=asset.maximumPosition=asset.vertices.front().position;
+            for (const auto& vertex:asset.vertices)
+            { asset.minimumPosition=glm::min(asset.minimumPosition,vertex.position); asset.maximumPosition=glm::max(asset.maximumPosition,vertex.position); }
             createEdges(asset);
             return asset;
         }
@@ -832,6 +917,93 @@ namespace quantum::renderer
             assetError(identifier,
                 "malformed glTF document: " + std::string(exception.what()));
         }
+    }
+
+    namespace
+    {
+        struct ComponentAssetState
+        {
+            StaticMeshAssetCache assets;
+            std::unordered_map<std::string,std::shared_ptr<const coaster::TrackComponentMesh>> meshes;
+            std::unordered_map<std::string,HardwareAssetLoadStatus> statuses;
+        };
+        thread_local std::shared_ptr<ComponentAssetState> componentAssets;
+    }
+    void configureTrackComponentAssets(const std::filesystem::path& root)
+    {
+        // Discover additional versioned definitions beside the bundled catalog.
+        // Registration is atomic per file; malformed extensions leave the saved
+        // component snapshots usable and receive an actionable diagnostic.
+        const auto directory=root/"assets/track/catalog";
+        static std::set<std::filesystem::path> loadedCatalogs;
+        if (std::filesystem::is_directory(directory))
+        {
+            std::vector<std::filesystem::path> catalogs;
+            for (const auto& entry:std::filesystem::directory_iterator(directory))
+                if (entry.is_regular_file() && entry.path().extension()==".json"
+                    && entry.path().filename()!="numbered-families.json") catalogs.push_back(entry.path());
+            std::ranges::sort(catalogs);
+            for (const auto& path:catalogs)
+            {
+                if (loadedCatalogs.contains(path)) continue;
+                std::ifstream file(path);
+                if (!file) throw std::runtime_error("Cannot read track catalog: "+path.string());
+                const std::string text{std::istreambuf_iterator<char>{file},{}};
+                try { coaster::trackFamilyRegistry().loadJson(text); loadedCatalogs.insert(path); }
+                catch (const std::exception& error) {
+                    logging::logMessagef(logging::LogLevel::Warning,"TRACK","Catalog %s rejected: %s",path.string().c_str(),error.what());
+                }
+            }
+        }
+        auto state=std::make_shared<ComponentAssetState>();
+        state->assets.setRuntimeRoot(root);
+        componentAssets=state;
+        coaster::setTrackComponentDiagnosticSink([state](std::string_view id,std::string_view detail) {
+            const auto key=normalizeStaticMeshAssetIdentifier(id);
+            state->statuses[key]={key,detail.empty() ? HardwareAssetLoadState::Loaded : HardwareAssetLoadState::UnsupportedGlb,
+                !detail.empty(),detail.empty() ? "Loaded curve-following component." : std::string{detail}};
+        });
+        coaster::setTrackComponentMeshResolver([state](std::string_view id) -> std::shared_ptr<const coaster::TrackComponentMesh> {
+            const auto key=normalizeStaticMeshAssetIdentifier(id);
+            if (const auto found=state->meshes.find(key); found!=state->meshes.end()) return found->second;
+            try
+            {
+                const auto source=state->assets.load(key);
+                auto mesh=std::make_shared<coaster::TrackComponentMesh>();
+                for (const auto& v:source->vertices) mesh->mesh.vertices.push_back({v.position,v.normal,v.uv});
+                mesh->mesh.triangleIndices=source->triangleIndices;
+                mesh->mesh.edgeIndices=source->edgeIndices;
+                for (const auto& sub:source->submeshes)
+                {
+                    auto material=static_cast<std::uint32_t>(mesh->materials.size());
+                    mesh->materials.push_back(sub.material.value_or(coaster::TrackMaterial{}));
+                    mesh->mesh.submeshes.push_back({sub.firstIndex,sub.indexCount,material,0});
+                }
+                state->statuses[key]={key,HardwareAssetLoadState::Loaded,false,"Loaded static component; node transforms applied."};
+                state->meshes[key]=mesh;
+                return mesh;
+            }
+            catch (const std::runtime_error& error)
+            {
+                state->statuses[key]={key,classifyStaticMeshLoadFailure(error.what()),true,error.what()};
+                state->meshes[key]=nullptr;
+                return nullptr;
+            }
+        });
+    }
+    std::optional<HardwareAssetLoadStatus> trackComponentAssetStatus(std::string_view id)
+    {
+        if (!componentAssets) return std::nullopt;
+        const auto found=componentAssets->statuses.find(std::string{id});
+        if (found==componentAssets->statuses.end()) return std::nullopt;
+        return found->second;
+    }
+    void reloadTrackComponentAsset(std::string_view id)
+    {
+        if (!componentAssets) return;
+        const auto key=normalizeStaticMeshAssetIdentifier(id);
+        componentAssets->assets.invalidate(key);
+        componentAssets->meshes.erase(key); componentAssets->statuses.erase(key);
     }
 
     StaticMeshAssetCache::StaticMeshAssetCache(

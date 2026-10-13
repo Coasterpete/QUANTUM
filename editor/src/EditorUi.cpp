@@ -20,7 +20,6 @@
 #include <SDL3/SDL_stdinc.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_vulkan.h>
 #include <imgui_internal.h>
 
 #include <glm/common.hpp>
@@ -54,7 +53,6 @@ namespace
         "Route###TRACK WORKSPACE";
     constexpr char supportWorkspaceWindowName[] =
         "Supports###Support Workspace";
-    constexpr double orbitRadiansPerPixel = 0.005;
     constexpr double piRadians = 3.14159265358979323846;
     // The Geometry Editor presents angles in degrees; Core keeps radians.
     constexpr double degreesPerRadian = 180.0 / piRadians;
@@ -355,14 +353,6 @@ namespace
         return std::round(value / increment) * increment;
     }
 
-    // While a drag is held, the platform may report the cursor position
-    // in screen coordinates rather than window coordinates (observed as
-    // a constant window-origin offset appearing between one frame and
-    // the next). Per-frame delta integration is invariant to a constant
-    // offset, so an implausible single-frame delta is absorbed by
-    // re-basing the anchor's pixel reference without changing the value.
-    constexpr double maxPlausiblePixelDeltaPerFrame = 64.0;
-
     struct TransitionEditorEdit
     {
         // Endpoint None together with clickedChannel means a plot click on
@@ -373,6 +363,7 @@ namespace
             quantum::editor::ProfileChannel channel;
             quantum::editor::ScalarProfileEndpoint endpoint;
             std::uint32_t segmentId;
+            bool armDrag = true;
         };
 
         struct TypeChange
@@ -388,6 +379,7 @@ namespace
             std::uint32_t segmentId;
             quantum::editor::ScalarProfileEndpoint endpoint;
             double distance;
+            bool continuous = true;
         };
 
         struct SplitRequest
@@ -434,6 +426,8 @@ namespace
         bool lengthEdited = false;
         bool convertToGeometryRequested = false;
         bool convertToRateProfilesRequested = false;
+        bool convertToForceDrivenRequested = false;
+        bool replaceWithRateProfilesRequested = false;
         bool completeCircuitRequested = false;
         std::optional<quantum::coaster::LayoutMode> layoutModeChanged;
         // Present when the user picked an authoring type in the create
@@ -1252,10 +1246,12 @@ namespace
         edit.valueEndEdited = ImGui::InputDouble(
             "##SelectedValue",
             selectedValueBuffer,
-            0.25,
-            1.0,
-            valueFormat
+            row.style.diagnostic == quantum::editor::ProfileRowDiagnostic::ForceTarget ? 0.05 : 0.01,
+            row.style.diagnostic == quantum::editor::ProfileRowDiagnostic::ForceTarget ? 0.5 : 0.1,
+            valueFormat,
+            ImGuiInputTextFlags_EnterReturnsTrue
         );
+        edit.valueEndEdited |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::PopFont();
         if (ImGui::IsItemHovered())
         {
@@ -1861,18 +1857,7 @@ namespace
         ImGui::GetIO().IniFilename = pathStorage.c_str();
     }
 
-    void checkVulkanResult(const VkResult result)
-    {
-        if (result != VK_SUCCESS)
-        {
-            quantum::logging::logMessagef(
-                quantum::logging::LogLevel::Error,
-                "VK:ImGui",
-                "Dear ImGui Vulkan backend reported VkResult %d.",
-                static_cast<int>(result)
-            );
-        }
-    }
+
 
     void logViewportSettings(
         const quantum::editor::ViewportSettings& settings)
@@ -2063,6 +2048,12 @@ namespace
             committed = true;
         }
 
+        committed |= ImGui::SliderFloat("Pan Sensitivity", &settings.panSensitivity,
+            0.05F, 4.0F, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+        committed |= ImGui::Checkbox("Zoom toward cursor", &settings.zoomToCursor);
+        quantum::editor::editorSecondaryTextWrapped(
+            "RMB look | Alt+RMB orbit | MMB pan | wheel zoom. Shift: precise mouse movement. F: frame Region; Shift+F: frame all.");
+
         if (ImGui::SliderFloat(
             "Zoom Sensitivity",
             &settings.zoomSensitivity,
@@ -2096,6 +2087,11 @@ namespace
             committed = true;
         }
 
+        if (ImGui::SmallButton("Reset navigation response"))
+        {
+            static_cast<quantum::editor::CameraNavigationSettings&>(settings) = {};
+            committed = true;
+        }
         quantum::editor::editorHeading("Outdoor Lighting", fonts);
         committed = ImGui::SliderFloat("Sun Azimuth",
             &settings.sunAzimuthDegrees, -180.0F, 180.0F, "%.0f deg")
@@ -2925,22 +2921,15 @@ namespace
                 const char* kindName = isGeometry
                     ? (isForceDriven ? "Force-Based" : "Circular Arc")
                     : "Profile";
-                // Keep the existing selectable ID, including its region/length
-                // components; draw the visible summary separately below.
-                const char* stableKindName = isGeometry
-                    ? (isForceDriven
-                        ? "Geometry / Force Driven" : "Geometry / Planar Arc")
-                    : "Rate/Profile";
+                // Index identity remains stable while editing length or kind.
                 const double length = quantum::coaster::sectionLength(track.section(index));
                 const double endStation = startStation + length;
                 char label[128]{};
                 std::snprintf(
                     label,
                     sizeof(label),
-                    "###Region %llu - %s (%.3g)",
-                    static_cast<unsigned long long>(index + 1),
-                    stableKindName,
-                    length
+                    "###Region %llu",
+                    static_cast<unsigned long long>(index + 1)
                 );
                 char title[64]{};
                 std::snprintf(title, sizeof(title), "%02zu  %s", index + 1, kindName);
@@ -3060,20 +3049,26 @@ namespace
                 {
                     ImGui::Separator();
                     const auto& selected = track.section(selectedIndex);
-                    const bool isGeometry = selected.kind
-                        == quantum::coaster::RegionKind::Geometry
-                        && !quantum::coaster::isForceDrivenSection(selected);
-                    if (ImGui::MenuItem(isGeometry ? "Convert to Profile"
-                        : "Convert to Circular Arc"))
+                    if (ImGui::BeginMenu("Convert selected region"))
                     {
-                        if (isGeometry)
-                        {
+                        const bool force = quantum::coaster::isForceDrivenSection(selected);
+                        const bool unbankedArc = selected.kind == quantum::coaster::RegionKind::Geometry
+                            && !force && std::get<quantum::coaster::PlanarArcRegion>(
+                                std::get<quantum::coaster::GeometryRegion>(selected.region).construction).bankChange == 0;
+                        if (ImGui::MenuItem("Profile (preserve arc geometry)", nullptr, false, unbankedArc))
                             edit.convertToRateProfilesRequested = true;
-                        }
-                        else
-                        {
+                        if (ImGui::MenuItem("Profile (reset construction)", nullptr, false,
+                            selected.kind != quantum::coaster::RegionKind::RateProfiles))
+                            edit.replaceWithRateProfilesRequested = true;
+                        if (ImGui::MenuItem("Circular Arc (reset construction)", nullptr, false,
+                            selected.kind == quantum::coaster::RegionKind::RateProfiles
+                            || quantum::coaster::isForceDrivenSection(selected)))
                             edit.convertToGeometryRequested = true;
-                        }
+                        if (ImGui::MenuItem("Force-Based (reset targets)", nullptr, false,
+                            !quantum::coaster::isForceDrivenSection(selected)))
+                            edit.convertToForceDrivenRequested = true;
+                        ImGui::TextDisabled("Resets retain length and style. Undo restores construction.");
+                        ImGui::EndMenu();
                     }
                 }
                 ImGui::EndPopup();
@@ -3223,7 +3218,11 @@ namespace
                 ImGui::Spacing();
                 quantum::editor::editorSectionHeading("Dimensions", fonts);
 
-                quantum::editor::editorSecondaryText("Authored length [m]");
+                quantum::editor::editorSecondaryText(track.physicalSettings().metersPerCoordinateUnit == 1.0
+                    ? "Authored length [m]" : "Authored length [coordinate units]");
+                if (track.physicalSettings().metersPerCoordinateUnit != 1.0)
+                    ImGui::TextDisabled("Physical length %.6g m", track.section(selectedIndex).length
+                        * track.physicalSettings().metersPerCoordinateUnit);
                 ImGui::SetNextItemWidth(-1.0F);
                 ImGui::PushFont(fonts.technical, quantum::editor::editorTechnicalFontSize);
                 if (ImGui::InputDouble(
@@ -3231,11 +3230,12 @@ namespace
                     sectionLengthEdit,
                     1.0,
                     10.0,
-                    "%.3f"
+                    "%.3f", ImGuiInputTextFlags_EnterReturnsTrue
                 ))
                 {
                     edit.lengthEdited = true;
                 }
+                edit.lengthEdited |= ImGui::IsItemDeactivatedAfterEdit();
                 ImGui::PopFont();
 
                 if (ImGui::IsItemHovered())
@@ -3346,7 +3346,7 @@ namespace
             &settings.normalDragGain,
             0.01F,
             0.05F,
-            5.0F,
+            4.0F,
             "%.2f",
             ImGuiSliderFlags_AlwaysClamp
         );
@@ -3357,7 +3357,7 @@ namespace
             &settings.fineDragGain,
             0.005F,
             0.01F,
-            5.0F,
+            4.0F,
             "%.2f",
             ImGuiSliderFlags_AlwaysClamp
         );
@@ -3371,7 +3371,7 @@ namespace
         double snapDegrees = settings.snapIncrement
             * quantum::editor::degreesPerRadian;
         if (ImGui::InputDouble(
-            "Value Snap (deg/m)",
+            "Rate Snap (deg/coordinate unit)",
             &snapDegrees,
             0.01,
             0.1,
@@ -3388,6 +3388,17 @@ namespace
                     : 0.05 * quantum::editor::radiansPerDegree;
             committed = true;
         }
+
+        const auto positiveSnap = [&](const char* label, double& value, double fallback)
+        {
+            if (ImGui::InputDouble(label, &value, 0, 0, "%.6g"))
+            {
+                if (!std::isfinite(value) || value <= 0 || value > 1e6) value = fallback;
+                committed = true;
+            }
+        };
+        positiveSnap("Force Target Snap (G)", settings.forceSnapIncrement, .05);
+        positiveSnap("Device Acceleration Snap (m/s^2)", settings.accelerationSnapIncrement, .1);
 
         if (ImGui::Checkbox(
             "Enable Distance Snapping",
@@ -3464,7 +3475,12 @@ namespace
         std::optional<quantum::editor::GraphMarkerId>& hoveredMarker,
         const quantum::editor::TransitionEditorInputSettings&
             inputSettings,
-        const quantum::editor::EditorFonts& fonts)
+        const quantum::editor::EditorFonts& fonts,
+        quantum::editor::TransitionPrecisionState& precision,
+        const double metersPerCoordinateUnit,
+        const std::optional<double> previousBoundaryValue,
+        const quantum::editor::MousePos mouseMotion,
+        const std::optional<glm::dvec3> endpointAngles)
     {
         TransitionEditorEdit edit;
         const double sectionLength = stations.length;
@@ -3484,12 +3500,19 @@ namespace
         }();
 
         char context[128]{};
-        std::snprintf(context, sizeof(context), "Region %zu | track s %.3g - %.3g m | local 0 - %.3g m",
-            regionIndex + 1, stations.startStation, stations.endStation, sectionLength);
+        std::snprintf(context, sizeof(context), "Region %zu | track s %.3g - %.3g m | length %.3g m",
+            regionIndex + 1, stations.startStation * metersPerCoordinateUnit,
+            stations.endStation * metersPerCoordinateUnit, sectionLength * metersPerCoordinateUnit);
         quantum::editor::editorPaneHeading(
             hasForceTargetRow ? "FORCE TARGETS" : "MATH / TRANSITIONS",
             context, fonts, hasForceTargetRow ? "Targets / response"
                 : "Distance-domain profiles");
+        if (metersPerCoordinateUnit != 1.0)
+            ImGui::TextDisabled("Graph X uses coordinate units: 1 unit = %.6g m. Numeric transition length uses metres.", metersPerCoordinateUnit);
+
+        if (endpointAngles)
+            ImGui::TextDisabled("Evaluated Region end: pitch %+.2f | yaw %+.2f | bank %+.2f deg",
+                endpointAngles->x, endpointAngles->y, endpointAngles->z);
 
         for (const ProfileRowView& row : profileRows)
         {
@@ -3658,6 +3681,110 @@ namespace
             };
         }
 
+        if (focusedSegment != nullptr)
+        {
+            const auto& transition = focusedSegment->transition;
+            const double length = transition.domainEnd - transition.domainBegin;
+            const double rotationDegrees = quantum::math::integrateScalarTransition(
+                transition, transition.domainBegin, transition.domainEnd) * quantum::editor::degreesPerRadian;
+            const bool rate = activeStyle.diagnostic != quantum::editor::ProfileRowDiagnostic::ForceTarget;
+            if (rate)
+                ImGui::TextDisabled("Transition integral %+.3f deg | Region integral %+.3f deg",
+                    rotationDegrees, quantum::editor::computeChannelNetRotationDegrees(*activeRow.profile));
+            else
+                ImGui::TextDisabled("Editable target: %+.4f -> %+.4f G | evaluated loads: Force Diagnostics",
+                    transition.valueBegin, transition.valueEnd);
+            if (precision.regionIndex != regionIndex || precision.channel != activeChannel
+                || precision.segmentId != focusedSegment->id)
+            {
+                precision = {};
+                precision.regionIndex = regionIndex;
+                precision.channel = activeChannel;
+                precision.segmentId = focusedSegment->id;
+                precision.targetDegrees = rotationDegrees;
+                precision.lastLength = -1;
+            }
+            if (!ImGui::IsAnyItemActive() && (precision.lastBegin != transition.valueBegin
+                || precision.lastEnd != transition.valueEnd || precision.lastLength != length))
+            {
+                precision.length = length * metersPerCoordinateUnit;
+                precision.amplitude = (transition.valueEnd - transition.valueBegin) * activeStyle.authoredToDisplay;
+                precision.lastBegin = transition.valueBegin;
+                precision.lastEnd = transition.valueEnd;
+                precision.lastLength = length;
+            }
+            sameLineIfFits(buttonWidth("Begin"));
+            if (ImGui::SmallButton("Begin"))
+                edit.click = TransitionEditorEdit::Click{activeChannel, quantum::editor::ScalarProfileEndpoint::Begin, focusedSegment->id, false};
+            sameLineIfFits(buttonWidth("End"));
+            if (ImGui::SmallButton("End"))
+                edit.click = TransitionEditorEdit::Click{activeChannel, quantum::editor::ScalarProfileEndpoint::End, focusedSegment->id, false};
+            sameLineIfFits(buttonWidth("Transition tools..."));
+            if (ImGui::SmallButton("Transition tools...")) ImGui::OpenPopup("TransitionPrecision");
+            if (ImGui::BeginPopup("TransitionPrecision"))
+            {
+                const auto field = [](const char* label, double& value)
+                {
+                    const bool submitted = ImGui::InputDouble(label, &value, 0, 0, "%.6f",
+                        ImGuiInputTextFlags_EnterReturnsTrue);
+                    return submitted || ImGui::IsItemDeactivatedAfterEdit();
+                };
+                ImGui::Text("Begin %+.6f | End %+.6f %s", transition.valueBegin * activeStyle.authoredToDisplay,
+                    transition.valueEnd * activeStyle.authoredToDisplay, activeStyle.valueUnitLabel);
+                const auto bounds = quantum::editor::profileBoundaryMoveBounds(*activeRow.profile,
+                    focusedSegment->id, quantum::editor::ScalarProfileEndpoint::End);
+                ImGui::BeginDisabled(!bounds.has_value());
+                if (field("Length (m)", precision.length) && bounds)
+                {
+                    const double proposed = transition.domainBegin + precision.length / metersPerCoordinateUnit;
+                    if (std::isfinite(proposed) && proposed > bounds->minimum && proposed < bounds->maximum)
+                        edit.distanceMove = TransitionEditorEdit::DistanceMove{activeChannel, focusedSegment->id,
+                            quantum::editor::ScalarProfileEndpoint::End, proposed, false};
+                    else precision.length = length * metersPerCoordinateUnit;
+                }
+                ImGui::EndDisabled();
+                if (!bounds) ImGui::TextDisabled("Final boundary follows Region length in the Inspector.");
+                if (field("Amplitude (end - begin)", precision.amplitude) && std::isfinite(precision.amplitude))
+                    edit.endpointValueEdit = quantum::editor::ScalarProfileEndpointValueEdit{quantum::editor::ScalarProfileEndpoint::End,
+                        transition.valueBegin + precision.amplitude * activeStyle.displayToAuthored,
+                        false, regionIndex, activeChannel, focusedSegment->id};
+                ImGui::TextWrapped("Moving an interior end resizes its neighbour. Shared values follow on both sides. Numeric edits commit on Enter or leaving the field.");
+                if (rate)
+                {
+                    field("Rotation target (deg)", precision.targetDegrees);
+                    ImGui::BeginDisabled(!std::isfinite(precision.targetDegrees));
+                    if (ImGui::Button("Solve end rate"))
+                    {
+                        precision.targetRequested = true;
+                        const auto result = quantum::editor::solveTransitionRotationTarget(transition,
+                            precision.targetDegrees * quantum::editor::radiansPerDegree);
+                        if (result.converged)
+                            edit.endpointValueEdit = quantum::editor::ScalarProfileEndpointValueEdit{quantum::editor::ScalarProfileEndpoint::End,
+                                result.endValue, false, regionIndex, activeChannel, focusedSegment->id};
+                    }
+                    ImGui::EndDisabled();
+                    if (precision.targetRequested)
+                    {
+                        ImGui::TextUnformatted(std::abs(rotationDegrees - precision.targetDegrees) <= 1e-8
+                            ? "Converged (committed geometry)" : "Pending or rejected; inspect Region status");
+                        ImGui::Text("Current residual %+.6g deg (target %+.6g deg)",
+                            rotationDegrees - precision.targetDegrees, precision.targetDegrees);
+                    }
+                    ImGui::TextWrapped("Analytic target adjusts this transition's end rate. The integral is rider-local rotation, not a world pitch/yaw/roll angle. Downstream geometry follows the edited frame.");
+                }
+                if (focusedSegment == &activeRow.profile->segments.front() && previousBoundaryValue)
+                {
+                    const double difference = (transition.valueBegin - *previousBoundaryValue) * activeStyle.authoredToDisplay;
+                    ImGui::Text("Previous Region boundary difference %+.6g %s", difference, activeStyle.valueUnitLabel);
+                    if (ImGui::Button("Match previous Region value"))
+                        edit.endpointValueEdit = quantum::editor::ScalarProfileEndpointValueEdit{quantum::editor::ScalarProfileEndpoint::Begin,
+                            *previousBoundaryValue, false, regionIndex, activeChannel, focusedSegment->id};
+                    ImGui::TextWrapped("Explicitly matches this channel's start value; neighbour values stay authored. Position and rider frame connect through normal regeneration.");
+                }
+                ImGui::EndPopup();
+            }
+        }
+
         sameLineIfFits(buttonWidth("Fit Y"));
         if (ImGui::SmallButton("Fit Y"))
         {
@@ -3770,7 +3897,7 @@ namespace
             {
                 const quantum::editor::CurvatureDiagnostic activeDiagnostic =
                     quantum::editor::curvatureDiagnosticFromRateRadians(
-                        diagnosticValue
+                        diagnosticValue / metersPerCoordinateUnit
                     );
                 ImGui::TextDisabled(
                     "%s Rate @ %.4g m: %+.5f %s  "
@@ -3797,7 +3924,7 @@ namespace
                         diagnosticDistance
                     );
                 const auto resultant = quantum::editor::
-                    resultantCurvatureDiagnostic(pitchRate, yawRate);
+                    resultantCurvatureDiagnostic(pitchRate / metersPerCoordinateUnit, yawRate / metersPerCoordinateUnit);
                 ImGui::TextDisabled(
                     "Local centerline curvature @ %.4g m: %.6f 1/m",
                     diagnosticDistance,
@@ -3808,10 +3935,10 @@ namespace
             quantum::editor::editorHeading("Total rotation", fonts);
             for (const ProfileRowView& row : profileRows)
             {
-                // Only a roll row integrates to an authored angle; a force
-                // target integrates to a rider load and has no rotation.
+                // Angular-rate integrals retain rider-local meaning. Force
+                // targets are loads and must not be presented as angles.
                 if (row.style.diagnostic
-                    != quantum::editor::ProfileRowDiagnostic::IntegratedRotation)
+                    == quantum::editor::ProfileRowDiagnostic::ForceTarget)
                 {
                     continue;
                 }
@@ -4338,20 +4465,10 @@ namespace
                     const double currentPixelY = static_cast<double>(
                         dragIo.MousePos.y);
 
-                    // Coordinate-space switches are absorbed per axis by
-                    // re-basing the pixel reference without integrating.
-                    double deltaX = currentPixelX - anchor.pixelX;
-                    if (std::abs(deltaX) > maxPlausiblePixelDeltaPerFrame)
-                    {
-                        deltaX = 0.0;
-                    }
+                    // SDL relative motion is independent of screen/window origin.
+                    const double deltaX = mouseMotion.x;
+                    const double deltaY = mouseMotion.y;
                     anchor.pixelX = currentPixelX;
-
-                    double deltaY = currentPixelY - anchor.pixelY;
-                    if (std::abs(deltaY) > maxPlausiblePixelDeltaPerFrame)
-                    {
-                        deltaY = 0.0;
-                    }
                     anchor.pixelY = currentPixelY;
 
                     quantum::editor::DragAxisLock& axisLock =
@@ -4413,11 +4530,16 @@ namespace
                                     deltaX,
                                     geometry.distanceUnitsPerPixel,
                                     static_cast<double>(gainMultiplier),
-                                    *bounds,
-                                    snapIncrement
+                                    *bounds
                                 );
+                            const double rawDistance = distance;
+                            const double snappedDistance = quantum::editor::proposeBoundaryDistanceDrag(
+                                rawDistance, 0, geometry.distanceUnitsPerPixel, 1.0, *bounds, snapIncrement);
 
-                            if (distance != anchor.distance)
+                            const auto* draggedSegment = findProfileSegment(*draggedRow.profile, dragSegmentIds[channelIndex]);
+                            const double committedDistance = endpointDrags[channelIndex] == quantum::editor::ScalarProfileEndpoint::Begin
+                                ? draggedSegment->transition.domainBegin : draggedSegment->transition.domainEnd;
+                            if (snappedDistance != committedDistance)
                             {
                                 edit.distanceMove =
                                     TransitionEditorEdit::DistanceMove{
@@ -4425,23 +4547,22 @@ namespace
                                             ProfileChannel>(channelIndex),
                                         dragSegmentIds[channelIndex],
                                         endpointDrags[channelIndex],
-                                        distance
+                                        snappedDistance
                                     };
-                                anchor.distance = distance;
                             }
+                            anchor.distance = rawDistance;
                         }
                     }
                     else if (axisLock
                         == quantum::editor::DragAxisLock::Vertical)
                     {
-                        const std::optional<double> snapIncrement =
-                            inputSettings.snapEnabled
-                                && inputSettings.snapIncrement > 0.0
-                            ? std::optional<double>{
-                                inputSettings.snapIncrement}
-                            : std::nullopt;
+                        const double increment = profileRows[channelIndex].style.diagnostic
+                                == quantum::editor::ProfileRowDiagnostic::ForceTarget
+                            ? inputSettings.forceSnapIncrement : inputSettings.snapIncrement;
+                        const std::optional<double> snapIncrement = inputSettings.snapEnabled
+                            ? std::optional<double>{increment} : std::nullopt;
                         const double value = quantum::editor::
-                            proposeMarkerValueDrag(
+                            accumulateMarkerValueDrag(
                                 anchor.value,
                                 deltaY,
                                 geometry.unitsPerPixel,
@@ -4449,7 +4570,6 @@ namespace
                                 snapIncrement
                             );
 
-                        anchor.value = value;
                         graphRanges[channelIndex] = quantum::editor::
                             expandGraphRangeToInclude(
                                 graphRanges[channelIndex],
@@ -4552,6 +4672,7 @@ namespace
         ImGui::DockBuilderDockWindow("3D Viewport", centerId);
         ImGui::DockBuilderDockWindow(supportWorkspaceWindowName, rightId);
         ImGui::DockBuilderDockWindow("Track Devices", rightId);
+        ImGui::DockBuilderDockWindow("Ride Operations", rightId);
         ImGui::DockBuilderDockWindow("Viewport Settings", rightId);
         ImGui::DockBuilderDockWindow("Region Inspector", rightId);
         ImGui::DockBuilderDockWindow("Transition Editor", bottomId);
@@ -4579,8 +4700,8 @@ namespace
         ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Down, 0.27F,
             &bottomId, &centerId);
         const float configurationFraction = std::clamp(
-            320.0F * quantum::editor::editorPresentationScale() / dockspaceSize.x,
-            0.20F, 0.30F);
+            420.0F * quantum::editor::editorPresentationScale() / dockspaceSize.x,
+            0.22F, 0.34F);
         ImGui::DockBuilderSplitNode(centerId, ImGuiDir_Left, configurationFraction,
             &leftId, &centerId);
         ImGui::DockBuilderDockWindow("Train Configuration", leftId);
@@ -5406,9 +5527,10 @@ namespace quantum::editor
                 &deviceProfileValueEditBuffer_,
                 0.25,
                 1.0,
-                "%.3f m/s^2");
+                "%.3f m/s^2", ImGuiInputTextFlags_EnterReturnsTrue);
+            const bool valueCommitted = valueEdited || ImGui::IsItemDeactivatedAfterEdit();
             ImGui::PopFont();
-            if (valueEdited && std::isfinite(deviceProfileValueEditBuffer_)
+            if (valueCommitted && std::isfinite(deviceProfileValueEditBuffer_)
                 && deviceProfileValueEditBuffer_ >= 0.0)
             {
                 if (numericEndpoint == ScalarProfileEndpoint::Begin)
@@ -5635,6 +5757,7 @@ namespace quantum::editor
                     drawList->PopClipRect();
 
                     // Interaction - mouse hover and drag.
+                    bool acquiredHandleThisFrame = false;
                     const ImVec2 mousePos = ImGui::GetIO().MousePos;
                     const bool mouseInPlot = ImGui::IsWindowHovered()
                         && mousePos.x >= plotBeginX && mousePos.x <= plotEndX
@@ -5655,6 +5778,7 @@ namespace quantum::editor
                             if (distSq <= bestDistSq)
                             {
                                 bestDistSq = distSq;
+                                acquiredHandleThisFrame = true;
                                 deviceProfileSelectedSegmentId_ = marker.segmentId;
                                 deviceProfileDragSegmentId_ = marker.segmentId;
                                 deviceProfileSelectedEndpoint_ = marker.endpoint;
@@ -5741,7 +5865,7 @@ namespace quantum::editor
 
                     // Drag handling.
                     if (deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None
-                        && deviceProfileDragAnchor_.has_value())
+                        && deviceProfileDragAnchor_.has_value() && !acquiredHandleThisFrame)
                     {
                         const ImGuiIO& io = ImGui::GetIO();
                         const float gainMult = io.KeyShift
@@ -5752,14 +5876,9 @@ namespace quantum::editor
                         const double currentPixelX = static_cast<double>(io.MousePos.x);
                         const double currentPixelY = static_cast<double>(io.MousePos.y);
 
-                        double deltaX = currentPixelX - anchor.pixelX;
-                        if (std::abs(deltaX) > maxPlausiblePixelDeltaPerFrame)
-                            deltaX = 0.0;
+                        const double deltaX = frameMouseMotion_.x;
+                        const double deltaY = frameMouseMotion_.y;
                         anchor.pixelX = currentPixelX;
-
-                        double deltaY = currentPixelY - anchor.pixelY;
-                        if (std::abs(deltaY) > maxPlausiblePixelDeltaPerFrame)
-                            deltaY = 0.0;
                         anchor.pixelY = currentPixelY;
 
                         if (deviceProfileDragAxisLock_ == DragAxisLock::None)
@@ -5797,11 +5916,15 @@ namespace quantum::editor
                                     && transitionEditorInputSettings_.distanceSnapIncrement > 0.0
                                     ? std::optional<double>(transitionEditorInputSettings_.distanceSnapIncrement)
                                     : std::nullopt;
-                                const double newDist = quantum::editor::proposeBoundaryDistanceDrag(
+                                anchor.distance = quantum::editor::proposeBoundaryDistanceDrag(
                                     anchor.distance, deltaX, distanceUnitsPerPixel,
-                                    static_cast<double>(gainMult), *bounds, snapInc);
+                                    static_cast<double>(gainMult), *bounds);
+                                const double newDist = quantum::editor::proposeBoundaryDistanceDrag(
+                                    anchor.distance, 0, distanceUnitsPerPixel, 1.0, *bounds, snapInc);
 
-                                if (newDist != anchor.distance)
+                                const double committedDistance = deviceProfileDragEndpoint_ == ScalarProfileEndpoint::Begin
+                                    ? focusedSegment->transition.domainBegin : focusedSegment->transition.domainEnd;
+                                if (newDist != committedDistance)
                                 {
                                     coaster::moveChannelSegmentBoundary(
                                         deviceProfileEditBuffer_, deviceProfileDragSegmentId_,
@@ -5809,7 +5932,6 @@ namespace quantum::editor
                                             ? coaster::ProfileBoundary::Begin
                                             : coaster::ProfileBoundary::End,
                                         newDist);
-                                    anchor.distance = newDist;
                                     commit = true;
                                 }
                             }
@@ -5822,16 +5944,18 @@ namespace quantum::editor
                                     / std::max(1.0, static_cast<double>(plotEndY - plotBeginY + 8.0F))
                                 : 0.0;
                             const std::optional<double> snapInc = transitionEditorInputSettings_.snapEnabled
-                                && transitionEditorInputSettings_.snapIncrement > 0.0
-                                ? std::optional<double>(transitionEditorInputSettings_.snapIncrement)
+                                && transitionEditorInputSettings_.accelerationSnapIncrement > 0.0
+                                ? std::optional<double>(transitionEditorInputSettings_.accelerationSnapIncrement)
                                 : std::nullopt;
-                            const double newValue = proposeMarkerValueDrag(
+                            const double newValue = accumulateMarkerValueDrag(
                                 anchor.value, deltaY, valueUnitsPerPixel,
                                 static_cast<double>(gainMult), snapInc);
 
-                            if (newValue >= 0.0) // Acceleration must be non-negative
+                            anchor.value = std::max(0.0, anchor.value);
+                            const double committedValue = deviceProfileDragEndpoint_ == ScalarProfileEndpoint::Begin
+                                ? focusedSegment->transition.valueBegin : focusedSegment->transition.valueEnd;
+                            if (newValue >= 0.0 && newValue != committedValue)
                             {
-                                anchor.value = newValue;
                                 // Apply to the focused segment.
                                 if (focusedSegment != nullptr)
                                 {
@@ -5940,13 +6064,34 @@ namespace quantum::editor
             ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(340.0F, 520.0F),
             ImGuiCond_FirstUseEver);
-        ImGui::Begin("Track Devices");
-        ImGui::TextUnformatted("Launch and brake forces");
-        if (ImGui::Button("Add Launch"))
-            trackDeviceCommand_ = {TrackDeviceCommandType::AddLaunch, {}};
-        ImGui::SameLine();
-        if (ImGui::Button("Add Brake"))
-            trackDeviceCommand_ = {TrackDeviceCommandType::AddBrake, {}};
+        if (!ImGui::Begin("Track Devices")) { ImGui::End(); return; }
+        editorPaneHeading("TRACK DEVICES", "Authored operations / saved with this document", fonts_);
+        if (ImGui::Button("Add device...")) ImGui::OpenPopup("Add track device");
+        if (ImGui::BeginPopup("Add track device"))
+        {
+            for (const auto kind : {coaster::TrackDeviceKind::Launch, coaster::TrackDeviceKind::Brake,
+                coaster::TrackDeviceKind::Transport, coaster::TrackDeviceKind::ChainLift,
+                coaster::TrackDeviceKind::CableLift, coaster::TrackDeviceKind::Station,
+                coaster::TrackDeviceKind::Block})
+            {
+                if (ImGui::MenuItem(coaster::trackDeviceKindName(kind)))
+                {
+                    auto device = coaster::makeTrackDevice(kind);
+                    double start = 0;
+                    for (std::size_t i = 0; i < selectedSection_; ++i)
+                        start += coaster::sectionLength(authoredTrack_->section(i));
+                    const double scale = authoredTrack_->physicalSettings().metersPerCoordinateUnit;
+                    const double length = coaster::sectionLength(authoredTrack_->section(selectedSection_)) * scale;
+                    device.startStationMeters = start * scale;
+                    device.endStationMeters = start * scale + length * .75;
+                    if (auto* station = std::get_if<coaster::StationConfiguration>(&device.configuration))
+                        station->stopStationMeters = start * scale + length * .5;
+                    trackDeviceCommand_ = {TrackDeviceCommandType::Add, std::move(device)};
+                }
+            }
+            ImGui::EndPopup();
+        }
+        editorSecondaryTextWrapped("New devices start in the selected Region. Stations below use SI metres along the entire track.");
         ImGui::Text("Track length %.2f m", authoredTrack_->trackLengthMeters());
         ImGui::Separator();
 
@@ -5955,8 +6100,7 @@ namespace quantum::editor
         {
             ImGui::PushID(static_cast<int>(device.id));
             const std::string label = device.name + "  ["
-                + (device.kind == coaster::TrackDeviceKind::Launch
-                    ? "Launch" : "Brake") + "]";
+                + coaster::trackDeviceKindName(device.kind) + "]";
             if (ImGui::Selectable(label.c_str(),
                     selectedTrackDeviceId_ == device.id))
                 selectTrackDevice(device.id);
@@ -5998,9 +6142,9 @@ namespace quantum::editor
             }
             ImGui::Separator();
             ImGui::Text("%s #%llu",
-                selected->kind == coaster::TrackDeviceKind::Launch
-                    ? "Launch" : "Brake",
+                coaster::trackDeviceKindName(selected->kind),
                 static_cast<unsigned long long>(selected->id));
+            drawSelectedDeviceStatus(*selected);
             bool commit = false;
             if (ImGui::Checkbox("Enabled", &deviceEditBuffer_.enabled))
                 commit = true;
@@ -6019,11 +6163,14 @@ namespace quantum::editor
             commit |= ImGui::IsItemDeactivatedAfterEdit();
 
             ImGui::Separator();
+            if (selected->kind <= coaster::TrackDeviceKind::Station)
+            {
             ImGui::TextUnformatted("Acceleration");
 
             const char* modeNames[] = {"Constant", "Custom Profile"};
             int modeIndex = deviceProfileMode_ ? 1 : 0;
-            if (ImGui::Combo("Mode", &modeIndex, modeNames, 2))
+            if (coaster::supportsAccelerationProfile(selected->kind)
+                && ImGui::Combo("Mode", &modeIndex, modeNames, 2))
             {
                 deviceProfileMode_ = (modeIndex == 1);
                 if (deviceProfileMode_)
@@ -6052,10 +6199,12 @@ namespace quantum::editor
                 drawDeviceAccelerationProfileEditor(deviceEditBuffer_, commit);
             }
 
+            }
             ImGui::InputDouble("Max force (N)",
                 &deviceEditBuffer_.maximumForceNewtons,
                 0.0, 0.0, "%.0f");
             commit |= ImGui::IsItemDeactivatedAfterEdit();
+            drawHardwareConfiguration(deviceEditBuffer_, commit);
             if (commit)
             {
                 // The constant field stays exactly as the user left it. A
@@ -6064,13 +6213,27 @@ namespace quantum::editor
                 // authored data the moment the profile is switched off again.
                 if (deviceProfileMode_)
                     deviceEditBuffer_.accelerationProfile = deviceProfileEditBuffer_;
-                else
-                    deviceEditBuffer_.accelerationProfile.reset();
-                trackDeviceCommand_ = {TrackDeviceCommandType::Update,
-                    deviceEditBuffer_};
+                else deviceEditBuffer_.accelerationProfile.reset();
+                try
+                {
+                    coaster::fitTrackDeviceAccelerationProfile(deviceEditBuffer_, authoredTrack_->trackLengthMeters(),
+                        authoredTrack_->layoutMode() == coaster::LayoutMode::Circuit);
+                    if (deviceProfileMode_) deviceProfileEditBuffer_ = *deviceEditBuffer_.accelerationProfile;
+                    trackDeviceCommand_ = {TrackDeviceCommandType::Update,
+                        deviceEditBuffer_, deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None};
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    deviceEditError_ = error.what();
+                }
             }
             if (ImGui::Button("Delete Device"))
                 trackDeviceCommand_ = {TrackDeviceCommandType::Delete, *selected};
+            if (!deviceEditError_.empty() && ImGui::Button("Revert rejected device edits"))
+            {
+                deviceBufferId_ = 0;
+                deviceEditError_.clear();
+            }
         }
         if (!deviceEditError_.empty())
             ImGui::TextWrapped("%s", deviceEditError_.c_str());
@@ -6120,38 +6283,7 @@ namespace quantum::editor
         captureSetupPending_ = captureScenario != nullptr;
         authoredTrack_ = &authoredTrack;
         viewportSettings_.groundSurface = authoredTrack.ground();
-        selectedSection_ = 0;
-        selectedTrackAnchor_ = 0;
-        for (std::size_t channelIndex = 0;
-            channelIndex < profileChannelCount;
-            ++channelIndex)
-        {
-            const auto channel = static_cast<ProfileChannel>(channelIndex);
-            const auto& profile =
-                sectionProfileChannel(authoredTrack.section(0), channel);
-            valueEndEditBuffers_[channelIndex] =
-                profile.segments.empty()
-                    ? 0.0
-                    : profile.segments.back().transition.valueEnd
-                        * degreesPerRadian;
-            endpointSelections_[channelIndex] =
-                ScalarProfileEndpoint::None;
-            endpointDrags_[channelIndex] = ScalarProfileEndpoint::None;
-            selectedSegmentIds_[channelIndex] =
-                coaster::invalidSegmentId;
-            dragSegmentIds_[channelIndex] = coaster::invalidSegmentId;
-            dragAxisLocks_[channelIndex] =
-                DragAxisLock::None;
-            dragAxisTravelX_[channelIndex] = 0.0;
-            dragAxisTravelY_[channelIndex] = 0.0;
-            dragLastValues_[channelIndex].reset();
-            scalarDragAnchors_[channelIndex].reset();
-            graphValueRanges_[channelIndex] = {};
-        }
-        activeProfileChannel_ = ProfileChannel::Pitch;
-        hoveredProfileChannel_.reset();
-        sectionLengthEditBuffer_ =
-            coaster::sectionLength(authoredTrack.section(0));
+        selectSection(0, true);
         profileEndpointValueEdit_.reset();
         profileTransitionTypeEdit_.reset();
         trackCommand_.reset();
@@ -6195,6 +6327,7 @@ namespace quantum::editor
             else
             {
                 configureIniPath(iniPath_);
+                configureInteractionPersistence();
             }
 
             applyQuantumStyle();
@@ -6235,108 +6368,73 @@ namespace quantum::editor
         );
     }
 
-    void EditorUi::initializeVulkanBackend(
-        const renderer::VulkanContext& vulkan)
+
+
+
+
+    void EditorUi::configureInteractionPersistence()
     {
-        const std::uint32_t imageCount = vulkan.swapchainImageCount();
-        const int minimumImageCount =
-            ImGui_ImplVulkanH_GetMinImageCountFromPresentMode(
-                VK_PRESENT_MODE_FIFO_KHR
-            );
-
-        if (minimumImageCount < 2
-            || imageCount < static_cast<std::uint32_t>(minimumImageCount))
+        ImGuiSettingsHandler handler;
+        handler.TypeName = "QuantumInteraction";
+        handler.TypeHash = ImHashStr(handler.TypeName);
+        handler.UserData = this;
+        handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* h, const char* name) -> void*
+        { return std::strcmp(name, "Preferences") == 0 ? h->UserData : nullptr; };
+        handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* line)
         {
-            throw std::runtime_error(
-                "The Vulkan swapchain does not provide enough images for "
-                "Dear ImGui."
-            );
-        }
-
-        const VkFormat colorFormat = vulkan.swapchainFormat();
-
-        if (colorFormat == VK_FORMAT_UNDEFINED)
+            if (std::strncmp(line, "Json=", 5) != 0) return;
+            auto& ui = *static_cast<EditorUi*>(entry);
+            try
+            {
+                const auto preferences = deserializeInteractionPreferences(line + 5);
+                static_cast<CameraNavigationSettings&>(ui.viewportSettings_) = preferences.camera;
+                ui.transitionEditorInputSettings_ = preferences.transitions;
+                if (const char* overrideValue = std::getenv("QUANTUM_TRANSITION_SNAP"))
+                {
+                    const double increment = std::strtod(overrideValue, nullptr);
+                    if (std::isfinite(increment) && increment > 0 && increment <= 1e6)
+                    {
+                        ui.transitionEditorInputSettings_.snapEnabled = true;
+                        ui.transitionEditorInputSettings_.snapIncrement = increment;
+                    }
+                }
+                ui.lastInteractionPreferences_ = InteractionPreferences{ui.viewportSettings_, ui.transitionEditorInputSettings_};
+            }
+            catch (const std::exception& error)
+            {
+                quantum::logging::logMessagef(quantum::logging::LogLevel::Warning, "CFG",
+                    "Interaction preferences rejected; using defaults: %s", error.what());
+            }
+        };
+        handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* h, ImGuiTextBuffer* buffer)
         {
-            throw std::runtime_error(
-                "Dear ImGui cannot initialize without a swapchain format."
-            );
-        }
-
-        ImGui_ImplVulkan_InitInfo initInfo{};
-        initInfo.ApiVersion = VK_API_VERSION_1_4;
-        initInfo.Instance = vulkan.instance();
-        initInfo.PhysicalDevice = vulkan.physicalDevice();
-        initInfo.Device = vulkan.device();
-        initInfo.QueueFamily = vulkan.graphicsQueueFamily();
-        initInfo.Queue = vulkan.graphicsQueue();
-        initInfo.DescriptorPoolSize =
-            IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
-        initInfo.MinImageCount = static_cast<std::uint32_t>(
-            minimumImageCount
-        );
-        initInfo.ImageCount = imageCount;
-        initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo
-            .colorAttachmentCount = 1;
-        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo
-            .pColorAttachmentFormats = &colorFormat;
-        initInfo.UseDynamicRendering = true;
-        initInfo.CheckVkResultFn = checkVulkanResult;
-
-        if (!ImGui_ImplVulkan_Init(&initInfo))
-        {
-            throw std::runtime_error("ImGui_ImplVulkan_Init failed.");
-        }
-
-        // ImGui_ImplVulkan_Shutdown() clears every viewport's PlatformHandle,
-        // including the main viewport's SDL_WindowID association that
-        // ImGui_ImplSDL3 requires to route window/input events into Dear
-        // ImGui. That association is established only by the SDL backend's
-        // Init, so restore it after each Vulkan backend reinitialization.
-        if (sdlBackendInitialized_)
-        {
-            const auto windowId =
-                static_cast<std::uintptr_t>(SDL_GetWindowID(window_));
-            ImGui::GetMainViewport()->PlatformHandle = (void*)(windowId);
-        }
-
-        device_ = vulkan.device();
-        vulkanBackendInitialized_ = true;
-        swapchainGeneration_ = vulkan.swapchainGeneration();
+            auto& ui = *static_cast<EditorUi*>(h->UserData);
+            const auto json = serializeInteractionPreferences({ui.viewportSettings_, ui.transitionEditorInputSettings_});
+            buffer->appendf("[QuantumInteraction][Preferences]\nJson=%s\n\n", json.c_str());
+        };
+        ImGui::AddSettingsHandler(&handler);
+        lastInteractionPreferences_ = InteractionPreferences{viewportSettings_, transitionEditorInputSettings_};
     }
 
-    void EditorUi::shutdownVulkanBackend() noexcept
+    void EditorUi::updateInteractionPersistence()
     {
-        if (!vulkanBackendInitialized_)
+        if (captureScenario_ != nullptr || iniPath_.empty() || ImGui::IsAnyItemActive()) return;
+        const InteractionPreferences current{viewportSettings_, transitionEditorInputSettings_};
+        if (current != lastInteractionPreferences_)
         {
-            return;
+            ImGui::MarkIniSettingsDirty();
+            lastInteractionPreferences_ = current;
         }
-
-        // The backend owns device resources referenced by submitted frames.
-        // They must not be destroyed until those frames have completed.
-        const VkResult result = vkDeviceWaitIdle(device_);
-
-        if (result != VK_SUCCESS)
-        {
-            quantum::logging::logMessagef(
-                quantum::logging::LogLevel::Error,
-                "VK:ImGui",
-                "vkDeviceWaitIdle failed before Dear ImGui shutdown with "
-                "VkResult %d.",
-                static_cast<int>(result)
-            );
-        }
-
-        removeViewportTexture();
-        ImGui_ImplVulkan_Shutdown();
-        vulkanBackendInitialized_ = false;
-        device_ = VK_NULL_HANDLE;
     }
 
     void EditorUi::processEvent(const SDL_Event& event)
     {
+        if (event.type == SDL_EVENT_MOUSE_MOTION && window_ != nullptr
+            && event.motion.windowID == SDL_GetWindowID(window_))
+        {
+            pendingMouseMotion_.x += event.motion.xrel;
+            pendingMouseMotion_.y += event.motion.yrel;
+        }
         // Low-frequency input/window audit trail. High-frequency events
         // (motion, enter/leave, move) are intentionally not logged.
         switch (event.type)
@@ -6399,6 +6497,8 @@ namespace quantum::editor
 
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
         {
+            pendingMouseMotion_ = {};
+            frameMouseMotion_ = {};
             frameBlockingEvents_.focusLost = true;
             cameraGesture_ = CameraGesture::None;
             viewportNavigationActive_ = false;
@@ -6424,57 +6524,9 @@ namespace quantum::editor
         }
     }
 
-    void EditorUi::updateViewportTexture(
-        renderer::VulkanContext& vulkan,
-        const std::uint32_t width,
-        const std::uint32_t height)
-    {
-        const VkExtent2D currentExtent = vulkan.viewportExtent();
 
-        if (currentExtent.width != width || currentExtent.height != height
-            || vulkan.viewportMsaaEnabled()
-                != (viewportSettings_.msaaEnabled
-                    && vulkan.capabilities().viewportMsaa4))
-        {
-            frameBlockingEvents_.viewportResized = true;
-            renderer::Renderer& renderer = vulkan;
-            renderer.resizeViewportTarget(
-                width,
-                height,
-                &EditorUi::retireViewportTexture,
-                this,
-                viewportSettings_.msaaEnabled
-            );
-        }
 
-        if (viewportTexture_ == VK_NULL_HANDLE
-            && vulkan.viewportImageView() != VK_NULL_HANDLE)
-        {
-            viewportTexture_ = ImGui_ImplVulkan_AddTexture(
-                vulkan.viewportImageView(),
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            );
 
-            if (viewportTexture_ == VK_NULL_HANDLE)
-            {
-                throw std::runtime_error(
-                    "Dear ImGui could not register the Editor viewport image."
-                );
-            }
-        }
-    }
-
-    void EditorUi::installFrameRenderCallback(
-        renderer::VulkanContext& vulkan) noexcept
-    {
-        frameRenderer_ = &vulkan;
-        vulkan.setFrameRenderCallback(
-            [](VkCommandBuffer commandBuffer, void* userData)
-            {
-                static_cast<EditorUi*>(userData)->render(commandBuffer);
-            },
-            this);
-    }
 
     void EditorUi::setViewportMsaaEnabled(const bool enabled) noexcept
     {
@@ -6522,19 +6574,9 @@ namespace quantum::editor
         pendingSimulationControl_ = control;
     }
 
-    void EditorUi::retireViewportTexture(void* const userData) noexcept
-    {
-        static_cast<EditorUi*>(userData)->removeViewportTexture();
-    }
 
-    void EditorUi::removeViewportTexture() noexcept
-    {
-        if (viewportTexture_ != VK_NULL_HANDLE)
-        {
-            ImGui_ImplVulkan_RemoveTexture(viewportTexture_);
-            viewportTexture_ = VK_NULL_HANDLE;
-        }
-    }
+
+
 
     bool EditorUi::updateSupportNodeManipulation(
         const bool viewportHovered,
@@ -7109,6 +7151,9 @@ namespace quantum::editor
 
         refreshViewportDisplayBounds();
 
+        if (trainWorkspaceActive() && trainPreviewFramePending_)
+            frameTrainPreview();
+
         if (captureScenario_ != nullptr && (initialViewportFramePending_ || aspectChanged))
         {
             // Fit using the actual docked viewport aspect, including startup layout changes.
@@ -7187,6 +7232,21 @@ namespace quantum::editor
 
         hoveredTrackAnchor_.reset();
         hoveredSupport_.reset();
+        if (trainWorkspaceActive() && viewportHovered && !io.AppFocusLost
+            && cameraGesture_ == CameraGesture::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            const auto imageMin = ImGui::GetItemRectMin();
+            const auto imageMax = ImGui::GetItemRectMax();
+            const auto ray = viewportCamera_.viewportRay(
+                (io.MousePos.x - imageMin.x) / (imageMax.x - imageMin.x),
+                (io.MousePos.y - imageMin.y) / (imageMax.y - imageMin.y), viewportAspectRatio_);
+            if (const auto hit = pickTrainPreviewCar(trainPreviewCars_, ray.origin, ray.direction))
+            {
+                trainSelectedCar_ = *hit;
+                for (const auto& car : trainPreviewCars_)
+                    if (car.id == *hit) trainSummaryCarIndex_ = static_cast<int>(car.index);
+            }
+        }
         std::optional<std::size_t> hoveredSection;
         // ImGui owns the raw SDL event stream. Treat a left click as a
         // viewport action only when the submitted viewport Image itself is
@@ -7424,12 +7484,15 @@ namespace quantum::editor
             }
         }
 
+        bool cameraGestureStarted = false;
         if (cameraGesture_ == CameraGesture::None
             && firstActiveEndpoint(endpointDrags_)
                 == ScalarProfileEndpoint::None
             && !supportTrackPickActive_
             && viewportHovered
-            && !startPoseManipulationCaptured)
+            && !startPoseManipulationCaptured
+            && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)
+            && !ImGui::IsAnyItemActive())
         {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
@@ -7444,6 +7507,7 @@ namespace quantum::editor
                 );
                 cameraGesture_ = orbitRequested
                     ? CameraGesture::Orbit : CameraGesture::Look;
+                cameraGestureStarted = true;
             }
             else if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
             {
@@ -7455,13 +7519,15 @@ namespace quantum::editor
                     io.MousePos.y
                 );
                 cameraGesture_ = CameraGesture::Pan;
+                cameraGestureStarted = true;
             }
         }
 
         if (cameraGesture_ == CameraGesture::Look
             || cameraGesture_ == CameraGesture::Orbit)
         {
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)
+                || ImGui::IsKeyPressed(ImGuiKey_Escape))
             {
                 quantum::logging::logMessagef(
                     quantum::logging::LogLevel::Trace,
@@ -7473,14 +7539,12 @@ namespace quantum::editor
             }
             else
             {
-                const double yawDelta =
-                    -static_cast<double>(io.MouseDelta.x)
-                    * orbitRadiansPerPixel
-                    * viewportSettings_.orbitSensitivity;
-                const double pitchDelta =
-                    -static_cast<double>(io.MouseDelta.y)
-                    * orbitRadiansPerPixel
-                    * viewportSettings_.orbitSensitivity;
+                const double yawDelta = viewportMouseRotationRadians(
+                    cameraGestureStarted ? 0 : -frameMouseMotion_.x,
+                    viewportSettings_.orbitSensitivity, presentationScale, io.KeyShift);
+                const double pitchDelta = viewportMouseRotationRadians(
+                    cameraGestureStarted ? 0 : -frameMouseMotion_.y,
+                    viewportSettings_.orbitSensitivity, presentationScale, io.KeyShift);
                 if (cameraGesture_ == CameraGesture::Look)
                 {
                     viewportCamera_.look(yawDelta, pitchDelta);
@@ -7494,7 +7558,8 @@ namespace quantum::editor
         }
         else if (cameraGesture_ == CameraGesture::Pan)
         {
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)
+                || ImGui::IsKeyPressed(ImGuiKey_Escape))
             {
                 quantum::logging::logMessage(
                     quantum::logging::LogLevel::Trace,
@@ -7506,8 +7571,10 @@ namespace quantum::editor
             else
             {
                 viewportCamera_.pan(
-                    static_cast<double>(io.MouseDelta.x),
-                    static_cast<double>(io.MouseDelta.y),
+                    (cameraGestureStarted ? 0 : frameMouseMotion_.x)
+                        * viewportSettings_.panSensitivity * (io.KeyShift ? 0.1 : 1.0),
+                    (cameraGestureStarted ? 0 : frameMouseMotion_.y)
+                        * viewportSettings_.panSensitivity * (io.KeyShift ? 0.1 : 1.0),
                     static_cast<double>(logicalWidth),
                     static_cast<double>(logicalHeight)
                 );
@@ -7560,20 +7627,29 @@ namespace quantum::editor
             }
         }
 
-        if (viewportHovered && !startPoseManipulationCaptured)
+        if (viewportHovered && !startPoseManipulationCaptured
+            && cameraGesture_ == CameraGesture::None
+            && firstActiveEndpoint(endpointDrags_) == ScalarProfileEndpoint::None
+            && !ImGui::IsAnyItemActive()
+            && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
         {
             if (io.MouseWheel != 0.0F)
             {
-                viewportCamera_.zoom(
-                    static_cast<double>(io.MouseWheel),
-                    defaultViewportZoomExponentPerWheelUnit
-                        * viewportSettings_.zoomSensitivity
-                );
+                const double exponent = defaultViewportZoomExponentPerWheelUnit
+                    * viewportSettings_.zoomSensitivity * (io.KeyShift ? 0.1 : 1.0);
+                if (viewportSettings_.zoomToCursor)
+                    viewportCamera_.zoomAt(io.MouseWheel,
+                        std::clamp(static_cast<double>((io.MousePos.x - ImGui::GetItemRectMin().x) / logicalWidth), 0.0, 1.0),
+                        std::clamp(static_cast<double>((io.MousePos.y - ImGui::GetItemRectMin().y) / logicalHeight), 0.0, 1.0),
+                        aspectRatio, exponent);
+                else viewportCamera_.zoom(io.MouseWheel, exponent);
             }
 
-            if (ImGui::IsKeyPressed(ImGuiKey_F, false))
+            if (!io.WantTextInput && !io.WantCaptureKeyboard
+                && ImGui::IsKeyPressed(ImGuiKey_F, false))
             {
-                frameWholeTrack();
+                if (io.KeyShift) frameWholeTrack();
+                else focusSelectedSection();
             }
         }
 
@@ -8120,7 +8196,7 @@ namespace quantum::editor
             status = "Track Start \xe2\x80\x94 editable";
             break;
         case ViewportTrackAnchorKind::Interior:
-            status = "Shared region boundary - constrained editing not implemented yet";
+            status = "Shared boundary: position/frame inherited; edit adjoining Region profiles. Point constraints are not implemented.";
             break;
         case ViewportTrackAnchorKind::End:
             status = "Final boundary - no terminal pose constraint; read-only";
@@ -8622,6 +8698,14 @@ namespace quantum::editor
             ImGui::Separator();
 
             const char* state = "Stopped";
+            if (ImGui::Button("Ride operations...")) ImGui::OpenPopup("Simulator operations");
+            if (ImGui::BeginPopup("Simulator operations"))
+            {
+                editorPaneHeading("RIDE OPERATIONS", "Live preview / runtime commands", fonts_);
+                drawRideOperationControls();
+                if (!deviceEditError_.empty()) ImGui::TextWrapped("%s", deviceEditError_.c_str());
+                ImGui::EndPopup();
+            }
             if (simulationPlaybackState_ == SimulationPlaybackState::Playing)
                 state = "Playing";
             else if (simulationPlaybackState_ == SimulationPlaybackState::Paused)
@@ -8642,11 +8726,12 @@ namespace quantum::editor
                 {
                     if (device.occupiedBogieCount == 0)
                         continue;
-                    ImGui::Text("Device #%llu: %zu bogies | command %.2f m/s^2 | applied %+.0f N",
+                    ImGui::Text("Device #%llu: %zu bogies | command %.2f m/s^2 | supplied %+.0f N",
                         static_cast<unsigned long long>(device.id),
                         device.occupiedBogieCount,
                         device.commandedAccelerationMetersPerSecondSquared,
                         device.appliedForceNewtons);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Device force after controller, interlocks and the total force cap. Gravity, resistance and endpoint reactions determine the net acceleration.");
                 }
             }
             else
@@ -8673,6 +8758,22 @@ namespace quantum::editor
                 pendingSimulationControl_ = SimulationControlType::Reset;
             ImGui::EndDisabled();
 
+            if (ImGui::Button("Engineering dynamics...")) ImGui::OpenPopup("Engineering dynamics");
+            if (pendingEngineeringDynamics_)
+            {
+                ImGui::OpenPopup("Engineering dynamics");
+                pendingEngineeringDynamics_ = false;
+            }
+            const float dynamicsScale = editorPresentationScale();
+            ImGui::SetNextWindowSize({std::max(1.0F, std::min(720 * dynamicsScale, mainViewport->WorkSize.x - 24 * dynamicsScale)),
+                std::max(1.0F, std::min(540 * dynamicsScale, mainViewport->WorkSize.y - 24 * dynamicsScale))}, ImGuiCond_Appearing);
+            ImGui::SetNextWindowPos({mainViewport->WorkPos.x + mainViewport->WorkSize.x * .5F,
+                mainViewport->WorkPos.y + mainViewport->WorkSize.y * .5F}, ImGuiCond_Appearing, {.5F, .5F});
+            if (ImGui::BeginPopup("Engineering dynamics"))
+            {
+                drawSimulationDynamicsDiagnostics();
+                ImGui::EndPopup();
+            }
             ImGui::Checkbox("Show train physics diagnostics", &trainPhysicsDiagnosticsVisible_);
             drawRigidBodyProofControls();
 
@@ -8719,6 +8820,8 @@ namespace quantum::editor
 
     void EditorUi::beginFrame(renderer::VulkanContext& vulkan)
     {
+        frameMouseMotion_ = pendingMouseMotion_;
+        pendingMouseMotion_ = {};
         if (!vulkanBackendInitialized_ || !sdlBackendInitialized_)
         {
             throw std::logic_error("EditorUi is not initialized.");
@@ -8739,7 +8842,7 @@ namespace quantum::editor
             initializeVulkanBackend(vulkan);
         }
 
-        ImGui_ImplVulkan_NewFrame();
+        beginVulkanFrame();
         ImGui_ImplSDL3_NewFrame();
         if (uiScaleRefreshPending_)
         {
@@ -8779,6 +8882,7 @@ namespace quantum::editor
         // transition. As before, that request takes effect on the next frame.
         const auto editorComposition = editorWorkspaceComposition(
             workspaceMode_, editorWorkspace_);
+        if (editorComposition != EditorWorkspace::Train) trainPreviewFramePending_ = true;
         const ImGuiID trackDockspaceId = ImGui::GetID(editorDockspaceName);
         const ImGuiID trainDockspaceId = ImGui::GetID(trainDockspaceName);
         // ImGui otherwise detaches windows when their dockspace is not
@@ -8794,6 +8898,7 @@ namespace quantum::editor
         if (!editorComposition.has_value())
         {
             drawSimulator(vulkan);
+            updateInteractionPersistence();
             ImGui::Render();
             return;
         }
@@ -8972,6 +9077,8 @@ namespace quantum::editor
             pendingTrackConfigurationSelection_ =
                 std::move(*setupEdits.trackConfigurationId);
         }
+        pendingTrackComponentReload_ |= setupEdits.reloadTrackComponents;
+        if (setupEdits.trackStyle) pendingTrackComponentEdit_ = std::move(setupEdits.trackStyle);
         pendingTrackConfigurationReset_ |=
             setupEdits.resetTrackConfiguration;
 
@@ -9447,6 +9554,7 @@ namespace quantum::editor
 
         if (trainComposition)
         {
+            updateInteractionPersistence();
             ImGui::Render();
             return;
         }
@@ -9455,6 +9563,7 @@ namespace quantum::editor
             || authoredTrack_->section(selectedSection_).kind == coaster::RegionKind::RateProfiles)
             drawSupportWorkspace();
         drawTrackDevices();
+        drawRideOperationStatus();
 
         // Clamp the selection against the live document before any panel
         // reads it; structural commits can shrink or reorder sections.
@@ -9640,6 +9749,16 @@ namespace quantum::editor
             regionCommand_ = {RegionCommandType::ConvertToRateProfiles,
                               selectedSection_, 0.0};
         }
+        else if (workspaceEdit.convertToForceDrivenRequested)
+        {
+            regionCommand_ = {RegionCommandType::ConvertToForceDriven,
+                              selectedSection_, 0.0};
+        }
+        else if (workspaceEdit.replaceWithRateProfilesRequested)
+        {
+            regionCommand_ = {RegionCommandType::ReplaceWithRateProfiles,
+                              selectedSection_, 0.0};
+        }
         // Each region kind owns exactly one primary editor surface. A
         // rate-profile region is edited in the Transition Editor and a
         // planar-arc region in the Geometry Editor. A force-driven region is
@@ -9691,7 +9810,8 @@ namespace quantum::editor
             ImGui::SetNextItemWidth(std::min(320.0F,
                 ImGui::GetContentRegionAvail().x));
             ImGui::PushFont(fonts_.technical, editorTechnicalFontSize);
-            const bool changed = ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+            ImGui::InputDouble(id, value, step, fastStep, "%.3f");
+            const bool changed = ImGui::IsItemDeactivatedAfterEdit();
             ImGui::PopFont();
             return changed;
         };
@@ -9863,6 +9983,30 @@ namespace quantum::editor
             ? &riderLoadDiagnostics_.selectedSection().samples
             : nullptr;
 
+        std::optional<double> previousBoundaryValue;
+        if (selectedSection_ > 0)
+        {
+            const auto& previous = authoredTrack_->section(selectedSection_ - 1);
+            if ((previous.kind == coaster::RegionKind::RateProfiles && editedSection.kind == coaster::RegionKind::RateProfiles)
+                || (coaster::isForceDrivenSection(previous) && editingForceTargets)
+                || (activeProfileChannel_ == ProfileChannel::Roll
+                    && (previous.kind == coaster::RegionKind::RateProfiles || coaster::isForceDrivenSection(previous))))
+                previousBoundaryValue = sectionProfileChannel(previous, activeProfileChannel_).segments.back().transition.valueEnd;
+        }
+
+        std::optional<glm::dvec3> endpointAngles;
+        if (centerlineVisualization_ != nullptr
+            && selectedSection_ + 1 < centerlineVisualization_->anchors.size())
+        {
+            const auto& anchor = centerlineVisualization_->anchors[selectedSection_ + 1];
+            // Semantic anchors retain the exact Core rider frame, independently
+            // of the viewport's projected/rendered curve vertices.
+            coaster::AuthoredStartPose endPose;
+            endPose.orientation = glm::normalize(glm::quat_cast(glm::dmat3{
+                anchor.forward, anchor.lateral, anchor.up}));
+            endpointAngles = startPoseAngles(endPose) * degreesPerRadian;
+        }
+
         const TransitionEditorEdit transitionEdit = showTransitionEditor(
             editingForceTargets
                 ? geometryEditorWindowName
@@ -9887,7 +10031,9 @@ namespace quantum::editor
             hoveredProfileChannel_,
             hoveredGraphMarker_,
             transitionEditorInputSettings_,
-            fonts_
+            fonts_, transitionPrecisionState_,
+            authoredTrack_->physicalSettings().metersPerCoordinateUnit,
+            previousBoundaryValue, frameMouseMotion_, endpointAngles
         );
 
         if (transitionEdit.endpointValueEdit.has_value())
@@ -9922,13 +10068,12 @@ namespace quantum::editor
             double candidateValue = valueEdit.value;
             const TransitionEditorInputSettings& inputSettings =
                 transitionEditorInputSettings_;
-            if (inputSettings.snapEnabled
+            if (valueEdit.continuous && inputSettings.snapEnabled
                 && inputSettings.snapIncrement > 0.0)
             {
-                candidateValue = snapToIncrement(
-                    candidateValue,
-                    inputSettings.snapIncrement
-                );
+                candidateValue = snapToIncrement(candidateValue,
+                    rowStyles[channelIndex].diagnostic == ProfileRowDiagnostic::ForceTarget
+                        ? inputSettings.forceSnapIncrement : inputSettings.snapIncrement);
             }
 
             const bool repeatsLastDragValue = valueEdit.continuous
@@ -10034,9 +10179,10 @@ namespace quantum::editor
             queuedEdit.segmentId = move.segmentId;
             queuedEdit.endpoint = move.endpoint;
             queuedEdit.distance = move.distance;
+            queuedEdit.continuous = move.continuous;
             profileSegmentDistanceEdit_ = queuedEdit;
 
-            pendingDistanceSummary_ = true;
+            pendingDistanceSummary_ = move.continuous;
             distanceSummaryEdit_ = queuedEdit;
         }
 
@@ -10061,8 +10207,8 @@ namespace quantum::editor
                     transitionEdit.click->segmentId;
                 endpointSelections_[clickChannel] =
                     transitionEdit.click->endpoint;
-                endpointDrags_[clickChannel] =
-                    transitionEdit.click->endpoint;
+                endpointDrags_[clickChannel] = transitionEdit.click->armDrag
+                    ? transitionEdit.click->endpoint : ScalarProfileEndpoint::None;
                 dragAxisLocks_[clickChannel] = DragAxisLock::None;
                 dragAxisTravelX_[clickChannel] = 0.0;
                 dragAxisTravelY_[clickChannel] = 0.0;
@@ -10209,6 +10355,7 @@ namespace quantum::editor
             }
         }
 
+        updateInteractionPersistence();
         ImGui::Render();
     }
 
@@ -10714,14 +10861,6 @@ namespace quantum::editor
         // shape and give geometry sections their own line.
         const bool selectedIsForceDriven =
             coaster::isForceDrivenSection(selected);
-        const std::array<ProfileRowStyle, profileChannelCount> rowStyles =
-            selectedIsForceDriven
-                ? forceDrivenRowStyles(
-                    authoredTrack_->physicalSettings()
-                        .metersPerCoordinateUnit)
-                : rateProfileRowStyles(
-                    authoredTrack_->physicalSettings()
-                        .metersPerCoordinateUnit);
         if (selected.kind == coaster::RegionKind::RateProfiles)
         {
             const auto& rollProfile =
@@ -10780,40 +10919,11 @@ namespace quantum::editor
             );
         }
 
-        // Both authoring models seed the same three numeric buffers through
-        // their own display styles, so switching region kind never leaves a
-        // stale unit in a field.
-        if (selected.kind == coaster::RegionKind::RateProfiles
-            || selectedIsForceDriven)
-        {
-            for (std::size_t channelIndex = 0;
-                channelIndex < profileChannelCount;
-                ++channelIndex)
-            {
-                valueEndEditBuffers_[channelIndex] =
-                    sectionProfileChannel(
-                        selected,
-                        static_cast<ProfileChannel>(channelIndex)
-                    ).segments.back().transition.valueEnd
-                        * rowStyles[channelIndex].authoredToDisplay;
-            }
-        }
-
-        if (selected.kind == coaster::RegionKind::Geometry
-            && !selectedIsForceDriven)
-        {
-            const auto& arc = std::get<coaster::PlanarArcRegion>(
-                std::get<coaster::GeometryRegion>(
-                    selected.region).construction);
-            planarArcEditBuffers_ = {
-                arc.radius,
-                arc.sweptAngle * degreesPerRadian,
-                arc.planeTilt * degreesPerRadian,
-                arc.bankChange * degreesPerRadian};
-        }
-
-        sectionLengthEditBuffer_ =
-            coaster::sectionLength(selected);
+        const auto values = regionEditorValues(selected,
+            authoredTrack_->physicalSettings().metersPerCoordinateUnit);
+        valueEndEditBuffers_ = values.channelEnds;
+        planarArcEditBuffers_ = values.arcParameters;
+        sectionLengthEditBuffer_ = values.length;
     }
 
     void EditorUi::selectTrackAnchor(const std::size_t anchorIndex)
@@ -11021,18 +11131,7 @@ namespace quantum::editor
         return selectedSection_;
     }
 
-    void EditorUi::render(const VkCommandBuffer commandBuffer)
-    {
-        if (!vulkanBackendInitialized_)
-        {
-            throw std::logic_error("EditorUi is not initialized.");
-        }
 
-        ImGui_ImplVulkan_RenderDrawData(
-            ImGui::GetDrawData(),
-            commandBuffer
-        );
-    }
 
     void EditorUi::shutdown() noexcept
     {
@@ -11559,6 +11658,7 @@ namespace quantum::editor
             || hardwareDragActive_
             || regionStyleNumericEditActive_
             || supportAnchorDragActive_
+            || deviceProfileDragEndpoint_ != ScalarProfileEndpoint::None
             || firstActiveEndpoint(endpointDrags_)
                 != ScalarProfileEndpoint::None;
     }
@@ -11595,6 +11695,18 @@ std::optional<coaster::LayoutMode>
         return selection;
     }
 
+    std::optional<coaster::TrackStylePreset> EditorUi::takePendingTrackComponentEdit() noexcept
+    {
+        auto result=std::move(pendingTrackComponentEdit_);
+        pendingTrackComponentEdit_.reset();
+        return result;
+    }
+
+    bool EditorUi::takePendingTrackComponentReload() noexcept
+    {
+        return std::exchange(pendingTrackComponentReload_, false);
+    }
+
     bool EditorUi::takePendingTrackConfigurationReset() noexcept
     {
         const bool reset = pendingTrackConfigurationReset_;
@@ -11611,6 +11723,16 @@ std::optional<coaster::LayoutMode>
 
     void EditorUi::resetTransientState()
     {
+        transitionPrecisionState_ = {};
+        trainConfigurationEdit_.reset();
+        trainDraftSource_.clear();
+        trainDraftDirty_ = false;
+        trainSelectedCar_ = 0;
+        trainEditError_.clear();
+        trainPreviewCars_.clear();
+        trainPreviewFramePending_ = true;
+        rideHardwareStatus_.clear();
+        rideOperationCommand_.reset();
         pendingGroundEdit_.reset();
         selectedTrackDeviceId_ = 0;
         deviceBufferId_ = 0;

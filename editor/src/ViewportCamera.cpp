@@ -47,6 +47,31 @@ namespace
 
 namespace quantum::editor
 {
+    double viewportMouseRotationRadians(double pixels, double sensitivity,
+        double displayScale, bool precision)
+    {
+        if (!std::isfinite(pixels) || !std::isfinite(sensitivity) || sensitivity <= 0
+            || !std::isfinite(displayScale) || displayScale <= 0)
+            throw std::invalid_argument("Mouse rotation needs finite displacement and positive sensitivity/scale.");
+        return pixels * 0.002 * sensitivity / displayScale * (precision ? 0.1 : 1.0);
+    }
+
+    void ViewportCamera::zoomAt(double wheelDelta, double normalizedX, double normalizedY,
+        double aspectRatio, double exponentPerWheelUnit)
+    {
+        const glm::dvec3 planePoint = focus_;
+        const glm::dvec3 normal = -directionFromFocus();
+        const auto pointOnPlane = [&](const ViewportRay& ray)
+        {
+            return ray.origin + ray.direction
+                * (glm::dot(planePoint - ray.origin, normal) / glm::dot(ray.direction, normal));
+        };
+        const auto before = pointOnPlane(viewportRay(normalizedX, normalizedY, aspectRatio));
+        zoom(wheelDelta, exponentPerWheelUnit);
+        const auto after = pointOnPlane(viewportRay(normalizedX, normalizedY, aspectRatio));
+        focus_ += before - after;
+    }
+
     bool acceptsViewportKeyboardNavigation(
         const ViewportKeyboardNavigationState& state) noexcept
     {

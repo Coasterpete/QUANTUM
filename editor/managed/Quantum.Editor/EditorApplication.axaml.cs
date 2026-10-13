@@ -1,0 +1,79 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Markup.Xaml;
+
+namespace Quantum.Editor;
+public sealed partial class EditorApplication : Application
+{
+    public IReadOnlyList<string> FontDiagnostics { get; private set; } = [];
+    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void OnFrameworkInitializationCompleted()
+    {
+        FontDiagnostics = QuantumFonts.Initialize(this);
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            try
+            {
+                var window = desktop.Args is ["--verify-workbench-smoke", _, var layoutReport]
+                    ? new MainWindow(Path.GetFullPath(layoutReport) + ".layout.json") : new MainWindow();
+                desktop.MainWindow = window;
+                if (desktop.Args is ["--verify-workbench-smoke", var uxFixture, var uxReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunWorkbenchSmoke(window, uxFixture, uxReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-train-2-smoke", var trainFixture, var trainReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunTrain2Smoke(window, trainFixture, trainReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-runtime", var fixture, var report])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.Run(window, fixture, report, desktop);
+                }
+                else if (desktop.Args is ["--verify-authoring-smoke", var smokeFixture, var smokeReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunAuthoringSmoke(window, smokeFixture, smokeReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-supports-smoke", var supportFixture, var supportReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunSupportsSmoke(window, supportFixture, supportReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-supports-2-smoke", var stylesFixture, var stylesReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunSupports2Smoke(window, stylesFixture, stylesReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-hardware-smoke", var hardwareFixture, var hardwareReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunHardwareSmoke(window, hardwareFixture, hardwareReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-velocity-smoke", var velocityReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunVelocitySmoke(window, velocityReport, desktop);
+                }
+                else if (desktop.Args is ["--verify-placement-smoke", var placementFixture, var placementReport])
+                {
+                    desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                    window.Opened += async (_, _) => await RuntimeChecks.RunPlacementSmoke(window, placementFixture, placementReport, desktop);
+                }
+            }
+            catch (Exception error)
+            {
+                desktop.MainWindow = new Window
+                {
+                    Title = "QUANTUM startup failed", Width = 620, Height = 260,
+                    Content = new TextBlock { Margin = new Thickness(24), TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        Text = $"Could not start QUANTUM.\n\n{error.Message}\n\nBuild and stage the native runtime using editor/managed/Build.ps1." }
+                };
+            }
+        }
+        base.OnFrameworkInitializationCompleted();
+    }
+}

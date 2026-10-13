@@ -2685,7 +2685,13 @@ namespace quantum::renderer
                     5, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
                     static_cast<std::uint32_t>(
                         offsetof(coaster::SupportMemberInstance, transform)
-                        + 3 * sizeof(glm::vec4))}};
+                        + 3 * sizeof(glm::vec4))},
+                VkVertexInputAttributeDescription{6, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    static_cast<std::uint32_t>(offsetof(coaster::SupportMemberInstance, section))},
+                VkVertexInputAttributeDescription{7, 0, VK_FORMAT_R32G32_SFLOAT,
+                    static_cast<std::uint32_t>(offsetof(SupportSolidVertex, uv))},
+                VkVertexInputAttributeDescription{8, 0, VK_FORMAT_R32_SFLOAT,
+                    static_cast<std::uint32_t>(offsetof(SupportSolidVertex, inner))}};
 
             VkPipelineVertexInputStateCreateInfo vertexInput{};
             vertexInput.sType =
@@ -2864,7 +2870,7 @@ namespace quantum::renderer
         [[nodiscard]] std::uint32_t supportSolidMeshIndex(
             const coaster::SupportMemberMeshKind mesh) noexcept
         {
-            return mesh == coaster::SupportMemberMeshKind::Circular ? 1u : 0u;
+            return static_cast<std::uint32_t>(mesh);
         }
     }
 
@@ -2878,9 +2884,7 @@ namespace quantum::renderer
                 continue;
             }
             const SupportSolidMesh mesh = createSupportSolidMesh(
-                index == 1
-                    ? coaster::SupportMemberMeshKind::Circular
-                    : coaster::SupportMemberMeshKind::Rectangular);
+                static_cast<coaster::SupportMemberMeshKind>(index));
 
             const CreatedBuffer vertices = createHostVisibleBuffer(allocator_,
                 std::span<const SupportSolidVertex>{mesh.vertices},
@@ -2902,16 +2906,18 @@ namespace quantum::renderer
     }
 
     void VulkanContext::uploadSupportSolidInstances(
-        const std::span<const coaster::SupportSolidPresentation> presentations)
+        const std::span<const coaster::SupportSolidPresentation> presentations,
+        const std::span<const coaster::SupportSolidPresentation> infrastructure,
+        const std::span<const coaster::SupportSolidPresentation> access)
     {
         std::vector<coaster::SupportMemberInstance> instances;
         std::vector<SupportSolidDrawBatch> candidateBatches;
         std::vector<SupportFoundationDrawBatch> candidateFoundationBatches;
 
-        // Foundation pads reuse the rectangular unit mesh, so they live in the
+        // Foundations reuse the box/cylinder meshes, so they live in the
         // same contiguous instance stream and keep drawing to two batch lists.
-        for (const coaster::SupportSolidPresentation& presentation
-            : presentations)
+        for (const auto source : {presentations, infrastructure, access})
+        for (const coaster::SupportSolidPresentation& presentation : source)
         {
             for (const coaster::SupportSolidBatch& batch
                 : presentation.batches)
@@ -2924,7 +2930,7 @@ namespace quantum::renderer
                     supportSolidMeshIndex(batch.mesh),
                     static_cast<std::uint32_t>(instances.size()),
                     static_cast<std::uint32_t>(batch.instances.size()),
-                    presentation.appearance});
+                    batch.surface, presentation.metersPerCoordinateUnit});
                 instances.insert(instances.end(), batch.instances.begin(),
                     batch.instances.end());
             }
@@ -2933,33 +2939,20 @@ namespace quantum::renderer
             {
                 continue;
             }
-            const std::uint32_t first = static_cast<std::uint32_t>(
-                instances.size());
-            for (const coaster::SupportFoundationPad& pad
-                : presentation.foundations)
+            for (std::uint32_t meshIndex = 0; meshIndex < 2; ++meshIndex)
             {
-                // M1 places foundation nodes on the foundation elevation
-                // plane. Centre the world-aligned pad on that node so half
-                // its thickness stays visible above the ground surface.
-                coaster::SupportMemberInstance instance;
-                const auto width = static_cast<float>(pad.padDimensions.x);
-                const auto depth = static_cast<float>(pad.padDimensions.y);
-                const auto thickness = static_cast<float>(pad.padDepth);
-                instance.transform = glm::mat4{1.0F};
-                instance.transform[0] = glm::vec4{width, 0.0F, 0.0F, 0.0F};
-                instance.transform[1] = glm::vec4{0.0F, depth, 0.0F, 0.0F};
-                instance.transform[2] = glm::vec4{
-                    0.0F, 0.0F, thickness, 0.0F};
-                instance.transform[3] = glm::vec4{
-                    static_cast<float>(pad.position.x),
-                    static_cast<float>(pad.position.y),
-                    static_cast<float>(pad.position.z),
-                    1.0F};
-                instances.push_back(instance);
+                const auto first = static_cast<std::uint32_t>(instances.size());
+                for (const auto& pad : presentation.foundations)
+                {
+                    const bool pier = pad.kind == coaster::SupportFoundationKind::Pier;
+                    if (pier != (meshIndex == 1)) continue;
+                    const auto foundationInstances = createSupportFoundationInstances(pad);
+                    instances.insert(instances.end(),foundationInstances.begin(),foundationInstances.end());
+                }
+                const auto count = static_cast<std::uint32_t>(instances.size())-first;
+                if (count) candidateFoundationBatches.push_back({first,count,presentation.foundationAppearance,
+                    meshIndex,presentation.metersPerCoordinateUnit});
             }
-            candidateFoundationBatches.push_back({first,
-                static_cast<std::uint32_t>(presentation.foundations.size()),
-                presentation.foundationAppearance});
         }
 
         if (instances.size() > std::numeric_limits<std::uint32_t>::max())
@@ -3005,6 +2998,16 @@ namespace quantum::renderer
         supportFoundationDrawBatches_ = std::move(candidateFoundationBatches);
     }
 
+    void VulkanContext::updateInfrastructurePresentation(
+        std::span<const coaster::SupportSolidPresentation> infrastructure,
+        std::span<const coaster::SupportSolidPresentation> access)
+    {
+        std::vector<coaster::SupportSolidPresentation> candidate{infrastructure.begin(), infrastructure.end()};
+        std::vector<coaster::SupportSolidPresentation> gates{access.begin(), access.end()};
+        uploadSupportSolidInstances(publishedSupports_, candidate, gates);
+        publishedInfrastructure_ = std::move(candidate); publishedAccess_ = std::move(gates);
+    }
+
     void VulkanContext::updateSupportSolidPresentation(
         const std::span<const coaster::SupportSolidPresentation> presentations)
     {
@@ -3014,7 +3017,9 @@ namespace quantum::renderer
                 "VulkanContext cannot update the solid support presentation "
                 "before initialization.");
         }
-        uploadSupportSolidInstances(presentations);
+        std::vector<coaster::SupportSolidPresentation> candidate{presentations.begin(), presentations.end()};
+        uploadSupportSolidInstances(candidate, publishedInfrastructure_, publishedAccess_);
+        publishedSupports_ = std::move(candidate);
         lastFrameCompletionWaitMilliseconds_ = 0.0;
     }
 
@@ -4720,7 +4725,7 @@ namespace quantum::renderer
                     const VkPipelineLayout layout,
                     const std::array<float, 4>& baseColor,
                     const float roughness, const float normalStrength,
-                    const float textureScale, const bool foundation)
+                    const glm::vec2 repeat, const float material, const float coordinateScale)
                 {
                     const std::array<float, 4> cameraExposure{
                         viewportCameraPosition_.x, viewportCameraPosition_.y,
@@ -4733,7 +4738,7 @@ namespace quantum::renderer
                         environmentAvailable_
                             ? environmentRotationRadians_ : -1.0F};
                     const std::array<float, 4> timber{
-                        textureScale, foundation ? 1.0F : 0.0F, 0.0F, 0.0F};
+                        repeat.x / coordinateScale, material, repeat.y / coordinateScale, coordinateScale};
                     constexpr VkShaderStageFlags stages =
                         VK_SHADER_STAGE_VERTEX_BIT
                         | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -4790,10 +4795,11 @@ namespace quantum::renderer
                     pushSupportDraw(supportSolidPipelineLayout_,
                         {batch.appearance.baseColorTint.x,
                             batch.appearance.baseColorTint.y,
-                            batch.appearance.baseColorTint.z, 1.0F},
-                        batch.appearance.roughnessMultiplier,
+                            batch.appearance.baseColorTint.z, batch.appearance.metallic},
+                        batch.appearance.roughness,
                         batch.appearance.normalStrength,
-                        batch.appearance.textureScale, false);
+                        batch.appearance.repeatMeters, static_cast<float>(batch.appearance.material),
+                        static_cast<float>(batch.metersPerCoordinateUnit));
                     vkCmdDrawIndexed(commandBuffer, mesh.triangleIndexCount,
                         batch.instanceCount, 0, 0, batch.firstInstance);
                 }
@@ -4811,7 +4817,7 @@ namespace quantum::renderer
                             continue;
                         }
                         const SupportSolidMeshResource& mesh =
-                            supportSolidMeshes_.at(0);
+                            supportSolidMeshes_.at(batch.meshIndex);
                         const std::array buffers{
                             mesh.vertexBuffer, supportSolidInstanceBuffer_};
                         vkCmdBindVertexBuffers(commandBuffer, 0, 2,
@@ -4822,8 +4828,9 @@ namespace quantum::renderer
                         pushSupportDraw(supportFoundationPipelineLayout_,
                             {batch.appearance.baseColorTint.x,
                                 batch.appearance.baseColorTint.y,
-                                batch.appearance.baseColorTint.z, 1.0F},
-                            batch.appearance.roughness, 0.0F, 1.0F, true);
+                                batch.appearance.baseColorTint.z, 0.0F},
+                            batch.appearance.roughness, .35F, {1.0F, 1.0F}, 3.0F,
+                            static_cast<float>(batch.metersPerCoordinateUnit));
                         vkCmdDrawIndexed(commandBuffer, mesh.triangleIndexCount,
                             batch.instanceCount, 0, 0, batch.firstInstance);
                     }

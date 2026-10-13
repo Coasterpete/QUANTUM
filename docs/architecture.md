@@ -5,7 +5,15 @@ implemented behavior from planned coaster-design, physics, and Editor systems.
 
 ## Target boundaries
 
-The repository currently builds three primary targets plus Core tests.
+The repository builds Core, Engine and the ImGui editor, with an opt-in native
+application library/C ABI and Avalonia frontend. See
+[Hybrid editor foundation](hybrid-editor-foundation.md) for build commands,
+frontend ownership and migration limits.
+
+The Avalonia workbench has Track, Supports, Train and Operations compositions,
+with contextual Inspectors and a collapsible bottom dock. User layout settings
+are separate from coaster documents. See [Workbench UX consolidation](workbench-ux-consolidation.md)
+for grouping, Apply boundaries, persistence and the pending human acceptance.
 
 ### `QuantumCore`
 
@@ -64,7 +72,11 @@ policy, deferred retirement, timestamp queries, and synchronization.
 
 `Application` is the composition root: it creates `VulkanContext`, then uses a
 `Renderer&` for track uploads, Simulator preview lines, and frame submission.
-Both workspaces share that renderer and the same `SimulationPreview`. The
+Its `ApplicationService` owns document/history/file state, generated CPU
+presentation and `SimulationPreview`. The optional managed frontend uses that
+same service through `QuantumNative`; specialized ImGui publication remains at
+its existing renderer boundary. Both ImGui workspaces share that renderer and
+the same preview. The
 Editor uses the contract for renderer-neutral camera, lighting, presentation,
 asset status, and viewport-aid operations. Its existing Dear ImGui Vulkan
 integration still registers the viewport image and records UI commands through
@@ -151,6 +163,23 @@ renderer uploads, and editor-visible state. `EditorUi` owns interaction state
 such as the selected region, selected profile segments, drag state, and numeric
 edit buffers; it does not own the authored document.
 
+The application holds `EditorUi` through a local `std::unique_ptr`, destroyed
+before its borrowed Vulkan context. Its fixed-capacity telemetry history is large;
+placing the entire UI in `Application::runImpl`'s stack frame exhausted the Windows
+Release stack during nested Vulkan/driver initialization. Vulkan-specific ImGui
+backend lifetime, descriptor registration/retirement and recording are isolated
+in `EditorUiVulkan.cpp`; the existing renderer still owns frame resources.
+
+Native Train Configuration edits a complete ordered-car draft. Apply uses
+`ApplicationService::setTrainConfiguration` to validate/accept one history action,
+reuse static geometry, and stop/reset the real preview. Physical car/load/contact,
+inertia/resistance and shell alignment remain separate authored properties.
+Native Track Devices now exposes supported speed, lift, braking and station
+parameters. Ride Operations consumes preview-owned mechanism/occupancy telemetry
+and sends runtime commands without modifying the document. Startup and Region
+selection both seed type-specific numeric buffers through `regionEditorValues`.
+See [native pass 1](native-authoring-pass1.md) for verification and workflow limits.
+
 ```text
 QuantumCore                         QuantumEngine
   |-- GLM                              |-- Vulkan
@@ -197,6 +226,28 @@ AuthoredTrack
 
 The diagram is a description of current dependency flow, not a commitment to
 additional architectural layers.
+
+## Numbered track construction catalog
+
+Pass 4 extends `TrackStylePreset` with family-defined component slots, variants,
+independent construction intervals and support attachment coordinates.
+`TrackFamilyRegistry` loads versioned content with explicit IDs and base relationships;
+resolved component snapshots are authored document data, while `RenderableTrack`
+and CPU/GPU asset caches remain generated presentation data. Tube/box sweeps and
+round/rectangular member providers support variable topology, including monorails.
+The existing legacy dual-rail path remains compatible.
+
+Component dimensions and interval stations are metres, converted through document
+physical scale before presentation. The Engine supplies static GLB meshes to Core's
+thread-local resolver; repeated custom parts use existing Vulkan instances, and
+continuous tiles deform/clip along cached track frames. Style/material/asset edits
+use presentation invalidation rather than canonical geometry/physics solves.
+New support generation consumes family/variant attachment metadata. Manual support
+graph data is preserved by appearance edits.
+
+See [pass-4 evidence and limitations](track-families-pass4.md) and the
+[Blender component contract](track-component-blender-workflow.md). Track texture
+sampling and complete generated-support edit provenance remain unfinished.
 
 ## Core curve foundation
 
@@ -492,6 +543,18 @@ visualization, then commits through `AuthoredTrackEditTransaction`. Accepted
 states enter the existing whole-document `DocumentHistory`, so Undo/Redo needs
 no support-specific stack. New documents remain empty; the existing opt-in
 interactive-authoring demo supplies a small deterministic A-frame.
+
+The Avalonia Supports workspace uses `ApplicationService::editSupport` for
+manual graph edits, attachments/foundations, member profiles and end treatments.
+It validates a native candidate and support presentation before committing one
+native history state. Support-only edits retain solved track geometry and live
+simulation. `QuantumNative` ABI 3 copies revision-cached support rows in metres;
+Core coordinates, track frames, mounting, persistence and history remain native.
+The hosted viewport reuses `pickSupport`, draws native selection overlays, and
+publishes transient stable-ID selection back to the managed browser/Inspector.
+Numeric movement is available; the ImGui move gizmo, generated-run tools and
+appearance controls remain in the fallback. See
+[Hybrid Supports workspace](hybrid-supports-workspace.md) for the handoff.
 
 ### Implemented region kinds
 
@@ -856,6 +919,24 @@ document mutations.
 
 ### Transition Editor
 
+The integrated interaction pass adds persistent navigation/graph preferences,
+SDL relative mouse accumulation, focus-plane cursor zoom, and discrete numeric
+commits. `TransitionEditorModel` proposes analytic channel-integral targets
+without mutating Core data; EditorUi applies accepted end-rate proposals through
+the existing authored transaction and regeneration path. Explicit interior
+length/amplitude controls and matching a compatible previous Region value use
+the same path. Exact semantic boundary frames supply evaluated endpoint angles.
+These are not general endpoint constraints. See
+[`track-authoring-input-device-pass2.md`](track-authoring-input-device-pass2.md)
+for mathematical scope, tests, interaction semantics and manual acceptance.
+
+Explicit custom-device interval resizes now use
+`fitTrackDeviceAccelerationProfile` to preserve normalized segment timing and
+authored values/IDs across growth or shrinkage. The native service and Workbench
+share this Core operation. Track Devices reads actual RideOperations state and
+identifies stopped/paused playback and last-step force rather than implying that
+a saved enabled checkbox indicates applied propulsion.
+
 The Transition Editor is a distance-domain authoring surface for the selected
 Rate/Profile region. It is not a generic stack of unrelated example graphs.
 Roll, Pitch, and Yaw are the three actual authored channels, aligned on one
@@ -1060,8 +1141,9 @@ for the exact ownership, saved-revision policy, and limits of failure coverage.
 ### Simulation preview
 
 The Editor composition root owns one `SimulationPreview` for diagnostic
-playback of the configured `carsPerTrain` using the current repeated-car
-definition. Rebuilding starts from the committed `AuthoredTrack`, calls
+playback of the document-owned ordered `TrainConfiguration`. Each car owns
+its physical definition/load and visual assignment; `carsPerTrain` remains a
+synchronized Coaster Setup count. See [Train 2](train-2.md). Rebuilding starts from the committed `AuthoredTrack`, calls
 `integrateAuthoredTrackKinematics`, and constructs an
 owned immutable `CompiledPhysicsTrack` using the document's physical scale,
 layout intent, and derived topology. Accepted geometry/document replacements
@@ -1075,9 +1157,12 @@ The preview owns its `TrainDefinition`, initial, previous, and current
 fixed-step accumulator. Play starts or resumes, Pause preserves the current
 state and pose, and Reset restores the deterministic increasing-station initial
 placement and the document's authored initial speed before returning to
-Stopped. Open tracks try a deterministic 14.75 m lead-reference station and
-then later 0.5 m candidates until `solveTrainPose` accepts the complete
-consist; an open-track consist boundary intervention pauses playback. Circuit
+Stopped. Open tracks retain the deterministic 14.75 m lead-reference placement
+when it fits, using the solved straight reference assembly to seed larger trains
+or shorter layouts, then searching the full open domain in 0.5 m candidates.
+The actual track solver validates every candidate. Failed placement reports the
+available track length and straight-reference bogie/body spans; it never clamps
+multiple bogies onto an endpoint. An open-track boundary intervention pauses playback. Circuit
 wrapping and reverse-travel orientation remain Core behavior.
 
 The first frame carrying minimize/restore events discards its incoming preview
@@ -1101,13 +1186,15 @@ increments the visible interpolation failure counter without invalidating physic
 This adds one fixed tick of presentation latency and only queries train geometry;
 it neither recompiles the track nor traverses or rebuilds static scene objects.
 
-Rendering consumes the render-only `TrainPose`. [Train Visual M1](train-visual-m1.md)
-extends M0's repeated prototype to an Editor-owned ordered `TrainVisualConsist`:
-entry i supplies the asset identity/local adjustment for render-pose car i.
-The temporary default is lead, middle(s), rear (one car uses only lead).
+Rendering consumes the render-only `TrainPose`. Train 2 resolves each saved
+car's GLB reference and explicit visual alignment into the existing
+Editor-owned `TrainVisualConsist`, retaining [M1's](train-visual-m1.md) instance
+publication path. Entry i supplies the asset identity/local adjustment for
+physical car i. The native document and history own order, stable car IDs,
+roles, physics, load and visuals; runtime physics still contains no mesh data.
 Rebuild resolves exactly one visual entry per physical car; the mesh helper
-rejects mismatched counts before modifying output. Physical definitions remain
-repeated and renderer-neutral, and visual inputs are not serialized.
+rejects mismatched counts before modifying output. Train edits stop/reset the
+preview and reuse track/support presentation; no topology changes mid-step.
 Each cached GLB shell uses its car's solved body position/quaternion. Application combines these
 instances with any active M5 mechanism instances before one renderer collection
 update. The renderer knows only asset identities and matrices; Jolt never owns
@@ -1129,6 +1216,28 @@ retained per rendered frame; excess wall-clock backlog from a stall is dropped,
 but the physics step size is never stretched or replaced with variable-delta
 motion.
 
+Simulator's optional **Engineering dynamics...** popup reads a committed-state
+`SimulationDynamicsDiagnostics` snapshot. It shows loaded and effective mass,
+straight-reference dimensions, actual bogie stations, signed speed, resolved
+acceleration, gravity, device virtual work, aggregate resistance, mass-gradient
+and constraint/stop corrections, geometric connector closure and interlocks.
+It does not evaluate individual wheel-contact loads or infer connector axial
+forces from aggregate resistance. Reset and device edits invalidate the old force
+sample. Train Apply accepts valid authored configuration into one history action
+even when the layout cannot accommodate it, then rebuilds/stops playback; Undo
+can recover the previous working train. Invalid authored physics is still rejected.
+
+Device telemetry distinguishes the controller request after occupancy/interlocks,
+the capped signed tangent-force sum, and `Q = sum(F dot dp/dq)` supplied to the
+production integrator. The force cap is one total absolute-force budget per
+mechanism, distributed across occupied bogies according to their car mass and
+command. `TrainTelemetry::externalForces` retains the ordered virtual-work
+projections already computed by `stepTrain`; the preview aggregates them by the
+device's application range after a successful tick. This introduces no extra pose
+solve. Device Q is separate from the resolved net `M_eff * delta(qdot)/dt` and
+from endpoint reactions. Developer smoke JSON includes the final committed
+dynamics; `--engineering-dynamics` opens this same native popup for capture.
+
 ## Native physics foundation
 
 The implemented native physics foundation covers deterministic track-follower,
@@ -1138,6 +1247,10 @@ complete coaster operations simulation. Physics consumes the canonical
 `TrackKinematicState` data through an immutable SI `CompiledPhysicsTrack`; it
 does not depend on rendered `TrackGeometryFamily` or `TrackStylePreset` rail,
 mesh, tube, or hardware details.
+
+Ride hardware now supplies native commands and interlocks above this solver; see
+[Ride Hardware and Operations](ride-hardware-operations.md) for configuration,
+occupancy, gate state and the bounded transfer/infrastructure model.
 
 ### Train-solver performance diagnostics
 
@@ -1247,6 +1360,16 @@ coordinate and solves each following car sequentially so its hitch-to-hitch
 distance satisfies the authored rigid connector length. Circuit seam crossing
 and reverse travel preserve consist order, while an open track admits motion
 only while the complete consist envelope remains on the track.
+
+Open-path connector searches now bound the complete nominal bogie footprint,
+and exclude the root where the following front hitch crosses forward of the
+leading rear hitch. The default unsigned-distance equation otherwise admits
+both 3.5 m overlapping and 4.5 m separated car placements for a 0.5 m connector.
+Switching between these roots during finite differences produces false inertia
+and mass-gradient forces. Perpendicular roots retain the ordinary distance
+residual/minimum refinement and their ill-conditioned load classification.
+Circuit root selection is unchanged. A clamped lead reference also stops outgoing
+velocity when asymmetric bogies remain inset within the endpoint.
 
 Individual cars do not have independently integrated longitudinal degrees of
 freedom. Phase 3 introduced the inter-car connectors as kinematic constraints;

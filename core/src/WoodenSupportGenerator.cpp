@@ -206,6 +206,8 @@ namespace quantum::coaster
         {
             structure.appearance = replacement->appearance;
             structure.foundationAppearance = replacement->foundationAppearance;
+            structure.style = replacement->style;
+            structure.surface = replacement->surface;
         }
         // Hybrid section proportions are QUANTUM approximations, not measured
         // lumber dimensions. TrackSupport remains available in the role model,
@@ -310,6 +312,11 @@ namespace quantum::coaster
 
         // Rider-frame top nodes follow banking; foundation lanes use the
         // horizontal tangent normal so they remain spread on the ground plane.
+        const auto familyAttachment = [&](double station, double lateral) {
+            const auto units=track.physicalSettings().metersPerCoordinateUnit;
+            const auto interface=trackSupportAttachmentAt(track.trackStyle(), station*units)/units;
+            return TrackAttachment{station+interface.x,lateral+interface.y,recipe.attachmentVerticalOffset+interface.z};
+        };
         const auto states = integrateAuthoredTrackKinematics(track, 0.25);
         const bool connectedTowers = connectedHybridAssembly(recipe, states);
         std::vector<Bent> towers;
@@ -362,7 +369,7 @@ namespace quantum::coaster
             for (const double lane : rules.lanes)
             {
                 const auto top = resolveSupportTrackAttachment(states,
-                    {station, lane * halfWidth, recipe.attachmentVerticalOffset});
+                    familyAttachment(station, lane * halfWidth));
                 if (top.position.z <= recipe.foundationElevation + 1e-6)
                 {
                     throw std::invalid_argument(
@@ -429,8 +436,7 @@ namespace quantum::coaster
                         && std::abs(rules.lanes[lane]) == 1.0;
                     nodes.push_back(addNode(position,
                         attached ? std::optional<TrackAttachment>{
-                            {station, rules.lanes[lane] * halfWidth,
-                                recipe.attachmentVerticalOffset}}
+                            familyAttachment(station, rules.lanes[lane] * halfWidth)}
                             : std::nullopt,
                         level == 0));
                 }
@@ -440,8 +446,7 @@ namespace quantum::coaster
                 for (std::size_t lane = 0; lane < rules.lanes.size(); ++lane)
                 {
                     bent.trackInterface.push_back(addNode(tops[lane],
-                        TrackAttachment{station, rules.lanes[lane] * halfWidth,
-                            recipe.attachmentVerticalOffset}, false));
+                        familyAttachment(station, rules.lanes[lane] * halfWidth), false));
                 }
             }
             // Very short posts cannot fit a separate lower member and ledger.

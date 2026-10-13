@@ -1224,6 +1224,32 @@ namespace
             << " exhaustive_fallbacks=" << fallbacks << '\n';
     }
 
+    void initialSpeedIsSeparateFromLaunchTarget()
+    {
+        auto track = straightTrack(300, 5);
+        track.setLayoutMode(quantum::coaster::LayoutMode::Shuttle);
+        auto launch = quantum::coaster::makeTrackDevice(quantum::coaster::TrackDeviceKind::Launch);
+        launch.endStationMeters = 70;
+        launch.configuration = quantum::coaster::LaunchConfiguration{10};
+        const auto id = track.addTrackDevice(launch);
+        SimulationPreview preview;
+        for (const double initialSpeed : {5., 20.})
+        {
+            auto settings = track.physicalSettings();
+            settings.initialSpeed = initialSpeed;
+            track.setPhysicalSettings(settings);
+            require(preview.rebuild(track), "initial-speed/launch-target preview rebuild");
+            requireNear(preview.speedMetersPerSecond(), initialSpeed, 0, "rebuild uses Initial Speed independently of target");
+            preview.play();
+            preview.update(defaultFixedTimeStepSeconds);
+            preview.reset();
+            requireNear(preview.speedMetersPerSecond(), initialSpeed, 0, "Reset restores authored Initial Speed, not launch target");
+            require(preview.dynamicsState()->tick == 0 && preview.operations().hardware()[0].id == id
+                && preview.operations().hardware()[0].commandedSpeedMetersPerSecond == 10,
+                "Reset preserves separate target and initialization values");
+        }
+    }
+
     void authoredLaunchAndBrakePlayback()
     {
         auto track = straightTrack(100.0, 5.0);
@@ -1313,6 +1339,7 @@ int main()
         openTrackPausesAtItsLegalEndpoint();
         transitionPlaybackKeepsEveryCommittedCarRigid();
         authoredLaunchAndBrakePlayback();
+        initialSpeedIsSeparateFromLaunchTarget();
     }
     catch (const std::exception& exception)
     {

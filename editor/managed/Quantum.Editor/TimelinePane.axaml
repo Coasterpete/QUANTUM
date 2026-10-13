@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Quantum.Editor" xmlns:managed="using:Quantum.Managed"
+             x:Class="Quantum.Editor.TimelinePane" x:DataType="local:EditorViewModel">
+  <Border Classes="pane" Padding="12,8">
+    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+      <Grid ColumnDefinitions="Auto,160,*" ColumnSpacing="14">
+        <TextBlock Classes="heading" Text="TIMELINE" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="1" SelectedIndex="{Binding TimelineSource}" MinHeight="28">
+          <ComboBoxItem Content="Region profiles" /><ComboBoxItem Content="Ride Hardware" />
+        </ComboBox>
+        <TextBlock Grid.Column="2" Classes="muted" Text="{Binding TimelineContext}" VerticalAlignment="Center" TextWrapping="Wrap" />
+      </Grid>
+      <Grid Grid.Row="1" ColumnDefinitions="190,*,300" ColumnSpacing="12">
+        <Grid RowDefinitions="Auto,*">
+          <Button Content="Open Operations" Command="{Binding OpenOperationsCommand}" IsVisible="{Binding IsDeviceTimeline}" />
+          <ListBox Grid.Row="1" ItemsSource="{Binding VisibleProfiles}" SelectedItem="{Binding SelectedProfile}" Background="Transparent" BorderThickness="0">
+            <ListBox.Styles><Style Selector="ListBoxItem"><Setter Property="Padding" Value="5,4" /><Setter Property="Margin" Value="0,1" /></Style></ListBox.Styles>
+            <ListBox.ItemTemplate><DataTemplate x:DataType="managed:ProfileSegment"><TextBlock Classes="technical" Text="{Binding Summary}" TextWrapping="Wrap" /></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+        <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="4" IsVisible="{Binding ShowProfileEditor}">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="muted" Text="{Binding ProfileDescription}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Content="Frame profile" Click="FrameProfileClicked" MinHeight="30" Padding="7,3" ToolTip.Tip="Show the full profile · F or Home with graph focus" />
+          </Grid>
+          <local:ProfilePlot x:Name="Plot" Grid.Row="1" Profiles="{Binding GraphProfiles}" Selected="{Binding SelectedProfile}" CanEdit="{Binding CanInteract}" />
+          <StackPanel Grid.Row="2" Spacing="2"><TextBlock Classes="technical muted" Text="{Binding DragStatus}" TextWrapping="Wrap" /><TextBlock Classes="muted" FontSize="{DynamicResource QuantumHelperSize}" Text="Grid · adaptive display ruler. Snap · separate editing increments." /></StackPanel>
+        </Grid>
+        <StackPanel Grid.Column="1" IsVisible="{Binding ShowHardwareState}" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Classes="heading" Text="{Binding HardwareContentDescription}" TextWrapping="Wrap" />
+          <TextBlock Classes="technical" Text="{Binding HardwareTelemetry}" TextWrapping="Wrap" />
+        </StackPanel>
+        <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="7">
+            <StackPanel Spacing="5" IsVisible="{Binding HasProfile}" IsEnabled="{Binding !InteractionActive}">
+              <TextBlock Text="{Binding SelectedProfile.Units}" Classes="technical muted" />
+              <Grid ColumnDefinitions="42,*,Auto" ColumnSpacing="6"><TextBlock Text="Begin" VerticalAlignment="Center" /><TextBox Classes="numeric" Grid.Column="1" Text="{Binding ProfileBegin}" MinHeight="28" /><Button Classes="primary" Grid.Column="2" Content="Apply" Command="{Binding ApplyProfileBeginCommand}" MinHeight="28" Padding="8,3" /></Grid>
+              <Grid ColumnDefinitions="42,*,Auto" ColumnSpacing="6"><TextBlock Text="End" VerticalAlignment="Center" /><TextBox Classes="numeric" Grid.Column="1" Text="{Binding ProfileEnd}" MinHeight="28" /><Button Classes="primary" Grid.Column="2" Content="Apply" Command="{Binding ApplyProfileEndCommand}" MinHeight="28" Padding="8,3" /></Grid>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6"><ComboBox ItemsSource="{Binding TransitionTypes}" SelectedItem="{Binding SelectedTransition}" MinHeight="28" HorizontalAlignment="Stretch" /><Button Grid.Column="1" Content="Apply type" Command="{Binding ApplyTransitionCommand}" MinHeight="28" Padding="8,3" /></Grid>
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6"><TextBox Classes="numeric" Text="{Binding ProfileDistance}" MinHeight="28" ToolTip.Tip="Local distance in metres; outer boundaries remain pinned" /><Button Grid.Column="1" Content="Split" Command="{Binding SplitProfileCommand}" MinHeight="28" Padding="8,3" /><Button Classes="destructive" Grid.Column="2" Content="Remove" Command="{Binding RemoveProfileCommand}" MinHeight="28" Padding="8,3" /></Grid>
+              <StackPanel Orientation="Horizontal" Spacing="6"><Button Content="Move begin" Command="{Binding MoveProfileBeginCommand}" ToolTip.Tip="The first begin is pinned to zero" MinHeight="28" Padding="8,3" /><Button Content="Move end" Command="{Binding MoveProfileEndCommand}" ToolTip.Tip="The final end is pinned to the profile extent" MinHeight="28" Padding="8,3" /></StackPanel>
+            </StackPanel>
+            <Grid IsVisible="{Binding ShowProfileEditor}" ColumnDefinitions="Auto,*,*" ColumnSpacing="6" IsEnabled="{Binding !InteractionActive}">
+              <CheckBox Content="Snap" IsChecked="{Binding SnapEnabled}" ToolTip.Tip="Snap uses the increments here, independently of the adaptive display grid; native boundary clamping still applies" />
+              <TextBox Classes="numeric" Grid.Column="1" Text="{Binding DistanceSnap}" MinHeight="28" ToolTip.Tip="Distance snapping increment · metres" />
+              <TextBox Classes="numeric" Grid.Column="2" Text="{Binding ValueSnap}" MinHeight="28" ToolTip.Tip="Value snapping increment · current channel's displayed units" />
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>

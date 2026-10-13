@@ -82,7 +82,7 @@ namespace
             return near <= far;
         };
         if (!slab(0, frame.length * 0.5)) return std::nullopt;
-        if (member.profile.shape == quantum::coaster::SupportMemberProfileShape::Rectangular)
+        if (member.profile.shape != quantum::coaster::SupportMemberProfileShape::Circular)
         {
             if (!slab(1, member.profile.outerDimensions.x * 0.5)
                 || !slab(2, member.profile.outerDimensions.y * 0.5)) return std::nullopt;

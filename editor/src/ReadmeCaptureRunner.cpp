@@ -1,3 +1,4 @@
+#include <quantum/renderer/StaticMeshAssets.hpp>
 #include <quantum/editor/ReadmeCapture.hpp>
 
 #include <quantum/coaster/CoasterDocument.hpp>
@@ -217,6 +218,7 @@ namespace quantum::editor
 
     int runReadmeCapture(const ReadmeCaptureManifest& manifest)
     {
+        renderer::configureTrackComponentAssets(std::filesystem::path{SDL_GetBasePath()});
         // Validate every supplied document before opening a window or writing any images.
         std::vector<LoadedCapture> loaded;
         loaded.reserve(manifest.scenarios.size());

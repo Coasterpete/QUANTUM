@@ -11,10 +11,14 @@
 #include <quantum/editor/RiderLoadDiagnostics.hpp>
 #include <quantum/editor/TransitionEditorModel.hpp>
 #include <quantum/editor/TrainPreviewInspection.hpp>
+#include <quantum/editor/SimulationDynamicsDiagnostics.hpp>
+#include <quantum/editor/TrainMeshPresentation.hpp>
 #include <quantum/editor/ViewportCamera.hpp>
+#include <quantum/editor/InteractionPreferences.hpp>
 #include <quantum/editor/ViewportTrackAnchors.hpp>
 #include <quantum/editor/WorkspaceComposition.hpp>
 #include <quantum/physics/TrackDeviceForces.hpp>
+#include <quantum/physics/RideOperations.hpp>
 #include <quantum/renderer/EnvironmentAssets.hpp>
 
 #include <SDL3/SDL_events.h>
@@ -46,30 +50,6 @@ namespace quantum::editor
         float y = 0.0f;
     };
 
-    // Authoring interaction configuration for the Transition Editor,
-    // shared by every section and every rate channel. Defaults preserve
-    // the original drag feel; snapping starts disabled. A future
-    // Preferences/Authoring panel can expose these fields directly.
-    struct TransitionEditorInputSettings
-    {
-        // Drag gain multipliers on each row's natural value-per-pixel
-        // slope. Normal 1.0 reproduces the original absolute-cursor
-        // mapping; Fine slows the value change for precision work.
-        float normalDragGain = 1.0F;
-        float fineDragGain = 0.25F;
-
-        // Authored-value snapping applied while the user edits (drag or
-        // numeric input). Never quantizes data on load or selection.
-        bool snapEnabled = false;
-        double snapIncrement = 0.005;
-
-        // Authored-distance snapping applied while interior segment
-        // boundaries are dragged horizontally. Independent of value
-        // snapping so vertical precision work keeps its own grid.
-        bool distanceSnapEnabled = false;
-        double distanceSnapIncrement = 5.0;
-    };
-
     // Which cursor axis an active handle drag follows. The lock engages
     // once cumulative motion makes the intended axis unambiguous, so a
     // mostly-vertical value drag cannot drift boundaries horizontally
@@ -81,10 +61,9 @@ namespace quantum::editor
         Vertical
     };
 
-    // Rolling reference for an active handle drag: the cursor position,
-    // authored value, and authored distance of the previous frame.
-    // Integrating per-frame deltas lets the gain change live when Shift is
-    // pressed mid-drag without a value jump.
+    // Unsnapped engineering accumulator for an active handle drag. SDL
+    // relative deltas preserve fractional motion; the gain can change live
+    // with Shift without rebasing or jumping the authored proposal.
     struct ScalarDragAnchor
     {
         double pixelX = 0.0;
@@ -138,6 +117,7 @@ namespace quantum::editor
         std::uint32_t segmentId = 0;
         ScalarProfileEndpoint endpoint = ScalarProfileEndpoint::End;
         double distance = 0.0;
+        bool continuous = true;
     };
 
     enum class TrackCommandType
@@ -158,6 +138,7 @@ namespace quantum::editor
 
     enum class TrackDeviceCommandType
     {
+        Add,
         AddLaunch,
         AddBrake,
         Update,
@@ -168,6 +149,14 @@ namespace quantum::editor
     {
         TrackDeviceCommandType type = TrackDeviceCommandType::Update;
         coaster::TrackDevice device;
+        bool continuous = false;
+    };
+
+    struct RideOperationCommand
+    {
+        coaster::TrackDeviceId id = 0;
+        physics::HardwareCommand command = physics::HardwareCommand::SetEnabled;
+        double value = 0;
     };
 
     struct SectionLengthEdit
@@ -382,6 +371,8 @@ namespace quantum::editor
         InsertAfterForceDriven,
         ConvertToRateProfiles,
         ConvertToPlanarArc,
+        ConvertToForceDriven,
+        ReplaceWithRateProfiles,
         SetPlanarArcRadius,
         SetPlanarArcSweptAngle,
         SetPlanarArcPlaneTilt,
@@ -437,18 +428,11 @@ namespace quantum::editor
 
     // Authoritative viewport display configuration. The editor owns these
     // values and pushes them into the camera and renderer every frame.
-    struct ViewportSettings
+    struct ViewportSettings : CameraNavigationSettings
     {
         bool orthographic = false;
         float fieldOfViewDegrees = 45.0F;
 
-        // Multipliers on the camera's natural drag response.
-        float orbitSensitivity = 1.0F;
-        float zoomSensitivity = 1.0F;
-        float movementUnitsPerSecond =
-            static_cast<float>(defaultViewportMovementUnitsPerSecond);
-        float fastMovementMultiplier =
-            static_cast<float>(defaultViewportFastMovementMultiplier);
         float sunAzimuthDegrees = -142.0F;
         float sunElevationDegrees = 55.0F;
         float sunIntensity = 3.0F;
@@ -529,6 +513,13 @@ namespace quantum::editor
         void returnToEditorForPreviewSmoke() noexcept;
         void requestSimulationControlForPreviewSmoke(
             SimulationControlType control) noexcept;
+        // Developer smoke emits the same requests as the native widgets.
+        void requestNativeAuthoringActionForPreviewSmoke(unsigned action);
+        [[nodiscard]] WorkspaceMode workspaceMode() const noexcept { return workspaceMode_; }
+        [[nodiscard]] bool trainWorkspaceActive() const noexcept
+        { return workspaceMode_ == WorkspaceMode::Editor && editorWorkspace_ == EditorWorkspace::Train; }
+        [[nodiscard]] coaster::TrainCarId selectedTrainCarId() const noexcept { return trainSelectedCar_; }
+        void setTrainPreviewCars(std::span<const TrainPreviewCar> cars);
         [[nodiscard]] std::optional<ScalarProfileEndpointValueEdit>
         takeProfileEndpointValueEdit() noexcept;
         [[nodiscard]] std::optional<ProfileTransitionTypeEdit>
@@ -724,6 +715,8 @@ namespace quantum::editor
         [[nodiscard]] std::optional<std::string>
         takePendingTrackConfigurationSelection() noexcept;
         [[nodiscard]] bool takePendingTrackConfigurationReset() noexcept;
+        [[nodiscard]] bool takePendingTrackComponentReload() noexcept;
+        [[nodiscard]] std::optional<coaster::TrackStylePreset> takePendingTrackComponentEdit() noexcept;
 
         // Circuit completion: returns true once when the user clicks
         // Complete Circuit....  Application processes the actual
@@ -753,9 +746,15 @@ namespace quantum::editor
         takeTrackDeviceCommand() noexcept;
         void selectTrackDevice(coaster::TrackDeviceId id) noexcept;
         void setTrackDeviceEditError(std::string error);
+        [[nodiscard]] std::optional<coaster::TrainConfiguration> takeTrainConfigurationEdit();
+        void setTrainConfigurationEditError(std::string error);
+        [[nodiscard]] std::optional<RideOperationCommand> takeRideOperationCommand();
+        void setRideOperationStatus(const physics::RideOperations& operations);
         void setSimulationDeviceTelemetry(
             const physics::TrackDeviceForceResult& forces,
             double realizedAccelerationMetersPerSecondSquared);
+        void setSimulationDynamicsDiagnostics(const SimulationDynamicsDiagnostics& diagnostics) { simulationDynamicsDiagnostics_ = diagnostics; }
+        void openEngineeringDynamics() noexcept { pendingEngineeringDynamics_ = true; }
 
         // Updates the compact viewport playback telemetry. Physics state and
         // render geometry remain owned by the application-side preview.
@@ -853,6 +852,12 @@ void drawSimulationTelemetry();
         [[nodiscard]] float drawWorkspaceCommandArea(ImGuiViewport* mainViewport);
         void drawSupportAppearancePanel();
         void drawTrackDevices();
+        void drawHardwareConfiguration(coaster::TrackDevice& device, bool& commit);
+        void drawRideOperationStatus();
+        void drawRideOperationControls();
+        void drawTrainConfigurationEditor();
+        void frameTrainPreview(bool selectedOnly = false);
+        void beginVulkanFrame();
         void drawDeviceAccelerationProfileEditor(
             coaster::TrackDevice& device, bool& commit);
         void seedDeviceProfileBuffer(const coaster::TrackDevice& device,
@@ -957,6 +962,9 @@ void drawSimulationTelemetry();
         // Split-at-cursor candidate captured when a row context menu opens.
         std::array<double, profileChannelCount> contextMenuSplitDistances_{};
         TransitionEditorInputSettings transitionEditorInputSettings_;
+        TransitionPrecisionState transitionPrecisionState_;
+        MousePos pendingMouseMotion_;
+        MousePos frameMouseMotion_;
         bool inputSettingsWindowOpen_ = false;
         ViewportSettings viewportSettings_;
         std::optional<std::pair<coaster::GroundAppearance, bool>> pendingGroundEdit_;
@@ -1057,6 +1065,8 @@ void drawSimulationTelemetry();
         coaster::TrackDevice deviceEditBuffer_;
         std::array<char, 128> deviceNameBuffer_{};
         std::string deviceEditError_;
+        std::vector<physics::HardwareRuntime> rideHardwareStatus_;
+        std::optional<RideOperationCommand> rideOperationCommand_;
 
         // Acceleration profile editor state for the selected track device.
         // Mirrors the Transition Editor's per-channel state but for a single
@@ -1081,17 +1091,34 @@ void drawSimulationTelemetry();
             ScalarProfileEndpoint::None;
         physics::TrackDeviceForceResult simulationDeviceForces_;
         double simulationRealizedAcceleration_ = 0.0;
+        SimulationDynamicsDiagnostics simulationDynamicsDiagnostics_;
+        bool pendingEngineeringDynamics_ = false;
+        void drawSimulationDynamicsDiagnostics();
         std::optional<SectionLengthEdit> sectionLengthEdit_;
         std::optional<RegionCommand> regionCommand_;
         std::optional<RegionTrackStyleEdit> regionTrackStyleEdit_;
         std::optional<StartPoseEdit> startPoseEdit_;
         std::optional<TrackHardwareEdit> trackHardwareEdit_;
+        void configureInteractionPersistence();
+        void updateInteractionPersistence();
+        void drawSelectedDeviceStatus(const coaster::TrackDevice& device);
+        std::optional<InteractionPreferences> lastInteractionPreferences_;
         std::string iniPath_;
         SDL_Window* window_ = nullptr;
         float uiScaleOverride_ = 0.0F; // zero selects automatic display scaling
         float appliedUiScale_ = 0.0F;
         bool uiScaleRefreshPending_ = true;
         bool trainConfigurationInitialFocusPending_ = false;
+        int trainSummaryCarIndex_ = 0;
+        std::vector<TrainPreviewCar> trainPreviewCars_;
+        bool trainPreviewFramePending_ = true;
+        coaster::TrainConfiguration trainDraft_;
+        std::string trainDraftSource_;
+        bool trainDraftDirty_ = false;
+        coaster::TrainCarId trainSelectedCar_ = 0;
+        int trainPrototypeRole_ = 1;
+        std::string trainEditError_;
+        std::optional<coaster::TrainConfiguration> trainConfigurationEdit_;
         std::optional<FileOperationType> pendingFileOperation_;
         std::optional<HistoryOperationType> pendingHistoryOperation_;
 bool canUndo_ = false;
@@ -1102,6 +1129,8 @@ bool canUndo_ = false;
             pendingPhysicalSettingsEdit_;
         std::optional<std::string> pendingTrackConfigurationSelection_;
         bool pendingTrackConfigurationReset_ = false;
+        bool pendingTrackComponentReload_ = false;
+        std::optional<coaster::TrackStylePreset> pendingTrackComponentEdit_;
         bool coasterSetupWindowOpen_ = true;
         bool pendingCircuitCompletion_ = false;
 

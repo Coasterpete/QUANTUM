@@ -82,6 +82,27 @@ namespace quantum::editor
         return candidate;
     }
 
+    glm::dvec3 startPoseAngles(const coaster::AuthoredStartPose& pose)
+    {
+        const auto frame = coaster::startPoseRiderFrame(pose);
+        const double pitch = std::atan2(-frame.tangent.z,
+            std::hypot(frame.tangent.x, frame.tangent.y));
+        if (std::hypot(frame.tangent.x, frame.tangent.y) < 1.0e-12)
+            return {pitch, std::atan2(-frame.lateral.x, frame.lateral.y), 0};
+        return {pitch, std::atan2(frame.tangent.y, frame.tangent.x),
+            std::atan2(frame.lateral.z, frame.up.z)};
+    }
+
+    coaster::AuthoredStartPose startPoseWithAngles(
+        const coaster::AuthoredStartPose& pose, const glm::dvec3& angles)
+    {
+        if (!finiteVector(angles)) throw std::invalid_argument("Track Start angles must be finite.");
+        return {pose.position,
+            glm::angleAxis(angles.y, glm::dvec3{0, 0, 1})
+                * glm::angleAxis(angles.x, glm::dvec3{0, 1, 0})
+                * glm::angleAxis(angles.z, glm::dvec3{1, 0, 0})};
+    }
+
     ViewportTrackSelection selectionForViewportTrackRegion(
         const std::size_t regionIndex,
         const std::size_t regionCount)
